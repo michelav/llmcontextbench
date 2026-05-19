@@ -450,7 +450,7 @@ wheels = [
 
 [[package]]
 name = "ctxbench"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "anthropic" },
@@ -499,7 +499,7 @@ dev = [
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "openai", specifier = ">=2.30.0" },
     { name = "pandas", specifier = ">=3.0.2" },
-    { name = "specify-cli", git = "https://github.com/github/spec-kit.git?rev=v0.8.7" },
+    { name = "specify-cli", git = "https://github.com/github/spec-kit.git?rev=v0.8.11" },
 ]
 
 [[package]]
@@ -2528,8 +2528,8 @@ wheels = [
 
 [[package]]
 name = "specify-cli"
-version = "0.8.7"
-source = { git = "https://github.com/github/spec-kit.git?rev=v0.8.7#3ef787ea8ca8ce85767153b8a9a03eb1167b2eaf" }
+version = "0.8.11"
+source = { git = "https://github.com/github/spec-kit.git?rev=v0.8.11#5301b34132fd0dfa96767631c3a79fd28ce30d00" }
 dependencies = [
     { name = "click" },
     { name = "json5" },

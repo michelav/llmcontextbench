@@ -33,7 +33,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.uv.sources]
-specify-cli = { git = "https://github.com/github/spec-kit.git", rev = "v0.8.7" }
+specify-cli = { git = "https://github.com/github/spec-kit.git", rev = "v0.8.11" }
 
 [tool.uv.extra-build-dependencies]
 specify-cli = ["hatchling"]
