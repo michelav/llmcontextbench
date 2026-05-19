@@ -6,6 +6,8 @@
 **Depends on**: Spec 003  
 **Supersedes parts of**: Spec 005  
 
+> **Note on Spec 005**: The superseding claim is limited to the role axis. Spec 004 encodes artifact role implicitly in method names (`get_context`, `get_evidence`, `get_oracle`) rather than as a parameter. Spec 005's full `(role, representation)` model is out of scope for v0.
+
 ## Overview
 
 This specification defines the runtime boundary between the CTXBench benchmark core and dataset-specific adapters.
@@ -34,6 +36,10 @@ This specification introduces:
 This specification does not move the Lattes adapter implementation to `ctxbench/lattes`. Spec 004 introduces the boundary. Spec 006 moves Lattes across that boundary.
 
 This specification also does not introduce a plugin framework, dynamic adapter discovery, Python package entry points, remote code loading, third-party adapter installation, multiple datasets per experiment, workspaces, sandboxes, executable oracle machinery, or dataset-contributed strategies.
+
+## Relationship to Spec 005
+
+Spec 004 encodes artifact role in method names rather than as a parameter, replacing Spec 005's `(role, representation)` handle with dedicated access methods. One gap remains: Spec 004 does not expose a way for adapters to declare the *normalized/derived* role required by Spec 006 FR-017. If that becomes necessary, a capabilities v1 amendment will add a `get_artifacts()` or role-declaration surface.
 
 ## Relationship to Spec 003
 
@@ -82,8 +88,7 @@ The registry exists only to centralize adapter selection. It MUST NOT become a p
 The registry v0 MUST support, at minimum:
 
 - the current Lattes dataset, through a temporary or external Lattes adapter;
-- a future software-repository dataset adapter;
-- a generic local dataset adapter when applicable.
+- a future software-repository dataset adapter.
 
 Generic lifecycle phases MUST NOT branch on concrete dataset identities. Dataset identity binding is allowed only inside the adapter registry or resolver.
 
@@ -277,7 +282,7 @@ A researcher writes an experiment definition that identifies the dataset and sel
 
 - **FR-011**: CTXBench MUST resolve a dataset reference to a dataset adapter before lifecycle phases consume the dataset.
 - **FR-012**: The Adapter Registry v0 MUST be the only component allowed to bind a concrete dataset identity or dataset kind to a concrete adapter implementation.
-- **FR-013**: The Adapter Registry v0 MAY use explicit first-party registrations.
+- **FR-013**: The Adapter Registry v0 MUST use explicit first-party registrations.
 - **FR-014**: The Adapter Registry v0 MUST support the current Lattes dataset and prepare for a future software-repository dataset without requiring changes in `plan`, `execute`, `eval`, `export`, or `status`.
 - **FR-015**: If no adapter can be resolved, the registry MUST fail deterministically with an adapter-unavailable error.
 - **FR-016**: Dynamic plugin discovery, Python package entry points, remote code loading, third-party adapter installation, and plugin marketplaces are out of scope for Spec 004.
@@ -315,7 +320,7 @@ A researcher writes an experiment definition that identifies the dataset and sel
 - **FR-036**: The experiment definition MUST NOT contain concrete adapter class names, Python module paths, parser names, tool implementation names, or Lattes-specific filenames.
 - **FR-037**: The `dataset.root` field MAY be used to reference an already materialized local dataset package.
 - **FR-038**: The `dataset.id` and `dataset.version` fields SHOULD be used when the experiment refers to a versioned dataset package.
-- **FR-039**: In v0, `factors.format` MAY remain the public experiment field for compatibility, but its semantic meaning MUST be "context representation requested from the dataset adapter."
+- **FR-039**: In v0, `factors.format` SHALL remain the public experiment field for compatibility, but its semantic meaning MUST be "context representation requested from the dataset adapter."
 - **FR-040**: This specification MUST NOT require generated JSON Schema artifacts for experiment definitions. Validation remains owned by the Pydantic model layer unless a future specification changes that decision.
 - **FR-041**: This specification MUST NOT force a broad rename of existing experiment fields unless the rename is already required by accepted canonical terminology.
 
@@ -372,7 +377,6 @@ A researcher writes an experiment definition that identifies the dataset and sel
 - **SC-007**: Existing experiment definitions using `factors.format` remain valid in v0, with `format` documented as a context representation request.
 - **SC-008**: No experiment definition needs to name a concrete adapter class, Python module, parser, or dataset-specific filename.
 - **SC-009**: `export` and `status` remain artifact-only unless a future spec explicitly changes that rule.
-- **SC-010**: Full removal of Lattes-specific implementation from `ctxbench-cli` is explicitly deferred to Spec 006.
 
 ## In Scope
 
@@ -390,6 +394,7 @@ A researcher writes an experiment definition that identifies the dataset and sel
 
 - Modifying Spec 003.
 - Moving Lattes code or data to `ctxbench/lattes`.
+- Full removal of Lattes-specific implementation from `ctxbench-cli` (deferred to Spec 006).
 - Implementing the software-repository dataset.
 - Plugin framework.
 - Dynamic adapter discovery.
@@ -419,6 +424,7 @@ A researcher writes an experiment definition that identifies the dataset and sel
 - Whether `format` remains long-term or is later renamed to `representation` or `contextRepresentation`.
 - How provider-free fixtures validate adapter conformance.
 - How a future software-repository adapter will exercise the same registry and capabilities.
+- Whether instances carry adapter-exposed metadata in v0, and whether `list_instances` accepts a filter.
 
 ## Future Work
 
