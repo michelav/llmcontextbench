@@ -32,17 +32,17 @@
 
 ### Tasks
 
-- [ ] T001 [S1] Create `src/ctxbench/dataset/payloads.py` with `ContextPayload`, `EvidencePayload`, `TaskPayload` dataclasses and `OracleUnavailable` sentinel class + `ORACLE_UNAVAILABLE` singleton exactly as specified in `plan.md` § Payload Types
-- [ ] T002 [P] [S1] Create `src/ctxbench/dataset/errors.py` with `AdapterUnavailableError(ValueError)`, `CapabilityUnavailableError(ValueError)`, `UnsupportedRepresentationError(ValueError)` as specified in `plan.md` § Slice S1
-- [ ] T003 [S1] Create `tests/test_dataset_payloads.py` with tests: error types are `ValueError` subclasses; `ORACLE_UNAVAILABLE is not None`; `isinstance(ORACLE_UNAVAILABLE, OracleUnavailable)` is `True`; `ContextPayload.role == "context"`; `EvidencePayload.role == "evidence"`; `TaskPayload.statement` exists
+- [X] T001 [S1] Create `src/ctxbench/dataset/payloads.py` with `ContextPayload`, `EvidencePayload`, `TaskPayload` dataclasses and `OracleUnavailable` sentinel class + `ORACLE_UNAVAILABLE` singleton exactly as specified in `plan.md` § Payload Types
+- [X] T002 [P] [S1] Create `src/ctxbench/dataset/errors.py` with `AdapterUnavailableError(ValueError)`, `CapabilityUnavailableError(ValueError)`, `UnsupportedRepresentationError(ValueError)` as specified in `plan.md` § Slice S1
+- [X] T003 [S1] Create `tests/test_dataset_payloads.py` with tests: error types are `ValueError` subclasses; `ORACLE_UNAVAILABLE is not None`; `isinstance(ORACLE_UNAVAILABLE, OracleUnavailable)` is `True`; `ContextPayload.role == "context"`; `EvidencePayload.role == "evidence"`; `TaskPayload.statement` exists
 
 ### Checkpoint
 
-- [ ] `pytest -k "payloads or adapter_errors" -v` passes
-- [ ] no provider-backed execution
-- [ ] no opportunistic refactor
-- [ ] diff is reviewable
-- [ ] `worklog.md` updated
+- [X] `pytest -k "payloads or adapter_errors" -v` passes
+- [X] no provider-backed execution
+- [X] no opportunistic refactor
+- [X] diff is reviewable
+- [X] `worklog.md` updated
 
 ---
 
