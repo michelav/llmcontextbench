@@ -22,6 +22,18 @@ All capabilities below MUST be implemented. A `DatasetCapabilityReport` with `co
 
 Returns dataset identity, version, name, domain, description, and provenance. Never raises.
 
+### `identity() → str`
+
+Returns the stable dataset identity, such as `"ctxbench/lattes"`.
+
+### `version() → str`
+
+Returns the dataset package version.
+
+### `origin() → str | None`
+
+Returns the dataset origin or provenance reference when available.
+
 ### `list_instance_ids() → list[str]`
 
 Returns a stable list of `instanceId` strings. MUST be stable (same order and content) across calls within a single run. MAY return an empty list.
@@ -64,10 +76,6 @@ Returns an `EvidencePayload` for the evaluator:
 The payload structure is adapter-defined and opaque to the benchmark core.  
 `contextBlocks` is NOT a generic contract key. Adapter-internal block keys may exist inside `evidence`.
 
-### `fixtures() → object`
-
-Returns small provider-free fixtures for conformance validation. Content is adapter-defined.
-
 ### `capability_report() → DatasetCapabilityReport`
 
 Returns a conformance summary. A conformant adapter sets `conformant=True` and `missing_mandatory=[]`.
@@ -100,13 +108,11 @@ Returns a domain-specific tool service for tool-mediated strategies, or `None`. 
 
 Default protocol implementation returns `None`.
 
-### `evaluation_helpers() → object | None`
+### `fixtures() → object | None`
 
-Reserved for future use. Return `None` in v0.
+Returns small provider-free fixtures for conformance validation when available. Content is adapter-defined.
 
-### `strategy_descriptors() → list[StrategyDescriptor] | None`
-
-Reserved for future use. Return `None` in v0.
+Default protocol implementation returns `None`. Fixtures are recommended but not mandatory in v0. Dataset-contributed evaluation helpers and strategy descriptors are out of scope for the v0 protocol.
 
 ---
 
@@ -152,6 +158,8 @@ def get_default_registry() -> AdapterRegistry:
 
 Registration is explicit and first-party. No dynamic loading, entry points, or plugin discovery.
 
+`ctxbench.dataset.registry` defines only generic registry types and helpers. It contains no default wired registry and must not import `ctxbench.adapters`.
+
 ---
 
 ## Import Boundaries
@@ -178,4 +186,5 @@ A conformant adapter:
 - Returns `EvidencePayload` from `get_evidence` with generic structure (no Lattes-specific keys required)
 - Returns `ORACLE_UNAVAILABLE` (not `None`) from `get_oracle` when no oracle exists
 - Returns `TaskPayload` with non-empty `statement` from `get_task`
+- Exposes `identity()`, `version()`, `origin()`, and `capability_report()`
 - Satisfies `isinstance(adapter, DatasetPackage)` via structural subtyping

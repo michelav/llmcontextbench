@@ -64,7 +64,9 @@ Methods:
 - `register(dataset_id, factory)` — explicit first-party registration
 - `resolve(dataset_ref: ExperimentDataset) → DatasetPackage` — raises `AdapterUnavailableError` if unregistered
 
-`ctxbench.adapters.registry` holds the singleton wired with `"ctxbench/lattes"`. Lifecycle code calls `get_default_registry()` which delegates to `ctxbench.adapters.registry`.
+`ctxbench.dataset.registry` defines only generic registry types and helpers. It does not define a default wired registry and does not import `ctxbench.adapters`, lazily or otherwise.
+
+`ctxbench.adapters.registry` holds the singleton wired with `"ctxbench/lattes"`. Lifecycle composition imports `get_default_registry()` from `ctxbench.adapters.registry`.
 
 ---
 
@@ -85,7 +87,6 @@ Methods:
 | `get_task(task_id)` | `→ TaskPayload` | Task description + metadata |
 | `get_context(instance_id, task_id, representation)` | `→ ContextPayload` | Model-facing context payload |
 | `get_evidence(instance_id, task_id)` | `→ EvidencePayload` | Evaluator-facing evidence payload |
-| `fixtures()` | `→ object` | Provider-free conformance fixtures |
 | `capability_report()` | `→ DatasetCapabilityReport` | Conformance summary |
 
 #### Optional (default implementations)
@@ -95,8 +96,9 @@ Methods:
 | `get_oracle(instance_id, task_id)` | `return ORACLE_UNAVAILABLE` | Oracle or sentinel |
 | `get_task_instance(instance_id, task_id)` | `return None` | Per-instance parameters dict |
 | `tool_provider()` | `return None` | Domain-specific tool service |
-| `evaluation_helpers()` | `return None` | Reserved |
-| `strategy_descriptors()` | `return None` | Reserved |
+| `fixtures()` | `return None` | Optional provider-free conformance fixtures |
+
+`fixtures()` is recommended but optional in v0. Dataset-contributed evaluation helpers and strategy descriptors are out of scope for the v0 protocol.
 
 ---
 
@@ -178,7 +180,7 @@ Check: `isinstance(result, OracleUnavailable)`.
 | `get_evidence` (FR-022) | `get_evidence(instance_id, task_id) → EvidencePayload` | Replaces `get_evidence_artifact` |
 | `get_oracle` (FR-023) | `get_oracle(instance_id, task_id) → object` | New optional; default returns `ORACLE_UNAVAILABLE` |
 | `get_tools` (FR-026) | `tool_provider() → object \| None` | Spec uses different name; semantics identical |
-| `fixtures` (FR-028) | `fixtures()` | Unchanged |
+| `fixtures` (FR-028) | `fixtures() → object \| None` | Optional; default returns `None` |
 
 ---
 

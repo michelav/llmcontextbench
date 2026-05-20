@@ -51,12 +51,12 @@ Introduce the Adapter Registry v0 and the Dataset Package Capabilities v0 contra
 | Phase separation | pass | Registry resolves once per run; each phase uses only the adapter capabilities it is responsible for |
 | Cost/evaluation separation | pass | No cost-tracking changes |
 | Metric provenance | pass | No metric changes |
-| Artifact contracts | pass | Artifact schemas unchanged; `dataset` provenance fields unchanged; `trials.jsonl` and `responses.jsonl` unaffected |
+| Artifact contracts | pass with action | Produced row schemas remain compatible, but trace metadata additions/removals are canonical trace contract changes. The slice that changes trace metadata MUST update `docs/architecture/artifact-contracts.md` or record an explicit compatibility decision in the same slice. |
 | Strategy comparability | pass | `get_context` replaces internal Lattes-specific reads; strategy semantics unchanged |
 | Dataset/domain isolation | **core purpose** | This spec enforces the boundary |
 | Provider isolation | pass | No AI provider adapter changes |
 | Provider-free validation | pass | `FakeDatasetAdapter` fixture validates the full v0 contract without real data |
-| Documentation impact | pass | CLAUDE.md active-plan pointer updated; no CLI help or README changes required |
+| Documentation impact | pass with action | Architecture docs must be updated: `docs/architecture/container.md` and `docs/architecture/component.md` for Adapter Registry / adapter boundary, `docs/architecture/vocabulary.md` and `docs/architecture/workflow.md` for `format` as context representation, and `docs/architecture/artifact-contracts.md` or a compatibility decision for trace metadata contract changes. |
 | Simplicity / research sufficiency | pass | Registry is a dict; payload types are dataclasses; no plugin machinery; no new abstraction layers beyond what the spec requires |
 
 ---
@@ -77,7 +77,7 @@ The dataset adapter provides capabilities. It does not decide which capability i
 | `export` | always | no dataset capability; artifact-only |
 | `status` | always | no dataset capability; artifact-only |
 
-**Important**: Tool-mediated strategies (`local_function`, `local_mcp`) obtain context through `tool_provider()`, not through `get_context`. The benchmark MUST NOT call `get_context` as a fallback to get Lattes files for tool-mediated strategies. Context access and tool access are distinct capabilities. If a tool-mediated strategy explicitly needs model-facing context in addition to tools, it is responsible for calling `get_context` via the adapter explicitly, not as a hidden fallback.
+**Important**: Tool-mediated strategies (`local_function`, `local_mcp`) obtain context through `tool_provider()`, not through `get_context`. The benchmark MUST query `adapter.tool_provider()` before any model call for a tool-mediated strategy, pass the returned provider/service into the existing local function or local MCP runtime factory, and fail if the result is `None`. The benchmark MUST NOT call `get_context` as a fallback to get Lattes files for tool-mediated strategies. Context access and tool access are distinct capabilities. If a tool-mediated strategy explicitly needs model-facing context in addition to tools, it is responsible for calling `get_context` via the adapter explicitly, not as a hidden fallback.
 
 ---
 
@@ -92,7 +92,7 @@ src/ctxbench/
     package.py          # DatasetPackage protocol; ResolvedDatasetRef (or imported from registry)
     payloads.py         # ContextPayload, EvidencePayload, TaskPayload, OracleUnavailable, ORACLE_UNAVAILABLE
     errors.py           # AdapterUnavailableError, CapabilityUnavailableError, UnsupportedRepresentationError
-    registry.py         # AdapterRegistry class; ResolvedDatasetRef; no concrete adapter imports
+    registry.py         # AdapterRegistry class; ResolvedDatasetRef; no default wired registry; no concrete adapter imports
     capabilities.py     # DatasetCapabilityReport (existing, keep)
     resolver.py         # DatasetResolver (Spec 003 local-file resolution, keep)
     provider.py         # LocalDatasetPackage (generic fallback, simplified)
@@ -245,7 +245,6 @@ class DatasetPackage(Protocol):
     def get_task(self, task_id: str) -> TaskPayload: ...
     def get_context(self, instance_id: str, task_id: str, representation: str) -> ContextPayload: ...
     def get_evidence(self, instance_id: str, task_id: str) -> EvidencePayload: ...
-    def fixtures(self) -> object: ...
     def capability_report(self) -> DatasetCapabilityReport: ...
 ```
 
@@ -261,12 +260,11 @@ class DatasetPackage(Protocol):
     def tool_provider(self) -> object | None:
         return None
 
-    def evaluation_helpers(self) -> object | None:
-        return None
-
-    def strategy_descriptors(self) -> list[StrategyDescriptor] | None:
+    def fixtures(self) -> object | None:
         return None
 ```
+
+Mandatory capabilities are limited to metadata, identity/version/origin, instance and task enumeration, task loading, context access, evidence access, and capability reporting. `fixtures()` is recommended but optional in v0, matching FR-028. Dataset-contributed evaluation helpers and strategy descriptors are out of scope for the v0 protocol.
 
 **Backward compatibility**: existing implementations that define `get_context_artifact` and `get_evidence_artifact` must add `get_context` and `get_evidence` wrappers. The old names may be kept internally but are not part of the v0 contract.
 
@@ -302,11 +300,11 @@ class AdapterRegistry:
         # builds ResolvedDatasetRef from dataset_ref, calls factory
         # raises AdapterUnavailableError if no factory registered for dataset_ref.id
 
-def get_default_registry() -> AdapterRegistry:
-    # returns the singleton registry populated by ctxbench.adapters.registry
+# No get_default_registry() is defined in ctxbench.dataset.registry.
+# Lifecycle composition imports it from ctxbench.adapters.registry.
 ```
 
-`ctxbench.dataset.registry` defines only the class and `get_default_registry()`. It does NOT wire concrete adapters.
+`ctxbench.dataset.registry` defines only generic registry types (`AdapterRegistry`, `ResolvedDatasetRef`, factory aliases, and related helpers). It contains no default wired registry and does not import `ctxbench.adapters`, lazily or otherwise.
 
 ### `ctxbench.adapters.registry`
 
@@ -325,7 +323,7 @@ def get_default_registry() -> AdapterRegistry:
     return _registry
 ```
 
-Lifecycle modules import `get_default_registry` from `ctxbench.adapters.registry`, not from `ctxbench.dataset.registry`.
+Lifecycle composition imports `get_default_registry` from `ctxbench.adapters.registry`, not from `ctxbench.dataset.registry`.
 
 ---
 
@@ -379,6 +377,8 @@ After evaluation, the evaluator records in the evaluation trace:
 
 Tool capability is already traceable via `CapabilityUnavailableError` on failure.
 
+Trace metadata keys are part of the canonical trace artifact contract. Adding `context_representation`, `context_obtained`, `evidence_obtained`, `oracle_available`, or `oracle_used`, and removing `context_path` / `instance_dir`, MUST be reflected in `docs/architecture/artifact-contracts.md` or covered by an explicit compatibility decision in the same implementation slice.
+
 ---
 
 ## Files Likely Affected
@@ -389,7 +389,7 @@ Tool capability is already traceable via `CapabilityUnavailableError` on failure
 |---|---|
 | `src/ctxbench/dataset/payloads.py` | `ContextPayload`, `EvidencePayload`, `TaskPayload`, `OracleUnavailable`, `ORACLE_UNAVAILABLE` |
 | `src/ctxbench/dataset/errors.py` | `AdapterUnavailableError`, `CapabilityUnavailableError`, `UnsupportedRepresentationError` |
-| `src/ctxbench/dataset/registry.py` | `AdapterRegistry`, `ResolvedDatasetRef`, `get_default_registry` stub |
+| `src/ctxbench/dataset/registry.py` | `AdapterRegistry`, `ResolvedDatasetRef`, generic registry helpers only; no default wired registry |
 | `src/ctxbench/adapters/__init__.py` | package marker |
 | `src/ctxbench/adapters/registry.py` | first-party wiring: registers `ctxbench/lattes` → `LattesDatasetAdapter` |
 | `src/ctxbench/adapters/lattes/__init__.py` | package marker (moved from `datasets/lattes`) |
@@ -413,6 +413,11 @@ Tool capability is already traceable via `CapabilityUnavailableError` on failure
 | `src/ctxbench/benchmark/executor.py` | Use registry; call `get_context` for inline; call `tool_provider()` for tool-mediated; rename `lattes_id` → `instance_id`; add trace fields |
 | `src/ctxbench/benchmark/evaluation.py` | Use registry; call `get_evidence` → `EvidencePayload`; call `get_oracle`; record oracle availability; remove `get_question`/`get_context_blocks` |
 | `src/ctxbench/commands/plan.py` | Import `DatasetPackage` protocol; use registry for conformance; pass adapter to `generate_runspecs` |
+| `docs/architecture/container.md` | Add Adapter Registry and dataset adapter boundary |
+| `docs/architecture/component.md` | Show `ctxbench.dataset` contracts, `ctxbench.adapters.registry`, and first-party adapter boundary |
+| `docs/architecture/vocabulary.md` | Clarify `format` as context representation request, not a physical context artifact |
+| `docs/architecture/workflow.md` | Clarify lifecycle use of adapter resolution and artifact-only `export` / `status` |
+| `docs/architecture/artifact-contracts.md` | Update trace metadata contract changes, or record an explicit compatibility decision in the implementation slice |
 
 ### Not changing
 
@@ -438,8 +443,9 @@ Tool capability is already traceable via `CapabilityUnavailableError` on failure
 | S5 | Executor boundary: `get_context` for inline, `tool_provider` for tools, trace fields | `benchmark/executor.py` | `pytest -k execute or lifecycle_no_network` | S3 |
 | S6 | Evaluation boundary: `get_evidence` → `EvidencePayload`, `get_oracle`, oracle trace recording | `benchmark/evaluation.py` | `pytest -k eval` | S3 |
 | S7 | Lattes adapter conformance + provider-free tests | `adapters/lattes/package.py`, `tests/test_fake_dataset_adapter.py`, `tests/test_dataset_adapter_registry.py` | `pytest -k fake_dataset or registry or lattes_adapter` | S3 |
+| S8 | Architecture docs + artifact-only command validation | `docs/architecture/*.md`, export/status tests | `pytest -k "export or status"` using existing artifacts with dataset unavailable | S5, S6 |
 
-Slices S4, S5, S6, and S7 are independent once S3 is green.
+Slices S4, S5, S6, and S7 are independent once S3 is green. S8 can be completed after the trace metadata decisions in S5/S6 are known.
 
 ---
 
@@ -470,8 +476,8 @@ Tests:
 - Replace `get_context_artifact` with `get_context(instance_id, task_id, representation) → ContextPayload`
 - Replace `get_evidence_artifact` with `get_evidence(instance_id, task_id) → EvidencePayload`
 - Add mandatory: `get_task(task_id) → TaskPayload`
-- Add optional (with defaults): `get_oracle`, `get_task_instance`, `tool_provider`, `evaluation_helpers`, `strategy_descriptors`
-- Keep `list_instance_ids`, `list_task_ids`, `identity`, `version`, `origin`, `metadata`, `fixtures`, `capability_report` unchanged
+- Add optional (with defaults): `get_oracle`, `get_task_instance`, `tool_provider`, `fixtures`
+- Keep `list_instance_ids`, `list_task_ids`, `identity`, `version`, `origin`, `metadata`, `capability_report` unchanged as mandatory protocol members
 
 `src/ctxbench/dataset/registry.py`:
 ```python
@@ -489,10 +495,8 @@ class AdapterRegistry:
         # raises AdapterUnavailableError if dataset_ref.id not registered
         # raises AdapterUnavailableError if dataset_ref.id is None
 
-def get_default_registry() -> AdapterRegistry:
-    # imports lazily from ctxbench.adapters.registry to avoid circular imports
-    from ctxbench.adapters.registry import get_default_registry as _get
-    return _get()
+# No get_default_registry() here. The default wired registry lives in
+# ctxbench.adapters.registry so ctxbench.dataset never imports ctxbench.adapters.
 ```
 
 ---
@@ -648,12 +652,17 @@ metadata = {
 Tool capability check in `_build_tool_runtime_factories`:
 ```python
 from ctxbench.dataset.errors import CapabilityUnavailableError
-# replace ValueError with:
-raise CapabilityUnavailableError(
-    f"Strategy '{runspec.strategy}' requires tool capability; "
-    f"adapter for '{runspec.dataset.id}' does not provide tools."
-)
+tool_provider = adapter.tool_provider()
+if tool_provider is None:
+    raise CapabilityUnavailableError(
+        f"Dataset '{runspec.dataset.id}' cannot run strategy '{runspec.strategy}': "
+        "missing capability 'tool_provider'."
+    )
+
+# Pass tool_provider into the existing local function / local MCP runtime factory.
 ```
+
+This check happens before any model call. `None` is a capability-unavailable signal, not a cue to fall back to `get_context`.
 
 ---
 
@@ -725,12 +734,28 @@ Experiment definition fixture test:
 
 ---
 
+### Slice detail: S8 — Architecture docs + artifact-only command validation
+
+Architecture documentation updates:
+- `docs/architecture/container.md`: show Adapter Registry as the lifecycle composition point between benchmark core and dataset adapters.
+- `docs/architecture/component.md`: show `ctxbench.dataset` as generic contracts, `ctxbench.adapters.registry` as first-party wiring, and `ctxbench.adapters.<domain>` as concrete adapter implementations.
+- `docs/architecture/vocabulary.md`: define `format` as a context representation request in v0, not a physical context artifact or filename.
+- `docs/architecture/workflow.md`: clarify adapter resolution during `plan` / `execute` / `eval`, and artifact-only behavior for `export` / `status`.
+- `docs/architecture/artifact-contracts.md`: document canonical trace metadata additions/removals from S5/S6, or record a compatibility decision explaining why no artifact-contract edit is needed.
+
+Provider-free validation additions:
+- Add or update tests proving `export` operates from existing run artifacts when the dataset root is unavailable or not materialized.
+- Add or update tests proving `status` operates from existing run artifacts when the dataset root is unavailable or not materialized.
+- Do not run provider-backed `ctxbench execute` or `ctxbench eval`; use fixtures, existing artifacts, mocks, or CLI-level artifact-only tests.
+
+---
+
 ## Migration Impact
 
 | Surface | Impact |
 |---|---|
 | Experiment definitions | None — `dataset.id`, `dataset.root`, `dataset.version`, `factors.format` unchanged |
-| Artifact schemas | None — `trials.jsonl`, `responses.jsonl`, `evals.jsonl` field names unchanged |
+| Artifact schemas | Row schemas remain compatible, but trace metadata additions/removals are canonical trace contract changes and require `docs/architecture/artifact-contracts.md` update or explicit compatibility decision |
 | CLI behavior | None — same commands, same flags |
 | `context_path` metadata field | Removed from executor metadata; no strategy reads it (verified by grep) |
 | `instance_dir` metadata field | Removed from executor metadata; no strategy reads it (verified by grep) |
@@ -748,7 +773,7 @@ Experiment definition fixture test:
 
 - **Package boundary**: `ctxbench.dataset` and `ctxbench.adapters` are sibling packages with enforced import direction. No circular imports.
 - **Registry as single binding point**: `dataset.id == "ctxbench/lattes"` appears only in `ctxbench.adapters.registry`.
-- **Protocol completeness**: `DatasetPackage` now covers all six mandatory and four optional capabilities with named payload types.
+- **Protocol completeness**: `DatasetPackage` covers the mandatory v0 capabilities from FR-017 through FR-022 plus capability reporting, and optional oracle, tools, task-instance data, and fixtures with named payload types.
 - **Evaluator decoupling**: `evaluation.py` no longer accesses `contextBlocks`, `get_question`, or `get_context_blocks`. It uses `EvidencePayload`.
 - **Planning decoupling**: `runspec_generator.py` no longer imports `LocalDatasetPackage`, `Question`, or `QuestionInstance`.
 - **Executor decoupling**: `executor.py` no longer calls Lattes-specific methods; calls only `get_context` (inline) or `tool_provider()` (tools).
@@ -765,7 +790,7 @@ Experiment definition fixture test:
 | `runspec_generator.py`: `TaskPayload` fields may miss something `Question` model had (e.g. template rendering edge cases) | Run `pytest -k plan or runspec` after S4; compare rendered trial payloads |
 | Lattes import move: internal lattes cross-imports may be missed | Run full import scan with `python -c "import ctxbench"` after S3; run `pytest tests/` |
 | `context_path`/`instance_dir` removal from metadata: analysis scripts reading raw traces may break | Document removal; existing tests already verify no strategy reads these fields |
-| `get_default_registry()` lazy import in `ctxbench.dataset.registry` may create subtle import order issues | Test with `pytest -k registry` and verify no import errors at module load |
+| Lifecycle code might import a default registry from `ctxbench.dataset.registry`, recreating an adapter dependency in the generic layer | Import-boundary tests forbid `ctxbench.dataset` importing `ctxbench.adapters`; lifecycle composition imports `get_default_registry()` only from `ctxbench.adapters.registry` |
 | Oracle trace fields: adding `oracle_available` / `oracle_used` to evaluation output changes eval trace schema | Verify these are additive (not breaking); update `test_artifact_contracts.py` if eval trace schema is tested |
 
 ---
@@ -797,11 +822,14 @@ pytest -k "eval" -v
 # S7:
 pytest -k "fake_dataset or registry or lattes_adapter" -v
 
+# S8:
+pytest -k "export or status" -v
+
 # Full (after all slices):
 pytest tests/ -x --ignore=tests/fixtures
 ```
 
-No real LLM provider call is required at any slice boundary.
+No real LLM provider call is required at any slice boundary. Validation MUST include artifact-only `export` and `status` coverage using existing artifacts while the referenced dataset is unavailable or not materialized.
 
 ---
 
