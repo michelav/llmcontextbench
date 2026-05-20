@@ -92,7 +92,7 @@ The registry v0 MUST support, at minimum:
 
 Generic lifecycle phases MUST NOT branch on concrete dataset identities. Dataset identity binding is allowed only inside the adapter registry or resolver.
 
-The registry v0 MAY use explicit first-party registrations. Dynamic plugin discovery, Python package entry points, remote code loading, third-party adapter installation, and plugin marketplaces are out of scope.
+The registry v0 MUST use explicit first-party registrations. Dynamic plugin discovery, Python package entry points, remote code loading, third-party adapter installation, and plugin marketplaces are out of scope.
 
 ## Dataset Package Capabilities v0
 
@@ -145,7 +145,9 @@ The experiment definition MUST remain domain-neutral. It MUST NOT name concrete 
 
 The experiment definition identifies the dataset. The adapter registry resolves the dataset to an adapter. The adapter provides capabilities to the benchmark core.
 
-In v0, the experiment definition MAY continue to use the existing `format` factor name for compatibility. However, within the Dataset Package Capabilities contract, `format` MUST be interpreted as the requested context representation provided by the dataset adapter.
+In v0, `factors.format` SHALL remain the public experiment field for compatibility. Within the Dataset Package Capabilities contract, `format` values are passed unmodified to the adapter as the `representation` parameter of the context access capability; the benchmark core does not normalize, translate, or map them. `format` MUST be interpreted as the requested context representation provided by the dataset adapter.
+
+Existing experiment definitions that do not reference adapter class names, Python module paths, Lattes-specific filenames, or parser names remain valid in v0 without modification.
 
 A future cleanup MAY rename `format` to `representation` or `contextRepresentation`, but that rename is out of scope for this specification unless already required by accepted canonical terminology.
 
@@ -180,7 +182,7 @@ A benchmark lifecycle phase receives a resolved dataset reference. Before it use
 **Acceptance Scenarios**:
 
 1. **Given** a dataset reference with `dataset.id = "ctxbench/lattes"`, **When** the registry resolves it, **Then** it returns the Lattes adapter.
-2. **Given** a future software-repository dataset identity, **When** the registry resolves it, **Then** no changes are required in `plan`, `execute`, `eval`, `export`, or `status`.
+2. **Given** a future software-repository dataset identity, **When** the registry resolves it, **Then** no changes are required in `plan`, `execute`, `eval`, `export`, `status`, or `dataset inspect`.
 3. **Given** an unknown dataset identity, **When** the registry cannot resolve it, **Then** the benchmark fails with a deterministic adapter-unavailable error.
 
 ---
@@ -276,21 +278,22 @@ A researcher writes an experiment definition that identifies the dataset and sel
 - **FR-007**: A dataset adapter MUST own domain-specific parsing, decoding, layout interpretation, representation mapping, context selection, evidence selection, oracle availability, and domain-specific tools.
 - **FR-008**: A dataset adapter MAY use domain-specific terminology internally, but its core-facing surface MUST expose generic vocabulary.
 - **FR-009**: A dataset adapter MAY be implemented temporarily inside `ctxbench-cli` during Spec 004.
+- **FR-009a**: A dataset adapter implemented temporarily inside `ctxbench-cli` MUST still conform to the Dataset Package Capabilities v0 contract. Temporary location does not exempt an adapter from any part of the contract.
 - **FR-010**: Moving the Lattes adapter implementation from `ctxbench-cli` to `ctxbench/lattes` is deferred to Spec 006.
 
 ### Adapter Registry v0
 
-- **FR-011**: CTXBench MUST resolve a dataset reference to a dataset adapter before lifecycle phases consume the dataset.
+- **FR-011**: CTXBench MUST resolve a dataset reference to a dataset adapter once per run, before any lifecycle phase consumes the dataset.
 - **FR-012**: The Adapter Registry v0 MUST be the only component allowed to bind a concrete dataset identity or dataset kind to a concrete adapter implementation.
 - **FR-013**: The Adapter Registry v0 MUST use explicit first-party registrations.
-- **FR-014**: The Adapter Registry v0 MUST support the current Lattes dataset and prepare for a future software-repository dataset without requiring changes in `plan`, `execute`, `eval`, `export`, or `status`.
+- **FR-014**: The Adapter Registry v0 MUST support the current Lattes dataset and prepare for a future software-repository dataset without requiring changes in `plan`, `execute`, `eval`, `export`, `status`, or `dataset inspect`.
 - **FR-015**: If no adapter can be resolved, the registry MUST fail deterministically with an adapter-unavailable error.
 - **FR-016**: Dynamic plugin discovery, Python package entry points, remote code loading, third-party adapter installation, and plugin marketplaces are out of scope for Spec 004.
 
 ### Mandatory Dataset Package Capabilities
 
 - **FR-017 — Metadata**: A dataset adapter MUST expose dataset identity, dataset version, human-readable name, domain, description, and origin or provenance reference when available.
-- **FR-018 — Instance enumeration**: A dataset adapter MUST enumerate benchmark instances using stable `instanceId` values.
+- **FR-018 — Instance enumeration**: A dataset adapter MUST enumerate benchmark instances using stable `instanceId` values. The returned enumeration MUST be stable across calls within a single run. In v0, instances are enumerated as stable identifiers only; adapter-exposed per-instance metadata is not part of the v0 contract.
 - **FR-019 — Task enumeration**: A dataset adapter MUST enumerate benchmark tasks using stable `taskId` values.
 - **FR-020 — Task loading**: A dataset adapter MUST resolve a `taskId` to a task object containing, at minimum, a prompt-ready task statement or enough generic information for a strategy to construct one.
 - **FR-021 — Context access**: A dataset adapter MUST provide context for a given `(instanceId, taskId, representation)` request.
@@ -299,10 +302,10 @@ A researcher writes an experiment definition that identifies the dataset and sel
 ### Optional Dataset Package Capabilities
 
 - **FR-023 — Oracle access**: A dataset adapter MAY provide an oracle for a given `(instanceId, taskId)`.
-- **FR-024**: If no oracle is available, the adapter MUST return an explicit unavailable result. It MUST NOT fabricate an oracle.
+- **FR-024**: If no oracle is available, the adapter MUST return an explicit unavailable result. The unavailable result MUST be a distinct signal that unambiguously indicates absence; it MUST NOT be a null value, an empty payload, or any value that could be mistaken for a valid oracle. The adapter MUST NOT fabricate an oracle.
 - **FR-025**: An oracle is distinct from evidence. Evidence is material used to support judgment. Oracle is an expected answer, validation rule, reference output, reference label, or authoritative outcome used to evaluate a response.
-- **FR-026 — Tool access**: A dataset adapter MAY provide domain-specific tools for tool-mediated strategies.
-- **FR-027**: If tools are unavailable and the selected strategy requires tools, execution MUST fail with a capability-unavailable error.
+- **FR-026 — Tool access**: A dataset adapter MAY provide domain-specific tools for tool-mediated strategies. A domain-specific tool is a callable operation that exposes dataset-internal data or functionality to a strategy and cannot be expressed as a generic benchmark capability.
+- **FR-027**: When a selected strategy requires tools, the benchmark MUST query the adapter for tool availability before any model call. If the adapter does not provide tools, the benchmark MUST fail with a capability-unavailable error naming the missing capability and the dataset identity. The adapter is responsible for signaling unavailability; the benchmark lifecycle orchestrator is responsible for converting that signal into a capability-unavailable error.
 - **FR-028 — Fixtures**: A dataset adapter SHOULD provide small provider-free fixtures for conformance validation. Fixtures are recommended but not mandatory in v0.
 
 ### Context, Evidence, and Oracle Semantics
@@ -311,32 +314,38 @@ A researcher writes an experiment definition that identifies the dataset and sel
 - **FR-030**: Evidence is what the evaluator or judge may receive during evaluation.
 - **FR-031**: Oracle is an expected or authoritative criterion used for evaluation when available.
 - **FR-032**: The same underlying payload MAY serve more than one role, but the access role MUST be recorded distinctly.
-- **FR-033**: The benchmark runtime MUST record whether context, evidence, and oracle were available and used for each trial or evaluation when that information is available at runtime.
+- **FR-033**: The benchmark runtime MUST record whether context, evidence, and oracle were available and used for each trial or evaluation when that information is available at runtime. This information MUST be recorded in the trial trace and evaluation trace artifacts.
 
 ### Experiment Definition Requirements
 
 - **FR-034**: The experiment definition MUST identify the dataset using a generic dataset reference, not dataset-specific file paths or adapter classes.
 - **FR-035**: When `dataset.id` is present, the Adapter Registry v0 MUST use it, together with any required dataset metadata, to resolve the dataset adapter.
 - **FR-036**: The experiment definition MUST NOT contain concrete adapter class names, Python module paths, parser names, tool implementation names, or Lattes-specific filenames.
-- **FR-037**: The `dataset.root` field MAY be used to reference an already materialized local dataset package.
+- **FR-037**: The `dataset.root` field MAY be used to reference an already materialized local dataset package. A valid materialized local dataset package MUST contain a `ctxbench.dataset.json` manifest as defined by Spec 003; an arbitrary directory without this manifest is not a valid dataset root.
 - **FR-038**: The `dataset.id` and `dataset.version` fields SHOULD be used when the experiment refers to a versioned dataset package.
 - **FR-039**: In v0, `factors.format` SHALL remain the public experiment field for compatibility, but its semantic meaning MUST be "context representation requested from the dataset adapter."
-- **FR-040**: This specification MUST NOT require generated JSON Schema artifacts for experiment definitions. Validation remains owned by the Pydantic model layer unless a future specification changes that decision.
+- **FR-039a**: In v0, `format` values from experiment factors MUST be passed unmodified to the adapter as the `representation` parameter of the context access capability. The benchmark core MUST NOT normalize, translate, or map `format` values before passing them to the adapter.
+- **FR-040**: This specification MUST NOT require generated validation artifacts for experiment definitions — including but not limited to JSON Schema, OpenAPI specifications, and TypeScript type definitions. Validation remains owned by the Pydantic model layer unless a future specification changes that decision.
 - **FR-041**: This specification MUST NOT force a broad rename of existing experiment fields unless the rename is already required by accepted canonical terminology.
+- **FR-041a**: Existing experiment definitions that do not reference adapter class names, Python module paths, Lattes-specific filenames, or parser names remain valid in v0 without modification. Fields not governed by this specification are not affected.
 
 ### Dataset Layout Isolation
 
 - **FR-042**: Physical filenames and directory layout are dataset-internal concerns.
 - **FR-043**: The benchmark core MUST NOT map context representations directly to dataset-specific filenames.
 - **FR-044**: If a representation is unsupported for a task or dataset, the adapter MUST fail deterministically with an unsupported-representation error.
+- **FR-044a**: Unsupported-representation errors are raised at adapter call time during execution. This specification does not require planning-time validation of representation support against the selected adapter.
+- **FR-044b**: The benchmark core MUST NOT catch an unsupported-representation error and substitute a different representation. When the adapter raises an unsupported-representation error, the benchmark MUST propagate it as a run failure.
 
 ### Lifecycle Phase Requirements
 
 - **FR-045**: `plan` MUST use dataset metadata, instance enumeration, task enumeration, and task loading through the resolved adapter.
 - **FR-046**: `execute` MUST use task loading, context access, and optional tools through the resolved adapter.
 - **FR-047**: `eval` MUST use evidence access and optional oracle access through the resolved adapter.
-- **FR-048**: `export` SHOULD operate only on already produced benchmark artifacts and SHOULD NOT require dataset access.
-- **FR-049**: `status` SHOULD operate only on already produced benchmark artifacts and SHOULD NOT require dataset access.
+- **FR-048**: `export` MUST operate only on already produced benchmark artifacts and MUST NOT require dataset access.
+- **FR-049**: `status` MUST operate only on already produced benchmark artifacts and MUST NOT require dataset access.
+- **FR-049a**: When `export` or `status` is invoked against a run whose dataset is no longer locally available, the command MUST succeed using only the existing benchmark artifacts. These commands MUST NOT require the dataset to be materialized.
+- **FR-049b**: Lifecycle phases MUST NOT perform implicit dataset acquisition or network fetches. If a referenced dataset is not locally resolved before a phase begins, the phase MUST fail with an explicit error.
 
 ### Scope Discipline
 
@@ -376,7 +385,7 @@ A researcher writes an experiment definition that identifies the dataset and sel
 - **SC-006**: Tool-mediated strategies obtain tools through the adapter boundary or fail with a capability-unavailable error.
 - **SC-007**: Existing experiment definitions using `factors.format` remain valid in v0, with `format` documented as a context representation request.
 - **SC-008**: No experiment definition needs to name a concrete adapter class, Python module, parser, or dataset-specific filename.
-- **SC-009**: `export` and `status` remain artifact-only unless a future spec explicitly changes that rule.
+- **SC-009**: `export` and `status` operate exclusively on already produced benchmark artifacts and succeed even when the dataset is no longer locally available.
 
 ## In Scope
 

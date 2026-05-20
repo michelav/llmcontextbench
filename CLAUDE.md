@@ -273,5 +273,5 @@ Drop:
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current active plan.
 
-Active plan: specs/003-dataset-distribution/plan.md
+Active plan: specs/004-dataset-package-capabilities/plan.md
 <!-- SPECKIT END -->
