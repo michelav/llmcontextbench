@@ -253,6 +253,67 @@
 
 ---
 
+## Slice S9 — Internal model vocabulary alignment (Track A)
+
+**Goal**: Rename internal Python model fields and class names to canonical vocabulary; remove translation shims; normalize `contextBlock`/`contextBlocks` inconsistency; update all callers and tests.  
+**Validation**: `pytest tests/ -x`  
+**Depends on**: S8  
+**Suggested commit**: `refactor(models): rename legacy fields and classes to canonical vocabulary`
+
+> **Intra-slice ordering**: T049 and T050 MUST be completed before T051–T054 are started. T051–T054 are marked `[P]` because they touch disjoint files and may run in parallel with each other, but they all depend on the class and field renames in models.py being in place first. T055 MUST follow T051–T054.
+
+### Tasks
+
+- [ ] T049 [S9] Rename model class names in `src/ctxbench/benchmark/models.py`: `RunSpec` → `TrialSpec`, `RunResult` → `TrialResult`, `RunTrace` → `TrialTrace`, `RunMetadata` → `TrialMetadata`, `EvaluationRunResult` → `EvaluationTrialResult`; add module-level backward-compat aliases (`RunSpec = TrialSpec`, etc.) immediately after each class definition; update all internal cross-references within `models.py` (e.g., `RunMetadata` type annotation inside `TrialSpec`) to use new names
+- [ ] T050 [S9] Rename model field names in `src/ctxbench/benchmark/models.py` following the rename map in `plan.md § S9 field rename table`: `questionId` → `taskId`, `runId` → `trialId`, `questionTags` → `taskTags`, `questionTemplate` → `taskTemplate`, `contextBlock` → `contextBlocks`, `answer` → `response` (in `TrialResult`); update all `to_persisted_artifact()` methods to use new field names directly (no longer mapping `self.runId` → `"trialId"`, etc.); simplify `model_validate()` translation shims: remove the `payload["questionId"] = payload.pop("taskId")` and similar internal remappings; keep the backward-compat rejection error messages for old public field names (callers that send `"runId"` or `"questionId"` still receive a `ValueError`); normalize `to_persisted_artifact()` in `TrialResult` and `TrialSpec` to output `"contextBlocks"` (plural) instead of `"contextBlock"` — this is an artifact contract change that must be reflected in `docs/architecture/artifact-contracts.md`
+- [ ] T051 [P] [S9] Update `src/ctxbench/benchmark/runspec_generator.py`: rename local variables `question_id` → `task_id`, `question_id=` kwargs → `task_id=`; update all `TrialSpec(...)` constructor calls to use `taskId=`, `trialId=`, `taskTags=`, `contextBlocks=`; rename `questionTags` keys in intermediate dicts to `taskTags`; import `TrialSpec`, `TrialMetadata` instead of `RunSpec`, `RunMetadata`
+- [ ] T052 [P] [S9] Update `src/ctxbench/benchmark/executor.py`: replace `runspec.questionId` → `runspec.taskId`, `runspec.runId` → `runspec.trialId`, `runspec.questionTags` → `runspec.taskTags`; update `TrialResult(...)` constructor calls; import `TrialSpec`, `TrialResult` instead of `RunSpec`, `RunResult`
+- [ ] T053 [P] [S9] Update `src/ctxbench/benchmark/evaluation.py` and `src/ctxbench/benchmark/evaluation_batch.py`: replace all `.questionId` → `.taskId`, `.runId` → `.trialId`, `.questionTags` → `.taskTags` field accesses; rename `EvaluationBatchSummary.questions` → `tasks` in both `models.py` and `evaluation.py:build_evaluation_summary_rows`; import `EvaluationTrialResult` instead of `EvaluationRunResult`
+- [ ] T054 [P] [S9] Update `src/ctxbench/benchmark/results.py` and `src/ctxbench/benchmark/selectors.py`: replace all field accesses and artifact key strings that still reference `questionId`, `runId`, `contextBlock` (singular) with canonical names; in `selectors.py` update `_field(item, "questionId")` → `_field(item, "taskId")`
+- [ ] T055 [S9] Update all affected test files to use renamed classes and fields: `tests/test_model_schemas.py` (primary: update all `RunSpec(...)` / `RunResult(...)` constructions, all `.questionId`, `.runId` accesses, all `contextBlock` key assertions); `tests/test_ai.py`, `tests/test_cli.py`, `tests/test_artifact_contracts.py`, `tests/test_lifecycle_no_network.py`, and any other file identified by `grep -rn "RunSpec\|RunResult\|questionId\|runId\b\|contextBlock" tests/`; update `test_artifact_contracts.py` to assert `"contextBlocks"` (plural) is the key in responses.jsonl and trials.jsonl; **update `docs/architecture/artifact-contracts.md`** to document the `contextBlock` → `contextBlocks` breaking key rename in both `responses.jsonl` and `trials.jsonl` — this is required by FR-064 and Constitution Principle V; place the entry alongside the existing S5/S6 trace-metadata entries added in T039
+
+### Checkpoint
+
+- [ ] `pytest tests/ -x` passes (no provider-backed execution)
+- [ ] `grep -r "RunSpec\|RunResult\|RunTrace\|RunMetadata\|EvaluationRunResult\b" src/ctxbench/ | grep -v "= TrialSpec\|= TrialResult\|= TrialTrace\|= TrialMetadata\|= EvaluationTrialResult"` returns no results
+- [ ] `grep -rn "\.questionId\|\.runId\b\|\.answer\b\|\.contextBlock\b\|\.questionTags\b" src/ctxbench/` returns no results (other than alias definitions and comments)
+- [ ] no opportunistic refactor
+- [ ] diff is reviewable
+- [ ] `worklog.md` updated
+
+---
+
+## Slice S10 — Dataset file and checkpoint naming alignment (Track B)
+
+**Goal**: Rename `questions.json` → `tasks.json` with backward-compat fallback; rename internal dataset model classes; rename checkpoint kind `"runs"` → `"trials"` with backward-compat reader; migrate test fixtures.  
+**Validation**: `pytest tests/ -x`  
+**Depends on**: S9  
+**Suggested commit**: `refactor(dataset): rename questions.json to tasks.json and align checkpoint kind to trials`
+
+> **Intra-slice ordering**: T058 MUST be completed before T057 — T057 updates `provider.py` to reference `dataset_paths.tasks`, which is the property added to `models.py` by T058. T056, T058, T059, and T060 may be implemented in parallel with each other; their changes within any single file do not conflict (T056 updates `provider.py`'s import source path; T057 adds backward-compat logic on top of that import). T057 follows T058. T061 and T062 are independent and may run in any order relative to T056–T060.
+
+### Tasks
+
+- [ ] T056 [S10] Rename `src/ctxbench/dataset/questions.py` → `src/ctxbench/dataset/tasks.py`; inside the new file rename classes following the rename map in `plan.md § S10 class rename table`: `QuestionDataset` → `TaskDataset`, `Question` → `Task`, `QuestionInstanceEntry` → `TaskInstanceEntry`, `QuestionInstanceDataset` → `TaskInstanceDataset`; add module-level backward-compat aliases; update `TaskDataset.model_validate` and `TaskInstanceDataset.model_validate` to read from `data.get("tasks", data.get("questions", []))` (try canonical key first, fall back to legacy key); update all importers to `from ctxbench.dataset.tasks import ...` (covers `provider.py`, `package.py`, and any test files importing from `ctxbench.dataset.questions`); add focused tests in `tests/test_dataset_local_package.py` verifying the JSON key fallback works for both `"tasks"` and `"questions"` keys
+- [ ] T057 [S10] Update `src/ctxbench/dataset/provider.py` (depends on T056 and T058): update all body-level usages of `QuestionDataset` → `TaskDataset`, `Question` → `Task`, `QuestionInstanceEntry` → `TaskInstanceEntry` throughout the module (the import source path `from ctxbench.dataset.tasks import ...` is already handled by T056); update the path reference from `dataset_paths.questions` → `dataset_paths.tasks` (the `tasks` property is added by T058); add the backward-compat file fallback pattern from `plan.md § S10` to `LocalDatasetPackage.__init__`: try `tasks.json` first, then fall back to `questions.json` with a `DeprecationWarning`; add a focused test verifying the deprecation warning is emitted when only `questions.json` is present
+- [ ] T058 [P] [S10] Update dataset path properties in `src/ctxbench/benchmark/models.py`: in `ExperimentDataset`, rename the `questions` property → `tasks` (returns path to `tasks.json`); preserve a deprecated `questions` property that returns the same path with a `DeprecationWarning`; in `DatasetProvenance`, apply the same rename; update the legacy-path validation in both classes to check `"tasks"` and `"task_instances"` as the canonical path keys while still accepting `"questions"` and `"question_instances"` during migration; update file name strings from `"questions.json"` → `"tasks.json"` and `"questions.instance.json"` → `"tasks.instance.json"` in both model validators; add a focused test in `tests/test_model_schemas.py` verifying that accessing the deprecated `questions` property emits a `DeprecationWarning`
+- [ ] T059 [P] [S10] Update `src/ctxbench/dataset/resolver.py`: change the file existence check from `(materialized_root / "questions.json").exists()` to `(materialized_root / "tasks.json").exists() or (materialized_root / "questions.json").exists()`; prefer `tasks.json` in the resolution path; the fallback must not fail silently — it must follow the same deprecation warning pattern as `provider.py`
+- [ ] T060 [P] [S10] Update `src/ctxbench/adapters/lattes/package.py`: rename `questions_payload = root / "questions.json"` → `tasks_payload = root / "tasks.json"`; rename `instances_payload = root / "questions.instance.json"` → `instances_payload = root / "tasks.instance.json"`; add the backward-compat fallback: if `tasks.json` not found, try `questions.json` with `DeprecationWarning`; same for `tasks.instance.json` / `questions.instance.json`
+- [ ] T061 [S10] Rename checkpoint kind in `src/ctxbench/benchmark/checkpoints.py` and `src/ctxbench/commands/run.py`: in `checkpoints.py` change the primary kind key from `"runs"` to `"trials"` in `CHECKPOINT_KINDS`; keep `"runs"` as a read-only backward-compat alias so existing checkpoint files with kind `"runs"` continue to be read; in `commands/run.py` replace all `kind="runs"` arguments with `kind="trials"`; add a focused test in `tests/test_lifecycle_no_network.py` verifying that a checkpoint file written with kind `"trials"` is read back correctly and that a legacy checkpoint file with kind `"runs"` is also accepted
+- [ ] T062 [S10] Rename test fixtures: rename `tests/fixtures/lattes_provider_free/dataset/questions.json` → `tasks.json`; rename `tests/fixtures/fake_dataset/dataset/questions.json` → `tasks.json`; rename `tests/fixtures/fake_dataset/dataset/questions.instance.json` → `tasks.instance.json`; update all test files that reference these fixture filenames by path; verify that `pytest tests/ -x` passes with the renamed fixtures
+
+### Checkpoint
+
+- [ ] `pytest tests/ -x` passes (no provider-backed execution)
+- [ ] `grep -rn "questions\.json\|questions\.instance\.json" src/ctxbench/` returns only backward-compat fallback branches and deprecation warning lines, not primary path construction
+- [ ] `grep -rn "kind=\"runs\"" src/ctxbench/` returns no primary assignments; only backward-compat reader branches
+- [ ] Deprecation warning is emitted (and tested) when `questions.json` fallback is triggered
+- [ ] no opportunistic refactor
+- [ ] diff is reviewable
+- [ ] `worklog.md` updated
+
+---
+
 ## Final Audit
 
 - [X] T043 [Audit] Run full focused validation suite: `pytest tests/ -x --ignore=tests/fixtures` — all slices green, no provider calls
@@ -261,6 +322,8 @@
 - [X] T046 [Audit] Update `specs/004-dataset-package-capabilities/usage.jsonl` — record token usage as `unavailable` if API usage data was not captured during implementation
 - [X] T047 [Audit] Inspect lifecycle imports after S4-S6 and update `src/ctxbench/dataset/provider.py` only if needed: if `DatasetProvider.from_dataset` becomes dead code for lifecycle phases, add `# deprecated: no longer called by lifecycle phases; retained for Spec 004 migration safety` without removing it; if it remains used by non-lifecycle utilities, record that explicitly in `worklog.md`; do not remove `DatasetProvider.from_dataset` in Spec 004
 - [X] T048 [Audit] Record follow-ups: confirm `context_path` / `instance_dir` removal has no downstream analysis script dependency; confirm `lattes_id` → `instance_id` rename is backward-compatible; note Spec 006 deferred items; record decision on `DatasetProvider.from_dataset` — if it remains deprecated-internal after this spec, schedule its removal in Spec 006 alongside the Lattes adapter relocation
+- [ ] T063 [Audit] After S9 and S10: run `pytest tests/ -x --ignore=tests/fixtures`; run SC-011 grep check; run SC-014 grep check; confirm no `contextBlock` (singular) appears as an artifact key in any `to_persisted_artifact()` output; update `worklog.md` with S9/S10 completion notes
+- [ ] T064 [Audit] After S10: confirm `grep -rn "questions\.json" src/ctxbench/` returns only backward-compat branches; confirm `grep -rn "QuestionDataset\|Question\b\|QuestionInstanceEntry\|QuestionInstanceDataset" src/ctxbench/` returns only alias definitions; record deferred items (Spec 006 removal of backward-compat fallbacks and `DatasetProvider.from_dataset`)
 
 ---
 
@@ -275,12 +338,16 @@ S1
         ├── S6  (independent of S4, S5, S7 once S3 is green)
         ├── S7  (independent of S4, S5, S6 once S3 is green)
         └── S8  (depends on S5 and S6 trace decisions; does not depend on S7 unless reusing S7 fixtures)
-            └── Final Audit
+            └── S9  (Track A: model vocabulary; depends on S8 for artifact-contracts baseline)
+                └── S10  (Track B: dataset file naming; ordered after S9 for reviewability)
+                    └── Final Audit (T063, T064)
 ```
 
 - S4, S5, S6, S7 may be implemented in any order once S3 is green.
 - S8 should wait until trace metadata changes in S5 and S6 are known; S8 may reuse S7 fixtures but must not depend on S7 unless that reuse is explicit in the implementation.
-- Final Audit depends on all slices being complete.
+- S9 is ordered after S8 for reviewability; `artifact-contracts.md` already exists from S8 and S9 adds the `contextBlocks` rename entry to it. S9 does not re-run S8 — it extends the document that S8 produced.
+- S10 is technically independent of S9, but is ordered after it to keep each PR reviewable as a standalone set of changes. T056–T062 touch different files than T049–T055.
+- Final Audit (T063, T064) depends on both S9 and S10 being complete.
 
 ## Provider and Cost Controls
 

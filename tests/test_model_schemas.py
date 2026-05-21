@@ -12,6 +12,7 @@ from ctxbench.benchmark.models import (
     EvaluationRunSummary,
     EvaluationTrace,
     ExperimentDataset,
+    ExperimentScope,
     RunMetadata,
     RunResult,
     RunSpec,
@@ -23,6 +24,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def make_dataset() -> ExperimentDataset:
     return ExperimentDataset(root="/tmp/dataset")
+
+
+def test_experiment_scope_uses_tasks_with_questions_compatibility_alias():
+    scoped = ExperimentScope.model_validate({"instances": ["cv-demo"], "tasks": ["q_year"]})
+    legacy = ExperimentScope.model_validate({"instances": ["cv-demo"], "questions": ["q_year"]})
+
+    assert scoped.tasks == ["q_year"]
+    assert scoped.questions == ["q_year"]
+    assert legacy.tasks == ["q_year"]
+    assert legacy.questions == ["q_year"]
 
 
 def make_metadata() -> RunMetadata:

@@ -135,6 +135,18 @@ A dataset may provide an oracle without exposing it as model-facing context. Thi
 
 If no oracle is available for a given task instance, the dataset adapter MUST return an explicit unavailable result. It MUST NOT fabricate an oracle.
 
+## Vocabulary Alignment
+
+Spec 004 established the canonical vocabulary (FR-002): `dataset`, `instance`, `task`, `trial`, `context`, `evidence`, `oracle`, `tool`, `response`, `evaluation`. The implementation completed all adapter-boundary slices (S1–S8), but the internal Python model layer still uses legacy names — `questionId`, `runId`, `questionTags`, `contextBlock`, `RunSpec`, `RunResult`, etc. — bridged to the public artifact format through translation shims in `model_validate` and `to_persisted_artifact`.
+
+This section covers two follow-on tracks that complete the vocabulary alignment:
+
+**Track A — Internal model vocabulary** (pure code, zero artifact change): rename internal Python field names and class names to match the public artifact format. Remove translation shims once internal and external names agree.
+
+**Track B — Dataset file and checkpoint naming** (impacts dataset packages on disk): rename `questions.json` → `tasks.json`, internal dataset model classes, and checkpoint kind `"runs"` → `"trials"`.
+
+---
+
 ## Experiment Definition Impact
 
 The Dataset Package Capabilities v0 contract changes how experiment definitions refer to datasets.
@@ -251,6 +263,34 @@ A researcher writes an experiment definition that identifies the dataset and sel
 
 ---
 
+### User Story 7 - Internal Code Uses Canonical Vocabulary (Priority: P1 — Track A)
+
+A contributor reading or modifying benchmark lifecycle code sees `TrialSpec`, `TrialResult`, `taskId`, `trialId`, and `response` throughout. No translation shims exist to confuse naming conventions.
+
+**Why this priority**: FR-002 requires the benchmark core to express its behavior using canonical vocabulary. Internal field names that contradict the public artifact format make code review and future maintenance error-prone.
+
+**Acceptance Scenarios**:
+
+1. **Given** a contributor reads `executor.py`, **When** they see `runspec.taskId` and `runspec.trialId`, **Then** those names match the corresponding artifact keys without any mapping.
+2. **Given** a contributor imports model classes, **When** they use `TrialSpec` and `TrialResult`, **Then** the class names match the spec vocabulary.
+3. **Given** a contributor reads `model_validate`, **When** the internal field is already canonical, **Then** no `payload["questionId"] = payload.pop("taskId")` remapping exists.
+
+---
+
+### User Story 8 - Dataset Files Use Canonical Naming (Priority: P2 — Track B)
+
+A contributor or researcher inspecting a materialized dataset package sees `tasks.json` and `tasks.instance.json` rather than `questions.json`. The naming is consistent with the benchmark vocabulary.
+
+**Why this priority**: File names are visible in dataset packages, tooling, and debugging output. Misaligned names (`questions.json`) confuse readers who know the canonical vocabulary (`task`). A backward-compat fallback prevents breaking existing packages.
+
+**Acceptance Scenarios**:
+
+1. **Given** a newly materialized dataset package, **When** a contributor inspects the directory, **Then** it contains `tasks.json` and `tasks.instance.json`.
+2. **Given** an existing dataset package with `questions.json`, **When** the adapter reads it, **Then** it falls back to `questions.json` with a deprecation warning and does not fail.
+3. **Given** a contributor reads `checkpoints.py`, **When** they see checkpoint kind `"trials"`, **Then** it aligns with the trial vocabulary throughout the benchmark.
+
+---
+
 ## Edge Cases
 
 - A dataset adapter cannot provide tools. Tool-mediated strategies fail with a capability-unavailable error. Inline strategies may still run.
@@ -347,6 +387,36 @@ A researcher writes an experiment definition that identifies the dataset and sel
 - **FR-049a**: When `export` or `status` is invoked against a run whose dataset is no longer locally available, the command MUST succeed using only the existing benchmark artifacts. These commands MUST NOT require the dataset to be materialized.
 - **FR-049b**: Lifecycle phases MUST NOT perform implicit dataset acquisition or network fetches. If a referenced dataset is not locally resolved before a phase begins, the phase MUST fail with an explicit error.
 
+### Track A — Internal Model Vocabulary Alignment
+
+- **FR-061**: Internal Python model field names in `TrialMetadata`, `TrialSpec`, `TrialResult`, `EvaluationItemResult`, `EvaluationTrialResult`, and all derivatives MUST use canonical vocabulary:
+  - `questionId` → `taskId`
+  - `runId` → `trialId`
+  - `questionTags` → `taskTags`
+  - `questionTemplate` → `taskTemplate`
+  - `contextBlock` → `contextBlocks` (also normalizing the singular/plural inconsistency that already exists between `responses.jsonl` and `evals.jsonl`)
+  - `answer` (internal response field) → `response`
+- **FR-062**: Python model class names MUST use canonical vocabulary:
+  - `RunSpec` → `TrialSpec`
+  - `RunResult` → `TrialResult`
+  - `RunTrace` → `TrialTrace`
+  - `RunMetadata` → `TrialMetadata`
+  - `EvaluationRunResult` → `EvaluationTrialResult`
+  - Legacy class aliases MAY be provided as module-level aliases during the migration slice, but MUST NOT appear in new code.
+- **FR-063**: Once internal field names match the public artifact keys, the translation shims in `model_validate` that accept the public `taskId` and store it as internal `questionId` (and equivalently accept public `trialId` storing it as `runId`, and public `response` storing it as `answer`) MUST be removed — no mapping is needed once internal names are canonical. The backward-compat rejection of old external field names (errors raised when callers send `runId`, `questionId`, or `answer`) MUST be preserved.
+- **FR-064**: `EvaluationBatchSummary.questions` MUST be renamed to `tasks`. The `to_persisted_artifact` output key for context blocks MUST be normalized to `contextBlocks` in `TrialResult`, `TrialSpec`, and `EvaluationItemResult`. This is an artifact contract change and MUST be recorded in `docs/architecture/artifact-contracts.md`.
+- **FR-065**: All internal callers (lifecycle modules, benchmark utilities, test files) MUST be updated to use the new class and field names. No caller may access `runspec.questionId`, `result.runId`, or equivalent legacy attribute paths after this track.
+
+### Track B — Dataset File and Checkpoint Naming Alignment
+
+- **FR-066**: Dataset file names MUST use canonical vocabulary. `questions.json` MUST be renamed to `tasks.json`. `questions.instance.json` MUST be renamed to `tasks.instance.json`.
+- **FR-067**: During the migration period, adapters and providers MUST attempt to read `tasks.json` first. If `tasks.json` is absent and `questions.json` is present, the implementation MUST fall back to reading `questions.json` and emit a runtime deprecation warning. This fallback MUST be removed in the specification that removes Track B migration support (deferred to Spec 006).
+- **FR-068**: The module `src/ctxbench/dataset/questions.py` MUST be renamed to `src/ctxbench/dataset/tasks.py`. Internal dataset model classes MUST be renamed to canonical vocabulary: `QuestionDataset` → `TaskDataset`; `Question` → `Task`; `QuestionInstanceEntry` → `TaskInstanceEntry`; `QuestionInstanceDataset` → `TaskInstanceDataset`. `TaskDataset` and `TaskInstanceDataset` MUST read from the `"tasks"` JSON key first, falling back to `"questions"` for backward compatibility. All importers of `ctxbench.dataset.questions` MUST be updated to import from `ctxbench.dataset.tasks`.
+- **FR-069**: The checkpoint kind identifier `"runs"` MUST be renamed to `"trials"` in `checkpoints.py` and `commands/run.py`. The checkpoint reader MUST accept both `"trials"` and `"runs"` kind values during the migration period for backward compatibility with existing checkpoint files. Removal of the `"runs"` compat alias is deferred to Spec 006.
+- **FR-070**: Existing test fixtures that contain `questions.json` or `questions.instance.json` MUST be migrated to `tasks.json` and `tasks.instance.json` to validate the new naming end-to-end.
+
+---
+
 ### Scope Discipline
 
 - **FR-050**: This specification MUST NOT modify Spec 003.
@@ -386,6 +456,11 @@ A researcher writes an experiment definition that identifies the dataset and sel
 - **SC-007**: Existing experiment definitions using `factors.format` remain valid in v0, with `format` documented as a context representation request.
 - **SC-008**: No experiment definition needs to name a concrete adapter class, Python module, parser, or dataset-specific filename.
 - **SC-009**: `export` and `status` operate exclusively on already produced benchmark artifacts and succeed even when the dataset is no longer locally available.
+- **SC-010** (Track A): No lifecycle or benchmark module accesses a legacy field path such as `runspec.questionId`, `result.runId`, `result.answer`, or `runspec.contextBlock`.
+- **SC-011** (Track A): After S9, running `grep -r "RunSpec\|RunResult\|RunTrace\|RunMetadata\|EvaluationRunResult\b" src/ctxbench/` piped through `grep -v "= TrialSpec\|= TrialResult\|= TrialTrace\|= TrialMetadata\|= EvaluationTrialResult"` returns no output — no primary class declarations or type annotations use the old names. The full verifiable command is in plan.md § S9 checkpoint.
+- **SC-012** (Track A): `contextBlocks` (plural) is the only form used in all `to_persisted_artifact` outputs; the singular `contextBlock` no longer appears as an artifact key in any model output.
+- **SC-013** (Track B): A freshly created or resolved dataset package contains `tasks.json` and `tasks.instance.json`. A dataset with only `questions.json` is read successfully with a deprecation warning.
+- **SC-014** (Track B): `grep -r "\"runs\"" src/ctxbench/benchmark/checkpoints.py src/ctxbench/commands/run.py` returns no primary checkpoint kind assignments; only backward-compat reader branches reference the old kind.
 
 ## In Scope
 
@@ -398,6 +473,8 @@ A researcher writes an experiment definition that identifies the dataset and sel
 - Dataset layout isolation.
 - Experiment definition impact related to dataset references and `format` semantics.
 - Temporary in-repository Lattes adapter support during migration.
+- Track A: internal Python model field and class name alignment with canonical vocabulary.
+- Track B: dataset file name (`questions.json` → `tasks.json`), dataset module (`questions.py` → `tasks.py`), and checkpoint kind (`"runs"` → `"trials"`) alignment.
 
 ## Out of Scope
 
@@ -439,7 +516,8 @@ A researcher writes an experiment definition that identifies the dataset and sel
 
 The following topics are intentionally deferred:
 
-- Spec 006: move the Lattes adapter implementation to `ctxbench/lattes` and make Lattes the first external dataset package conforming to this contract.
+- Spec 006: move the Lattes adapter implementation to `ctxbench/lattes` and make Lattes the first external dataset package conforming to this contract. This also removes the `DatasetProvider.from_dataset` deprecated internal path and the Track B backward-compat fallback for `questions.json`.
 - Spec 007 or later: define the software-repository dataset and its adapter.
 - A future adapter-registration specification may introduce plugin loading if first-party explicit registration becomes insufficient.
 - A future schema specification may publish generated schemas for experiment definitions, trials, responses, evaluations, judge votes, dataset descriptors, and exported analysis files.
+- Removal of Track A and Track B backward-compat aliases and fallbacks once all callsites and dataset packages are confirmed migrated.

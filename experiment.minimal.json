@@ -2,7 +2,11 @@
   "id": "minimal",
   "name": "Minimal execution of trials",
   "output": "outputs",
-  "dataset": "datasets/lattes",
+  "dataset": {
+    "id": "ctxbench/lattes",
+    "version": "2026-04-28",
+    "root": "datasets/lattes"
+  },
   "models": {
     "gpt1": {
       "provider": "openai",
@@ -146,7 +150,7 @@
   },
   "scope": {
     "instances": ["5123602572479168"],
-    "questions": ["q_phd", "q_en"]
+    "tasks": ["q_phd", "q_en"]
   },
   "factors": {
     "model": ["gpt1", "gemini1"],
@@ -156,8 +160,8 @@
   "params": {
     "mcp_server": {
       "server_url": "https://secure-harlequin-mollusk.fastmcp.app/mcp",
-      "server_label": "copa_lattes",
-      "server_description": "COPA Lattes MCP server",
+      "server_label": "ctxbench_lattes",
+      "server_description": "CTXBench Lattes MCP server",
       "auth_token": "${LATTES_MCP_TOKEN}"
     }
   },

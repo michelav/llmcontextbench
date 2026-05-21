@@ -243,7 +243,7 @@ class ExperimentExecution(BaseModel):
 
 class ExperimentScope(BaseModel):
     instances: list[str] = Field(default_factory=list)
-    questions: list[str] = Field(default_factory=list)
+    tasks: list[str] = Field(default_factory=list)
 
     @classmethod
     def model_validate(cls, data: Any) -> "ExperimentScope":
@@ -253,10 +253,15 @@ class ExperimentScope(BaseModel):
             return cls()
         if not isinstance(data, dict):
             raise ValidationError("ExperimentScope requires an object input.")
+        task_items = data.get("tasks", data.get("questions", []))
         return cls(
             instances=[str(item) for item in data.get("instances", []) if isinstance(item, str)],
-            questions=[str(item) for item in data.get("questions", []) if isinstance(item, str)],
+            tasks=[str(item) for item in task_items if isinstance(item, str)],
         )
+
+    @property
+    def questions(self) -> list[str]:
+        return self.tasks
 
 
 class ExperimentExpansion(BaseModel):

@@ -75,11 +75,11 @@ def generate_runspecs(
     experiment_path: str | Path | None = None,
     on_warning: Callable[..., None] | None = None,
 ) -> list[RunSpec]:
-    scoped_questions = set(experiment.scope.questions)
+    scoped_tasks = set(experiment.scope.tasks)
     scoped_instances = set(experiment.scope.instances)
-    questions = [
+    tasks = [
         question_id for question_id in dataset_package.list_task_ids()
-        if not scoped_questions or question_id in scoped_questions
+        if not scoped_tasks or question_id in scoped_tasks
     ]
     instance_ids = [
         instance_id for instance_id in dataset_package.list_instance_ids()
@@ -91,7 +91,7 @@ def generate_runspecs(
     output_root = str((Path(base_dir) / experiment.output).resolve())
     draft_specs: list[dict[str, Any]] = []
     for instance_id in instance_ids:
-        for question_id in questions:
+        for question_id in tasks:
             task = dataset_package.get_task(question_id)
             task_instance = dataset_package.get_task_instance(instance_id, question_id)
             raw_parameters = task_instance.get("parameters", {}) if task_instance else {}

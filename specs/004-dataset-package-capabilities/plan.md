@@ -58,6 +58,7 @@ Introduce the Adapter Registry v0 and the Dataset Package Capabilities v0 contra
 | Provider-free validation | pass | `FakeDatasetAdapter` fixture validates the full v0 contract without real data |
 | Documentation impact | pass with action | Architecture docs must be updated: `docs/architecture/container.md` and `docs/architecture/component.md` for Adapter Registry / adapter boundary, `docs/architecture/vocabulary.md` and `docs/architecture/workflow.md` for `format` as context representation, and `docs/architecture/artifact-contracts.md` or a compatibility decision for trace metadata contract changes. |
 | Simplicity / research sufficiency | pass | Registry is a dict; payload types are dataclasses; no plugin machinery; no new abstraction layers beyond what the spec requires |
+| Vocabulary alignment (S9/S10) | pass with action | S9 introduces a breaking artifact key change: `"contextBlock"` → `"contextBlocks"` in `responses.jsonl` (TrialResult) and `trials.jsonl` (TrialSpec). This MUST be documented in `docs/architecture/artifact-contracts.md` (tasked in T055). S10 renames dataset files (`questions.json` → `tasks.json`), the dataset module (`questions.py` → `tasks.py`), and checkpoint kind (`"runs"` → `"trials"`); backward-compat fallbacks with deprecation warnings MUST be in place per FR-067 and FR-069. |
 
 ---
 
@@ -419,16 +420,46 @@ Trace metadata keys are part of the canonical trace artifact contract. Adding `c
 | `docs/architecture/workflow.md` | Clarify lifecycle use of adapter resolution and artifact-only `export` / `status` |
 | `docs/architecture/artifact-contracts.md` | Update trace metadata contract changes, or record an explicit compatibility decision in the implementation slice |
 
-### Not changing
+### Not changing (S1–S8)
 
 | File | Reason |
 |---|---|
 | `src/ctxbench/commands/export.py` | Artifact-only; no dataset access (FR-048) |
 | `src/ctxbench/commands/status.py` | Artifact-only; no dataset access (FR-049) |
 | `src/ctxbench/commands/eval.py` | Orchestration layer; inner `evaluation.py` changes cover the boundary |
-| `src/ctxbench/dataset/resolver.py` | Spec 003 materialization resolver; separate concern |
+| `src/ctxbench/dataset/resolver.py` | Spec 003 materialization resolver; separate concern (updated in S10) |
 | `src/ctxbench/ai/strategies/` | `lattes_id`/`instance_id` fallback already in place; metadata rename at source (executor) is sufficient |
 | `src/ctxbench/ai/engine.py`, `runtime.py` | No dataset coupling |
+
+### Additional files modified in S9 (Track A)
+
+| File | Change |
+|---|---|
+| `src/ctxbench/benchmark/models.py` | Class renames; field renames; remove translation shims; add compat aliases |
+| `src/ctxbench/benchmark/executor.py` | Field accesses updated: `.questionId`→`.taskId`, `.runId`→`.trialId`, etc. |
+| `src/ctxbench/benchmark/evaluation.py` | Field accesses updated; `EvaluationBatchSummary.questions`→`tasks` |
+| `src/ctxbench/benchmark/evaluation_batch.py` | Class imports and field accesses updated |
+| `src/ctxbench/benchmark/results.py` | Field accesses updated |
+| `src/ctxbench/benchmark/runspec_generator.py` | Local vars renamed; `questionId` constructor kwarg updated |
+| `src/ctxbench/benchmark/selectors.py` | `_field(item, "questionId")` → `_field(item, "taskId")` |
+| `src/ctxbench/commands/plan.py` | Class imports updated |
+| `docs/architecture/artifact-contracts.md` | `contextBlock` → `contextBlocks` in responses.jsonl and trials.jsonl |
+| `tests/test_model_schemas.py`, `tests/test_ai.py`, `tests/test_cli.py`, `tests/test_artifact_contracts.py`, `tests/test_lifecycle_no_network.py`, and others | Class and field references updated |
+
+### Additional files modified in S10 (Track B)
+
+| File | Change |
+|---|---|
+| `src/ctxbench/dataset/questions.py` | Class renames; JSON key fallback (`"tasks"` first, then `"questions"`) |
+| `src/ctxbench/dataset/provider.py` | Import and usage of renamed classes; path references |
+| `src/ctxbench/benchmark/models.py` | `ExperimentDataset.tasks` / `DatasetProvenance.tasks` property; `questions.json` → `tasks.json` in path strings; legacy `questions` property preserved as deprecated alias |
+| `src/ctxbench/dataset/resolver.py` | File existence check: `tasks.json` first, then `questions.json` fallback |
+| `src/ctxbench/adapters/lattes/package.py` | `questions.json` / `questions.instance.json` references → `tasks.json` / `tasks.instance.json` with fallback |
+| `src/ctxbench/benchmark/checkpoints.py` | Kind `"runs"` → `"trials"`; backward-compat alias retained |
+| `src/ctxbench/commands/run.py` | `kind="runs"` → `kind="trials"` throughout |
+| `tests/fixtures/lattes_provider_free/dataset/questions.json` | Renamed to `tasks.json` |
+| `tests/fixtures/fake_dataset/dataset/questions.json` | Renamed to `tasks.json` |
+| `tests/fixtures/fake_dataset/dataset/questions.instance.json` | Renamed to `tasks.instance.json` |
 
 ---
 
@@ -444,8 +475,10 @@ Trace metadata keys are part of the canonical trace artifact contract. Adding `c
 | S6 | Evaluation boundary: `get_evidence` → `EvidencePayload`, `get_oracle`, oracle trace recording | `benchmark/evaluation.py` | `pytest -k eval` | S3 |
 | S7 | Lattes adapter conformance + provider-free tests | `adapters/lattes/package.py`, `tests/test_fake_dataset_adapter.py`, `tests/test_dataset_adapter_registry.py` | `pytest -k fake_dataset or registry or lattes_adapter` | S3 |
 | S8 | Architecture docs + artifact-only command validation | `docs/architecture/*.md`, export/status tests | `pytest -k "export or status"` using existing artifacts with dataset unavailable | S5, S6 |
+| S9 | Track A: internal model vocabulary alignment | `benchmark/models.py`, all lifecycle callers, test files | `pytest tests/ -x` | S8 |
+| S10 | Track B: dataset file and checkpoint naming alignment | `dataset/questions.py`, `dataset/provider.py`, `adapters/lattes/package.py`, `benchmark/models.py`, `benchmark/checkpoints.py`, `commands/run.py`, test fixtures | `pytest tests/ -x` | S9 |
 
-Slices S4, S5, S6, and S7 are independent once S3 is green. S8 can be completed after the trace metadata decisions in S5/S6 are known.
+Slices S4, S5, S6, and S7 are independent once S3 is green. S8 can be completed after the trace metadata decisions in S5/S6 are known. S9 depends on S8 because S8 updates artifact-contracts.md which must be re-checked after the `contextBlocks` normalization in S9. S10 is independent of S9 but is ordered after it to keep the migration delta reviewable.
 
 ---
 
@@ -734,6 +767,160 @@ Experiment definition fixture test:
 
 ---
 
+### Slice detail: S9 — Internal model vocabulary alignment (Track A)
+
+**Goal**: Rename internal Python model fields and class names to match canonical vocabulary; remove translation shims; update all callers; normalize the `contextBlock`/`contextBlocks` inconsistency as an artifact contract change.
+
+**Files**:
+- `src/ctxbench/benchmark/models.py` (primary; all field and class renames)
+- `src/ctxbench/benchmark/executor.py`
+- `src/ctxbench/benchmark/evaluation.py`
+- `src/ctxbench/benchmark/evaluation_batch.py`
+- `src/ctxbench/benchmark/results.py`
+- `src/ctxbench/benchmark/runspec_generator.py`
+- `src/ctxbench/benchmark/selectors.py`
+- `src/ctxbench/commands/plan.py`
+- `docs/architecture/artifact-contracts.md` (contextBlocks normalization)
+- `tests/test_model_schemas.py`, `tests/test_ai.py`, `tests/test_cli.py`, `tests/test_artifact_contracts.py`, `tests/test_lifecycle_no_network.py`, and any other test files that reference old class or field names
+
+**Validation**: `pytest tests/ -x`
+
+#### Field and class rename map (S9)
+
+| Old name | New name | Notes |
+|---|---|---|
+| `RunMetadata` | `TrialMetadata` | Add `RunMetadata = TrialMetadata` alias |
+| `RunSpec` | `TrialSpec` | Add `RunSpec = TrialSpec` alias |
+| `RunResult` | `TrialResult` | Add `RunResult = TrialResult` alias |
+| `RunTrace` | `TrialTrace` | Add `RunTrace = TrialTrace` alias |
+| `EvaluationRunResult` | `EvaluationTrialResult` | Add `EvaluationRunResult = EvaluationTrialResult` alias |
+| `TrialMetadata.questionId` | `taskId` | Internal field name |
+| `TrialMetadata.questionTags` | `taskTags` | Internal field name |
+| `TrialSpec.runId` | `trialId` | Internal field name |
+| `TrialSpec.questionId` | `taskId` | Internal field name |
+| `TrialSpec.questionTags` | `taskTags` | Internal field name |
+| `TrialSpec.questionTemplate` | `taskTemplate` | Internal field name |
+| `TrialSpec.contextBlock` | `contextBlocks` | Internal field; also updates artifact key from `"contextBlock"` → `"contextBlocks"` in trials.jsonl |
+| `TrialResult.runId` | `trialId` | Internal field name |
+| `TrialResult.questionId` | `taskId` | Internal field name |
+| `TrialResult.questionTags` | `taskTags` | Internal field name |
+| `TrialResult.questionTemplate` | `taskTemplate` | Internal field name |
+| `TrialResult.contextBlock` | `contextBlocks` | Normalizes to plural; artifact key was already `"contextBlock"` (breaking) |
+| `TrialResult.answer` | `response` | Internal field; removes reverse mapping in `model_validate` |
+| `EvaluationItemResult.runId` | `trialId` | Internal field name |
+| `EvaluationItemResult.questionId` | `taskId` | Internal field name |
+| `EvaluationItemResult.questionTags` | `taskTags` | Internal field name |
+| `EvaluationItemResult.contextBlock` | `contextBlocks` | Field was already plural in artifact output; now aligned |
+| `EvaluationTrialResult.runId` | `trialId` | Internal field name |
+| `EvaluationTrialResult.questionId` | `taskId` | Internal field name |
+| `EvaluationBatchSummary.questions` | `tasks` | Internal summary field |
+
+#### Artifact contract changes in S9
+
+`TrialResult.to_persisted_artifact()` currently outputs `"contextBlock"`. After S9 it outputs `"contextBlocks"`. This is a breaking change to the `responses.jsonl` artifact. Update `docs/architecture/artifact-contracts.md` to document this rename.
+
+`EvaluationItemResult.to_persisted_artifact()` already outputs `"contextBlocks"`. No external change.
+
+`RunSpec.to_persisted_artifact()` currently outputs `"contextBlock"`. After S9 it outputs `"contextBlocks"`. This affects the `trials.jsonl` (runspec) artifact. Update `docs/architecture/artifact-contracts.md`.
+
+#### `model_validate` simplification in S9
+
+After field renames, the translation shims become direct assignments or are removed:
+
+```python
+# BEFORE
+if "trialId" in payload:
+    payload["runId"] = payload.pop("trialId")   # map external → internal
+if "taskId" in payload:
+    payload["questionId"] = payload.pop("taskId")  # map external → internal
+
+# AFTER (internal field is already trialId / taskId)
+# No mapping needed. Backward-compat rejection of old names is preserved:
+if "runId" in payload:
+    raise ValueError("Public TrialResult input must use 'trialId', not 'runId'.")
+if "questionId" in payload:
+    raise ValueError("Public TrialResult input must use 'taskId', not 'questionId'.")
+```
+
+Similarly for `TrialResult`: `"response" → "answer"` mapping is removed; internal field is now `response`.
+
+---
+
+### Slice detail: S10 — Dataset file and checkpoint naming alignment (Track B)
+
+**Goal**: Rename `questions.json` → `tasks.json` (with backward-compat fallback); rename `questions.py` → `tasks.py` and internal dataset model classes; rename checkpoint kind `"runs"` → `"trials"` (with backward-compat reader); migrate test fixtures.
+
+**Files**:
+- `src/ctxbench/dataset/questions.py` → `src/ctxbench/dataset/tasks.py` (module rename + class renames + JSON key fallback)
+- `src/ctxbench/dataset/provider.py` (update path references and class imports)
+- `src/ctxbench/benchmark/models.py` (`ExperimentDataset.questions` → `tasks` property; `DatasetProvenance.questions` → `tasks` property; file name in path strings)
+- `src/ctxbench/dataset/resolver.py` (file existence check: `questions.json` → `tasks.json` with fallback)
+- `src/ctxbench/adapters/lattes/package.py` (file name references)
+- `src/ctxbench/benchmark/checkpoints.py` (checkpoint kind `"runs"` → `"trials"`)
+- `src/ctxbench/commands/run.py` (checkpoint kind references and directory logic)
+- `tests/fixtures/lattes_provider_free/dataset/questions.json` → `tasks.json`
+- `tests/fixtures/fake_dataset/dataset/questions.json` → `tasks.json`
+- `tests/fixtures/fake_dataset/dataset/questions.instance.json` → `tasks.instance.json`
+- Any test file that references `questions.json` by name
+
+**Validation**: `pytest tests/ -x`
+
+#### Class rename map (S10)
+
+| Old name | New name | Notes |
+|---|---|---|
+| `QuestionDataset` | `TaskDataset` | Reads `"tasks"` key first, falls back to `"questions"` |
+| `Question` | `Task` | No JSON key change |
+| `QuestionInstanceEntry` | `TaskInstanceEntry` | No JSON key change |
+| `QuestionInstanceDataset` | `TaskInstanceDataset` | Reads `"tasks"` key first, falls back to `"questions"` |
+
+#### Backward-compat fallback pattern (S10)
+
+```python
+# In LocalDatasetPackage.__init__ or equivalent reader:
+tasks_path = Path(dataset_paths.root) / "tasks.json"
+questions_path = Path(dataset_paths.root) / "questions.json"
+if tasks_path.exists():
+    self._tasks = TaskDataset.model_validate(load_json(tasks_path))
+elif questions_path.exists():
+    import warnings
+    warnings.warn(
+        "questions.json is deprecated; rename to tasks.json",
+        DeprecationWarning, stacklevel=2,
+    )
+    self._tasks = TaskDataset.model_validate(load_json(questions_path))
+else:
+    raise FileNotFoundError(f"No tasks.json or questions.json found in {dataset_paths.root}")
+```
+
+#### `ExperimentDataset` and `DatasetProvenance` property rename (S10)
+
+`ExperimentDataset.questions` → `ExperimentDataset.tasks`. The property returns the path to `tasks.json`. The legacy property `questions` SHOULD remain as a deprecated alias returning the same value.
+
+Same pattern for `DatasetProvenance.questions` → `DatasetProvenance.tasks`.
+
+Update the legacy-path validation in `ExperimentDataset.model_validate` and `DatasetProvenance.model_validate` to check for `tasks.json` and `tasks.instance.json` in addition to `questions.json`.
+
+#### Checkpoint kind rename (S10)
+
+```python
+# checkpoints.py — BEFORE
+CHECKPOINT_KINDS = {
+    "runs": RUNS_CHECKPOINT_FILENAME,
+    ...
+}
+
+# AFTER
+CHECKPOINT_KINDS = {
+    "trials": RUNS_CHECKPOINT_FILENAME,
+    "runs": RUNS_CHECKPOINT_FILENAME,  # backward-compat alias; read-only
+}
+```
+
+In `commands/run.py`, replace all `kind="runs"` with `kind="trials"`. The reader accepts both kinds.
+
+---
+
 ### Slice detail: S8 — Architecture docs + artifact-only command validation
 
 Architecture documentation updates:
@@ -755,7 +942,7 @@ Provider-free validation additions:
 | Surface | Impact |
 |---|---|
 | Experiment definitions | None — `dataset.id`, `dataset.root`, `dataset.version`, `factors.format` unchanged |
-| Artifact schemas | Row schemas remain compatible, but trace metadata additions/removals are canonical trace contract changes and require `docs/architecture/artifact-contracts.md` update or explicit compatibility decision |
+| Artifact schemas (S1–S8) | Row schemas remain compatible, but trace metadata additions/removals are canonical trace contract changes and require `docs/architecture/artifact-contracts.md` update or explicit compatibility decision |
 | CLI behavior | None — same commands, same flags |
 | `context_path` metadata field | Removed from executor metadata; no strategy reads it (verified by grep) |
 | `instance_dir` metadata field | Removed from executor metadata; no strategy reads it (verified by grep) |
@@ -764,8 +951,15 @@ Provider-free validation additions:
 | `LattesDatasetPackage` class name | Renamed to `LattesDatasetAdapter` inside `ctxbench.adapters.lattes` |
 | `DatasetProvider.from_dataset` | Still works for `LocalDatasetPackage` use cases; `_specialized_local_dataset_package` removed |
 | `get_context_artifact` / `get_evidence_artifact` | Internal wrappers may remain in `LocalDatasetPackage`; removed from protocol surface |
-| `contextBlock` field in `RunSpec`/`RunResult` | Unchanged (comes from `TaskPayload.context_blocks`; artifact field preserved) |
+| `contextBlock` field in `RunSpec`/`RunResult` | **Changed in S9**: artifact key renamed from `"contextBlock"` → `"contextBlocks"` in both `responses.jsonl` and `trials.jsonl`. Breaking change; requires `artifact-contracts.md` update. |
 | Test fixtures | `CompleteDatasetPackage` in `test_dataset_package_contract.py` gains `get_task`, `get_context`, `get_evidence`, `get_oracle`, `get_task_instance` |
+| Python class names `RunSpec`, `RunResult`, `RunTrace`, `RunMetadata`, `EvaluationRunResult` | **Changed in S9**: renamed to `TrialSpec`, `TrialResult`, `TrialTrace`, `TrialMetadata`, `EvaluationTrialResult`; old names kept as module-level aliases |
+| Python field names `questionId`, `runId`, `answer`, `questionTags`, `contextBlock` | **Changed in S9**: renamed to canonical names; translation shims in `model_validate` removed |
+| `EvaluationBatchSummary.questions` | **Changed in S9**: renamed to `tasks`; internal summary struct, no external artifact impact |
+| `questions.json` / `questions.instance.json` on disk | **Changed in S10**: canonical name is `tasks.json` / `tasks.instance.json`; backward-compat fallback reads old name with deprecation warning |
+| `QuestionDataset`, `Question`, `QuestionInstanceEntry` class names | **Changed in S10**: renamed to `TaskDataset`, `Task`, `TaskInstanceEntry`; moved to `ctxbench.dataset.tasks` (module renamed from `questions.py` per FR-068) |
+| Checkpoint kind `"runs"` | **Changed in S10**: canonical kind is `"trials"`; backward-compat reader accepts `"runs"` |
+| `ExperimentDataset.questions` / `DatasetProvenance.questions` property | **Changed in S10**: primary property renamed to `tasks`; `questions` alias preserved as deprecated |
 
 ---
 
@@ -792,6 +986,12 @@ Provider-free validation additions:
 | `context_path`/`instance_dir` removal from metadata: analysis scripts reading raw traces may break | Document removal; existing tests already verify no strategy reads these fields |
 | Lifecycle code might import a default registry from `ctxbench.dataset.registry`, recreating an adapter dependency in the generic layer | Import-boundary tests forbid `ctxbench.dataset` importing `ctxbench.adapters`; lifecycle composition imports `get_default_registry()` only from `ctxbench.adapters.registry` |
 | Oracle trace fields: adding `oracle_available` / `oracle_used` to evaluation output changes eval trace schema | Verify these are additive (not breaking); update `test_artifact_contracts.py` if eval trace schema is tested |
+| S9 — `contextBlock` → `contextBlocks` artifact key rename breaks `responses.jsonl` readers | Audit any analysis scripts that read raw `responses.jsonl` for `contextBlock`; update `artifact-contracts.md`; this is a deliberate breaking change, not accidental |
+| S9 — missed class or field rename site causes `AttributeError` at runtime | Run `pytest tests/ -x` immediately after S9; grep for old names in src/ before committing |
+| S9 — alias `RunSpec = TrialSpec` may mask missed imports in other packages | Confirm import-boundary tests still pass after S9; aliases must not exist in `ctxbench.dataset.*` or `ctxbench.adapters.*` |
+| S10 — `questions.json` backward-compat fallback masks migration failures | Emit deprecation warning in the fallback path; add a test that verifies the warning is raised when old file name is found |
+| S10 — checkpoint kind rename breaks existing checkpoint files on disk | The backward-compat reader accepting `"runs"` prevents failures; document in `artifact-contracts.md` |
+| S10 — module rename `questions.py` → `tasks.py` breaks imports in `provider.py` and lattes adapter | Grep for all importers before committing S10; run full test suite |
 
 ---
 
@@ -824,6 +1024,14 @@ pytest -k "fake_dataset or registry or lattes_adapter" -v
 
 # S8:
 pytest -k "export or status" -v
+
+# S9:
+pytest tests/ -x
+grep -r "RunSpec\|RunResult\|RunTrace\|RunMetadata\|EvaluationRunResult\b" src/ctxbench/ | grep -v "= TrialSpec\|= TrialResult\|= TrialTrace\|= TrialMetadata\|= EvaluationTrialResult"
+
+# S10:
+pytest tests/ -x
+grep -rn "questions\.json\|questions\.instance\.json" src/ctxbench/ | grep -v "backward\|compat\|fallback\|deprecated\|warning"
 
 # Full (after all slices):
 pytest tests/ -x --ignore=tests/fixtures
