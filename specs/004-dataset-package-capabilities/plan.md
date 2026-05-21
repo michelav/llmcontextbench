@@ -424,7 +424,7 @@ Trace metadata keys are part of the canonical trace artifact contract. Adding `c
 
 | File | Reason |
 |---|---|
-| `src/ctxbench/commands/export.py` | Artifact-only; no dataset access (FR-048) |
+| `src/ctxbench/commands/export.py` | Artifact-only; no dataset access in S1-S8; updated in S9 for artifact key vocabulary only |
 | `src/ctxbench/commands/status.py` | Artifact-only; no dataset access (FR-049) |
 | `src/ctxbench/commands/eval.py` | Orchestration layer; inner `evaluation.py` changes cover the boundary |
 | `src/ctxbench/dataset/resolver.py` | Spec 003 materialization resolver; separate concern (updated in S10) |
@@ -442,9 +442,13 @@ Trace metadata keys are part of the canonical trace artifact contract. Adding `c
 | `src/ctxbench/benchmark/results.py` | Field accesses updated |
 | `src/ctxbench/benchmark/runspec_generator.py` | Local vars renamed; `questionId` constructor kwarg updated |
 | `src/ctxbench/benchmark/selectors.py` | `_field(item, "questionId")` → `_field(item, "taskId")` |
-| `src/ctxbench/commands/plan.py` | Class imports updated |
+| `src/ctxbench/commands/plan.py`, `src/ctxbench/commands/execute.py`, `src/ctxbench/commands/eval.py`, `src/ctxbench/commands/run.py`, `src/ctxbench/commands/experiment.py` | Class imports and field accesses updated |
+| `src/ctxbench/commands/export.py` | Primary artifact key reads updated to `taskTags` and `contextBlocks`; documented legacy fallback only where needed |
+| `src/ctxbench/util/artifacts.py` | Helper fields updated to `trialId` / `taskId` |
+| `src/ctxbench/ai/rate_control.py` | Request metadata keys updated to `trialId` / `taskId` where they represent ctxbench artifact metadata |
 | `docs/architecture/artifact-contracts.md` | `contextBlock` → `contextBlocks` in responses.jsonl and trials.jsonl |
 | `tests/test_model_schemas.py`, `tests/test_ai.py`, `tests/test_cli.py`, `tests/test_artifact_contracts.py`, `tests/test_lifecycle_no_network.py`, and others | Class and field references updated |
+| `tests/fixtures/**/*.jsonl` | Artifact fixture keys updated from `questionTags` / `contextBlock` to `taskTags` / `contextBlocks` |
 
 ### Additional files modified in S10 (Track B)
 
@@ -454,12 +458,14 @@ Trace metadata keys are part of the canonical trace artifact contract. Adding `c
 | `src/ctxbench/dataset/provider.py` | Import and usage of renamed classes; path references |
 | `src/ctxbench/benchmark/models.py` | `ExperimentDataset.tasks` / `DatasetProvenance.tasks` property; `questions.json` → `tasks.json` in path strings; legacy `questions` property preserved as deprecated alias |
 | `src/ctxbench/dataset/resolver.py` | File existence check: `tasks.json` first, then `questions.json` fallback |
-| `src/ctxbench/adapters/lattes/package.py` | `questions.json` / `questions.instance.json` references → `tasks.json` / `tasks.instance.json` with fallback |
+| `src/ctxbench/adapters/lattes/package.py` | `questions.json` / `questions.instance.json` references → `tasks.json` / `tasks.instance.json` with fallback; body-level task/context-block field references updated to `Task.contextBlocks` |
 | `src/ctxbench/benchmark/checkpoints.py` | Kind `"runs"` → `"trials"`; backward-compat alias retained |
 | `src/ctxbench/commands/run.py` | `kind="runs"` → `kind="trials"` throughout |
 | `tests/fixtures/lattes_provider_free/dataset/questions.json` | Renamed to `tasks.json` |
+| `tests/fixtures/lattes_provider_free/dataset/questions.instance.json` | Renamed to `tasks.instance.json` |
 | `tests/fixtures/fake_dataset/dataset/questions.json` | Renamed to `tasks.json` |
 | `tests/fixtures/fake_dataset/dataset/questions.instance.json` | Renamed to `tasks.instance.json` |
+| `docs/architecture/README.md` and architecture docs with dataset-package examples | Primary examples updated to `tasks.json` / `tasks.instance.json`; legacy names only in compatibility notes |
 
 ---
 
@@ -780,6 +786,13 @@ Experiment definition fixture test:
 - `src/ctxbench/benchmark/runspec_generator.py`
 - `src/ctxbench/benchmark/selectors.py`
 - `src/ctxbench/commands/plan.py`
+- `src/ctxbench/commands/execute.py`
+- `src/ctxbench/commands/eval.py`
+- `src/ctxbench/commands/run.py`
+- `src/ctxbench/commands/experiment.py`
+- `src/ctxbench/commands/export.py`
+- `src/ctxbench/util/artifacts.py`
+- `src/ctxbench/ai/rate_control.py`
 - `docs/architecture/artifact-contracts.md` (contextBlocks normalization)
 - `tests/test_model_schemas.py`, `tests/test_ai.py`, `tests/test_cli.py`, `tests/test_artifact_contracts.py`, `tests/test_lifecycle_no_network.py`, and any other test files that reference old class or field names
 
@@ -855,12 +868,14 @@ Similarly for `TrialResult`: `"response" → "answer"` mapping is removed; inter
 - `src/ctxbench/dataset/provider.py` (update path references and class imports)
 - `src/ctxbench/benchmark/models.py` (`ExperimentDataset.questions` → `tasks` property; `DatasetProvenance.questions` → `tasks` property; file name in path strings)
 - `src/ctxbench/dataset/resolver.py` (file existence check: `questions.json` → `tasks.json` with fallback)
-- `src/ctxbench/adapters/lattes/package.py` (file name references)
+- `src/ctxbench/adapters/lattes/package.py` (file name references and body-level `Task.contextBlocks` field usage)
 - `src/ctxbench/benchmark/checkpoints.py` (checkpoint kind `"runs"` → `"trials"`)
 - `src/ctxbench/commands/run.py` (checkpoint kind references and directory logic)
 - `tests/fixtures/lattes_provider_free/dataset/questions.json` → `tasks.json`
+- `tests/fixtures/lattes_provider_free/dataset/questions.instance.json` → `tasks.instance.json`
 - `tests/fixtures/fake_dataset/dataset/questions.json` → `tasks.json`
 - `tests/fixtures/fake_dataset/dataset/questions.instance.json` → `tasks.instance.json`
+- `docs/architecture/README.md` and any architecture docs that show dataset package filenames
 - Any test file that references `questions.json` by name
 
 **Validation**: `pytest tests/ -x`
@@ -870,7 +885,7 @@ Similarly for `TrialResult`: `"response" → "answer"` mapping is removed; inter
 | Old name | New name | Notes |
 |---|---|---|
 | `QuestionDataset` | `TaskDataset` | Reads `"tasks"` key first, falls back to `"questions"` |
-| `Question` | `Task` | No JSON key change |
+| `Question` | `Task` | Exposes canonical Python attribute `contextBlocks`; reads legacy JSON key `"contextBlock"` during migration |
 | `QuestionInstanceEntry` | `TaskInstanceEntry` | No JSON key change |
 | `QuestionInstanceDataset` | `TaskInstanceDataset` | Reads `"tasks"` key first, falls back to `"questions"` |
 
