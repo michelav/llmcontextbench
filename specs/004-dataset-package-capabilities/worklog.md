@@ -51,3 +51,18 @@
 - slice: S8
 - summary: Updated architecture documentation for Adapter Registry v0, adapter boundaries, format vocabulary, artifact-only export/status behavior, and trace metadata contracts; added artifact-only unavailable-dataset fixtures and provider-free export/status validation.
 - token_provenance: unavailable
+
+- event: audit-run
+- slice: final-audit
+- summary: Ran full provider-free validation (`pytest tests/ -x --ignore=tests/fixtures`) with 246 passing tests; import smoke check for executor/evaluation exited 0. Spec Kit prerequisite helper was not used as a gate because the current branch name `feat/dataset-boundaries-capabilities` does not match its numeric feature-branch pattern, but the explicit Spec 004 task list and complete checklist were used.
+- token_provenance: unavailable
+
+- event: diff-reviewed
+- slice: final-audit
+- summary: Confirmed lifecycle phases no longer call `DatasetProvider.from_dataset`; remaining lifecycle fallbacks use `LocalDatasetPackage.from_dataset`, while `DatasetProvider.from_dataset` is retained only through the compatibility subclass. Added a deprecation note to schedule removal after Spec 004 migration safety is no longer needed.
+- token_provenance: unavailable
+
+- event: spec-completed
+- slice: final-audit
+- summary: Follow-ups recorded: no downstream analysis notebook dependency on removed executor trace metadata keys `context_path` or `instance_dir`; `lattes_id` to `instance_id` remains backward-compatible through strategy fallback reads; Spec 006 still owns external Lattes adapter relocation and should remove the deprecated-internal `DatasetProvider` compatibility alias with that relocation.
+- token_provenance: unavailable

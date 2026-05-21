@@ -1,0 +1,1 @@
+{"event":"audit-run","phase":"final-audit","spec":"004-dataset-package-capabilities","token_provenance":"unavailable","input_tokens":null,"output_tokens":null,"total_tokens":null,"notes":"API token usage was not captured during final audit; provider-free validation only."}

@@ -269,4 +269,5 @@ class LocalDatasetPackage:
 
 
 class DatasetProvider(LocalDatasetPackage):
+    # deprecated: no longer called by lifecycle phases; retained for Spec 004 migration safety
     pass

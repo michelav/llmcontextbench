@@ -255,12 +255,12 @@
 
 ## Final Audit
 
-- [ ] T043 [Audit] Run full focused validation suite: `pytest tests/ -x --ignore=tests/fixtures` — all slices green, no provider calls
-- [ ] T044 [Audit] Verify import boundary with `python -c "import ctxbench.benchmark.executor; import ctxbench.benchmark.evaluation"` — exits 0
-- [ ] T045 [Audit] Update `specs/004-dataset-package-capabilities/worklog.md` with final slice completions, deviations from plan, and lessons learned
-- [ ] T046 [Audit] Update `specs/004-dataset-package-capabilities/usage.jsonl` — record token usage as `unavailable` if API usage data was not captured during implementation
-- [ ] T047 [Audit] Inspect lifecycle imports after S4-S6 and update `src/ctxbench/dataset/provider.py` only if needed: if `DatasetProvider.from_dataset` becomes dead code for lifecycle phases, add `# deprecated: no longer called by lifecycle phases; retained for Spec 004 migration safety` without removing it; if it remains used by non-lifecycle utilities, record that explicitly in `worklog.md`; do not remove `DatasetProvider.from_dataset` in Spec 004
-- [ ] T048 [Audit] Record follow-ups: confirm `context_path` / `instance_dir` removal has no downstream analysis script dependency; confirm `lattes_id` → `instance_id` rename is backward-compatible; note Spec 006 deferred items; record decision on `DatasetProvider.from_dataset` — if it remains deprecated-internal after this spec, schedule its removal in Spec 006 alongside the Lattes adapter relocation
+- [X] T043 [Audit] Run full focused validation suite: `pytest tests/ -x --ignore=tests/fixtures` — all slices green, no provider calls
+- [X] T044 [Audit] Verify import boundary with `python -c "import ctxbench.benchmark.executor; import ctxbench.benchmark.evaluation"` — exits 0
+- [X] T045 [Audit] Update `specs/004-dataset-package-capabilities/worklog.md` with final slice completions, deviations from plan, and lessons learned
+- [X] T046 [Audit] Update `specs/004-dataset-package-capabilities/usage.jsonl` — record token usage as `unavailable` if API usage data was not captured during implementation
+- [X] T047 [Audit] Inspect lifecycle imports after S4-S6 and update `src/ctxbench/dataset/provider.py` only if needed: if `DatasetProvider.from_dataset` becomes dead code for lifecycle phases, add `# deprecated: no longer called by lifecycle phases; retained for Spec 004 migration safety` without removing it; if it remains used by non-lifecycle utilities, record that explicitly in `worklog.md`; do not remove `DatasetProvider.from_dataset` in Spec 004
+- [X] T048 [Audit] Record follow-ups: confirm `context_path` / `instance_dir` removal has no downstream analysis script dependency; confirm `lattes_id` → `instance_id` rename is backward-compatible; note Spec 006 deferred items; record decision on `DatasetProvider.from_dataset` — if it remains deprecated-internal after this spec, schedule its removal in Spec 006 alongside the Lattes adapter relocation
 
 ---
 
