@@ -3,6 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from ctxbench.dataset.payloads import (
+    ORACLE_UNAVAILABLE,
+    ContextPayload,
+    EvidencePayload,
+    TaskPayload,
+)
+
 if TYPE_CHECKING:
     from ctxbench.dataset.capabilities import DatasetCapabilityReport
 
@@ -45,27 +52,27 @@ class DatasetPackage(Protocol):
 
     def list_task_ids(self) -> list[str]: ...
 
-    def get_context_artifact(
+    def get_task(self, task_id: str) -> TaskPayload: ...
+
+    def get_context(
         self,
         instance_id: str,
         task_id: str,
-        strategy: str,
-        format_name: str,
-    ) -> object: ...
+        representation: str,
+    ) -> ContextPayload: ...
 
-    def get_evidence_artifact(self, instance_id: str, task_id: str) -> object: ...
-
-    def fixtures(self) -> object: ...
+    def get_evidence(self, instance_id: str, task_id: str) -> EvidencePayload: ...
 
     def capability_report(self) -> DatasetCapabilityReport: ...
 
-    # Optional extension points. They are documented here but not required by the
-    # runtime structural check used by the S1 contract tests.
+    def get_oracle(self, instance_id: str, task_id: str) -> object:
+        return ORACLE_UNAVAILABLE
+
+    def get_task_instance(self, instance_id: str, task_id: str) -> dict[str, object] | None:
+        return None
+
     def tool_provider(self) -> object | None:
         return None
 
-    def evaluation_helpers(self) -> object | None:
-        return None
-
-    def strategy_descriptors(self) -> list[StrategyDescriptor] | None:
+    def fixtures(self) -> object | None:
         return None

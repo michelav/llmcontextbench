@@ -10,6 +10,13 @@ from ctxbench.dataset.capabilities import DatasetCapabilityReport
 from ctxbench.dataset.conflicts import DatasetConflictDetector
 from ctxbench.dataset.materialization import MaterializationManifest
 from ctxbench.dataset.package import DatasetMetadata, DatasetPackage
+from ctxbench.dataset.payloads import (
+    ORACLE_UNAVAILABLE,
+    ContextPayload,
+    EvidencePayload,
+    OracleUnavailable,
+    TaskPayload,
+)
 from ctxbench.dataset.provider import LocalDatasetPackage
 
 
@@ -67,17 +74,20 @@ class ResolvedDatasetPackage:
     def list_task_ids(self) -> list[str]:
         return []
 
-    def get_context_artifact(
-        self,
-        instance_id: str,
-        task_id: str,
-        strategy: str,
-        format_name: str,
-    ) -> object:
+    def get_task(self, task_id: str) -> TaskPayload:
+        raise NotImplementedError("Dataset tasks are not available from the resolver package wrapper.")
+
+    def get_context(self, instance_id: str, task_id: str, representation: str) -> ContextPayload:
         raise NotImplementedError("Dataset artifacts are not available from the S4 resolver package wrapper.")
 
-    def get_evidence_artifact(self, instance_id: str, task_id: str) -> object:
+    def get_evidence(self, instance_id: str, task_id: str) -> EvidencePayload:
         raise NotImplementedError("Dataset artifacts are not available from the S4 resolver package wrapper.")
+
+    def get_oracle(self, instance_id: str, task_id: str) -> OracleUnavailable:
+        return ORACLE_UNAVAILABLE
+
+    def get_task_instance(self, instance_id: str, task_id: str) -> dict[str, object] | None:
+        return None
 
     def fixtures(self) -> object:
         return {}

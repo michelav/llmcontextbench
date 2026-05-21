@@ -14,16 +14,17 @@ _MANDATORY_METHODS = (
     "origin",
     "list_instance_ids",
     "list_task_ids",
-    "get_context_artifact",
-    "get_evidence_artifact",
-    "fixtures",
+    "get_task",
+    "get_context",
+    "get_evidence",
     "capability_report",
 )
 
 _OPTIONAL_METHODS = (
+    "get_oracle",
+    "get_task_instance",
     "tool_provider",
-    "evaluation_helpers",
-    "strategy_descriptors",
+    "fixtures",
 )
 
 _DESCRIPTOR_FIELDS = (

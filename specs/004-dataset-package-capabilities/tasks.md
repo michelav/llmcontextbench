@@ -55,17 +55,17 @@
 
 ### Tasks
 
-- [ ] T004 [S2] Update `src/ctxbench/dataset/package.py`: import `TaskPayload`, `ContextPayload`, `EvidencePayload` from `payloads.py`; add mandatory protocol methods `get_task(task_id) → TaskPayload`, `get_context(instance_id, task_id, representation) → ContextPayload`, `get_evidence(instance_id, task_id) → EvidencePayload`; add optional methods `get_oracle`, `get_task_instance`, `tool_provider`, `fixtures` with default implementations as specified in `plan.md` § DatasetPackage Protocol; keep existing `list_instance_ids`, `list_task_ids`, `identity`, `version`, `origin`, `metadata`, `capability_report`; **remove `get_context_artifact` and `get_evidence_artifact` from the `Protocol` definition** — they may remain as private implementation methods in `LocalDatasetPackage` but are not part of the v0 contract surface
-- [ ] T005 [P] [S2] Create `src/ctxbench/dataset/registry.py` with `ResolvedDatasetRef` (dataclass with `id`, `version`, `root`, `origin`, `content_hash`, `materialized_path`), `Factory` type alias, and `AdapterRegistry` class with `register(dataset_id, factory)` and `resolve(dataset_ref: ExperimentDataset | DatasetProvenance) → DatasetPackage` methods; `resolve` must normalize either input type into `ResolvedDatasetRef`; for `DatasetProvenance`, use `materialized_path` as `materialized_path`, `root` as `root`, and preserve `content_hash`; `resolve` raises `AdapterUnavailableError` if the normalized id is unregistered or missing; no default registry instance; no import of `ctxbench.adapters`
-- [ ] T006 [S2] Create `tests/test_dataset_adapter_registry.py` with tests: `AdapterRegistry.resolve` raises `AdapterUnavailableError` for unknown or missing id; `AdapterRegistry.resolve` returns the adapter produced by a registered factory for `ExperimentDataset`; `AdapterRegistry.resolve` returns the adapter produced by a registered factory for `DatasetProvenance` and preserves `materialized_path`/`content_hash` in the `ResolvedDatasetRef` passed to the factory; `AdapterRegistry.register` is callable with a factory; `ResolvedDatasetRef` is constructable with required fields — **note: this file will be extended in T033 (S7) with Lattes integration tests; treat T006 as the initial population only**
+- [X] T004 [S2] Update `src/ctxbench/dataset/package.py`: import `TaskPayload`, `ContextPayload`, `EvidencePayload` from `payloads.py`; add mandatory protocol methods `get_task(task_id) → TaskPayload`, `get_context(instance_id, task_id, representation) → ContextPayload`, `get_evidence(instance_id, task_id) → EvidencePayload`; add optional methods `get_oracle`, `get_task_instance`, `tool_provider`, `fixtures` with default implementations as specified in `plan.md` § DatasetPackage Protocol; keep existing `list_instance_ids`, `list_task_ids`, `identity`, `version`, `origin`, `metadata`, `capability_report`; **remove `get_context_artifact` and `get_evidence_artifact` from the `Protocol` definition** — they may remain as private implementation methods in `LocalDatasetPackage` but are not part of the v0 contract surface
+- [X] T005 [P] [S2] Create `src/ctxbench/dataset/registry.py` with `ResolvedDatasetRef` (dataclass with `id`, `version`, `root`, `origin`, `content_hash`, `materialized_path`), `Factory` type alias, and `AdapterRegistry` class with `register(dataset_id, factory)` and `resolve(dataset_ref: ExperimentDataset | DatasetProvenance) → DatasetPackage` methods; `resolve` must normalize either input type into `ResolvedDatasetRef`; for `DatasetProvenance`, use `materialized_path` as `materialized_path`, `root` as `root`, and preserve `content_hash`; `resolve` raises `AdapterUnavailableError` if the normalized id is unregistered or missing; no default registry instance; no import of `ctxbench.adapters`
+- [X] T006 [S2] Create `tests/test_dataset_adapter_registry.py` with tests: `AdapterRegistry.resolve` raises `AdapterUnavailableError` for unknown or missing id; `AdapterRegistry.resolve` returns the adapter produced by a registered factory for `ExperimentDataset`; `AdapterRegistry.resolve` returns the adapter produced by a registered factory for `DatasetProvenance` and preserves `materialized_path`/`content_hash` in the `ResolvedDatasetRef` passed to the factory; `AdapterRegistry.register` is callable with a factory; `ResolvedDatasetRef` is constructable with required fields — **note: this file will be extended in T033 (S7) with Lattes integration tests; treat T006 as the initial population only**
 
 ### Checkpoint
 
-- [ ] `pytest -k "dataset_package_contract or registry" -v` passes
-- [ ] no provider-backed execution
-- [ ] no opportunistic refactor
-- [ ] diff is reviewable
-- [ ] `worklog.md` updated
+- [X] `pytest -k "dataset_package_contract or registry" -v` passes
+- [X] no provider-backed execution
+- [X] no opportunistic refactor
+- [X] diff is reviewable
+- [X] `worklog.md` updated
 
 ---
 

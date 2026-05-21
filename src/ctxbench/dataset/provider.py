@@ -6,6 +6,13 @@ from pathlib import Path
 from ctxbench.benchmark.models import DatasetProvenance, Experiment, ExperimentDataset
 from ctxbench.dataset.capabilities import DatasetCapabilityReport
 from ctxbench.dataset.package import DatasetMetadata
+from ctxbench.dataset.payloads import (
+    ORACLE_UNAVAILABLE,
+    ContextPayload,
+    EvidencePayload,
+    OracleUnavailable,
+    TaskPayload,
+)
 from ctxbench.dataset.questions import (
     Question,
     QuestionDataset,
@@ -112,6 +119,17 @@ class LocalDatasetPackage:
                 return question
         raise KeyError(f"Unknown question id: {question_id}")
 
+    def get_task(self, task_id: str) -> TaskPayload:
+        question = self.get_question(task_id)
+        return TaskPayload(
+            task_id=question.id,
+            statement=question.question,
+            tags=list(question.tags),
+            validation_type=question.validation.type,
+            context_blocks=list(question.contextBlock),
+            metadata={"source": "questions.json"},
+        )
+
     def get_instance(self, instance_id: str) -> QuestionInstance:
         for instance in self._question_instances.instances:
             if instance.instanceId == instance_id:
@@ -121,6 +139,12 @@ class LocalDatasetPackage:
     def get_question_instance(self, question_id: str, context_id: str) -> QuestionInstanceEntry | None:
         instance = self.get_instance(context_id)
         return instance.get_question(question_id)
+
+    def get_task_instance(self, instance_id: str, task_id: str) -> dict[str, object] | None:
+        question_instance = self.get_question_instance(task_id, instance_id)
+        if question_instance is None:
+            return None
+        return question_instance.model_dump(mode="python")
 
     def list_question_ids_for_instance(self, instance_id: str) -> list[str]:
         instance = self.get_instance(instance_id)
@@ -139,9 +163,24 @@ class LocalDatasetPackage:
             raise FileNotFoundError(f"Missing context artifact: {path}")
         return path
 
-    def get_context(self, context_id: str, format_name: str) -> str:
+    def _read_context_text(self, context_id: str, format_name: str) -> str:
         path = self.get_context_artifact_path(context_id, format_name)
         return path.read_text(encoding="utf-8")
+
+    def get_context(
+        self,
+        instance_id: str,
+        task_id: str,
+        representation: str | None = None,
+    ) -> ContextPayload | str:
+        if representation is None:
+            return self._read_context_text(instance_id, task_id)
+        return ContextPayload(
+            role="context",
+            representation=representation,
+            content=self.get_context_artifact(instance_id, task_id, "inline", representation),
+            metadata={"instance_id": instance_id, "task_id": task_id},
+        )
 
     def get_context_artifact(
         self,
@@ -175,6 +214,21 @@ class LocalDatasetPackage:
             "contextBlocks": self.get_context_blocks(instance_id),
         }
 
+    def get_evidence(self, instance_id: str, task_id: str) -> EvidencePayload:
+        artifact = self.get_evidence_artifact(instance_id, task_id)
+        if not isinstance(artifact, dict):
+            return EvidencePayload(role="evidence", task={}, evidence=artifact)
+        return EvidencePayload(
+            role="evidence",
+            task=artifact.get("question", {}),
+            task_instance=artifact.get("questionInstance"),
+            evidence=artifact.get("contextBlocks", {}),
+            metadata={"instance_id": instance_id, "task_id": task_id},
+        )
+
+    def get_oracle(self, instance_id: str, task_id: str) -> OracleUnavailable:
+        return ORACLE_UNAVAILABLE
+
     def fixtures(self) -> object:
         return {
             "root": self.dataset_paths.root,
@@ -197,14 +251,15 @@ class LocalDatasetPackage:
                 "version": True,
                 "list_instance_ids": True,
                 "list_task_ids": True,
-                "get_context_artifact": True,
-                "get_evidence_artifact": True,
-                "fixtures": True,
+                "get_task": True,
+                "get_context": True,
+                "get_evidence": True,
             },
             optional_capabilities={
+                "get_oracle": True,
+                "get_task_instance": True,
                 "tool_provider": False,
-                "evaluation_helpers": False,
-                "strategy_descriptors": False,
+                "fixtures": True,
             },
             contributed_tools=None,
             evaluation_helpers=None,

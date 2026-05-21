@@ -13,6 +13,7 @@ from ctxbench.dataset.conflicts import AmbiguousDatasetError
 from ctxbench.dataset.inspect import build_inspect_result
 from ctxbench.dataset.materialization import MaterializationManifest
 from ctxbench.dataset.package import DatasetMetadata, StrategyDescriptor
+from ctxbench.dataset.payloads import ContextPayload, EvidencePayload, TaskPayload
 
 
 def _metadata() -> DatasetMetadata:
@@ -46,14 +47,22 @@ class ConformantPackage:
     def list_task_ids(self) -> list[str]:
         return ["task-001"]
 
-    def get_context_artifact(self, instance_id: str, task_id: str, strategy: str, format_name: str) -> object:
-        return {"instance": instance_id, "task": task_id, "strategy": strategy, "format": format_name}
+    def get_task(self, task_id: str) -> TaskPayload:
+        return TaskPayload(task_id=task_id, statement="When?")
 
-    def get_evidence_artifact(self, instance_id: str, task_id: str) -> object:
-        return {"instance": instance_id, "task": task_id}
+    def get_context(self, instance_id: str, task_id: str, representation: str) -> ContextPayload:
+        return ContextPayload(
+            role="context",
+            representation=representation,
+            content={"instance": instance_id, "task": task_id},
+        )
 
-    def fixtures(self) -> object:
-        return {"fixture": "ok"}
+    def get_evidence(self, instance_id: str, task_id: str) -> EvidencePayload:
+        return EvidencePayload(
+            role="evidence",
+            task={"task_id": task_id},
+            evidence={"instance": instance_id},
+        )
 
     def capability_report(self) -> object:
         return None
@@ -81,7 +90,7 @@ class ConformantPackage:
 
 
 class MissingMandatoryPackage(ConformantPackage):
-    get_context_artifact = None  # type: ignore[assignment]
+    get_context = None  # type: ignore[assignment]
 
 
 class NonconformantDescriptorPackage(ConformantPackage):
@@ -164,7 +173,7 @@ def test_build_inspect_result_reports_missing_mandatory_method() -> None:
     report = build_inspect_result(MissingMandatoryPackage(), None)
 
     assert report.conformant is False
-    assert "get_context_artifact" in report.missing_mandatory
+    assert "get_context" in report.missing_mandatory
 
 
 def test_build_inspect_result_reports_nonconformant_strategy_descriptor() -> None:
