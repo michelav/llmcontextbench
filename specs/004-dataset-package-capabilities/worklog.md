@@ -76,3 +76,8 @@
 - slice: S10
 - summary: Renamed dataset package model/module/file naming to canonical task vocabulary, added `tasks.json`/`tasks.instance.json` primary reads with deprecated `questions*` fallbacks, migrated fixture filenames, and aligned run checkpoint kind writes to `trials` while preserving legacy `runs` reads.
 - token_provenance: unavailable
+
+- event: audit-run
+- slice: S9-S10-final-audit
+- summary: Reran `pytest tests/ -x --ignore=tests/fixtures` with 253 passing tests; SC-011 passed after excluding generated pycache artifacts; SC-014 has no `kind="runs"` assignments and only legacy checkpoint alias/reader references plus unrelated `runs/` directory handling; `to_persisted_artifact()` outputs only `contextBlocks`. Remaining unchecked literal grep items are overbroad: `.answer` still appears only on AI model result objects intentionally excluded from S9 renaming, and `Question` still appears in prompt text plus compatibility aliases.
+- token_provenance: unavailable
