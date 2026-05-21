@@ -36,6 +36,16 @@ def test_experiment_scope_uses_tasks_with_questions_compatibility_alias():
     assert legacy.questions == ["q_year"]
 
 
+def test_deprecated_dataset_questions_property_warns() -> None:
+    dataset = ExperimentDataset(root="/tmp/dataset")
+    provenance = DatasetProvenance(id="dataset", version="1", materialized_path="/tmp/dataset")
+
+    with pytest.warns(DeprecationWarning, match="ExperimentDataset.questions is deprecated"):
+        assert dataset.questions == "/tmp/dataset/tasks.json"
+    with pytest.warns(DeprecationWarning, match="DatasetProvenance.questions is deprecated"):
+        assert provenance.questions == "/tmp/dataset/tasks.json"
+
+
 def make_metadata() -> TrialMetadata:
     return TrialMetadata(
         canonicalId="exp-1|q_year|cv-demo|mock|mock|inline|json|1",

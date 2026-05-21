@@ -5,81 +5,87 @@ from typing import Any
 from ctxbench._compat import BaseModel, Field, ValidationError
 
 
-class QuestionValidation(BaseModel):
+class TaskValidation(BaseModel):
     type: str
 
     @classmethod
-    def model_validate(cls, data: Any) -> "QuestionValidation":
+    def model_validate(cls, data: Any) -> "TaskValidation":
         if isinstance(data, cls):
             return data
         if not isinstance(data, dict):
-            raise ValidationError("Question validation requires an object input.")
+            raise ValidationError("Task validation requires an object input.")
         validation_type = str(data.get("type", "")).strip()
         if validation_type != "judge":
-            raise ValidationError("Question validation.type must be 'judge'.")
+            raise ValidationError("Task validation.type must be 'judge'.")
         return cls(type=validation_type)
 
 
-class Question(BaseModel):
+class Task(BaseModel):
     id: str
     question: str
     tags: list[str] = Field(default_factory=list)
-    validation: QuestionValidation
-    contextBlock: list[str] = Field(default_factory=list)
+    validation: TaskValidation
+    contextBlocks: list[str] = Field(default_factory=list)
 
     @classmethod
-    def model_validate(cls, data: Any) -> "Question":
+    def model_validate(cls, data: Any) -> "Task":
         if isinstance(data, cls):
             return data
         if not isinstance(data, dict):
-            raise ValidationError("Question requires an object input.")
+            raise ValidationError("Task requires an object input.")
+        context_blocks = data.get("contextBlocks", data.get("contextBlock", []))
         return cls(
             id=str(data.get("id", "")).strip(),
             question=str(data.get("question", "")),
             tags=[str(item) for item in data.get("tags", []) if isinstance(item, str)],
-            validation=QuestionValidation.model_validate(data.get("validation", {})),
-            contextBlock=[str(item) for item in data.get("contextBlock", []) if isinstance(item, str)],
+            validation=TaskValidation.model_validate(data.get("validation", {})),
+            contextBlocks=[str(item) for item in context_blocks if isinstance(item, str)],
         )
 
 
-class QuestionDataset(BaseModel):
+class TaskDataset(BaseModel):
     datasetId: str = ""
     domain: str | None = None
     language: str | None = None
     version: str | None = None
     description: str | None = None
-    questions: list[Question] = Field(default_factory=list)
+    tasks: list[Task] = Field(default_factory=list)
 
     @classmethod
-    def model_validate(cls, data: Any) -> "QuestionDataset":
+    def model_validate(cls, data: Any) -> "TaskDataset":
         if isinstance(data, cls):
             return data
         if not isinstance(data, dict):
-            raise ValidationError("QuestionDataset requires an object input.")
+            raise ValidationError("TaskDataset requires an object input.")
+        task_items = data.get("tasks", data.get("questions", []))
         return cls(
             datasetId=str(data.get("datasetId", "")),
             domain=data.get("domain"),
             language=data.get("language"),
             version=data.get("version"),
             description=data.get("description"),
-            questions=[
-                Question.model_validate(item)
-                for item in data.get("questions", [])
+            tasks=[
+                Task.model_validate(item)
+                for item in task_items
                 if isinstance(item, dict)
             ],
         )
 
+    @property
+    def questions(self) -> list[Task]:
+        return self.tasks
 
-class QuestionInstanceEntry(BaseModel):
+
+class TaskInstanceEntry(BaseModel):
     id: str
     parameters: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
-    def model_validate(cls, data: Any) -> "QuestionInstanceEntry":
+    def model_validate(cls, data: Any) -> "TaskInstanceEntry":
         if isinstance(data, cls):
             return data
         if not isinstance(data, dict):
-            raise ValidationError("Question instance question entry must be an object.")
+            raise ValidationError("Task instance task entry must be an object.")
         return cls(
             id=str(data.get("id", "")).strip(),
             parameters={
@@ -95,7 +101,7 @@ class QuestionInstanceEntry(BaseModel):
 class QuestionInstance(BaseModel):
     instanceId: str
     contextBlocks: str = ""
-    questions: list[QuestionInstanceEntry] = Field(default_factory=list)
+    tasks: list[TaskInstanceEntry] = Field(default_factory=list)
 
     @classmethod
     def model_validate(cls, data: Any) -> "QuestionInstance":
@@ -103,35 +109,46 @@ class QuestionInstance(BaseModel):
             return data
         if not isinstance(data, dict):
             raise ValidationError("QuestionInstance requires an object input.")
+        task_items = data.get("tasks", data.get("questions", []))
         return cls(
             instanceId=str(data.get("instanceId", "")).strip(),
             contextBlocks=str(data.get("contextBlocks", "")).strip(),
-            questions=[
-                QuestionInstanceEntry.model_validate(item)
-                for item in data.get("questions", [])
+            tasks=[
+                TaskInstanceEntry.model_validate(item)
+                for item in task_items
                 if isinstance(item, dict)
             ],
         )
 
-    def get_question(self, question_id: str) -> QuestionInstanceEntry | None:
-        for item in self.questions:
+    @property
+    def questions(self) -> list[TaskInstanceEntry]:
+        return self.tasks
+
+    def get_task(self, task_id: str) -> TaskInstanceEntry | None:
+        for item in self.tasks:
+            if item.id == task_id:
+                return item
+        return None
+
+    def get_question(self, question_id: str) -> TaskInstanceEntry | None:
+        for item in self.tasks:
             if item.id == question_id:
                 return item
         return None
 
 
-class QuestionInstanceDataset(BaseModel):
+class TaskInstanceDataset(BaseModel):
     datasetId: str = ""
     domain: str | None = None
     version: str | None = None
     instances: list[QuestionInstance] = Field(default_factory=list)
 
     @classmethod
-    def model_validate(cls, data: Any) -> "QuestionInstanceDataset":
+    def model_validate(cls, data: Any) -> "TaskInstanceDataset":
         if isinstance(data, cls):
             return data
         if not isinstance(data, dict):
-            raise ValidationError("QuestionInstanceDataset requires an object input.")
+            raise ValidationError("TaskInstanceDataset requires an object input.")
         return cls(
             datasetId=str(data.get("datasetId", "")),
             domain=data.get("domain"),
@@ -142,3 +159,10 @@ class QuestionInstanceDataset(BaseModel):
                 if isinstance(item, dict)
             ],
         )
+
+
+QuestionValidation = TaskValidation
+Question = Task
+QuestionDataset = TaskDataset
+QuestionInstanceEntry = TaskInstanceEntry
+QuestionInstanceDataset = TaskInstanceDataset

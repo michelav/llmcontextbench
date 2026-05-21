@@ -15,23 +15,23 @@ def _write_eval_fixture(root: Path) -> Path:
     instance_dir = dataset_root / "context" / "cv_demo"
     instance_dir.mkdir(parents=True, exist_ok=True)
 
-    (dataset_root / "questions.json").write_text(
+    (dataset_root / "tasks.json").write_text(
         json.dumps(
             {
                 "datasetId": "mock-v1",
-                "questions": [
+                "tasks": [
                     {
                         "id": "q_one",
                         "question": "Question one?",
                         "validation": {"type": "judge"},
-                        "contextBlock": ["q_one"],
+                        "contextBlocks": ["q_one"],
                     }
                 ],
             }
         ),
         encoding="utf-8",
     )
-    (dataset_root / "questions.instance.json").write_text(
+    (dataset_root / "tasks.instance.json").write_text(
         json.dumps(
             {
                 "datasetId": "mock-v1",
@@ -39,7 +39,7 @@ def _write_eval_fixture(root: Path) -> Path:
                     {
                         "instanceId": "cv_demo",
                         "contextBlocks": "context/cv_demo/blocks.json",
-                        "questions": [{"id": "q_one"}],
+                        "tasks": [{"id": "q_one"}],
                     }
                 ],
             }

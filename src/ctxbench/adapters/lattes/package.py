@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import warnings
 
 from ctxbench.benchmark.models import ExperimentDataset
 from ctxbench.dataset.capabilities import DatasetCapabilityReport
@@ -62,13 +63,13 @@ class LattesDatasetAdapter(LocalDatasetPackage):
         return build_lattes_mcp_server(contexts_dir=self.dataset_paths.contexts)
 
     def get_task(self, task_id: str) -> TaskPayload:
-        question = self.get_question(task_id)
+        task = self.get_task_model(task_id)
         return TaskPayload(
-            task_id=question.id,
-            statement=question.question,
-            tags=list(question.tags),
-            validation_type=question.validation.type,
-            context_blocks=list(question.contextBlock),
+            task_id=task.id,
+            statement=task.question,
+            tags=list(task.tags),
+            validation_type=task.validation.type,
+            context_blocks=list(task.contextBlocks),
         )
 
     def get_context(
@@ -129,12 +130,28 @@ class LattesDatasetAdapter(LocalDatasetPackage):
     @staticmethod
     def _detect_version(dataset_root: str | Path) -> str:
         root = Path(dataset_root)
-        questions_payload = root / "questions.json"
-        instances_payload = root / "questions.instance.json"
-        if questions_payload.exists():
+        tasks_payload = root / "tasks.json"
+        legacy_questions_payload = root / "questions.json"
+        instances_payload = root / "tasks.instance.json"
+        legacy_instances_payload = root / "questions.instance.json"
+        if not tasks_payload.exists() and legacy_questions_payload.exists():
+            warnings.warn(
+                "questions.json is deprecated; rename to tasks.json",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            tasks_payload = legacy_questions_payload
+        if not instances_payload.exists() and legacy_instances_payload.exists():
+            warnings.warn(
+                "questions.instance.json is deprecated; rename to tasks.instance.json",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            instances_payload = legacy_instances_payload
+        if tasks_payload.exists():
             import json
 
-            payload = json.loads(questions_payload.read_text(encoding="utf-8"))
+            payload = json.loads(tasks_payload.read_text(encoding="utf-8"))
             version = payload.get("version")
             if isinstance(version, str) and version.strip():
                 return version.strip()

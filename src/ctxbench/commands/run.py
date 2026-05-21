@@ -173,7 +173,7 @@ def run_command(
     progress_tracker = ProgressTracker(total=len(runspecs), enabled=progress)
     logger.progress = progress_tracker
     progress_tracker.start()
-    checkpoint_file = checkpoint_path(target_dir.parent if target_jsonl is None else target_jsonl.parent, "runs")
+    checkpoint_file = checkpoint_path(target_dir.parent if target_jsonl is None else target_jsonl.parent, "trials")
     experiment_id = runspecs[0].experimentId
     existing_jsonl_run_ids = _existing_run_ids_in_jsonl(target_jsonl)
     if force:
@@ -181,14 +181,14 @@ def run_command(
         write_completed_run_ids(
             checkpoint_file,
             experiment_id=experiment_id,
-            kind="runs",
+            kind="trials",
             completed_run_ids=completed_run_ids,
         )
     else:
         completed_run_ids = load_completed_run_ids(
             checkpoint_file,
             experiment_id=experiment_id,
-            kind="runs",
+            kind="trials",
         )
         completed_run_ids.update(existing_jsonl_run_ids)
         if write_individual_json:
@@ -197,7 +197,7 @@ def run_command(
             write_completed_run_ids(
                 checkpoint_file,
                 experiment_id=experiment_id,
-                kind="runs",
+                kind="trials",
                 completed_run_ids=completed_run_ids,
             )
     completed_runs = 0
@@ -252,7 +252,7 @@ def run_command(
                 write_completed_run_ids(
                     checkpoint_file,
                     experiment_id=experiment_id,
-                    kind="runs",
+                    kind="trials",
                     completed_run_ids=completed_run_ids,
                 )
                 logger.phase("WRITE", "Artifact written", run=result.trialId, path=target_jsonl)
@@ -261,7 +261,7 @@ def run_command(
                 write_completed_run_ids(
                     checkpoint_file,
                     experiment_id=experiment_id,
-                    kind="runs",
+                    kind="trials",
                     completed_run_ids=completed_run_ids,
                 )
             logger.phase("DONE", "Completed successfully", run=result.trialId)

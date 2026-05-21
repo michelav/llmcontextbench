@@ -175,9 +175,9 @@ lattes/
 ├── DATASET-TERMS.md
 ├── NOTICE.md
 ├── CITATION.cff
-├── questions/
-│   ├── questions.json
-│   └── questions.instance.json
+├── dataset/
+│   ├── tasks.json
+│   └── tasks.instance.json
 ├── experiments/
 │   └── lattes_baseline_001.json
 ├── scripts/

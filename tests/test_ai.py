@@ -54,7 +54,7 @@ def make_experiment() -> Experiment:
             "id": "exp-test",
             "output": "outputs",
             "dataset": str((Path.cwd() / "examples" / "datasets" / "lattes").resolve()),
-            "scope": {"instances": [], "questions": []},
+            "scope": {"instances": [], "tasks": []},
             "factors": {
                 "model": [{"provider": "mock", "name": "mock"}],
                 "strategy": ["inline"],
@@ -71,31 +71,31 @@ def make_experiment() -> Experiment:
 def write_mock_dataset(root: Path) -> ExperimentDataset:
     instance_dir = root / "context" / "cv-demo"
     instance_dir.mkdir(parents=True, exist_ok=True)
-    (root / "questions.json").write_text(
+    (root / "tasks.json").write_text(
         json.dumps(
             {
                 "datasetId": "mock-v2",
-                "questions": [
+                "tasks": [
                     {
                         "id": "q_year",
                         "question": "In which year did the researcher obtain their PhD?",
                         "tags": ["objective", "simple"],
                         "validation": {"type": "judge"},
-                        "contextBlock": ["summary"],
+                        "contextBlocks": ["summary"],
                     },
                     {
                         "id": "q_summary",
                         "question": "Summarize the main research areas for {researcher_name}.",
                         "tags": ["subjective", "simple"],
                         "validation": {"type": "judge"},
-                        "contextBlock": ["summary", "research"],
+                        "contextBlocks": ["summary", "research"],
                     },
                 ],
             }
         ),
         encoding="utf-8",
     )
-    (root / "questions.instance.json").write_text(
+    (root / "tasks.instance.json").write_text(
         json.dumps(
             {
                 "datasetId": "mock-v2",
@@ -103,7 +103,7 @@ def write_mock_dataset(root: Path) -> ExperimentDataset:
                     {
                         "instanceId": "cv-demo",
                         "contextBlocks": "context/cv-demo/blocks.json",
-                        "questions": [
+                        "tasks": [
                             {"id": "q_year"},
                             {"id": "q_summary", "parameters": {"researcher_name": "CV Demo"}},
                         ],
@@ -125,9 +125,9 @@ def write_mock_dataset(root: Path) -> ExperimentDataset:
 
 def test_dataset_provider_context_blocks_falls_back_to_instance_blocks_file(tmp_path):
     dataset = write_mock_dataset(tmp_path / "dataset")
-    payload = json.loads((Path(dataset.root) / "questions.instance.json").read_text(encoding="utf-8"))
+    payload = json.loads((Path(dataset.root) / "tasks.instance.json").read_text(encoding="utf-8"))
     payload["instances"][0].pop("contextBlocks", None)
-    (Path(dataset.root) / "questions.instance.json").write_text(json.dumps(payload), encoding="utf-8")
+    (Path(dataset.root) / "tasks.instance.json").write_text(json.dumps(payload), encoding="utf-8")
 
     provider = DatasetProvider.from_dataset(dataset)
 
@@ -563,7 +563,7 @@ def test_experiment_validation_rejects_bare_mcp_strategy_factor():
                 "id": "exp-test",
                 "output": "outputs",
                 "dataset": "/tmp/dataset",
-                "scope": {"instances": [], "questions": []},
+                "scope": {"instances": [], "tasks": []},
                 "factors": {
                     "model": [{"provider": "mock", "name": "mock"}],
                     "strategy": ["mcp"],
@@ -683,7 +683,7 @@ def test_evaluate_judge_aggregates_multiple_judges(monkeypatch):
             "id": "exp-test",
             "output": "outputs",
             "dataset": str((Path.cwd() / "datasets" / "lattes").resolve()),
-            "scope": {"instances": [], "questions": []},
+            "scope": {"instances": [], "tasks": []},
             "factors": {
                 "model": [{"provider": "mock", "name": "mock"}],
                 "strategy": ["inline"],
@@ -1169,19 +1169,19 @@ def test_evaluate_run_result_skips_when_context_block_missing(tmp_path):
     # Add a question whose contextBlocks references a block that doesn't exist in blocks.json
     dataset_root = tmp_path / "dataset"
     dataset = write_mock_dataset(dataset_root)
-    questions_path = dataset_root / "questions.json"
-    questions = json.loads(questions_path.read_text(encoding="utf-8"))
-    questions["questions"].append({
+    tasks_path = dataset_root / "tasks.json"
+    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
+    tasks["tasks"].append({
         "id": "q_missing",
         "question": "What is the missing answer?",
         "tags": [],
         "validation": {"type": "judge"},
-        "contextBlock": ["nonexistent_block"],
+        "contextBlocks": ["nonexistent_block"],
     })
-    questions_path.write_text(json.dumps(questions), encoding="utf-8")
-    instances_path = dataset_root / "questions.instance.json"
+    tasks_path.write_text(json.dumps(tasks), encoding="utf-8")
+    instances_path = dataset_root / "tasks.instance.json"
     instances = json.loads(instances_path.read_text(encoding="utf-8"))
-    instances["instances"][0]["questions"].append({"id": "q_missing"})
+    instances["instances"][0]["tasks"].append({"id": "q_missing"})
     instances_path.write_text(json.dumps(instances), encoding="utf-8")
 
     provider = DatasetProvider.from_dataset(dataset)

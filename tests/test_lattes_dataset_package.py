@@ -26,8 +26,8 @@ def test_lattes_dataset_package_fixtures_path_contains_instance_and_task_files()
     package = LattesDatasetPackage(FIXTURE_ROOT)
 
     fixtures_root = Path(str(package.fixtures()))
-    assert (fixtures_root / "questions.json").exists()
-    assert (fixtures_root / "questions.instance.json").exists()
+    assert (fixtures_root / "tasks.json").exists()
+    assert (fixtures_root / "tasks.instance.json").exists()
     assert any((fixtures_root / "context").iterdir())
 
 

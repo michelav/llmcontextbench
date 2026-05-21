@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import warnings
 
 from ctxbench.benchmark.models import DatasetProvenance, ExperimentDataset
 from ctxbench.dataset.cache import DatasetCache
@@ -188,7 +189,16 @@ class DatasetResolver:
                 materialized_path=manifest.materializedPath,
             )
             materialized_root = Path(manifest.materializedPath) if manifest.materializedPath else None
-            if materialized_root is not None and (materialized_root / "questions.json").exists():
+            if materialized_root is not None and (
+                (materialized_root / "tasks.json").exists()
+                or (materialized_root / "questions.json").exists()
+            ):
+                if not (materialized_root / "tasks.json").exists() and (materialized_root / "questions.json").exists():
+                    warnings.warn(
+                        "questions.json is deprecated; rename to tasks.json",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
                 materialized_dataset = ExperimentDataset(
                     root=str(materialized_root),
                     id=manifest.datasetId,

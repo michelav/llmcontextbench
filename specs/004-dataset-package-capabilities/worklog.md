@@ -71,3 +71,8 @@
 - slice: final-audit
 - summary: Follow-ups recorded: no downstream analysis notebook dependency on removed executor trace metadata keys `context_path` or `instance_dir`; `lattes_id` to `instance_id` remains backward-compatible through strategy fallback reads; Spec 006 still owns external Lattes adapter relocation and should remove the deprecated-internal `DatasetProvider` compatibility alias with that relocation.
 - token_provenance: unavailable
+
+- event: slice-implemented
+- slice: S10
+- summary: Renamed dataset package model/module/file naming to canonical task vocabulary, added `tasks.json`/`tasks.instance.json` primary reads with deprecated `questions*` fallbacks, migrated fixture filenames, and aligned run checkpoint kind writes to `trials` while preserving legacy `runs` reads.
+- token_provenance: unavailable

@@ -98,7 +98,7 @@ def test_fake_dataset_plan_workflow_uses_env_cache_root_for_cached_dataset(
                 "id": "exp-fake-cached",
                 "output": "outputs",
                 "dataset": {"id": "ctxbench/fake-dataset", "version": "0.1.0"},
-                "scope": {"instances": [], "questions": []},
+                "scope": {"instances": [], "tasks": []},
                 "factors": {
                     "model": [{"provider": "mock", "name": "mock"}],
                     "strategy": ["inline"],

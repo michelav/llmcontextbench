@@ -3,37 +3,40 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from ctxbench.benchmark.models import ExperimentDataset
 from ctxbench.dataset.cache import DatasetCache
 from ctxbench.dataset.package import DatasetPackage
 from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.dataset.resolver import DatasetResolver
+from ctxbench.dataset.tasks import Task, TaskDataset, TaskInstanceDataset
 
 
 def _write_local_dataset(root: Path) -> Path:
     instance_dir = root / "context" / "cv-demo"
     instance_dir.mkdir(parents=True, exist_ok=True)
-    (root / "questions.json").write_text(
+    (root / "tasks.json").write_text(
         json.dumps(
             {
                 "datasetId": "ctxbench/local-fixture",
                 "version": "0.1.0",
                 "domain": "testing",
                 "description": "Local package fixture.",
-                "questions": [
+                "tasks": [
                     {
                         "id": "q_year",
                         "question": "In which year did {researcher_name} obtain their PhD?",
                         "tags": ["objective", "simple"],
                         "validation": {"type": "judge"},
-                        "contextBlock": ["summary"],
+                        "contextBlocks": ["summary"],
                     }
                 ],
             }
         ),
         encoding="utf-8",
     )
-    (root / "questions.instance.json").write_text(
+    (root / "tasks.instance.json").write_text(
         json.dumps(
             {
                 "datasetId": "ctxbench/local-fixture",
@@ -42,7 +45,7 @@ def _write_local_dataset(root: Path) -> Path:
                     {
                         "instanceId": "cv-demo",
                         "contextBlocks": "context/cv-demo/blocks.json",
-                        "questions": [
+                        "tasks": [
                             {"id": "q_year", "parameters": {"researcher_name": "CV Demo"}}
                         ],
                     }
@@ -83,18 +86,18 @@ def test_local_dataset_package_preserves_question_template_and_instance_paramete
     assert question.question == "In which year did {researcher_name} obtain their PhD?"
     assert question.tags == ["objective", "simple"]
     assert question.validation.type == "judge"
-    assert question.contextBlock == ["summary"]
+    assert question.contextBlocks == ["summary"]
     assert question_instance is not None
     assert question_instance.parameters == {"researcher_name": "CV Demo"}
     assert package.get_context_blocks("cv-demo") == {"summary": "Researcher in software engineering."}
     assert package.get_context_artifact("cv-demo", "q_year", "inline", "json") == {"answers": {"q_year": 2020}}
     assert package.get_evidence_artifact("cv-demo", "q_year") == {
-        "question": {
+        "task": {
             "id": "q_year",
             "question": "In which year did {researcher_name} obtain their PhD?",
             "tags": ["objective", "simple"],
             "validation": {"type": "judge"},
-            "contextBlock": ["summary"],
+            "contextBlocks": ["summary"],
         },
         "questionInstance": {"id": "q_year", "parameters": {"researcher_name": "CV Demo"}},
         "contextBlocks": {"summary": "Researcher in software engineering."},
@@ -114,3 +117,71 @@ def test_local_dataset_package_accepts_string_and_root_forms_equivalently(tmp_pa
     assert from_string.identity() == from_root.identity()
     assert from_string.version() == from_root.version()
     assert from_string.origin() == from_root.origin()
+
+
+def test_task_dataset_reads_tasks_and_legacy_questions_keys() -> None:
+    canonical = TaskDataset.model_validate(
+        {
+            "datasetId": "dataset",
+            "tasks": [
+                {
+                    "id": "q_year",
+                    "question": "Question?",
+                    "validation": {"type": "judge"},
+                    "contextBlocks": ["summary"],
+                }
+            ],
+        }
+    )
+    legacy = TaskDataset.model_validate(
+        {
+            "datasetId": "dataset",
+            "questions": [
+                {
+                    "id": "q_year",
+                    "question": "Question?",
+                    "validation": {"type": "judge"},
+                    "contextBlocks": ["summary"],
+                }
+            ],
+        }
+    )
+
+    assert [task.id for task in canonical.tasks] == ["q_year"]
+    assert [task.id for task in legacy.tasks] == ["q_year"]
+
+
+def test_task_instance_dataset_reads_tasks_and_legacy_questions_keys() -> None:
+    canonical = TaskInstanceDataset.model_validate(
+        {"instances": [{"instanceId": "cv-demo", "tasks": [{"id": "q_year"}]}]}
+    )
+    legacy = TaskInstanceDataset.model_validate(
+        {"instances": [{"instanceId": "cv-demo", "questions": [{"id": "q_year"}]}]}
+    )
+
+    assert canonical.instances[0].tasks[0].id == "q_year"
+    assert legacy.instances[0].tasks[0].id == "q_year"
+
+
+def test_task_reads_legacy_context_block_key() -> None:
+    task = Task.model_validate(
+        {
+            "id": "q_year",
+            "question": "Question?",
+            "validation": {"type": "judge"},
+            "contextBlock": ["summary"],
+        }
+    )
+
+    assert task.contextBlocks == ["summary"]
+
+
+def test_local_dataset_package_warns_for_legacy_questions_file(tmp_path: Path) -> None:
+    dataset_root = _write_local_dataset(tmp_path / "dataset")
+    (dataset_root / "questions.json").write_text((dataset_root / "tasks.json").read_text(encoding="utf-8"), encoding="utf-8")
+    (dataset_root / "tasks.json").unlink()
+
+    with pytest.warns(DeprecationWarning, match="questions.json is deprecated"):
+        package = LocalDatasetPackage.from_dataset(ExperimentDataset(root=str(dataset_root)))
+
+    assert package.list_task_ids() == ["q_year"]

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from ctxbench.benchmark import evaluation as evaluation_module
+from ctxbench.benchmark.checkpoints import load_completed_run_ids, write_completed_run_ids
 from ctxbench.commands.eval import eval_command
 from ctxbench.commands.execute import execute_command
 from ctxbench.commands.export import export_command
@@ -36,25 +37,25 @@ def _forbid_dataset_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
 def _write_local_dataset(root: Path) -> Path:
     instance_dir = root / "context" / "cv-demo"
     instance_dir.mkdir(parents=True, exist_ok=True)
-    (root / "questions.json").write_text(
+    (root / "tasks.json").write_text(
         json.dumps(
             {
                 "datasetId": "ctxbench/local-fixture",
                 "version": "0.1.0",
-                "questions": [
+                "tasks": [
                     {
                         "id": "q_year",
                         "question": "In which year did {researcher_name} obtain their PhD?",
                         "tags": ["objective"],
                         "validation": {"type": "judge"},
-                        "contextBlock": ["summary"],
+                        "contextBlocks": ["summary"],
                     }
                 ],
             }
         ),
         encoding="utf-8",
     )
-    (root / "questions.instance.json").write_text(
+    (root / "tasks.instance.json").write_text(
         json.dumps(
             {
                 "datasetId": "ctxbench/local-fixture",
@@ -62,7 +63,7 @@ def _write_local_dataset(root: Path) -> Path:
                 "instances": [
                     {
                         "instanceId": "cv-demo",
-                        "questions": [{"id": "q_year", "parameters": {"researcher_name": "CV Demo"}}],
+                        "tasks": [{"id": "q_year", "parameters": {"researcher_name": "CV Demo"}}],
                     }
                 ],
             }
@@ -84,7 +85,7 @@ def _write_experiment(path: Path, dataset_ref: object) -> Path:
                 "id": "exp-no-network",
                 "output": "outputs",
                 "dataset": dataset_ref,
-                "scope": {"instances": [], "questions": []},
+                "scope": {"instances": [], "tasks": []},
                 "factors": {
                     "model": [{"provider": "mock", "name": "mock"}],
                     "strategy": ["inline"],
@@ -100,6 +101,32 @@ def _write_experiment(path: Path, dataset_ref: object) -> Path:
         encoding="utf-8",
     )
     return path
+
+
+def test_trial_checkpoint_kind_accepts_canonical_and_legacy(tmp_path: Path) -> None:
+    checkpoint = tmp_path / "runs.checkpoint.json"
+
+    write_completed_run_ids(
+        checkpoint,
+        experiment_id="exp-1",
+        kind="trials",
+        completed_run_ids={"trial-1"},
+    )
+
+    assert load_completed_run_ids(checkpoint, experiment_id="exp-1", kind="trials") == {"trial-1"}
+
+    checkpoint.write_text(
+        json.dumps(
+            {
+                "experimentId": "exp-1",
+                "kind": "runs",
+                "completedTrialIds": ["legacy-trial"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_completed_run_ids(checkpoint, experiment_id="exp-1", kind="trials") == {"legacy-trial"}
 
 
 def _write_missing_trials(root: Path) -> Path:

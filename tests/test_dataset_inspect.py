@@ -112,30 +112,30 @@ class NonconformantDescriptorPackage(ConformantPackage):
 def _write_local_dataset(root: Path) -> Path:
     instance_dir = root / "context" / "cv-demo"
     instance_dir.mkdir(parents=True, exist_ok=True)
-    (root / "questions.json").write_text(
+    (root / "tasks.json").write_text(
         json.dumps(
             {
                 "datasetId": "ctxbench/fake",
                 "version": "0.1.0",
-                "questions": [
+                "tasks": [
                     {
                         "id": "q_year",
                         "question": "When?",
                         "tags": ["objective"],
                         "validation": {"type": "judge"},
-                        "contextBlock": ["summary"],
+                        "contextBlocks": ["summary"],
                     }
                 ],
             }
         ),
         encoding="utf-8",
     )
-    (root / "questions.instance.json").write_text(
+    (root / "tasks.instance.json").write_text(
         json.dumps(
             {
                 "datasetId": "ctxbench/fake",
                 "version": "0.1.0",
-                "instances": [{"instanceId": "cv-demo", "questions": [{"id": "q_year"}]}],
+                "instances": [{"instanceId": "cv-demo", "tasks": [{"id": "q_year"}]}],
             }
         ),
         encoding="utf-8",

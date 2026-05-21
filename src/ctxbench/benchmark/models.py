@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 import re
 from typing import Any
+import warnings
 
 from ctxbench._compat import BaseModel, Field, ValidationError
 
@@ -53,11 +54,11 @@ class ExperimentDataset(BaseModel):
                     version=str(data["version"]) if data.get("version") is not None else None,
                     origin=str(data["origin"]) if data.get("origin") is not None else None,
                 )
-            legacy_paths = {"questions", "contexts", "question_instances"}
+            legacy_paths = {"tasks", "contexts", "task_instances", "questions", "question_instances"}
             if legacy_paths & set(data):
                 raise ValidationError(
                     "Experiment dataset must be a dataset directory path. "
-                    "Put questions.json and questions.instance.json in the dataset root "
+                    "Put tasks.json and tasks.instance.json in the dataset root "
                     "and context files in <dataset>/context."
                 )
         raise ValidationError(
@@ -75,10 +76,19 @@ class ExperimentDataset(BaseModel):
             raise ValidationError("ExperimentDataset id references require a version.")
 
     @property
-    def questions(self) -> str:
+    def tasks(self) -> str:
         if not self.root:
-            raise ValueError("Dataset questions path is only available for local-root datasets.")
-        return str(Path(self.root) / "questions.json")
+            raise ValueError("Dataset tasks path is only available for local-root datasets.")
+        return str(Path(self.root) / "tasks.json")
+
+    @property
+    def questions(self) -> str:
+        warnings.warn(
+            "ExperimentDataset.questions is deprecated; use ExperimentDataset.tasks.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.tasks
 
     @property
     def contexts(self) -> str:
@@ -87,10 +97,19 @@ class ExperimentDataset(BaseModel):
         return str(Path(self.root) / "context")
 
     @property
-    def question_instances(self) -> str:
+    def task_instances(self) -> str:
         if not self.root:
-            raise ValueError("Dataset question_instances path is only available for local-root datasets.")
-        return str(Path(self.root) / "questions.instance.json")
+            raise ValueError("Dataset task_instances path is only available for local-root datasets.")
+        return str(Path(self.root) / "tasks.instance.json")
+
+    @property
+    def question_instances(self) -> str:
+        warnings.warn(
+            "ExperimentDataset.question_instances is deprecated; use ExperimentDataset.task_instances.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.task_instances
 
 
 class DatasetProvenance(BaseModel):
@@ -125,6 +144,13 @@ class DatasetProvenance(BaseModel):
             )
         if isinstance(data, dict):
             payload = dict(data)
+            legacy_paths = {"tasks", "contexts", "task_instances", "questions", "question_instances"}
+            if legacy_paths & set(payload) and "root" not in payload and "id" not in payload:
+                raise ValidationError(
+                    "Dataset provenance must reference a dataset root or id/version. "
+                    "Put tasks.json and tasks.instance.json in the dataset root "
+                    "and context files in <dataset>/context."
+                )
             if "root" in payload:
                 root = str(payload.get("root") or "")
                 return cls(
@@ -173,10 +199,19 @@ class DatasetProvenance(BaseModel):
         return self.materialized_path or self.origin
 
     @property
-    def questions(self) -> str:
+    def tasks(self) -> str:
         if not self.root:
-            raise ValueError("Dataset questions path is unavailable without a local materialized path.")
-        return str(Path(self.root) / "questions.json")
+            raise ValueError("Dataset tasks path is unavailable without a local materialized path.")
+        return str(Path(self.root) / "tasks.json")
+
+    @property
+    def questions(self) -> str:
+        warnings.warn(
+            "DatasetProvenance.questions is deprecated; use DatasetProvenance.tasks.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.tasks
 
     @property
     def contexts(self) -> str:
@@ -185,10 +220,19 @@ class DatasetProvenance(BaseModel):
         return str(Path(self.root) / "context")
 
     @property
-    def question_instances(self) -> str:
+    def task_instances(self) -> str:
         if not self.root:
-            raise ValueError("Dataset question_instances path is unavailable without a local materialized path.")
-        return str(Path(self.root) / "questions.instance.json")
+            raise ValueError("Dataset task_instances path is unavailable without a local materialized path.")
+        return str(Path(self.root) / "tasks.instance.json")
+
+    @property
+    def question_instances(self) -> str:
+        warnings.warn(
+            "DatasetProvenance.question_instances is deprecated; use DatasetProvenance.task_instances.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.task_instances
 
 
 class ModelEntry(BaseModel):

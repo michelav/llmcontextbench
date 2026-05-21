@@ -15,25 +15,25 @@ from ctxbench.util.jsonl import read_jsonl
 def _write_local_dataset(root: Path) -> Path:
     instance_dir = root / "context" / "cv-demo"
     instance_dir.mkdir(parents=True, exist_ok=True)
-    (root / "questions.json").write_text(
+    (root / "tasks.json").write_text(
         json.dumps(
             {
                 "datasetId": "ctxbench/local-fixture",
                 "version": "0.1.0",
-                "questions": [
+                "tasks": [
                     {
                         "id": "q_year",
                         "question": "In which year did {researcher_name} obtain their PhD?",
                         "tags": ["objective"],
                         "validation": {"type": "judge"},
-                        "contextBlock": ["summary"],
+                        "contextBlocks": ["summary"],
                     }
                 ],
             }
         ),
         encoding="utf-8",
     )
-    (root / "questions.instance.json").write_text(
+    (root / "tasks.instance.json").write_text(
         json.dumps(
             {
                 "datasetId": "ctxbench/local-fixture",
@@ -41,7 +41,7 @@ def _write_local_dataset(root: Path) -> Path:
                 "instances": [
                     {
                         "instanceId": "cv-demo",
-                        "questions": [{"id": "q_year", "parameters": {"researcher_name": "CV Demo"}}],
+                        "tasks": [{"id": "q_year", "parameters": {"researcher_name": "CV Demo"}}],
                     }
                 ],
             }
@@ -60,7 +60,7 @@ def _write_experiment(path: Path, dataset_ref: object) -> Path:
                 "id": "exp-dataset-plan",
                 "output": "outputs",
                 "dataset": dataset_ref,
-                "scope": {"instances": [], "questions": []},
+                "scope": {"instances": [], "tasks": []},
                 "factors": {
                     "model": [{"provider": "mock", "name": "mock"}],
                     "strategy": ["inline"],

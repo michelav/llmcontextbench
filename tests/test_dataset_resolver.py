@@ -44,31 +44,31 @@ def _write_source(path: Path) -> Path:
 def _write_local_dataset(path: Path) -> Path:
     instance_dir = path / "context" / "cv-demo"
     instance_dir.mkdir(parents=True, exist_ok=True)
-    (path / "questions.json").write_text(
+    (path / "tasks.json").write_text(
         json.dumps(
             {
                 "datasetId": "ctxbench/local-fixture",
-                "questions": [
+                "tasks": [
                     {
                         "id": "q_year",
                         "question": "When?",
                         "tags": [],
                         "validation": {"type": "judge"},
-                        "contextBlock": ["summary"],
+                        "contextBlocks": ["summary"],
                     }
                 ],
             }
         ),
         encoding="utf-8",
     )
-    (path / "questions.instance.json").write_text(
+    (path / "tasks.instance.json").write_text(
         json.dumps(
             {
                 "datasetId": "ctxbench/local-fixture",
                 "instances": [
                     {
                         "instanceId": "cv-demo",
-                        "questions": [{"id": "q_year"}],
+                        "tasks": [{"id": "q_year"}],
                     }
                 ],
             }

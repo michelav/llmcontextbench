@@ -8,13 +8,15 @@ from ctxbench.util.fs import load_json, write_json
 
 RUNS_CHECKPOINT_FILENAME = "runs.checkpoint.json"
 EVALUATION_CHECKPOINT_FILENAME = "evaluation.checkpoint.json"
+CHECKPOINT_KINDS = {
+    "trials": RUNS_CHECKPOINT_FILENAME,
+    "runs": RUNS_CHECKPOINT_FILENAME,
+    "evaluation": EVALUATION_CHECKPOINT_FILENAME,
+}
 
 
 def checkpoint_path(root: str | Path, kind: str) -> Path:
-    filename = {
-        "runs": RUNS_CHECKPOINT_FILENAME,
-        "evaluation": EVALUATION_CHECKPOINT_FILENAME,
-    }.get(kind)
+    filename = CHECKPOINT_KINDS.get(kind)
     if filename is None:
         raise ValueError(f"Unknown checkpoint kind: {kind}")
     return Path(root) / filename
@@ -29,7 +31,11 @@ def load_completed_run_ids(path: str | Path | None, *, experiment_id: str, kind:
     payload = load_json(target)
     if not isinstance(payload, dict):
         return set()
-    if str(payload.get("kind") or "") != kind:
+    payload_kind = str(payload.get("kind") or "")
+    compatible_kinds = {kind}
+    if kind == "trials":
+        compatible_kinds.add("runs")
+    if payload_kind not in compatible_kinds:
         return set()
     if str(payload.get("experimentId") or "") not in {"", experiment_id}:
         return set()
