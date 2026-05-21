@@ -41,3 +41,8 @@
 - slice: S6
 - summary: Routed evaluation through adapter resolution and v0 evidence/oracle payloads, kept oracle values out of judge prompts, recorded evidence/oracle trace metadata, and added provider-free evaluation boundary tests.
 - token_provenance: unavailable
+
+- event: slice-implemented
+- slice: S7
+- summary: Added provider-free fake adapter conformance tests, default Lattes registry integration tests, canonical experiment fixture validation, and a clean canonical experiment fixture.
+- token_provenance: unavailable

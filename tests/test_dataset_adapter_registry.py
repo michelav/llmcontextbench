@@ -2,11 +2,22 @@ from __future__ import annotations
 
 import pytest
 
+from ctxbench.adapters.lattes.package import LattesDatasetAdapter
+from ctxbench.adapters.registry import get_default_registry
 from ctxbench.benchmark.models import DatasetProvenance, ExperimentDataset
 from ctxbench.dataset.errors import AdapterUnavailableError
 from ctxbench.dataset.package import DatasetMetadata
-from ctxbench.dataset.payloads import ContextPayload, EvidencePayload, TaskPayload
+from ctxbench.dataset.payloads import (
+    ORACLE_UNAVAILABLE,
+    ContextPayload,
+    EvidencePayload,
+    OracleUnavailable,
+    TaskPayload,
+)
 from ctxbench.dataset.registry import AdapterRegistry, ResolvedDatasetRef
+
+
+LATTES_FIXTURE_ROOT = "tests/fixtures/lattes_provider_free/dataset"
 
 
 class DummyDatasetPackage:
@@ -139,3 +150,45 @@ def test_adapter_registry_resolves_dataset_provenance_materialization_fields() -
             materialized_path="/cache/dummy",
         )
     ]
+
+
+def test_default_registry_resolves_lattes_adapter_from_experiment_dataset() -> None:
+    adapter = get_default_registry().resolve(
+        ExperimentDataset(
+            id="ctxbench/lattes",
+            version="2026-04-28",
+            root=LATTES_FIXTURE_ROOT,
+            origin="provider-free fixture",
+        )
+    )
+
+    assert isinstance(adapter, LattesDatasetAdapter)
+
+
+def test_default_registry_resolves_lattes_adapter_from_dataset_provenance() -> None:
+    adapter = get_default_registry().resolve(
+        DatasetProvenance(
+            id="ctxbench/lattes",
+            version="2026-04-28",
+            origin="provider-free fixture",
+            content_hash="sha256:test-fixture",
+            materialized_path=LATTES_FIXTURE_ROOT,
+        )
+    )
+
+    assert isinstance(adapter, LattesDatasetAdapter)
+
+
+def test_default_registry_resolve_unknown_dataset_id_raises_adapter_unavailable() -> None:
+    with pytest.raises(AdapterUnavailableError):
+        get_default_registry().resolve(
+            ExperimentDataset(
+                id="ctxbench/unknown",
+                version="0.1.0",
+                root=LATTES_FIXTURE_ROOT,
+            )
+        )
+
+
+def test_oracle_unavailable_singleton_is_oracle_unavailable() -> None:
+    assert isinstance(ORACLE_UNAVAILABLE, OracleUnavailable)

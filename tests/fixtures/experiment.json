@@ -1,0 +1,32 @@
+{
+  "id": "exp-lattes-adapter-fixture",
+  "output": "outputs",
+  "dataset": {
+    "id": "ctxbench/lattes",
+    "version": "2026-04-28",
+    "root": "tests/fixtures/lattes_provider_free/dataset"
+  },
+  "scope": {
+    "instances": [],
+    "questions": []
+  },
+  "factors": {
+    "model": [
+      {
+        "provider": "mock",
+        "name": "mock-model"
+      }
+    ],
+    "strategy": [
+      "inline"
+    ],
+    "format": [
+      "html",
+      "json"
+    ]
+  },
+  "evaluation": {
+    "enabled": false,
+    "judges": []
+  }
+}

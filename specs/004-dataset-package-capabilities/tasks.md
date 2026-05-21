@@ -210,18 +210,18 @@
 
 ### Tasks
 
-- [ ] T031 [S7] Create `tests/test_fake_dataset_adapter.py` with a `FakeDatasetAdapter` class implementing all mandatory v0 capabilities using hard-coded in-memory data; add tests: `FakeDatasetAdapter` satisfies `DatasetPackage` protocol (structural subtyping); `get_context` with unsupported representation raises `UnsupportedRepresentationError`; `get_oracle` returns `ORACLE_UNAVAILABLE` (not `None`); `get_task` returns `TaskPayload` with non-empty `statement`; `get_evidence` returns `EvidencePayload` with `role == "evidence"`
-- [ ] T032 [S7] Create or update the canonical experiment definition fixture at `tests/fixtures/experiment.json`; it must contain `dataset.id`, `dataset.version`, `dataset.root`, and `factors.format` with realistic values for a Lattes experiment — no adapter class names, no module paths, no Lattes-specific filenames; this fixture is used by T034
-- [ ] T033 [P] [S7] Add registry integration tests to `tests/test_dataset_adapter_registry.py` (extending the file created in T006): `get_default_registry().resolve(ExperimentDataset(id="ctxbench/lattes", ...))` returns a `LattesDatasetAdapter` instance; `get_default_registry().resolve(DatasetProvenance(id="ctxbench/lattes", ..., materialized_path=...))` returns a `LattesDatasetAdapter` instance; `get_default_registry().resolve(ExperimentDataset(id="ctxbench/unknown", ...))` raises `AdapterUnavailableError`; `isinstance(ORACLE_UNAVAILABLE, OracleUnavailable)` is `True`
-- [ ] T034 [S7] Add experiment definition fixture test in `tests/test_experiment_fixtures.py`: load `tests/fixtures/experiment.json`; assert it contains no adapter class name, no Python module path, no Lattes-specific filename (e.g. `clean.html`, `parsed.json`); assert `factors.format` values (if present) are plain strings; assert `dataset.id` is present and is a string matching a registered id (e.g. `"ctxbench/lattes"`)
+- [X] T031 [S7] Create `tests/test_fake_dataset_adapter.py` with a `FakeDatasetAdapter` class implementing all mandatory v0 capabilities using hard-coded in-memory data; add tests: `FakeDatasetAdapter` satisfies `DatasetPackage` protocol (structural subtyping); `get_context` with unsupported representation raises `UnsupportedRepresentationError`; `get_oracle` returns `ORACLE_UNAVAILABLE` (not `None`); `get_task` returns `TaskPayload` with non-empty `statement`; `get_evidence` returns `EvidencePayload` with `role == "evidence"`
+- [X] T032 [S7] Create or update the canonical experiment definition fixture at `tests/fixtures/experiment.json`; it must contain `dataset.id`, `dataset.version`, `dataset.root`, and `factors.format` with realistic values for a Lattes experiment — no adapter class names, no module paths, no Lattes-specific filenames; this fixture is used by T034
+- [X] T033 [P] [S7] Add registry integration tests to `tests/test_dataset_adapter_registry.py` (extending the file created in T006): `get_default_registry().resolve(ExperimentDataset(id="ctxbench/lattes", ...))` returns a `LattesDatasetAdapter` instance; `get_default_registry().resolve(DatasetProvenance(id="ctxbench/lattes", ..., materialized_path=...))` returns a `LattesDatasetAdapter` instance; `get_default_registry().resolve(ExperimentDataset(id="ctxbench/unknown", ...))` raises `AdapterUnavailableError`; `isinstance(ORACLE_UNAVAILABLE, OracleUnavailable)` is `True`
+- [X] T034 [S7] Add experiment definition fixture test in `tests/test_experiment_fixtures.py`: load `tests/fixtures/experiment.json`; assert it contains no adapter class name, no Python module path, no Lattes-specific filename (e.g. `clean.html`, `parsed.json`); assert `factors.format` values (if present) are plain strings; assert `dataset.id` is present and is a string matching a registered id (e.g. `"ctxbench/lattes"`)
 
 ### Checkpoint
 
-- [ ] `pytest -k "fake_dataset or registry or lattes_adapter" -v` passes
-- [ ] no provider-backed execution
-- [ ] no opportunistic refactor
-- [ ] diff is reviewable
-- [ ] `worklog.md` updated
+- [X] `pytest -k "fake_dataset or registry or lattes_adapter" -v` passes
+- [X] no provider-backed execution
+- [X] no opportunistic refactor
+- [X] diff is reviewable
+- [X] `worklog.md` updated
 
 ---
 
