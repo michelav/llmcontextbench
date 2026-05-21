@@ -15,6 +15,7 @@ from ctxbench.ai.models.mock import MockModel
 from ctxbench.ai.models.openai import OpenAIModel
 from ctxbench.ai.runtime import MCPRuntime
 from ctxbench.ai.trace import TraceCollector
+from ctxbench.benchmark import executor as executor_module
 from ctxbench.benchmark.evaluation import _evaluate_judge, evaluate_run_result
 from ctxbench.benchmark.executor import execute_runspec
 from ctxbench.benchmark.models import (
@@ -25,6 +26,9 @@ from ctxbench.benchmark.models import (
     RunResult,
     RunSpec,
 )
+from ctxbench.dataset.errors import CapabilityUnavailableError, UnsupportedRepresentationError
+from ctxbench.dataset.package import DatasetMetadata
+from ctxbench.dataset.payloads import ContextPayload, EvidencePayload, TaskPayload
 from ctxbench.dataset.provider import DatasetProvider
 import json
 
@@ -116,7 +120,7 @@ def write_mock_dataset(root: Path) -> ExperimentDataset:
         json.dumps({"summary": "Researcher in software engineering.", "research": "Works with distributed systems."}),
         encoding="utf-8",
     )
-    return ExperimentDataset(root=str(root.resolve()))
+    return ExperimentDataset(root=str(root.resolve()), id="ctxbench/lattes", version="0.1.0")
 
 
 def test_dataset_provider_context_blocks_falls_back_to_instance_blocks_file(tmp_path):
@@ -204,6 +208,203 @@ class FakeLattesRuntime:
 
     def close(self) -> None:
         return None
+
+
+class FakeDatasetAdapter:
+    def __init__(
+        self,
+        *,
+        context_content: object = '{"answers": {"q_year": 2020}}',
+        tool_provider: object | None = None,
+        unsupported_context: bool = False,
+    ) -> None:
+        self.context_content = context_content
+        self._tool_provider = tool_provider
+        self.unsupported_context = unsupported_context
+        self.context_calls: list[tuple[str, str, str]] = []
+        self.tool_provider_calls = 0
+
+    def metadata(self) -> DatasetMetadata:
+        return DatasetMetadata(
+            name="ctxbench/fake-adapter",
+            description="Fake adapter for executor tests.",
+            domain="testing",
+            intended_uses="Unit tests",
+            limitations="None",
+            license_url=None,
+            citation_url=None,
+        )
+
+    def identity(self) -> str:
+        return "ctxbench/fake-adapter"
+
+    def version(self) -> str:
+        return "0.1.0"
+
+    def origin(self) -> str | None:
+        return None
+
+    def list_instance_ids(self) -> list[str]:
+        return ["cv-demo"]
+
+    def list_task_ids(self) -> list[str]:
+        return ["q_year"]
+
+    def get_task(self, task_id: str) -> TaskPayload:
+        return TaskPayload(task_id=task_id, statement="Question?")
+
+    def get_context(self, instance_id: str, task_id: str, representation: str) -> ContextPayload:
+        self.context_calls.append((instance_id, task_id, representation))
+        if self.unsupported_context:
+            raise UnsupportedRepresentationError("unsupported representation")
+        return ContextPayload(
+            role="context",
+            representation=representation,
+            content=self.context_content,
+        )
+
+    def get_evidence(self, instance_id: str, task_id: str) -> EvidencePayload:
+        return EvidencePayload(role="evidence", task={}, evidence={})
+
+    def capability_report(self) -> object:
+        return object()
+
+    def tool_provider(self) -> object | None:
+        self.tool_provider_calls += 1
+        return self._tool_provider
+
+
+class FakeRegistry:
+    def __init__(self, adapter: FakeDatasetAdapter) -> None:
+        self.adapter = adapter
+        self.resolved: list[object] = []
+
+    def resolve(self, dataset_ref: object) -> FakeDatasetAdapter:
+        self.resolved.append(dataset_ref)
+        return self.adapter
+
+
+def _runspec_for_executor(
+    dataset: ExperimentDataset,
+    *,
+    strategy: str = "inline",
+    provider: str = "recording",
+    params: dict[str, object] | None = None,
+) -> RunSpec:
+    return RunSpec.model_validate(
+        {
+            "trialId": "run-1",
+            "experimentId": "exp-1",
+            "dataset": dataset.model_dump(mode="json"),
+            "taskId": "q_year",
+            "question": "In which year did the researcher obtain their PhD?",
+            "questionTemplate": "In which year did the researcher obtain their PhD?",
+            "instanceId": "cv-demo",
+            "provider": provider,
+            "model": "recording-model",
+            "strategy": strategy,
+            "format": "json",
+            "repeatIndex": 1,
+            "params": params or {},
+            "trace": {"enabled": True},
+            "metadata": {
+                "canonicalId": f"exp-1|q_year|cv-demo|{provider}|recording-model|{strategy}|json|1",
+                "taskId": "q_year",
+                "instanceId": "cv-demo",
+                "provider": provider,
+                "modelName": "recording-model",
+                "strategy": strategy,
+                "format": "json",
+                "repeatIndex": 1,
+            },
+        }
+    )
+
+
+def test_execute_runspec_resolves_adapter_and_uses_get_context_for_inline(monkeypatch, tmp_path):
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter(context_content={"answers": {"q_year": 2020}})
+    registry = FakeRegistry(adapter)
+    monkeypatch.setattr(executor_module, "get_default_registry", lambda: registry)
+    engine = Engine()
+    model = RecordingModel()
+    engine._models["recording"] = model
+
+    result = execute_runspec(_runspec_for_executor(dataset), engine)
+
+    assert result.answer == "3"
+    assert registry.resolved == [result.dataset]
+    assert adapter.context_calls == [("cv-demo", "q_year", "json")]
+    assert model.last_request is not None
+    assert model.last_request.context == '{"answers": {"q_year": 2020}}'
+
+
+def test_execute_runspec_inline_metadata_uses_adapter_boundary_keys(monkeypatch, tmp_path):
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter()
+    monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
+    engine = Engine()
+    model = RecordingModel()
+    engine._models["recording"] = model
+
+    execute_runspec(_runspec_for_executor(dataset), engine)
+
+    assert model.last_request is not None
+    metadata = model.last_request.metadata
+    assert metadata["instance_id"] == "cv-demo"
+    assert metadata["context_representation"] == "json"
+    assert metadata["context_obtained"] is True
+    assert "context_path" not in metadata
+    assert "instance_dir" not in metadata
+
+
+def test_execute_runspec_inline_unsupported_representation_propagates(monkeypatch, tmp_path):
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter(unsupported_context=True)
+    monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
+
+    with pytest.raises(UnsupportedRepresentationError):
+        execute_runspec(_runspec_for_executor(dataset), Engine())
+
+
+@pytest.mark.parametrize("strategy_name", ["local_function", "local_mcp", "remote_mcp"])
+def test_execute_runspec_tool_strategies_use_tool_provider_without_context(monkeypatch, tmp_path, strategy_name):
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    service = FakeLattesRuntime()
+    adapter = FakeDatasetAdapter(tool_provider=service)
+    monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
+    engine = Engine()
+    model = RecordingModel()
+    engine._models["recording"] = model
+
+    result = execute_runspec(
+        _runspec_for_executor(
+            dataset,
+            strategy=strategy_name,
+            params={"mcp_server": {"server_url": "https://example.test/mcp"}},
+        ),
+        engine,
+    )
+
+    assert result.status == "success"
+    assert adapter.context_calls == []
+    assert adapter.tool_provider_calls == 1
+    assert model.last_request is not None
+    assert model.last_request.metadata["context_obtained"] is False
+    if strategy_name == "remote_mcp":
+        assert model.last_request.metadata["dataset_tool_provider"] is service
+        events = result.trace.aiTrace.get("events", [])
+        assert any(event["name"] == "strategy.remote_mcp.execute" for event in events)
+        assert not any(event["name"] == "strategy.local_mcp.execute" for event in events)
+
+
+def test_execute_runspec_tool_strategy_missing_provider_raises(monkeypatch, tmp_path):
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter(tool_provider=None)
+    monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
+
+    with pytest.raises(CapabilityUnavailableError):
+        execute_runspec(_runspec_for_executor(dataset, strategy="local_function"), Engine())
 
 
 def test_engine_inline_execution_records_prompt_trace_and_usage():

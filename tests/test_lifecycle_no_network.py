@@ -11,6 +11,7 @@ from ctxbench.commands.execute import execute_command
 from ctxbench.commands.export import export_command
 from ctxbench.commands.plan import plan_command
 from ctxbench.commands.status import status_command
+from ctxbench.dataset.errors import AdapterUnavailableError
 from ctxbench.dataset import acquisition as acquisition_module
 
 
@@ -401,7 +402,7 @@ def test_execute_rejects_missing_planned_materialization_without_fetching(
     _forbid_dataset_fetch(monkeypatch)
     trials_path = _write_missing_trials(tmp_path)
 
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(AdapterUnavailableError):
         execute_command(str(trials_path))
 
 

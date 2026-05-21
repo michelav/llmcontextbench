@@ -31,3 +31,8 @@
 - slice: S4
 - summary: Routed planning through the dataset adapter contract by adding resolve_for_planning, updating runspec generation to use DatasetPackage v0 methods, and resolving registered adapters in plan with a protocol fallback for unregistered local fixtures.
 - token_provenance: unavailable
+
+- event: slice-implemented
+- slice: S5
+- summary: Routed execution through adapter resolution, replaced inline context file access with get_context payloads, enforced tool_provider capabilities for tool-mediated strategies, and updated execution request metadata.
+- token_provenance: unavailable
