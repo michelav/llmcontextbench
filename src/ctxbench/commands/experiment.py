@@ -76,15 +76,15 @@ def expand_experiment(
 
     if experiment.artifacts.writeIndividualJson:
         for runspec in runspecs:
-            artifact_path = target_dir / runspec_filename(runspec.experimentId, runspec.runId)
-            logger.phase("WRITE", "Writing artifact", run=runspec.runId, path=artifact_path)
+            artifact_path = target_dir / runspec_filename(runspec.experimentId, runspec.trialId)
+            logger.phase("WRITE", "Writing artifact", run=runspec.trialId, path=artifact_path)
             write_json(artifact_path, runspec.to_persisted_artifact())
-            logger.phase("WRITE", "Artifact written", run=runspec.runId, path=artifact_path)
-            logger.phase("DONE", "Completed successfully", run=runspec.runId)
+            logger.phase("WRITE", "Artifact written", run=runspec.trialId, path=artifact_path)
+            logger.phase("DONE", "Completed successfully", run=runspec.trialId)
             progress_tracker.advance()
     else:
         for runspec in runspecs:
-            logger.phase("DONE", "RunSpec prepared", run=runspec.runId)
+            logger.phase("DONE", "TrialSpec prepared", run=runspec.trialId)
             progress_tracker.advance()
 
     if target_jsonl is not None:

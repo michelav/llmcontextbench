@@ -13,7 +13,7 @@ from ctxbench.benchmark.evaluation import (
     evaluation_from_judge_payload,
     judge_identifier,
 )
-from ctxbench.benchmark.models import EvaluationJudgeInfo, EvaluationRunResult, EvaluationTrace
+from ctxbench.benchmark.models import EvaluationJudgeInfo, EvaluationTrialResult, EvaluationTrace
 from ctxbench.util.fs import write_json
 
 
@@ -144,7 +144,7 @@ def retrieve_evaluation_batch(
     wait: bool = False,
     poll_interval: int = DEFAULT_BATCH_POLL_INTERVAL_SECONDS,
     client: Any | None = None,
-) -> tuple[dict[str, Any], list[EvaluationRunResult]]:
+) -> tuple[dict[str, Any], list[EvaluationTrialResult]]:
     if not jobs:
         raise ValueError("No evaluation jobs available for batch retrieval.")
     _ensure_single_batch_judge(jobs)
@@ -317,9 +317,9 @@ def _gemini_generation_config(job: EvaluationJob) -> dict[str, Any]:
     return config
 
 
-def _evaluation_results_from_batch(items: list[Any], jobs: list[EvaluationJob]) -> list[EvaluationRunResult]:
+def _evaluation_results_from_batch(items: list[Any], jobs: list[EvaluationJob]) -> list[EvaluationTrialResult]:
     jobs_by_custom_id = {job.custom_id: job for job in jobs}
-    evaluations: list[EvaluationRunResult] = []
+    evaluations: list[EvaluationTrialResult] = []
     for item in items:
         payload = _normalize(item)
         if not isinstance(payload, dict):
@@ -339,7 +339,7 @@ def _evaluation_results_from_batch(items: list[Any], jobs: list[EvaluationJob]) 
     return evaluations
 
 
-def _anthropic_evaluation_from_payload(job: EvaluationJob, payload: dict[str, Any], custom_id: str) -> EvaluationRunResult:
+def _anthropic_evaluation_from_payload(job: EvaluationJob, payload: dict[str, Any], custom_id: str) -> EvaluationTrialResult:
     result = payload.get("result")
     if not isinstance(result, dict):
         return _failed_evaluation(job, payload, "Batch result is missing a result payload.")
@@ -371,7 +371,7 @@ def _anthropic_evaluation_from_payload(job: EvaluationJob, payload: dict[str, An
     )
 
 
-def _openai_evaluation_from_payload(job: EvaluationJob, payload: dict[str, Any], custom_id: str) -> EvaluationRunResult:
+def _openai_evaluation_from_payload(job: EvaluationJob, payload: dict[str, Any], custom_id: str) -> EvaluationTrialResult:
     error = payload.get("error")
     if error:
         return _failed_evaluation(job, payload, "Batch request errored.")
@@ -406,7 +406,7 @@ def _openai_evaluation_from_payload(job: EvaluationJob, payload: dict[str, Any],
     )
 
 
-def _gemini_evaluation_from_payload(job: EvaluationJob, payload: dict[str, Any], custom_id: str) -> EvaluationRunResult:
+def _gemini_evaluation_from_payload(job: EvaluationJob, payload: dict[str, Any], custom_id: str) -> EvaluationTrialResult:
     error = payload.get("error")
     if error:
         return _failed_evaluation(job, payload, "Batch request errored.")
@@ -486,7 +486,7 @@ def _extract_gemini_response_text(response: dict[str, Any]) -> str:
     return "\n".join(text_parts).strip()
 
 
-def _failed_evaluation(job: EvaluationJob, raw_response: dict[str, Any], error: str) -> EvaluationRunResult:
+def _failed_evaluation(job: EvaluationJob, raw_response: dict[str, Any], error: str) -> EvaluationTrialResult:
     return evaluation_from_judge_payload(
         job,
         payload=None,
@@ -541,8 +541,8 @@ def _build_manifest(batch: Any, *, jobs: list[EvaluationJob], status: str) -> di
         "requests": [
             {
                 "customId": job.custom_id,
-                "trialId": job.result.runId,
-                "taskId": job.result.questionId,
+                "trialId": job.result.trialId,
+                "taskId": job.result.taskId,
                 "instanceId": job.result.instanceId,
             }
             for job in jobs

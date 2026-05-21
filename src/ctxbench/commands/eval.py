@@ -16,7 +16,7 @@ from ctxbench.benchmark.evaluation_batch import (
     retrieve_evaluation_batch,
     submit_evaluation_batch,
 )
-from ctxbench.benchmark.models import EvaluationModelConfig, ExperimentTrace, RunResult
+from ctxbench.benchmark.models import EvaluationModelConfig, ExperimentTrace, TrialResult
 from ctxbench.benchmark.selectors import RunSelector, matches_run_result
 from ctxbench.benchmark.results import (
     _resolve_eval_trace_ref,
@@ -36,7 +36,7 @@ def _trial_id(row: dict[str, Any]) -> str:
     return str(row.get("trialId", ""))
 
 
-def _load_responses(path: Path) -> list[RunResult]:
+def _load_responses(path: Path) -> list[TrialResult]:
     if not path.exists():
         raise FileNotFoundError(f"Responses file not found: {path}. Run 'ctxbench execute' first.")
     payloads = [dict(item) for item in read_jsonl(path)]
@@ -53,7 +53,7 @@ def _load_responses(path: Path) -> list[RunResult]:
         raise ValueError(
             "Responses file is missing context data. Re-run 'ctxbench execute' to regenerate."
         )
-    return [RunResult.model_validate(item) for item in payloads]
+    return [TrialResult.model_validate(item) for item in payloads]
 
 
 # ---------------------------------------------------------------------------
@@ -275,14 +275,14 @@ def eval_command(
     # Group pending runs by which judges they still need.
     # A run is pending if at least one selected judge hasn't voted for it yet.
     # Runs already marked as "skipped" (missing context blocks) are excluded unless --force.
-    groups: dict[tuple[str, ...], tuple[list[RunResult], list[EvaluationModelConfig]]] = {}
+    groups: dict[tuple[str, ...], tuple[list[TrialResult], list[EvaluationModelConfig]]] = {}
     for r in results:
-        if not force and r.runId in skipped_run_ids:
+        if not force and r.trialId in skipped_run_ids:
             continue
         if force:
             missing = judges
         else:
-            done = evaluated_judge_ids.get(r.runId, set())
+            done = evaluated_judge_ids.get(r.trialId, set())
             missing = [j for j in judges if judge_identifier(j) not in done]
         if not missing:
             continue
@@ -304,14 +304,14 @@ def eval_command(
     logger.progress = progress_tracker
     progress_tracker.start()
 
-    def _persist(result: RunResult, evaluated: Any) -> None:
+    def _persist(result: TrialResult, evaluated: Any) -> None:
         if evaluated is None:
             progress_tracker.advance()
             return
         item = evaluated.items[0] if evaluated.items else None
         is_skipped = item is not None and item.status == "skipped"
         if not is_skipped:
-            existing = votes_index.get(evaluated.runId)
+            existing = votes_index.get(evaluated.trialId)
             if item is not None and existing:
                 _merge_existing_votes(item.details, existing)
                 nonlocal has_duplicates
@@ -324,9 +324,9 @@ def eval_command(
             if votes:
                 append_jsonl(votes_path, votes)
         if is_skipped:
-            logger.phase("SKIP", "Evaluation skipped (missing context blocks)", run=evaluated.runId)
+            logger.phase("SKIP", "Evaluation skipped (missing context blocks)", run=evaluated.trialId)
         else:
-            logger.phase("WRITE", "Evaluation written", run=evaluated.runId)
+            logger.phase("WRITE", "Evaluation written", run=evaluated.trialId)
         progress_tracker.advance()
 
     if batch:
@@ -345,7 +345,7 @@ def eval_command(
             for jid in jids
         }
         if not force:
-            jobs = [j for j in jobs if (j.result.runId, judge_identifier(j.judge)) not in evaluated_pairs]
+            jobs = [j for j in jobs if (j.result.trialId, judge_identifier(j.judge)) not in evaluated_pairs]
         if not jobs:
             print("No pending evaluation jobs.")
             return 0
@@ -374,9 +374,9 @@ def eval_command(
         progress_tracker.total = len(batch_evaluations)
         progress_tracker.current = 0
         progress_tracker.start()
-        results_by_run_id = {r.runId: r for r in pending}
+        results_by_run_id = {r.trialId: r for r in pending}
         for evaluated in batch_evaluations:
-            source_result = results_by_run_id.get(evaluated.runId)
+            source_result = results_by_run_id.get(evaluated.trialId)
             if source_result is not None:
                 _persist(source_result, evaluated)
 

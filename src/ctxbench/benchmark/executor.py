@@ -9,19 +9,19 @@ from ctxbench.ai.cache import build_inline_prompt_cache_key
 from ctxbench.ai.engine import Engine
 from ctxbench.ai.models.base import AIRequest
 from ctxbench.ai.runtime import LocalFunctionRuntime, MCPRuntime
-from ctxbench.benchmark.models import EvaluationResult, RunResult, RunTiming, RunTrace, RunSpec
+from ctxbench.benchmark.models import EvaluationResult, TrialResult, RunTiming, TrialTrace, TrialSpec
 from ctxbench.dataset.errors import AdapterUnavailableError, CapabilityUnavailableError
 from ctxbench.dataset.package import DatasetPackage
 from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.util.clock import utc_now_iso
 
 
-def execute_runspec(runspec: RunSpec, engine: Engine) -> RunResult:
+def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
     adapter = _resolve_adapter(runspec)
     context = ""
     dataset_tool_provider: object | None = None
     if runspec.strategy == "inline":
-        context_payload = adapter.get_context(runspec.instanceId, runspec.questionId, runspec.format)
+        context_payload = adapter.get_context(runspec.instanceId, runspec.taskId, runspec.format)
         context = _context_to_text(context_payload.content)
     elif runspec.strategy in {"local_function", "local_mcp", "remote_mcp"}:
         dataset_tool_provider = adapter.tool_provider()
@@ -42,16 +42,16 @@ def execute_runspec(runspec: RunSpec, engine: Engine) -> RunResult:
         )
 
     request_metadata = {
-        "trialId": runspec.runId,
+        "trialId": runspec.trialId,
         "experimentId": runspec.experimentId,
-        "taskId": runspec.questionId,
+        "taskId": runspec.taskId,
         "instanceId": runspec.instanceId,
         "phase": "execution",
         "format": runspec.format,
         "provider": runspec.provider,
         "instance_id": runspec.instanceId,
         "lattes_id": runspec.instanceId,
-        "question_tags": list(runspec.questionTags),
+        "task_tags": list(runspec.taskTags),
         "validation_type": runspec.validationType,
         "context_representation": runspec.format,
         "context_obtained": runspec.strategy == "inline",
@@ -89,7 +89,7 @@ def execute_runspec(runspec: RunSpec, engine: Engine) -> RunResult:
     error_message = ai_result.error or ("Model returned empty answer" if is_empty_answer else None)
     run_status = "error" if error_message is not None else "success"
 
-    trace = RunTrace()
+    trace = TrialTrace()
     if runspec.trace.enabled:
         trace.aiTrace = ai_result.trace
         if runspec.trace.save_tool_calls:
@@ -110,16 +110,16 @@ def execute_runspec(runspec: RunSpec, engine: Engine) -> RunResult:
         ai_trace=trace.aiTrace,
         strategy=runspec.strategy,
     )
-    result = RunResult(
-        runId=runspec.runId,
+    result = TrialResult(
+        trialId=runspec.trialId,
         experimentId=runspec.experimentId,
         dataset=runspec.dataset,
-        questionId=runspec.questionId,
+        taskId=runspec.taskId,
         question=runspec.question,
-        questionTemplate=runspec.questionTemplate,
-        questionTags=list(runspec.questionTags),
+        taskTemplate=runspec.taskTemplate,
+        taskTags=list(runspec.taskTags),
         validationType=runspec.validationType,
-        contextBlock=list(runspec.contextBlock),
+        contextBlocks=list(runspec.contextBlocks),
         parameters=dict(runspec.parameters),
         instanceId=runspec.instanceId,
         provider=runspec.provider,
@@ -129,7 +129,7 @@ def execute_runspec(runspec: RunSpec, engine: Engine) -> RunResult:
         format=runspec.format,
         repeatIndex=runspec.repeatIndex,
         outputRoot=runspec.outputRoot,
-        answer=ai_result.answer,
+        response=ai_result.answer,
         status=run_status,
         errorMessage=error_message,
         timing=RunTiming(
@@ -146,7 +146,7 @@ def execute_runspec(runspec: RunSpec, engine: Engine) -> RunResult:
     return result
 
 
-def _resolve_adapter(runspec: RunSpec) -> DatasetPackage:
+def _resolve_adapter(runspec: TrialSpec) -> DatasetPackage:
     try:
         return get_default_registry().resolve(runspec.dataset)
     except AdapterUnavailableError as exc:
@@ -162,7 +162,7 @@ def _context_to_text(content: object) -> str:
     return json.dumps(content)
 
 
-def _build_tool_runtime_factories(runspec: RunSpec, service: object) -> dict[str, object]:
+def _build_tool_runtime_factories(runspec: TrialSpec, service: object) -> dict[str, object]:
     tool_runtime_factories: dict[str, object] = {}
     if runspec.strategy == "local_function":
         tool_runtime_factories["local_function"] = lambda: LocalFunctionRuntime(service)

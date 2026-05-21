@@ -324,7 +324,7 @@ def test_plan_writes_trials_with_scope_and_target_fields(tmp_path):
     assert first["instanceId"] == "cv_demo"
     assert first["modelId"] == "mock"
     assert first["validationType"] == "judge"
-    assert first["contextBlock"] in (["summary"], ["summary", "research"])
+    assert first["contextBlocks"] in (["summary"], ["summary", "research"])
     assert "dataset" in first
     summary = next(row for row in rows if row["taskId"] == "q_summary")
     assert summary["question"] == "Summarize the main research areas for CV Demo."
@@ -691,8 +691,8 @@ def test_eval_writes_qualitative_outputs_and_summary(tmp_path, monkeypatch):
     judge_votes = _jsonl_rows(trials_path.parent / "judge_votes.jsonl")
     assert len(judge_votes) == 2
     summary = json.loads((trials_path.parent / "evals-summary.json").read_text(encoding="utf-8"))
-    assert len(summary["questions"]) == 2
-    judge_summary = next(item for item in summary["questions"] if item["taskId"] == "q_summary")
+    assert len(summary["tasks"]) == 2
+    judge_summary = next(item for item in summary["tasks"] if item["taskId"] == "q_summary")
     assert judge_summary["taskId"] == "q_summary"
     assert judge_summary["trialId"]
 

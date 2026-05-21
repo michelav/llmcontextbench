@@ -471,9 +471,9 @@ class Experiment(BaseModel):
             raise ValueError(f"unknown strategy: {joined}")
 
 
-class RunMetadata(BaseModel):
+class TrialMetadata(BaseModel):
     canonicalId: str
-    questionId: str
+    taskId: str
     instanceId: str
     provider: str
     modelId: str | None = None
@@ -481,36 +481,37 @@ class RunMetadata(BaseModel):
     strategy: str
     format: str
     repeatIndex: int
-    questionTags: list[str] = Field(default_factory=list)
+    taskTags: list[str] = Field(default_factory=list)
     validationType: str | None = None
     parameters: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
-    def model_validate(cls, data: Any) -> "RunMetadata":
+    def model_validate(cls, data: Any) -> "TrialMetadata":
         if isinstance(data, cls):
             return data
         if not isinstance(data, dict):
-            raise ValidationError("RunMetadata requires an object input.")
+            raise ValidationError("TrialMetadata requires an object input.")
         payload = dict(data)
         if "questionId" in payload:
-            raise ValueError("Public RunMetadata input must use 'taskId', not 'questionId'.")
-        if "taskId" in payload:
-            payload["questionId"] = payload.pop("taskId")
+            raise ValueError("Public TrialMetadata input must use 'taskId', not 'questionId'.")
         return super().model_validate(payload)
 
 
-class RunSpec(BaseModel):
+RunMetadata = TrialMetadata
+
+
+class TrialSpec(BaseModel):
     id: str
-    runId: str
+    trialId: str
     experimentId: str
     dataset: DatasetProvenance
     experimentPath: str | None = None
-    questionId: str
+    taskId: str
     question: str = ""
-    questionTemplate: str | None = None
-    questionTags: list[str] = Field(default_factory=list)
+    taskTemplate: str | None = None
+    taskTags: list[str] = Field(default_factory=list)
     validationType: str | None = None
-    contextBlock: list[str] = Field(default_factory=list)
+    contextBlocks: list[str] = Field(default_factory=list)
     parameters: dict[str, Any] = Field(default_factory=dict)
     instanceId: str
     provider: str
@@ -524,23 +525,19 @@ class RunSpec(BaseModel):
     evaluationEnabled: bool = False
     trace: ExperimentTrace = Field(default_factory=ExperimentTrace)
     artifacts: ExperimentArtifacts = Field(default_factory=ExperimentArtifacts)
-    metadata: RunMetadata
+    metadata: TrialMetadata
 
     @classmethod
-    def model_validate(cls, data: Any) -> "RunSpec":
+    def model_validate(cls, data: Any) -> "TrialSpec":
         if isinstance(data, cls):
             return data
         if not isinstance(data, dict):
-            raise ValidationError("RunSpec requires an object input.")
+            raise ValidationError("TrialSpec requires an object input.")
         payload = dict(data)
         if "runId" in payload:
-            raise ValueError("Public RunSpec input must use 'trialId', not 'runId'.")
+            raise ValueError("Public TrialSpec input must use 'trialId', not 'runId'.")
         if "questionId" in payload:
-            raise ValueError("Public RunSpec input must use 'taskId', not 'questionId'.")
-        if "trialId" in payload:
-            payload["runId"] = payload.pop("trialId")
-        if "taskId" in payload:
-            payload["questionId"] = payload.pop("taskId")
+            raise ValueError("Public TrialSpec input must use 'taskId', not 'questionId'.")
         strategy = payload.get("strategy")
         if isinstance(strategy, str) and strategy == "mcp":
             raise ValueError("unknown strategy: mcp")
@@ -549,13 +546,13 @@ class RunSpec(BaseModel):
         if "instanceId" not in payload and "contextId" in payload:
             payload["instanceId"] = payload.get("contextId")
         original_id = str(payload.get("id") or "")
-        run_id = str(payload.get("runId") or payload.get("id") or "")
-        payload["runId"] = run_id
+        run_id = str(payload.get("trialId") or payload.get("id") or "")
+        payload["trialId"] = run_id
         payload["id"] = run_id
         if "metadata" not in payload:
             payload["metadata"] = {
                 "canonicalId": original_id or run_id,
-                "taskId": payload.get("questionId", ""),
+                "taskId": payload.get("taskId", ""),
                 "instanceId": payload.get("instanceId", payload.get("contextId", "")),
                 "provider": payload.get("provider", ""),
                 "modelId": payload.get("modelId"),
@@ -565,9 +562,9 @@ class RunSpec(BaseModel):
                 "repeatIndex": payload.get("repeatIndex", 1),
                 "parameters": payload.get("parameters", {}),
             }
-        validated_metadata = RunMetadata.model_validate(payload["metadata"])
+        validated_metadata = TrialMetadata.model_validate(payload["metadata"])
         payload["metadata"] = validated_metadata
-        payload.setdefault("questionTags", validated_metadata.questionTags)
+        payload.setdefault("taskTags", validated_metadata.taskTags)
         payload.setdefault("validationType", validated_metadata.validationType)
         payload.setdefault("parameters", validated_metadata.parameters)
         payload.setdefault("modelId", validated_metadata.modelId or payload.get("modelName"))
@@ -576,11 +573,11 @@ class RunSpec(BaseModel):
 
     def to_persisted_artifact(self) -> dict[str, Any]:
         return {
-            "trialId": self.runId,
+            "trialId": self.trialId,
             "experimentId": self.experimentId,
-            "taskId": self.questionId,
+            "taskId": self.taskId,
             "question": self.question,
-            "questionTemplate": self.questionTemplate,
+            "taskTemplate": self.taskTemplate,
             "dataset": self.dataset.model_dump(mode="json"),
             "instanceId": self.instanceId,
             "model": self.modelName,
@@ -594,13 +591,13 @@ class RunSpec(BaseModel):
             "evaluationEnabled": self.evaluationEnabled,
             "trace": self.trace.model_dump(mode="json"),
             "artifacts": self.artifacts.model_dump(mode="json"),
-            "questionTags": list(self.questionTags),
+            "taskTags": list(self.taskTags),
             "validationType": self.validationType,
-            "contextBlock": list(self.contextBlock),
+            "contextBlocks": list(self.contextBlocks),
             "parameters": dict(self.parameters),
             "metadata": {
                 "canonicalId": self.metadata.canonicalId,
-                "taskId": self.metadata.questionId,
+                "taskId": self.metadata.taskId,
                 "instanceId": self.metadata.instanceId,
                 "provider": self.metadata.provider,
                 "modelId": self.metadata.modelId,
@@ -608,11 +605,14 @@ class RunSpec(BaseModel):
                 "strategy": self.metadata.strategy,
                 "format": self.metadata.format,
                 "repeatIndex": self.metadata.repeatIndex,
-                "questionTags": list(self.metadata.questionTags),
+                "taskTags": list(self.metadata.taskTags),
                 "validationType": self.metadata.validationType,
                 "parameters": dict(self.metadata.parameters),
             },
         }
+
+
+RunSpec = TrialSpec
 
 
 class RunTiming(BaseModel):
@@ -621,13 +621,16 @@ class RunTiming(BaseModel):
     durationMs: int
 
 
-class RunTrace(BaseModel):
+class TrialTrace(BaseModel):
     aiTrace: dict[str, Any] = Field(default_factory=dict)
     toolCalls: list[dict[str, Any]] = Field(default_factory=list)
     nativeMcp: dict[str, Any] = Field(default_factory=dict)
     serverMcp: list[dict[str, Any]] = Field(default_factory=list)
     rawResponse: Any | None = None
     error: str | None = None
+
+
+RunTrace = TrialTrace
 
 
 class EvaluationResult(BaseModel):
@@ -638,16 +641,16 @@ class EvaluationResult(BaseModel):
     evaluator: str | None = None
 
 
-class RunResult(BaseModel):
-    runId: str
+class TrialResult(BaseModel):
+    trialId: str
     experimentId: str
     dataset: DatasetProvenance
-    questionId: str
+    taskId: str
     question: str = ""
-    questionTemplate: str | None = None
-    questionTags: list[str] = Field(default_factory=list)
+    taskTemplate: str | None = None
+    taskTags: list[str] = Field(default_factory=list)
     validationType: str | None = None
-    contextBlock: list[str] = Field(default_factory=list)
+    contextBlocks: list[str] = Field(default_factory=list)
     parameters: dict[str, Any] = Field(default_factory=dict)
     instanceId: str
     provider: str
@@ -657,36 +660,30 @@ class RunResult(BaseModel):
     format: str
     repeatIndex: int
     outputRoot: str | None = None
-    answer: str
+    response: str
     status: str
     errorMessage: str | None = None
     timing: RunTiming
     usage: dict[str, Any] = Field(default_factory=dict)
     metricsSummary: dict[str, Any] = Field(default_factory=dict)
-    trace: RunTrace = Field(default_factory=RunTrace)
+    trace: TrialTrace = Field(default_factory=TrialTrace)
     traceRef: str | None = None
     evaluation: EvaluationResult = Field(default_factory=EvaluationResult)
-    metadata: RunMetadata
+    metadata: TrialMetadata
 
     @classmethod
-    def model_validate(cls, data: Any) -> "RunResult":
+    def model_validate(cls, data: Any) -> "TrialResult":
         if isinstance(data, cls):
             return data
         if not isinstance(data, dict):
-            raise ValidationError("RunResult requires an object input.")
+            raise ValidationError("TrialResult requires an object input.")
         payload = dict(data)
         if "runId" in payload:
-            raise ValueError("Public RunResult input must use 'trialId', not 'runId'.")
+            raise ValueError("Public TrialResult input must use 'trialId', not 'runId'.")
         if "questionId" in payload:
-            raise ValueError("Public RunResult input must use 'taskId', not 'questionId'.")
+            raise ValueError("Public TrialResult input must use 'taskId', not 'questionId'.")
         if "answer" in payload:
-            raise ValueError("Public RunResult input must use 'response', not 'answer'.")
-        if "trialId" in payload:
-            payload["runId"] = payload.pop("trialId")
-        if "taskId" in payload:
-            payload["questionId"] = payload.pop("taskId")
-        if "response" in payload:
-            payload["answer"] = payload.pop("response")
+            raise ValueError("Public TrialResult input must use 'response', not 'answer'.")
         strategy = payload.get("strategy")
         if isinstance(strategy, str) and strategy == "mcp":
             raise ValueError("unknown strategy: mcp")
@@ -695,12 +692,12 @@ class RunResult(BaseModel):
         if "instanceId" not in payload and "contextId" in payload:
             payload["instanceId"] = payload.get("contextId")
         original_id = str(payload.get("id") or "")
-        run_id = str(payload.get("runId") or payload.get("id") or "")
-        payload["runId"] = run_id
+        run_id = str(payload.get("trialId") or payload.get("id") or "")
+        payload["trialId"] = run_id
         if "metadata" not in payload:
             payload["metadata"] = {
                 "canonicalId": original_id or run_id,
-                "taskId": payload.get("questionId", ""),
+                "taskId": payload.get("taskId", ""),
                 "instanceId": payload.get("instanceId", payload.get("contextId", "")),
                 "provider": payload.get("provider", ""),
                 "modelId": payload.get("modelId"),
@@ -710,9 +707,9 @@ class RunResult(BaseModel):
                 "repeatIndex": payload.get("repeatIndex", 1),
                 "parameters": payload.get("parameters", {}),
             }
-        validated_metadata = RunMetadata.model_validate(payload["metadata"])
+        validated_metadata = TrialMetadata.model_validate(payload["metadata"])
         payload["metadata"] = validated_metadata
-        payload.setdefault("questionTags", validated_metadata.questionTags)
+        payload.setdefault("taskTags", validated_metadata.taskTags)
         payload.setdefault("validationType", validated_metadata.validationType)
         payload.setdefault("parameters", validated_metadata.parameters)
         payload.setdefault("modelId", validated_metadata.modelId or payload.get("modelName"))
@@ -721,11 +718,11 @@ class RunResult(BaseModel):
 
     def to_persisted_artifact(self, *, trace_ref: str | None = None) -> dict[str, Any]:
         return {
-            "trialId": self.runId,
+            "trialId": self.trialId,
             "experimentId": self.experimentId,
-            "taskId": self.questionId,
+            "taskId": self.taskId,
             "question": self.question,
-            "questionTemplate": self.questionTemplate,
+            "taskTemplate": self.taskTemplate,
             "dataset": self.dataset.model_dump(mode="json"),
             "instanceId": self.instanceId,
             "provider": self.provider,
@@ -736,19 +733,19 @@ class RunResult(BaseModel):
             "repeatIndex": self.repeatIndex,
             "outputRoot": self.outputRoot,
             "status": self.status,
-            "response": self.answer,
+            "response": self.response,
             "errorMessage": self.errorMessage,
             "timing": self.timing.model_dump(mode="json"),
             "usage": self.usage,
             "metricsSummary": self.metricsSummary,
             "traceRef": trace_ref,
-            "questionTags": list(self.questionTags),
+            "taskTags": list(self.taskTags),
             "validationType": self.validationType,
-            "contextBlock": list(self.contextBlock),
+            "contextBlocks": list(self.contextBlocks),
             "parameters": dict(self.parameters),
             "metadata": {
                 "canonicalId": self.metadata.canonicalId,
-                "taskId": self.metadata.questionId,
+                "taskId": self.metadata.taskId,
                 "instanceId": self.metadata.instanceId,
                 "provider": self.metadata.provider,
                 "modelId": self.metadata.modelId,
@@ -756,11 +753,14 @@ class RunResult(BaseModel):
                 "strategy": self.metadata.strategy,
                 "format": self.metadata.format,
                 "repeatIndex": self.metadata.repeatIndex,
-                "questionTags": list(self.metadata.questionTags),
+                "taskTags": list(self.metadata.taskTags),
                 "validationType": self.metadata.validationType,
                 "parameters": dict(self.metadata.parameters),
             },
         }
+
+
+RunResult = TrialResult
 
 
 class EvaluationTrace(BaseModel):
@@ -782,9 +782,9 @@ class EvaluationJudgeInfo(BaseModel):
 
 class EvaluationItemResult(BaseModel):
     experimentId: str
-    runId: str
+    trialId: str
     dataset: DatasetProvenance
-    questionId: str
+    taskId: str
     instanceId: str | None = None
     question: str
     evaluationMode: str
@@ -800,7 +800,7 @@ class EvaluationItemResult(BaseModel):
     executionToolCalls: int | None = None
     executionFunctionCalls: int | None = None
     executionLlmCalls: int | None = None
-    questionTags: list[str] = Field(default_factory=list)
+    taskTags: list[str] = Field(default_factory=list)
     evaluationJudgeUsed: bool = False
     evaluationJudgeRole: str | None = None
     evaluationJudgeProvider: str | None = None
@@ -809,7 +809,7 @@ class EvaluationItemResult(BaseModel):
     evaluationOutputTokens: int | None = None
     evaluationDurationMs: int | None = None
     evaluationTrace: EvaluationTrace = Field(default_factory=EvaluationTrace)
-    contextBlock: list[str] | None = None
+    contextBlocks: list[str] | None = None
 
     @classmethod
     def model_validate(cls, data: Any) -> "EvaluationItemResult":
@@ -839,11 +839,11 @@ class EvaluationItemResult(BaseModel):
             else None
         )
         return {
-            "trialId": self.runId,
+            "trialId": self.trialId,
             "experimentId": self.experimentId,
             "dataset": self.dataset.model_dump(mode="json"),
             "instanceId": self.instanceId,
-            "taskId": self.questionId,
+            "taskId": self.taskId,
             "strategy": self.executionStrategy,
             "status": eval_status,
             "evaluationMethod": self.evaluationMethod,
@@ -854,7 +854,7 @@ class EvaluationItemResult(BaseModel):
             "evaluationOutputTokens": self.evaluationOutputTokens,
             "evaluationTotalTokens": eval_total,
             "evaluationDurationMs": self.evaluationDurationMs,
-            "contextBlocks": self.contextBlock if self.contextBlock else None,
+            "contextBlocks": self.contextBlocks if self.contextBlocks else None,
         }
 
     def to_judge_votes(self, *, trace_ref: str | None = None) -> list[dict[str, Any]]:
@@ -872,11 +872,11 @@ class EvaluationItemResult(BaseModel):
             if inp is not None or out is not None:
                 total_tokens = (inp or 0) + (out or 0)
             votes.append({
-                "trialId": self.runId,
+                "trialId": self.trialId,
                 "experimentId": self.experimentId,
                 "dataset": self.dataset.model_dump(mode="json"),
                 "instanceId": self.instanceId,
-                "taskId": self.questionId,
+                "taskId": self.taskId,
                 "strategy": self.executionStrategy,
                 "judgeId": judge.get("judgeId"),
                 "provider": judge.get("provider"),
@@ -906,34 +906,30 @@ class EvaluationRunSummary(BaseModel):
     itemCount: int = 0
 
 
-class EvaluationRunResult(BaseModel):
+class EvaluationTrialResult(BaseModel):
     experimentId: str
-    runId: str
+    trialId: str
     dataset: DatasetProvenance
-    questionId: str
+    taskId: str
     items: list[EvaluationItemResult] = Field(default_factory=list)
     summary: EvaluationRunSummary = Field(default_factory=EvaluationRunSummary)
-    metadata: RunMetadata
+    metadata: TrialMetadata
 
     @classmethod
-    def model_validate(cls, data: Any) -> "EvaluationRunResult":
+    def model_validate(cls, data: Any) -> "EvaluationTrialResult":
         if isinstance(data, cls):
             return data
         if not isinstance(data, dict):
-            raise ValidationError("EvaluationRunResult requires an object input.")
+            raise ValidationError("EvaluationTrialResult requires an object input.")
         payload = dict(data)
         if "runId" in payload:
-            raise ValueError("Public EvaluationRunResult input must use 'trialId', not 'runId'.")
+            raise ValueError("Public EvaluationTrialResult input must use 'trialId', not 'runId'.")
         if "questionId" in payload:
-            raise ValueError("Public EvaluationRunResult input must use 'taskId', not 'questionId'.")
-        if "trialId" in payload:
-            payload["runId"] = payload.pop("trialId")
-        if "taskId" in payload:
-            payload["questionId"] = payload.pop("taskId")
+            raise ValueError("Public EvaluationTrialResult input must use 'taskId', not 'questionId'.")
         if "metadata" not in payload:
             payload["metadata"] = {
-                "canonicalId": str(payload.get("runId", "")),
-                "taskId": payload.get("questionId", ""),
+                "canonicalId": str(payload.get("trialId", "")),
+                "taskId": payload.get("taskId", ""),
                 "instanceId": "",
                 "provider": "",
                 "modelId": None,
@@ -943,13 +939,16 @@ class EvaluationRunResult(BaseModel):
                 "repeatIndex": 1,
             }
         else:
-            payload["metadata"] = RunMetadata.model_validate(payload["metadata"])
+            payload["metadata"] = TrialMetadata.model_validate(payload["metadata"])
         payload = _coerce_dataset_provenance(payload)
         return super().model_validate(payload)
+
+
+EvaluationRunResult = EvaluationTrialResult
 
 
 class EvaluationBatchSummary(BaseModel):
     experimentId: str
     runCount: int = 0
     itemCount: int = 0
-    questions: list[dict[str, Any]] = Field(default_factory=list)
+    tasks: list[dict[str, Any]] = Field(default_factory=list)

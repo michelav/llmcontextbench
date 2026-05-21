@@ -10,7 +10,7 @@ from ctxbench.benchmark.checkpoints import (
     write_completed_run_ids,
 )
 from ctxbench.benchmark.executor import execute_runspec
-from ctxbench.benchmark.models import RunSpec
+from ctxbench.benchmark.models import TrialSpec
 from ctxbench.benchmark.selectors import RunSelector, matches_runspec
 from ctxbench.benchmark.results import (
     append_result_jsonl,
@@ -42,15 +42,15 @@ def _artifact_root(source: Path) -> Path:
     return source.parent
 
 
-def load_runspecs(path: str) -> tuple[list[RunSpec], str | None]:
+def load_runspecs(path: str) -> tuple[list[TrialSpec], str | None]:
     payloads = _read_runspec_payloads(path)
     if not payloads:
         return [], None
     if "dataset" not in payloads[0]:
         raise ValueError(
-            "RunSpec artifacts are incomplete. Re-expand the experiment to generate self-contained runspec files."
+            "TrialSpec artifacts are incomplete. Re-expand the experiment to generate self-contained runspec files."
         )
-    runspecs = [RunSpec.model_validate(payload) for payload in payloads]
+    runspecs = [TrialSpec.model_validate(payload) for payload in payloads]
     experiment_path = runspecs[0].experimentPath if runspecs else None
     return runspecs, experiment_path
 
@@ -59,9 +59,9 @@ def _existing_run_ids_in_jsonl(path: Path | None) -> set[str]:
     if path is None or not path.exists():
         return set()
     return {
-        str(item.get("runId") or "")
+        str(item.get("trialId") or "")
         for item in read_jsonl(path)
-        if isinstance(item.get("runId"), str) and str(item.get("runId"))
+        if isinstance(item.get("trialId"), str) and str(item.get("trialId"))
     }
 
 
@@ -74,18 +74,18 @@ def _existing_run_ids_in_result_dir(path: Path) -> set[str]:
             payload = load_json(item)
         except Exception:
             continue
-        run_id = payload.get("runId")
+        run_id = payload.get("trialId")
         if isinstance(run_id, str) and run_id:
             run_ids.add(run_id)
     return run_ids
 
 
-def _result_path(target_dir: Path, runspec: RunSpec) -> Path:
-    return target_dir / runresult_filename(runspec.experimentId, runspec.runId)
+def _result_path(target_dir: Path, runspec: TrialSpec) -> Path:
+    return target_dir / runresult_filename(runspec.experimentId, runspec.trialId)
 
 
 def _backfill_result_jsonl(
-    runspecs: list[RunSpec],
+    runspecs: list[TrialSpec],
     *,
     target_dir: Path,
     target_jsonl: Path | None,
@@ -94,7 +94,7 @@ def _backfill_result_jsonl(
     if target_jsonl is None:
         return
     for runspec in runspecs:
-        if runspec.runId in existing_run_ids:
+        if runspec.trialId in existing_run_ids:
             continue
         result_path = _result_path(target_dir, runspec)
         if not result_path.exists():
@@ -106,7 +106,7 @@ def _backfill_result_jsonl(
             target_root=target_jsonl.parent,
         )
         append_jsonl(target_jsonl, [payload])
-        existing_run_ids.add(runspec.runId)
+        existing_run_ids.add(runspec.trialId)
 
 
 def _copy_trace_payload(payload: dict[str, Any], *, source_root: Path, target_root: Path) -> None:
@@ -127,7 +127,7 @@ def _rewrite_jsonl_with_run_payload(
 ) -> None:
     existing = []
     if path.exists():
-        existing = [row for row in read_jsonl(path) if str(row.get("runId") or "") != run_id]
+        existing = [row for row in read_jsonl(path) if str(row.get("trialId") or "") != run_id]
     existing.append(payload)
     write_jsonl(path, existing)
 
@@ -206,9 +206,9 @@ def run_command(
     try:
         for runspec in runspecs:
             result_path = _result_path(target_dir, runspec)
-            if runspec.runId in completed_run_ids and not force:
+            if runspec.trialId in completed_run_ids and not force:
                 skipped_runs += 1
-                logger.phase("SKIP", "Run already persisted; skipping execution", run=runspec.runId, path=result_path)
+                logger.phase("SKIP", "Run already persisted; skipping execution", run=runspec.trialId, path=result_path)
                 progress_tracker.advance()
                 completed_runs += 1
                 continue
@@ -216,55 +216,55 @@ def run_command(
             logger.phase(
                 "EXECUTE",
                 "Starting answer generation",
-                run=runspec.runId,
+                run=runspec.trialId,
                 model=model_name,
-                question=runspec.questionId,
+                question=runspec.taskId,
             )
             result = execute_runspec(runspec, engine)
             logger.phase(
                 "EXECUTE",
                 "Answer generation completed",
-                run=runspec.runId,
+                run=runspec.trialId,
                 model=model_name,
-                question=runspec.questionId,
+                question=runspec.taskId,
             )
             if write_individual_json:
                 if force and result_path.exists():
-                    logger.phase("WRITE", "Overwriting existing run artifact", run=result.runId, path=result_path)
-                logger.phase("WRITE", "Writing artifact", run=result.runId, path=result_path)
+                    logger.phase("WRITE", "Overwriting existing run artifact", run=result.trialId, path=result_path)
+                logger.phase("WRITE", "Writing artifact", run=result.trialId, path=result_path)
                 written_path = write_result_file(
                     result,
                     target_dir,
                     artifact_root=file_artifact_root,
                     write_trace=write_traces,
                 )
-                logger.phase("WRITE", "Artifact written", run=result.runId, path=written_path)
+                logger.phase("WRITE", "Artifact written", run=result.trialId, path=written_path)
             if target_jsonl is not None:
                 if force:
                     _rewrite_jsonl_with_run_payload(
                         path=target_jsonl,
-                        run_id=result.runId,
+                        run_id=result.trialId,
                         payload=serialize_run_result(result, artifact_root=jsonl_artifact_root, write_trace=write_traces),
                     )
                 else:
                     append_result_jsonl(result, target_jsonl, artifact_root=jsonl_artifact_root, write_trace=write_traces)
-                completed_run_ids.add(result.runId)
+                completed_run_ids.add(result.trialId)
                 write_completed_run_ids(
                     checkpoint_file,
                     experiment_id=experiment_id,
                     kind="runs",
                     completed_run_ids=completed_run_ids,
                 )
-                logger.phase("WRITE", "Artifact written", run=result.runId, path=target_jsonl)
+                logger.phase("WRITE", "Artifact written", run=result.trialId, path=target_jsonl)
             else:
-                completed_run_ids.add(result.runId)
+                completed_run_ids.add(result.trialId)
                 write_completed_run_ids(
                     checkpoint_file,
                     experiment_id=experiment_id,
                     kind="runs",
                     completed_run_ids=completed_run_ids,
                 )
-            logger.phase("DONE", "Completed successfully", run=result.runId)
+            logger.phase("DONE", "Completed successfully", run=result.trialId)
             progress_tracker.advance()
             completed_runs += 1
     finally:

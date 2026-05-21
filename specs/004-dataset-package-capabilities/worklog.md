@@ -52,6 +52,11 @@
 - summary: Updated architecture documentation for Adapter Registry v0, adapter boundaries, format vocabulary, artifact-only export/status behavior, and trace metadata contracts; added artifact-only unavailable-dataset fixtures and provider-free export/status validation.
 - token_provenance: unavailable
 
+- event: slice-implemented
+- slice: S9
+- summary: Renamed internal benchmark trial/task model classes and fields to canonical vocabulary, normalized persisted trial/response context block keys to `contextBlocks`, updated lifecycle callers/tests/fixtures, and documented the artifact key rename.
+- token_provenance: unavailable
+
 - event: audit-run
 - slice: final-audit
 - summary: Ran full provider-free validation (`pytest tests/ -x --ignore=tests/fixtures`) with 246 passing tests; import smoke check for executor/evaluation exited 0. Spec Kit prerequisite helper was not used as a gate because the current branch name `feat/dataset-boundaries-capabilities` does not match its numeric feature-branch pattern, but the explicit Spec 004 task list and complete checklist were used.

@@ -3,12 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Iterable
 
-from ctxbench.benchmark.models import EvaluationRunResult, EvaluationTrace, RunResult, RunTrace
+from ctxbench.benchmark.models import EvaluationTrialResult, EvaluationTrace, TrialResult, TrialTrace
 from ctxbench.util.fs import load_json, write_json
 from ctxbench.util.jsonl import append_jsonl, write_jsonl
 
 
-def _has_trace_payload(trace: RunTrace) -> bool:
+def _has_trace_payload(trace: TrialTrace) -> bool:
     return bool(
         trace.aiTrace
         or trace.toolCalls
@@ -40,30 +40,30 @@ def _write_trace_payload(
     return relative_path.as_posix()
 
 
-def write_trace_file(result: RunResult, artifact_root: str | Path) -> str | None:
+def write_trace_file(result: TrialResult, artifact_root: str | Path) -> str | None:
     if not _has_trace_payload(result.trace):
         return None
     payload = {
         "experimentId": result.experimentId,
-        "trialId": result.runId,
-        "taskId": result.questionId,
+        "trialId": result.trialId,
+        "taskId": result.taskId,
         "task": "responses",
         "trace": result.trace.model_dump(mode="json"),
     }
     return _write_trace_payload(
         artifact_root=artifact_root,
         task="executions",
-        run_id=result.runId,
+        run_id=result.trialId,
         payload=payload,
     )
 
 
-def write_evaluation_trace_file(result: EvaluationRunResult, artifact_root: str | Path) -> str | None:
+def write_evaluation_trace_file(result: EvaluationTrialResult, artifact_root: str | Path) -> str | None:
     item = result.items[0] if result.items else None
     if item is None or not _has_evaluation_trace_payload(item.evaluationTrace):
         return None
     root = Path(artifact_root)
-    relative_path = Path("traces") / "evals" / f"{result.runId}.json"
+    relative_path = Path("traces") / "evals" / f"{result.trialId}.json"
     existing_file = root / relative_path
     new_trace = item.evaluationTrace.model_dump(mode="json")
     if existing_file.exists():
@@ -85,8 +85,8 @@ def write_evaluation_trace_file(result: EvaluationRunResult, artifact_root: str 
             pass
     payload = {
         "experimentId": result.experimentId,
-        "trialId": result.runId,
-        "taskId": result.questionId,
+        "trialId": result.trialId,
+        "taskId": result.taskId,
         "task": "evals",
         "trace": new_trace,
     }
@@ -95,7 +95,7 @@ def write_evaluation_trace_file(result: EvaluationRunResult, artifact_root: str 
 
 
 def serialize_run_result(
-    result: RunResult,
+    result: TrialResult,
     *,
     artifact_root: str | Path,
     write_trace: bool = True,
@@ -106,7 +106,7 @@ def serialize_run_result(
 
 
 def _resolve_eval_trace_ref(
-    result: EvaluationRunResult,
+    result: EvaluationTrialResult,
     *,
     artifact_root: str | Path | None,
     write_trace: bool,
@@ -117,7 +117,7 @@ def _resolve_eval_trace_ref(
 
 
 def serialize_evaluation_result(
-    result: EvaluationRunResult,
+    result: EvaluationTrialResult,
     *,
     artifact_root: str | Path | None = None,
     write_trace: bool = True,
@@ -129,11 +129,11 @@ def serialize_evaluation_result(
     )
     if item is None:
         return {
-            "trialId": result.runId,
+            "trialId": result.trialId,
             "experimentId": result.experimentId,
             "dataset": result.dataset.model_dump(mode="json"),
             "instanceId": result.metadata.instanceId or None,
-            "taskId": result.questionId,
+            "taskId": result.taskId,
             "strategy": result.metadata.strategy or None,
             "repeatIndex": result.metadata.repeatIndex,
             "status": "not_evaluated",
@@ -154,7 +154,7 @@ def serialize_evaluation_result(
 
 
 def serialize_judge_votes(
-    result: EvaluationRunResult,
+    result: EvaluationTrialResult,
     *,
     trace_ref: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -165,7 +165,7 @@ def serialize_judge_votes(
 
 
 def append_result_jsonl(
-    result: RunResult,
+    result: TrialResult,
     path: str | Path,
     *,
     artifact_root: str | Path | None = None,
@@ -178,7 +178,7 @@ def append_result_jsonl(
 
 
 def write_results_jsonl(
-    results: Iterable[RunResult],
+    results: Iterable[TrialResult],
     path: str | Path,
     *,
     artifact_root: str | Path | None = None,
@@ -192,7 +192,7 @@ def write_results_jsonl(
 
 
 def append_evaluation_jsonl(
-    evaluation: EvaluationRunResult,
+    evaluation: EvaluationTrialResult,
     path: str | Path,
     *,
     artifact_root: str | Path | None = None,
@@ -205,7 +205,7 @@ def append_evaluation_jsonl(
 
 
 def write_evaluation_jsonl(
-    evaluations: Iterable[EvaluationRunResult],
+    evaluations: Iterable[EvaluationTrialResult],
     path: str | Path,
     *,
     artifact_root: str | Path | None = None,

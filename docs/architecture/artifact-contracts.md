@@ -136,6 +136,8 @@ The following mappings are migration guidance only. Each legacy name has no alia
 | `queries.jsonl` | `trials.jsonl` | No alias. Writers and readers use the target name only. |
 | `answers.jsonl` | `responses.jsonl` | No alias. Writers and readers use the target name only. |
 | `traces/queries/<runId>.json` | `traces/executions/<trialId>.json` | No alias. Writers and readers use the target name only. |
+| `trials.jsonl.contextBlock` | `trials.jsonl.contextBlocks` | Breaking key rename. Writers use the target plural key; readers may keep documented migration fallbacks only where needed for old artifacts. |
+| `responses.jsonl.contextBlock` | `responses.jsonl.contextBlocks` | Breaking key rename. Writers use the target plural key; readers may keep documented migration fallbacks only where needed for old artifacts. |
 
 No automated migration tooling is committed to by this specification.
 

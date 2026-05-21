@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ctxbench-benchmark.org/schemas/runspec.schema.json",
-  "title": "CTXBench RunSpec",
+  "title": "CTXBench TrialSpec",
   "type": "object",
   "additionalProperties": false,
   "required": [

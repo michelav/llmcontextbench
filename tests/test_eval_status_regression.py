@@ -124,7 +124,7 @@ def _write_eval_fixture(root: Path) -> Path:
                         "dataset": {"root": str(dataset_root.resolve())},
                         "taskId": "q_one",
                         "question": "Question one?",
-                        "questionTemplate": None,
+                        "taskTemplate": None,
                         "instanceId": "cv_demo",
                         "provider": "mock",
                         "modelId": "model",
@@ -204,9 +204,9 @@ def test_eval_force_with_judge_preserves_other_judges(tmp_path):
         assert eval_rows[0]["taskId"] == "q_one"
         assert {"trialId", "taskId", "judgeCount"} <= set(eval_rows[0])
         summary = json.loads((root / "evals-summary.json").read_text(encoding="utf-8"))
-        assert summary["questions"][0]["trialId"] == "run-1"
-        assert summary["questions"][0]["taskId"] == "q_one"
-        assert {"trialId", "taskId"} <= set(summary["questions"][0])
+        assert summary["tasks"][0]["trialId"] == "run-1"
+        assert summary["tasks"][0]["taskId"] == "q_one"
+        assert {"trialId", "taskId"} <= set(summary["tasks"][0])
 
         judge_votes = [json.loads(line) for line in (root / "judge_votes.jsonl").read_text(encoding="utf-8").splitlines()]
         votes_by_id = {row["judgeId"]: row for row in judge_votes}

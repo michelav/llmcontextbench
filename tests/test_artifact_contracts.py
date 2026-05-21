@@ -198,7 +198,7 @@ def _write_eval_fixture(root: Path) -> Path:
                 "dataset": {"root": str(dataset_root.resolve())},
                 "taskId": "q_one",
                 "question": "Question one?",
-                "questionTemplate": None,
+                "taskTemplate": None,
                 "instanceId": "cv_demo",
                 "provider": "mock",
                 "modelId": "model",
@@ -398,4 +398,3 @@ def test_export_and_status_ignore_legacy_files_when_target_files_exist(
     assert len(rows) == 1
     assert rows[0]["trialId"] == "run-1"
     assert rows[0]["response"] == "Answer"
-

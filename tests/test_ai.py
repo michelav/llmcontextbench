@@ -23,8 +23,8 @@ from ctxbench.benchmark.models import (
     EvaluationTrace,
     Experiment,
     ExperimentDataset,
-    RunResult,
-    RunSpec,
+    TrialResult,
+    TrialSpec,
 )
 from ctxbench.dataset.errors import CapabilityUnavailableError, UnsupportedRepresentationError
 from ctxbench.dataset.package import DatasetMetadata
@@ -307,15 +307,15 @@ def _runspec_for_executor(
     strategy: str = "inline",
     provider: str = "recording",
     params: dict[str, object] | None = None,
-) -> RunSpec:
-    return RunSpec.model_validate(
+) -> TrialSpec:
+    return TrialSpec.model_validate(
         {
             "trialId": "run-1",
             "experimentId": "exp-1",
             "dataset": dataset.model_dump(mode="json"),
             "taskId": "q_year",
             "question": "In which year did the researcher obtain their PhD?",
-            "questionTemplate": "In which year did the researcher obtain their PhD?",
+            "taskTemplate": "In which year did the researcher obtain their PhD?",
             "instanceId": "cv-demo",
             "provider": provider,
             "model": "recording-model",
@@ -338,18 +338,18 @@ def _runspec_for_executor(
     )
 
 
-def _run_result_for_evaluation(dataset: ExperimentDataset) -> RunResult:
-    return RunResult.model_validate(
+def _run_result_for_evaluation(dataset: ExperimentDataset) -> TrialResult:
+    return TrialResult.model_validate(
         {
             "trialId": "run-1",
             "experimentId": "exp-1",
             "dataset": dataset.model_dump(mode="json"),
             "taskId": "q_year",
             "question": "In which year did the researcher obtain their PhD?",
-            "questionTemplate": "In which year did the researcher obtain their PhD?",
-            "questionTags": [],
+            "taskTemplate": "In which year did the researcher obtain their PhD?",
+            "taskTags": [],
             "validationType": "judge",
-            "contextBlock": ["summary"],
+            "contextBlocks": ["summary"],
             "parameters": {},
             "instanceId": "cv-demo",
             "provider": "mock",
@@ -392,7 +392,7 @@ def test_execute_runspec_resolves_adapter_and_uses_get_context_for_inline(monkey
 
     result = execute_runspec(_runspec_for_executor(dataset), engine)
 
-    assert result.answer == "3"
+    assert result.response == "3"
     assert registry.resolved == [result.dataset]
     assert adapter.context_calls == [("cv-demo", "q_year", "json")]
     assert model.last_request is not None
@@ -575,7 +575,7 @@ def test_experiment_validation_rejects_bare_mcp_strategy_factor():
 
 def test_runspec_model_validate_rejects_bare_mcp_strategy_in_public_record():
     with pytest.raises(ValueError, match="unknown strategy: mcp"):
-        RunSpec.model_validate(
+        TrialSpec.model_validate(
             {
                 "trialId": "trial-1",
                 "experimentId": "exp-1",
@@ -609,7 +609,7 @@ def test_runspec_model_validate_rejects_bare_mcp_strategy_in_public_record():
 
 def test_runresult_model_validate_rejects_bare_mcp_strategy_in_public_record():
     with pytest.raises(ValueError, match="unknown strategy: mcp"):
-        RunResult.model_validate(
+        TrialResult.model_validate(
             {
                 "trialId": "trial-1",
                 "experimentId": "exp-1",
@@ -660,7 +660,7 @@ def test_evaluate_judge_persists_rating_and_justification(monkeypatch):
     monkeypatch.setattr(evaluation_module, "_judge_request", fake_judge_request)
 
     details, judge_info, _ = _evaluate_judge(
-        result=type("R", (), {"answer": "Answer", "runId": "run-1", "experimentId": "exp-1", "instanceId": "cv-demo", "questionId": "q_summary"})(),
+        result=type("R", (), {"response": "Answer", "trialId": "run-1", "experimentId": "exp-1", "instanceId": "cv-demo", "taskId": "q_summary"})(),
         question_text="Question?",
         context_payload={"summary": "Ground truth answer."},
         judges=make_experiment().evaluation.judges,
@@ -722,7 +722,7 @@ def test_evaluate_judge_aggregates_multiple_judges(monkeypatch):
     monkeypatch.setattr(evaluation_module, "_judge_request", fake_judge_request)
 
     details, judge_info, _ = _evaluate_judge(
-        result=type("R", (), {"answer": "Answer", "runId": "run-1", "experimentId": "exp-1", "instanceId": "cv-demo", "questionId": "q_summary"})(),
+        result=type("R", (), {"response": "Answer", "trialId": "run-1", "experimentId": "exp-1", "instanceId": "cv-demo", "taskId": "q_summary"})(),
         question_text="Question?",
         context_payload={"summary": "Ground truth answer."},
         judges=experiment.evaluation.judges,
@@ -757,10 +757,10 @@ def test_judge_request_injects_structured_output_schema():
         )(),
         prompt="Judge this answer.",
         answer_text="The candidate answer.",
-        run_id="run-1",
+        trial_id="run-1",
         exp_id="exp-1",
         instance_id="cv-demo",
-        question_id="q_summary",
+        task_id="q_summary",
         question_text="Question?",
         curriculum_context='{"summary":"Research summary"}',
         engine=engine,
@@ -776,7 +776,7 @@ def test_judge_request_injects_structured_output_schema():
 
 def test_execute_runspec_persists_metrics_summary_with_nulls_for_remote_mcp(tmp_path):
     dataset = write_mock_dataset(tmp_path / "dataset")
-    runspec = RunSpec.model_validate(
+    runspec = TrialSpec.model_validate(
         {
             "trialId": "run-1",
             "experimentId": "exp-1",
@@ -805,7 +805,7 @@ def test_execute_runspec_persists_metrics_summary_with_nulls_for_remote_mcp(tmp_
 
     result = execute_runspec(runspec, Engine())
 
-    assert isinstance(result.answer, str)
+    assert isinstance(result.response, str)
     assert result.metricsSummary["toolCalls"] == 0
     assert result.metricsSummary["functionCalls"] == 0
     assert result.metricsSummary["inputTokens"] is not None
@@ -817,14 +817,14 @@ def test_execute_runspec_persists_metrics_summary_with_nulls_for_remote_mcp(tmp_
 
 def test_execute_runspec_injects_openai_inline_prompt_cache_key(tmp_path):
     dataset = write_mock_dataset(tmp_path / "dataset")
-    runspec = RunSpec.model_validate(
+    runspec = TrialSpec.model_validate(
         {
             "trialId": "run-1",
             "experimentId": "exp-1",
             "dataset": dataset.model_dump(mode="json"),
             "taskId": "q_year",
             "question": "In which year did the researcher obtain their PhD?",
-            "questionTemplate": "In which year did the researcher obtain their PhD?",
+            "taskTemplate": "In which year did the researcher obtain their PhD?",
             "instanceId": "cv-demo",
             "provider": "openai",
             "model": "gpt-5.4-mini",
@@ -1166,7 +1166,7 @@ def test_mcp_runtime_defaults_public_server_label_to_ctxbench():
 
 
 def test_evaluate_run_result_skips_when_context_block_missing(tmp_path):
-    # Add a question whose contextBlock references a block that doesn't exist in blocks.json
+    # Add a question whose contextBlocks references a block that doesn't exist in blocks.json
     dataset_root = tmp_path / "dataset"
     dataset = write_mock_dataset(dataset_root)
     questions_path = dataset_root / "questions.json"
@@ -1186,17 +1186,17 @@ def test_evaluate_run_result_skips_when_context_block_missing(tmp_path):
 
     provider = DatasetProvider.from_dataset(dataset)
     events: list[tuple[str, str, dict[str, object]]] = []
-    result = RunResult.model_validate(
+    result = TrialResult.model_validate(
         {
             "trialId": "run-skip",
             "experimentId": "exp-1",
             "dataset": dataset.model_dump(mode="json"),
             "taskId": "q_missing",
             "question": "What is the missing answer?",
-            "questionTemplate": "What is the missing answer?",
-            "questionTags": [],
+            "taskTemplate": "What is the missing answer?",
+            "taskTags": [],
             "validationType": "judge",
-            "contextBlock": [],
+            "contextBlocks": [],
             "parameters": {},
             "instanceId": "cv-demo",
             "provider": "mock",
@@ -1244,7 +1244,7 @@ def test_evaluate_run_result_skips_when_context_block_missing(tmp_path):
     assert artifact["taskId"] == "q_missing"
     assert artifact["status"] == "skipped"
     assert artifact["judgeCount"] == 0
-    assert any(label == "SKIP" and fields.get("questionId") == "q_missing" for label, _message, fields in events)
+    assert any(label == "SKIP" and fields.get("taskId") == "q_missing" for label, _message, fields in events)
 
 
 def test_openai_model_extracts_cache_metadata():

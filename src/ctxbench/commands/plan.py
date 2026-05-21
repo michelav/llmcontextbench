@@ -99,7 +99,7 @@ def plan_command(
     payloads = []
     for runspec in runspecs:
         payloads.append(runspec.to_persisted_artifact())
-        logger.phase("PLAN", "Trial prepared", run=runspec.runId)
+        logger.phase("PLAN", "Trial prepared", run=runspec.trialId)
         progress_tracker.advance()
 
     write_jsonl(trials_path, payloads)

@@ -12,9 +12,9 @@ from ctxbench.benchmark.models import (
     EvaluationJudgeInfo,
     EvaluationTrace,
     EvaluationResult,
-    RunResult,
+    TrialResult,
     RunTiming,
-    RunTrace,
+    TrialTrace,
 )
 from ctxbench.commands.eval import eval_command
 from ctxbench.commands.execute import execute_command
@@ -89,18 +89,18 @@ def _write_experiment(path: Path, dataset_root: Path) -> Path:
     return path
 
 
-def _fake_execute_runspec(runspec, engine) -> RunResult:
+def _fake_execute_runspec(runspec, engine) -> TrialResult:
     del engine
-    return RunResult(
-        runId=runspec.runId,
+    return TrialResult(
+        trialId=runspec.trialId,
         experimentId=runspec.experimentId,
         dataset=runspec.dataset,
-        questionId=runspec.questionId,
+        taskId=runspec.taskId,
         question=runspec.question,
-        questionTemplate=runspec.questionTemplate,
-        questionTags=list(runspec.questionTags),
+        taskTemplate=runspec.taskTemplate,
+        taskTags=list(runspec.taskTags),
         validationType=runspec.validationType,
-        contextBlock=list(runspec.contextBlock),
+        contextBlocks=list(runspec.contextBlocks),
         parameters=dict(runspec.parameters),
         instanceId=runspec.instanceId,
         provider=runspec.provider,
@@ -110,7 +110,7 @@ def _fake_execute_runspec(runspec, engine) -> RunResult:
         format=runspec.format,
         repeatIndex=runspec.repeatIndex,
         outputRoot=runspec.outputRoot,
-        answer="2020",
+        response="2020",
         status="success",
         errorMessage=None,
         timing=RunTiming(
@@ -120,7 +120,7 @@ def _fake_execute_runspec(runspec, engine) -> RunResult:
         ),
         usage={},
         metricsSummary={},
-        trace=RunTrace(),
+        trace=TrialTrace(),
         traceRef=None,
         evaluation=EvaluationResult(),
         metadata=runspec.metadata,

@@ -8,14 +8,14 @@ import pytest
 from ctxbench.benchmark.models import (
     DatasetProvenance,
     EvaluationItemResult,
-    EvaluationRunResult,
+    EvaluationTrialResult,
     EvaluationRunSummary,
     EvaluationTrace,
     ExperimentDataset,
     ExperimentScope,
-    RunMetadata,
-    RunResult,
-    RunSpec,
+    TrialMetadata,
+    TrialResult,
+    TrialSpec,
 )
 
 
@@ -36,10 +36,10 @@ def test_experiment_scope_uses_tasks_with_questions_compatibility_alias():
     assert legacy.questions == ["q_year"]
 
 
-def make_metadata() -> RunMetadata:
-    return RunMetadata(
+def make_metadata() -> TrialMetadata:
+    return TrialMetadata(
         canonicalId="exp-1|q_year|cv-demo|mock|mock|inline|json|1",
-        questionId="q_year",
+        taskId="q_year",
         instanceId="cv-demo",
         provider="mock",
         modelId="mock",
@@ -47,7 +47,7 @@ def make_metadata() -> RunMetadata:
         strategy="inline",
         format="json",
         repeatIndex=1,
-        questionTags=["objective"],
+        taskTags=["objective"],
         validationType="judge",
         parameters={},
     )
@@ -59,7 +59,7 @@ def make_runspec_payload() -> dict[str, object]:
         "experimentId": "exp-1",
         "taskId": "q_year",
         "question": "In which year did the researcher obtain their PhD?",
-        "questionTemplate": "In which year did the researcher obtain their PhD?",
+        "taskTemplate": "In which year did the researcher obtain their PhD?",
         "dataset": {"root": "/tmp/dataset"},
         "instanceId": "cv-demo",
         "model": "mock",
@@ -73,9 +73,9 @@ def make_runspec_payload() -> dict[str, object]:
         "evaluationEnabled": False,
         "trace": {"enabled": False, "writeFiles": True, "save_raw_response": False, "save_tool_calls": False, "save_usage": False, "save_errors": False},
         "artifacts": {"writeJsonl": True, "writeIndividualJson": False},
-        "questionTags": ["objective"],
+        "taskTags": ["objective"],
         "validationType": "judge",
-        "contextBlock": ["summary"],
+        "contextBlocks": ["summary"],
         "parameters": {},
         "metadata": {
             "canonicalId": "exp-1|q_year|cv-demo|mock|mock|inline|json|1",
@@ -87,7 +87,7 @@ def make_runspec_payload() -> dict[str, object]:
             "strategy": "inline",
             "format": "json",
             "repeatIndex": 1,
-            "questionTags": ["objective"],
+            "taskTags": ["objective"],
             "validationType": "judge",
             "parameters": {},
         },
@@ -100,7 +100,7 @@ def make_runresult_payload() -> dict[str, object]:
         "experimentId": "exp-1",
         "taskId": "q_year",
         "question": "In which year did the researcher obtain their PhD?",
-        "questionTemplate": "In which year did the researcher obtain their PhD?",
+        "taskTemplate": "In which year did the researcher obtain their PhD?",
         "dataset": {"root": "/tmp/dataset"},
         "instanceId": "cv-demo",
         "provider": "mock",
@@ -117,9 +117,9 @@ def make_runresult_payload() -> dict[str, object]:
         "usage": {},
         "metricsSummary": {},
         "traceRef": None,
-        "questionTags": ["objective"],
+        "taskTags": ["objective"],
         "validationType": "judge",
-        "contextBlock": ["summary"],
+        "contextBlocks": ["summary"],
         "parameters": {},
         "metadata": {
             "canonicalId": "exp-1|q_year|cv-demo|mock|mock|inline|json|1",
@@ -131,7 +131,7 @@ def make_runresult_payload() -> dict[str, object]:
             "strategy": "inline",
             "format": "json",
             "repeatIndex": 1,
-            "questionTags": ["objective"],
+            "taskTags": ["objective"],
             "validationType": "judge",
             "parameters": {},
         },
@@ -139,11 +139,11 @@ def make_runresult_payload() -> dict[str, object]:
 
 
 def test_runspec_model_validate_accepts_target_public_fields():
-    runspec = RunSpec.model_validate(make_runspec_payload())
+    runspec = TrialSpec.model_validate(make_runspec_payload())
 
-    assert runspec.runId == "trial-1"
-    assert runspec.questionId == "q_year"
-    assert runspec.metadata.questionId == "q_year"
+    assert runspec.trialId == "trial-1"
+    assert runspec.taskId == "q_year"
+    assert runspec.metadata.taskId == "q_year"
 
 
 @pytest.mark.parametrize(
@@ -160,7 +160,7 @@ def test_runspec_model_validate_rejects_legacy_public_fields(field: str, value: 
     payload[field] = value
 
     with pytest.raises(ValueError):
-        RunSpec.model_validate(payload)
+        TrialSpec.model_validate(payload)
 
 
 def test_runspec_model_validate_rejects_legacy_metadata_field():
@@ -170,15 +170,15 @@ def test_runspec_model_validate_rejects_legacy_metadata_field():
     payload["metadata"]["questionId"] = "q_year"
 
     with pytest.raises(ValueError):
-        RunSpec.model_validate(payload)
+        TrialSpec.model_validate(payload)
 
 
 def test_runresult_model_validate_accepts_target_public_fields():
-    result = RunResult.model_validate(make_runresult_payload())
+    result = TrialResult.model_validate(make_runresult_payload())
 
-    assert result.runId == "trial-1"
-    assert result.questionId == "q_year"
-    assert result.answer == "2018"
+    assert result.trialId == "trial-1"
+    assert result.taskId == "q_year"
+    assert result.response == "2018"
 
 
 @pytest.mark.parametrize(
@@ -197,7 +197,7 @@ def test_runresult_model_validate_rejects_legacy_public_fields(field: str, value
     payload[field] = value
 
     with pytest.raises(ValueError):
-        RunResult.model_validate(payload)
+        TrialResult.model_validate(payload)
 
 
 def test_runresult_model_validate_rejects_legacy_metadata_field():
@@ -207,20 +207,20 @@ def test_runresult_model_validate_rejects_legacy_metadata_field():
     payload["metadata"]["questionId"] = "q_year"
 
     with pytest.raises(ValueError):
-        RunResult.model_validate(payload)
+        TrialResult.model_validate(payload)
 
 
 def test_evaluation_item_serializers_use_trial_and_task_ids():
     item = EvaluationItemResult(
         experimentId="exp-1",
-        runId="trial-1",
+        trialId="trial-1",
         dataset=DatasetProvenance(
             id="ctxbench/fake",
             version="0.1.0",
             origin="/tmp/dataset",
             materialized_path="/tmp/dataset",
         ),
-        questionId="q_year",
+        taskId="q_year",
         instanceId="cv-demo",
         question="In which year did the researcher obtain their PhD?",
         evaluationMode="judge",
@@ -269,7 +269,7 @@ def test_evaluation_run_result_model_validate_rejects_legacy_public_fields():
     }
 
     with pytest.raises(ValueError):
-        EvaluationRunResult.model_validate(
+        EvaluationTrialResult.model_validate(
             {
                 "runId": "trial-1",
                 "questionId": "q_year",
@@ -286,7 +286,7 @@ def test_schema_public_identifiers_use_ctxbench_names():
     plan_schema = json.loads((REPO_ROOT / "src/schemas/plan.schema.json").read_text(encoding="utf-8"))
 
     assert runspec_schema["$id"] == "https://ctxbench-benchmark.org/schemas/runspec.schema.json"
-    assert runspec_schema["title"] == "CTXBench RunSpec"
+    assert runspec_schema["title"] == "CTXBench TrialSpec"
     assert runspec_schema["properties"]["kind"]["const"] == "ctxbench.runspec"
 
     assert plan_schema["$id"] == "https://ctxbench-benchmark.org/schemas/runplan.schema.json"
