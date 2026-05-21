@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from ctxbench.benchmark.models import DatasetProvenance, Experiment, ExperimentDataset
 from ctxbench.dataset.capabilities import DatasetCapabilityReport
+from ctxbench.dataset.contexts import artifact_name_for_format
 from ctxbench.dataset.package import DatasetMetadata
 from ctxbench.dataset.payloads import (
     ORACLE_UNAVAILABLE,
@@ -21,27 +21,6 @@ from ctxbench.dataset.questions import (
     QuestionInstanceEntry,
 )
 from ctxbench.util.fs import load_json
-
-
-FORMAT_ARTIFACTS = {
-    "html": "clean.html",
-    "raw_html": "raw.html",
-    "cleaned_html": "clean.html",
-    "clean_html": "clean.html",
-    "json": "parsed.json",
-    "parsed_json": "parsed.json",
-    "blocks": "blocks.json",
-}
-
-
-def _specialized_local_dataset_package(
-    dataset: ExperimentDataset,
-) -> "LocalDatasetPackage | None":
-    if dataset.id == "ctxbench/lattes" and dataset.root:
-        from ctxbench.datasets.lattes.package import LattesDatasetPackage
-
-        return LattesDatasetPackage(dataset.root)
-    return None
 
 
 class LocalDatasetPackage:
@@ -62,14 +41,11 @@ class LocalDatasetPackage:
     def from_dataset(cls, dataset: ExperimentDataset | DatasetProvenance) -> "LocalDatasetPackage":
         if isinstance(dataset, DatasetProvenance):
             dataset = ExperimentDataset(
-                root=dataset.root,
+                root=dataset.materialized_path,
                 id=dataset.id,
                 version=dataset.version,
                 origin=dataset.origin,
             )
-        specialized = _specialized_local_dataset_package(dataset)
-        if specialized is not None and cls in {LocalDatasetPackage, DatasetProvider}:
-            return specialized
         return cls(dataset)
 
     def metadata(self) -> DatasetMetadata:
@@ -84,10 +60,10 @@ class LocalDatasetPackage:
         )
 
     def identity(self) -> str:
-        if self._questions.datasetId:
-            return self._questions.datasetId
         if self.dataset_paths.id:
             return self.dataset_paths.id
+        if self._questions.datasetId:
+            return self._questions.datasetId
         return Path(self.dataset_paths.root or "").name or "local-dataset"
 
     def version(self) -> str:
@@ -144,7 +120,7 @@ class LocalDatasetPackage:
         question_instance = self.get_question_instance(task_id, instance_id)
         if question_instance is None:
             return None
-        return question_instance.model_dump(mode="python")
+        return {"parameters": dict(question_instance.parameters)}
 
     def list_question_ids_for_instance(self, instance_id: str) -> list[str]:
         instance = self.get_instance(instance_id)
@@ -157,7 +133,7 @@ class LocalDatasetPackage:
         return path
 
     def get_context_artifact_path(self, instance_id: str, format_name: str) -> Path:
-        filename = FORMAT_ARTIFACTS.get(format_name, format_name)
+        filename = artifact_name_for_format(format_name)
         path = self.get_instance_dir(instance_id) / filename
         if not path.exists():
             raise FileNotFoundError(f"Missing context artifact: {path}")

@@ -1,5 +1,7 @@
-from ctxbench.datasets.lattes.readers.base import LattesReader
-from ctxbench.datasets.lattes.readers.html_reader import HtmlLattesReader
-from ctxbench.datasets.lattes.readers.json_reader import JsonLattesReader
+from ctxbench.adapters.lattes.readers import (
+    HtmlLattesReader,
+    JsonLattesReader,
+    LattesReader,
+)
 
 __all__ = ["HtmlLattesReader", "JsonLattesReader", "LattesReader"]

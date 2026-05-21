@@ -1,4 +1,6 @@
-from ctxbench.datasets.lattes.provider import LattesProvider
-from ctxbench.datasets.lattes.package import LattesDatasetPackage
+from ctxbench.adapters.lattes.package import LattesDatasetAdapter
+from ctxbench.adapters.lattes.provider import LattesProvider
 
-__all__ = ["LattesDatasetPackage", "LattesProvider"]
+LattesDatasetPackage = LattesDatasetAdapter
+
+__all__ = ["LattesDatasetAdapter", "LattesDatasetPackage", "LattesProvider"]

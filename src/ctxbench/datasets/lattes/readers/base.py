@@ -1,8 +1,3 @@
-from __future__ import annotations
+from ctxbench.adapters.lattes.readers.base import LattesReader
 
-from ctxbench.datasets.lattes.models import LattesCurriculum
-
-
-class LattesReader:
-    def read(self, path: str) -> LattesCurriculum:
-        raise NotImplementedError
+__all__ = ["LattesReader"]

@@ -84,9 +84,9 @@
 
 ### Tasks
 
-- [ ] T007 [S3] Create `src/ctxbench/adapters/__init__.py` as an empty package marker
-- [ ] T008 [S3] Copy the entire `src/ctxbench/datasets/lattes/` tree to `src/ctxbench/adapters/lattes/` (including `readers/` subdirectory and all existing modules: `__init__.py`, `package.py`, `tools.py`, `mcp_server.py`, `models.py`, `provider.py`, `readers/`)
-- [ ] T009 [S3] Update all internal imports in `src/ctxbench/adapters/lattes/` tree: replace every `ctxbench.datasets.lattes.*` import with `ctxbench.adapters.lattes.*`
+- [X] T007 [S3] Create `src/ctxbench/adapters/__init__.py` as an empty package marker
+- [X] T008 [S3] Copy the entire `src/ctxbench/datasets/lattes/` tree to `src/ctxbench/adapters/lattes/` (including `readers/` subdirectory and all existing modules: `__init__.py`, `package.py`, `tools.py`, `mcp_server.py`, `models.py`, `provider.py`, `readers/`)
+- [X] T009 [S3] Update all internal imports in `src/ctxbench/adapters/lattes/` tree: replace every `ctxbench.datasets.lattes.*` import with `ctxbench.adapters.lattes.*`
 
 ### S3b — Rename adapter and add v0 methods
 
@@ -94,10 +94,10 @@
 
 ### Tasks
 
-- [ ] T010 [S3] Rename class `LattesDatasetPackage` → `LattesDatasetAdapter` in `src/ctxbench/adapters/lattes/package.py`; update all internal references within the file and within the `adapters/lattes/` tree
-- [ ] T011 [S3] Add `FORMAT_ARTIFACTS` dict to `src/ctxbench/adapters/lattes/package.py` (moved from `ctxbench.dataset.provider`); add `get_task(task_id) → TaskPayload`, `get_context(instance_id, task_id, representation) → ContextPayload`, `get_evidence(instance_id, task_id) → EvidencePayload`, `get_task_instance(instance_id, task_id) → dict | None`, `get_oracle(instance_id, task_id) → OracleUnavailable` to `LattesDatasetAdapter` using the exact logic from `plan.md` § Slice S3
-- [ ] T012 [S3] Update `LocalDatasetPackage` in `src/ctxbench/dataset/provider.py`: add `get_task(task_id) → TaskPayload`, `get_context(instance_id, task_id, representation) → ContextPayload`, `get_evidence(instance_id, task_id) → EvidencePayload`, `get_task_instance(instance_id, task_id) → dict | None`, and `get_oracle(instance_id, task_id) → OracleUnavailable` (returning `ORACLE_UNAVAILABLE`) using existing internal methods (`get_question`, `get_context_artifact`, etc.) as backing implementation; rename the current legacy helper `get_context(context_id, format_name) -> str` to a private helper such as `_read_context_text(context_id, format_name)` and update internal callers/tests that used the old two-argument signature; keep `get_context_artifact` and `get_evidence_artifact` only as migration-private/internal helpers, not as protocol methods; `get_oracle` must be explicitly defined because Python `Protocol` default method bodies are not inherited by concrete implementors
-- [ ] T013 [S3] Remove Lattes specialization from `src/ctxbench/dataset/provider.py`: remove `FORMAT_ARTIFACTS` from this module, remove `_specialized_local_dataset_package`, and ensure `DatasetProvider.from_dataset` / `LocalDatasetPackage.from_dataset` no longer imports `ctxbench.datasets.lattes` or `ctxbench.adapters.lattes`; if generic context filename mapping is still needed by `LocalDatasetPackage`, import or call the existing generic helper in `src/ctxbench/dataset/contexts.py`; do not remove `DatasetProvider.from_dataset` itself in Spec 004
+- [X] T010 [S3] Rename class `LattesDatasetPackage` → `LattesDatasetAdapter` in `src/ctxbench/adapters/lattes/package.py`; update all internal references within the file and within the `adapters/lattes/` tree
+- [X] T011 [S3] Add `FORMAT_ARTIFACTS` dict to `src/ctxbench/adapters/lattes/package.py` (moved from `ctxbench.dataset.provider`); add `get_task(task_id) → TaskPayload`, `get_context(instance_id, task_id, representation) → ContextPayload`, `get_evidence(instance_id, task_id) → EvidencePayload`, `get_task_instance(instance_id, task_id) → dict | None`, `get_oracle(instance_id, task_id) → OracleUnavailable` to `LattesDatasetAdapter` using the exact logic from `plan.md` § Slice S3
+- [X] T012 [S3] Update `LocalDatasetPackage` in `src/ctxbench/dataset/provider.py`: add `get_task(task_id) → TaskPayload`, `get_context(instance_id, task_id, representation) → ContextPayload`, `get_evidence(instance_id, task_id) → EvidencePayload`, `get_task_instance(instance_id, task_id) → dict | None`, and `get_oracle(instance_id, task_id) → OracleUnavailable` (returning `ORACLE_UNAVAILABLE`) using existing internal methods (`get_question`, `get_context_artifact`, etc.) as backing implementation; rename the current legacy helper `get_context(context_id, format_name) -> str` to a private helper such as `_read_context_text(context_id, format_name)` and update internal callers/tests that used the old two-argument signature; keep `get_context_artifact` and `get_evidence_artifact` only as migration-private/internal helpers, not as protocol methods; `get_oracle` must be explicitly defined because Python `Protocol` default method bodies are not inherited by concrete implementors
+- [X] T013 [S3] Remove Lattes specialization from `src/ctxbench/dataset/provider.py`: remove `FORMAT_ARTIFACTS` from this module, remove `_specialized_local_dataset_package`, and ensure `DatasetProvider.from_dataset` / `LocalDatasetPackage.from_dataset` no longer imports `ctxbench.datasets.lattes` or `ctxbench.adapters.lattes`; if generic context filename mapping is still needed by `LocalDatasetPackage`, import or call the existing generic helper in `src/ctxbench/dataset/contexts.py`; do not remove `DatasetProvider.from_dataset` itself in Spec 004
 
 ### S3c — Wire registry and enforce import boundaries
 
@@ -105,8 +105,8 @@
 
 ### Tasks
 
-- [ ] T014 [S3] Create `src/ctxbench/adapters/registry.py` with a private `_registry = AdapterRegistry()`, registration of `"ctxbench/lattes"` → `LattesDatasetAdapter` factory, and `get_default_registry() → AdapterRegistry` function; only this module may import `LattesDatasetAdapter`; the factory must receive `ResolvedDatasetRef` and use `ref.materialized_path or ref.root`
-- [ ] T015 [S3] Create `tests/test_import_boundaries.py` with tests that: (a) no module in `ctxbench.benchmark.*` imports `ctxbench.adapters.lattes` directly; (b) no module in `ctxbench.dataset.*` imports `ctxbench.adapters`; (c) no module in `ctxbench.commands.*` imports `ctxbench.adapters.lattes` directly; (d) `src/ctxbench/dataset/provider.py` does not import `ctxbench.datasets.lattes` or `ctxbench.adapters.lattes`
+- [X] T014 [S3] Create `src/ctxbench/adapters/registry.py` with a private `_registry = AdapterRegistry()`, registration of `"ctxbench/lattes"` → `LattesDatasetAdapter` factory, and `get_default_registry() → AdapterRegistry` function; only this module may import `LattesDatasetAdapter`; the factory must receive `ResolvedDatasetRef` and use `ref.materialized_path or ref.root`
+- [X] T015 [S3] Create `tests/test_import_boundaries.py` with tests that: (a) no module in `ctxbench.benchmark.*` imports `ctxbench.adapters.lattes` directly; (b) no module in `ctxbench.dataset.*` imports `ctxbench.adapters`; (c) no module in `ctxbench.commands.*` imports `ctxbench.adapters.lattes` directly; (d) `src/ctxbench/dataset/provider.py` does not import `ctxbench.datasets.lattes` or `ctxbench.adapters.lattes`
 
 ### S3d — Legacy compatibility stubs
 
@@ -114,17 +114,17 @@
 
 ### Tasks
 
-- [ ] T016 [S3] Replace all `.py` implementation files in `src/ctxbench/datasets/lattes/` with backward-compatible redirect stubs after S3a-S3c validations pass: `__init__.py` re-exports `LattesDatasetAdapter` and a compatibility alias `LattesDatasetPackage`; `package.py` re-exports `LattesDatasetAdapter` and `LattesDatasetPackage`; `provider.py`, `tools.py`, `mcp_server.py`, `models.py`, and every `readers/*.py` re-export their moved symbols from `ctxbench.adapters.lattes.*`; `readers/__init__.py` re-exports the moved reader symbols; do not delete the directory or its `__init__.py` files; remove implementation logic from the legacy modules, but keep old import paths working for compatibility
-- [ ] T017 [S3] Add or update compatibility tests in `tests/test_lattes_dataset_package.py` and `tests/test_lattes_sections.py` proving legacy imports from `ctxbench.datasets.lattes.package`, `ctxbench.datasets.lattes.provider`, `ctxbench.datasets.lattes.tools`, `ctxbench.datasets.lattes.mcp_server`, and `ctxbench.datasets.lattes.readers.*` still resolve to the moved adapter implementations; these tests must not require provider calls
+- [X] T016 [S3] Replace all `.py` implementation files in `src/ctxbench/datasets/lattes/` with backward-compatible redirect stubs after S3a-S3c validations pass: `__init__.py` re-exports `LattesDatasetAdapter` and a compatibility alias `LattesDatasetPackage`; `package.py` re-exports `LattesDatasetAdapter` and `LattesDatasetPackage`; `provider.py`, `tools.py`, `mcp_server.py`, `models.py`, and every `readers/*.py` re-export their moved symbols from `ctxbench.adapters.lattes.*`; `readers/__init__.py` re-exports the moved reader symbols; do not delete the directory or its `__init__.py` files; remove implementation logic from the legacy modules, but keep old import paths working for compatibility
+- [X] T017 [S3] Add or update compatibility tests in `tests/test_lattes_dataset_package.py` and `tests/test_lattes_sections.py` proving legacy imports from `ctxbench.datasets.lattes.package`, `ctxbench.datasets.lattes.provider`, `ctxbench.datasets.lattes.tools`, `ctxbench.datasets.lattes.mcp_server`, and `ctxbench.datasets.lattes.readers.*` still resolve to the moved adapter implementations; these tests must not require provider calls
 
 ### Checkpoint
 
-- [ ] `pytest -k "import_boundary or lattes_dataset or lattes_adapter" -v` passes
-- [ ] `python -c "import ctxbench.benchmark.executor; import ctxbench.benchmark.evaluation"` exits 0
-- [ ] no provider-backed execution
-- [ ] no opportunistic refactor
-- [ ] diff is reviewable
-- [ ] `worklog.md` updated
+- [X] `pytest -k "import_boundary or lattes_dataset or lattes_adapter" -v` passes
+- [X] `python -c "import ctxbench.benchmark.executor; import ctxbench.benchmark.evaluation"` exits 0
+- [X] no provider-backed execution
+- [X] no opportunistic refactor
+- [X] diff is reviewable
+- [X] `worklog.md` updated
 
 ---
 

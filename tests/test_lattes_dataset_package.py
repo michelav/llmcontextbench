@@ -4,6 +4,7 @@ from pathlib import Path
 
 from ctxbench.dataset.package import DatasetPackage
 from ctxbench.datasets.lattes.package import LattesDatasetPackage
+from ctxbench.adapters.lattes.package import LattesDatasetAdapter
 
 
 FIXTURE_ROOT = (
@@ -45,3 +46,14 @@ def test_lattes_dataset_package_capability_report_is_conformant() -> None:
     assert report.conformant is True
     assert report.missing_mandatory == []
     assert report.identity == "ctxbench/lattes"
+
+
+def test_legacy_lattes_dataset_package_aliases_adapter() -> None:
+    from ctxbench.datasets.lattes import LattesDatasetAdapter as LegacyAdapter
+    from ctxbench.datasets.lattes import LattesDatasetPackage as LegacyPackage
+    from ctxbench.datasets.lattes.package import LattesDatasetAdapter as LegacyPackageAdapter
+
+    assert LegacyAdapter is LattesDatasetAdapter
+    assert LegacyPackage is LattesDatasetAdapter
+    assert LegacyPackageAdapter is LattesDatasetAdapter
+    assert LattesDatasetPackage is LattesDatasetAdapter
