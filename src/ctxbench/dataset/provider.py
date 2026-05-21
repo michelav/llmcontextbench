@@ -194,9 +194,14 @@ class LocalDatasetPackage:
         artifact = self.get_evidence_artifact(instance_id, task_id)
         if not isinstance(artifact, dict):
             return EvidencePayload(role="evidence", task={}, evidence=artifact)
+        task = self.get_task(task_id)
         return EvidencePayload(
             role="evidence",
-            task=artifact.get("question", {}),
+            task={
+                "task_id": task.task_id,
+                "statement": task.statement,
+                "context_blocks": task.context_blocks,
+            },
             task_instance=artifact.get("questionInstance"),
             evidence=artifact.get("contextBlocks", {}),
             metadata={"instance_id": instance_id, "task_id": task_id},

@@ -36,3 +36,8 @@
 - slice: S5
 - summary: Routed execution through adapter resolution, replaced inline context file access with get_context payloads, enforced tool_provider capabilities for tool-mediated strategies, and updated execution request metadata.
 - token_provenance: unavailable
+
+- event: slice-implemented
+- slice: S6
+- summary: Routed evaluation through adapter resolution and v0 evidence/oracle payloads, kept oracle values out of judge prompts, recorded evidence/oracle trace metadata, and added provider-free evaluation boundary tests.
+- token_provenance: unavailable

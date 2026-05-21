@@ -8,7 +8,9 @@ from typing import Any, Callable, Iterable
 from ctxbench.ai.cache import build_judge_prompt_cache_key
 from ctxbench.ai.engine import Engine
 from ctxbench.ai.models.base import AIRequest, ModelInput
+from ctxbench.adapters.registry import get_default_registry
 from ctxbench.benchmark.models import (
+    DatasetProvenance,
     EvaluationBatchSummary,
     EvaluationItemResult,
     EvaluationJudgeInfo,
@@ -18,7 +20,10 @@ from ctxbench.benchmark.models import (
     EvaluationTrace,
     RunResult,
 )
-from ctxbench.dataset.provider import DatasetProvider
+from ctxbench.dataset.errors import AdapterUnavailableError
+from ctxbench.dataset.package import DatasetPackage
+from ctxbench.dataset.payloads import OracleUnavailable
+from ctxbench.dataset.provider import LocalDatasetPackage
 
 EVALUATION_SYSTEM_INSTRUCTION = (
     "You are evaluating benchmark answers.\n"
@@ -136,6 +141,16 @@ JUDGE_STRUCTURED_OUTPUT_SCHEMA = {
 }
 
 
+def _resolve_adapter(dataset: DatasetProvenance) -> DatasetPackage:
+    try:
+        return get_default_registry().resolve(dataset)
+    except AdapterUnavailableError as exc:
+        local_root = dataset.materialized_path or getattr(dataset, "root", None)
+        if local_root:
+            return LocalDatasetPackage.from_dataset(dataset)
+        raise AdapterUnavailableError(str(exc)) from exc
+
+
 def _normalize_rating(raw: str | None) -> str:
     if not isinstance(raw, str):
         return "misses"
@@ -151,6 +166,9 @@ class EvaluationJob:
     question_text: str
     context_payload: dict[str, Any]
     curriculum_context: str
+    evidence_obtained: bool
+    oracle_available: bool
+    oracle_used: bool = False
 
 
 def judge_identifier(config: EvaluationModelConfig) -> str:
@@ -170,7 +188,7 @@ def batch_custom_id(result: RunResult, judge: EvaluationModelConfig) -> str:
 
 def build_evaluation_job(
     result: RunResult,
-    provider: DatasetProvider,
+    adapter: DatasetPackage,
     *,
     judge: EvaluationModelConfig,
     only: str | None = None,
@@ -189,10 +207,11 @@ def build_evaluation_job(
     if validation_type != "judge":
         raise ValueError(f"Unsupported validation type: {validation_type}")
 
-    question = provider.get_question(result.questionId)
-    block_ids = list(question.contextBlock)
-    all_blocks = provider.get_context_blocks(result.instanceId)
-    context_payload, missing = _get_context_blocks(all_blocks, block_ids)
+    evidence_payload = adapter.get_evidence(result.instanceId, result.questionId)
+    oracle_result = adapter.get_oracle(result.instanceId, result.questionId)
+    oracle_available = not isinstance(oracle_result, OracleUnavailable)
+    block_ids = _evidence_task_context_blocks(evidence_payload.task)
+    context_payload, missing = _get_context_blocks(evidence_payload.evidence, block_ids)
     if missing:
         if event_logger is not None:
             event_logger(
@@ -220,6 +239,9 @@ def build_evaluation_job(
         question_text=rendered_question,
         context_payload=context_payload,
         curriculum_context=curriculum_context,
+        evidence_obtained=True,
+        oracle_available=oracle_available,
+        oracle_used=False,
     )
 
 
@@ -231,7 +253,7 @@ def build_evaluation_jobs(
     mode: str | None = None,
     event_logger: Callable[[str, str, dict[str, object]], None] | None = None,
 ) -> list[EvaluationJob]:
-    provider_cache: dict[tuple[str | None, str | None, str | None], DatasetProvider] = {}
+    adapter_cache: dict[tuple[str | None, str | None, str | None], DatasetPackage] = {}
     jobs: list[EvaluationJob] = []
     ordered_results = sorted(
         list(results),
@@ -245,16 +267,19 @@ def build_evaluation_jobs(
         ),
     )
     for result in ordered_results:
-        provider_key = (
+        adapter_key = (
             result.dataset.id,
             result.dataset.version,
             result.dataset.materialized_path or result.dataset.origin,
         )
-        provider = provider_cache.setdefault(provider_key, DatasetProvider.from_dataset(result.dataset))
+        adapter = adapter_cache.get(adapter_key)
+        if adapter is None:
+            adapter = _resolve_adapter(result.dataset)
+            adapter_cache[adapter_key] = adapter
         for judge in judges:
             job = build_evaluation_job(
                 result,
-                provider,
+                adapter,
                 judge=judge,
                 only=only,
                 mode=mode,
@@ -454,6 +479,9 @@ def evaluation_from_judge_payload(
         details = {
             "evaluationMethod": "judge",
             "contextBlocks": list(job.context_payload.keys()),
+            "evidence_obtained": job.evidence_obtained,
+            "oracle_available": job.oracle_available,
+            "oracle_used": job.oracle_used,
             "judges": [{
                 "judgeId": judge_id,
                 "provider": job.judge.provider,
@@ -485,6 +513,9 @@ def evaluation_from_judge_payload(
         details = {
             "evaluationMethod": "judge",
             "contextBlocks": list(job.context_payload.keys()),
+            "evidence_obtained": job.evidence_obtained,
+            "oracle_available": job.oracle_available,
+            "oracle_used": job.oracle_used,
             "judges": [vote],
             "outcome": {
                 "correctness": agg_correctness,
@@ -497,7 +528,12 @@ def evaluation_from_judge_payload(
         validation_type="judge",
         details=details,
         judge_info=judge_info,
-        trace=trace,
+        trace=_with_evaluation_trace_metadata(
+            trace,
+            evidence_obtained=job.evidence_obtained,
+            oracle_available=job.oracle_available,
+            oracle_used=job.oracle_used,
+        ),
     )
 
 
@@ -598,13 +634,15 @@ def _build_evaluation_result(
 
 
 def _get_context_blocks(
-    blocks: dict[str, Any],
+    blocks: object,
     block_ids: list[str],
 ) -> tuple[dict[str, Any], list[str]]:
     """Returns (found_blocks_dict, missing_block_ids).
 
     Supports both wrapped format {"blocks": {id: block, ...}} and flat {id: block, ...}.
     """
+    if not isinstance(blocks, dict):
+        return {}, list(block_ids)
     nested = blocks.get("blocks")
     inner: dict[str, Any] = nested if isinstance(nested, dict) else blocks
     found: dict[str, Any] = {}
@@ -616,6 +654,39 @@ def _get_context_blocks(
         else:
             found[bid] = block
     return found, missing
+
+
+def _evidence_task_context_blocks(task: object) -> list[str]:
+    if not isinstance(task, dict):
+        return []
+    raw_blocks = task.get("context_blocks", [])
+    if not isinstance(raw_blocks, list):
+        return []
+    return [str(block_id) for block_id in raw_blocks]
+
+
+def _with_evaluation_trace_metadata(
+    trace: EvaluationTrace,
+    *,
+    evidence_obtained: bool,
+    oracle_available: bool,
+    oracle_used: bool,
+) -> EvaluationTrace:
+    ai_trace = dict(trace.aiTrace or {})
+    metadata = dict(ai_trace.get("metadata") or {})
+    metadata.update(
+        {
+            "evidence_obtained": evidence_obtained,
+            "oracle_available": oracle_available,
+            "oracle_used": oracle_used,
+        }
+    )
+    ai_trace["metadata"] = metadata
+    return EvaluationTrace(
+        aiTrace=ai_trace,
+        rawResponse=trace.rawResponse,
+        error=trace.error,
+    )
 
 
 def _format_curriculum_context(context_payload: dict[str, Any]) -> str:
@@ -700,7 +771,7 @@ def _merge_evaluation_traces(traces: list[EvaluationTrace]) -> EvaluationTrace:
 
 def evaluate_run_result(
     result: RunResult,
-    provider: DatasetProvider,
+    adapter: DatasetPackage,
     *,
     judges: list[EvaluationModelConfig],
     only: str | None = None,
@@ -729,10 +800,11 @@ def evaluate_run_result(
             },
         )
     if validation_type == "judge":
-        question = provider.get_question(result.questionId)
-        block_ids = list(question.contextBlock)
-        all_blocks = provider.get_context_blocks(result.instanceId)
-        context_payload, missing = _get_context_blocks(all_blocks, block_ids)
+        evidence_payload = adapter.get_evidence(result.instanceId, result.questionId)
+        oracle_result = adapter.get_oracle(result.instanceId, result.questionId)
+        oracle_available = not isinstance(oracle_result, OracleUnavailable)
+        block_ids = _evidence_task_context_blocks(evidence_payload.task)
+        context_payload, missing = _get_context_blocks(evidence_payload.evidence, block_ids)
         if missing:
             if event_logger is not None:
                 event_logger(
@@ -752,6 +824,15 @@ def evaluate_run_result(
             context_payload,
             judges,
             active_engine,
+        )
+        details["evidence_obtained"] = True
+        details["oracle_available"] = oracle_available
+        details["oracle_used"] = False
+        trace = _with_evaluation_trace_metadata(
+            trace,
+            evidence_obtained=True,
+            oracle_available=oracle_available,
+            oracle_used=False,
         )
     else:
         raise ValueError(f"Unsupported validation type: {validation_type}")
@@ -787,7 +868,7 @@ def evaluate_run_results(
     event_logger: Callable[[str, str, dict[str, object]], None] | None = None,
     on_result: Callable[[RunResult, EvaluationRunResult | None], None] | None = None,
 ) -> list[EvaluationRunResult]:
-    provider_cache: dict[str, DatasetProvider] = {}
+    adapter_cache: dict[tuple[str | None, str | None, str | None], DatasetPackage] = {}
     engine = Engine(event_logger=event_logger)
     evaluations: list[EvaluationRunResult] = []
     ordered_results = sorted(
@@ -804,12 +885,18 @@ def evaluate_run_results(
     try:
         for result in ordered_results:
             try:
+                adapter_key = (
+                    result.dataset.id,
+                    result.dataset.version,
+                    result.dataset.materialized_path or result.dataset.origin,
+                )
+                adapter = adapter_cache.get(adapter_key)
+                if adapter is None:
+                    adapter = _resolve_adapter(result.dataset)
+                    adapter_cache[adapter_key] = adapter
                 evaluated = evaluate_run_result(
                     result,
-                    provider_cache.setdefault(
-                        result.dataset.root,
-                        DatasetProvider.from_dataset(result.dataset),
-                    ),
+                    adapter,
                     judges=judges,
                     only=only,
                     mode=mode,

@@ -16,7 +16,7 @@ from ctxbench.ai.models.openai import OpenAIModel
 from ctxbench.ai.runtime import MCPRuntime
 from ctxbench.ai.trace import TraceCollector
 from ctxbench.benchmark import executor as executor_module
-from ctxbench.benchmark.evaluation import _evaluate_judge, evaluate_run_result
+from ctxbench.benchmark.evaluation import _evaluate_judge, build_evaluation_jobs, evaluate_run_result
 from ctxbench.benchmark.executor import execute_runspec
 from ctxbench.benchmark.models import (
     EvaluationJudgeInfo,
@@ -28,7 +28,7 @@ from ctxbench.benchmark.models import (
 )
 from ctxbench.dataset.errors import CapabilityUnavailableError, UnsupportedRepresentationError
 from ctxbench.dataset.package import DatasetMetadata
-from ctxbench.dataset.payloads import ContextPayload, EvidencePayload, TaskPayload
+from ctxbench.dataset.payloads import ORACLE_UNAVAILABLE, ContextPayload, EvidencePayload, TaskPayload
 from ctxbench.dataset.provider import DatasetProvider
 import json
 
@@ -215,13 +215,21 @@ class FakeDatasetAdapter:
         self,
         *,
         context_content: object = '{"answers": {"q_year": 2020}}',
+        evidence: object | None = None,
+        oracle: object = ORACLE_UNAVAILABLE,
         tool_provider: object | None = None,
         unsupported_context: bool = False,
     ) -> None:
         self.context_content = context_content
+        self.evidence = evidence if evidence is not None else {
+            "summary": {"title": "Summary", "content": "Researcher in software engineering."}
+        }
+        self.oracle = oracle
         self._tool_provider = tool_provider
         self.unsupported_context = unsupported_context
         self.context_calls: list[tuple[str, str, str]] = []
+        self.evidence_calls: list[tuple[str | None, str]] = []
+        self.oracle_calls: list[tuple[str | None, str]] = []
         self.tool_provider_calls = 0
 
     def metadata(self) -> DatasetMetadata:
@@ -264,7 +272,16 @@ class FakeDatasetAdapter:
         )
 
     def get_evidence(self, instance_id: str, task_id: str) -> EvidencePayload:
-        return EvidencePayload(role="evidence", task={}, evidence={})
+        self.evidence_calls.append((instance_id, task_id))
+        return EvidencePayload(
+            role="evidence",
+            task={"context_blocks": ["summary"]},
+            evidence=self.evidence,
+        )
+
+    def get_oracle(self, instance_id: str, task_id: str) -> object:
+        self.oracle_calls.append((instance_id, task_id))
+        return self.oracle
 
     def capability_report(self) -> object:
         return object()
@@ -314,6 +331,49 @@ def _runspec_for_executor(
                 "provider": provider,
                 "modelName": "recording-model",
                 "strategy": strategy,
+                "format": "json",
+                "repeatIndex": 1,
+            },
+        }
+    )
+
+
+def _run_result_for_evaluation(dataset: ExperimentDataset) -> RunResult:
+    return RunResult.model_validate(
+        {
+            "trialId": "run-1",
+            "experimentId": "exp-1",
+            "dataset": dataset.model_dump(mode="json"),
+            "taskId": "q_year",
+            "question": "In which year did the researcher obtain their PhD?",
+            "questionTemplate": "In which year did the researcher obtain their PhD?",
+            "questionTags": [],
+            "validationType": "judge",
+            "contextBlock": ["summary"],
+            "parameters": {},
+            "instanceId": "cv-demo",
+            "provider": "mock",
+            "model": "mock",
+            "strategy": "inline",
+            "format": "json",
+            "repeatIndex": 1,
+            "response": "The PhD was obtained in 2020.",
+            "status": "success",
+            "timing": {
+                "startedAt": "2026-01-01T00:00:00Z",
+                "finishedAt": "2026-01-01T00:00:01Z",
+                "durationMs": 1000,
+            },
+            "usage": {},
+            "metricsSummary": {},
+            "trace": {},
+            "metadata": {
+                "canonicalId": "exp-1|q_year|cv-demo|mock|mock|inline|json|1",
+                "taskId": "q_year",
+                "instanceId": "cv-demo",
+                "provider": "mock",
+                "modelName": "mock",
+                "strategy": "inline",
                 "format": "json",
                 "repeatIndex": 1,
             },
@@ -995,6 +1055,105 @@ def test_mock_model_uses_task_metadata_lookup():
     response = model.generate(ModelInput(system_instruction="System", prompt="Prompt"), request)
 
     assert response.text == "42"
+
+
+def test_build_evaluation_jobs_resolves_adapter_and_uses_evidence(monkeypatch, tmp_path):
+    from ctxbench.benchmark import evaluation as evaluation_module
+
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter()
+    registry = FakeRegistry(adapter)
+    monkeypatch.setattr(evaluation_module, "get_default_registry", lambda: registry)
+
+    jobs = build_evaluation_jobs(
+        [_run_result_for_evaluation(dataset)],
+        judges=[make_experiment().evaluation.judges[0]],
+    )
+
+    assert len(jobs) == 1
+    assert registry.resolved == [jobs[0].result.dataset]
+    assert adapter.evidence_calls == [("cv-demo", "q_year")]
+    assert adapter.oracle_calls == [("cv-demo", "q_year")]
+    assert jobs[0].context_payload == {
+        "summary": {"title": "Summary", "content": "Researcher in software engineering."}
+    }
+    assert "Researcher in software engineering." in jobs[0].prompt
+
+
+def test_evaluate_run_result_records_unavailable_oracle_without_using_it_in_prompt(monkeypatch, tmp_path):
+    from ctxbench.benchmark import evaluation as evaluation_module
+
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter(oracle=ORACLE_UNAVAILABLE)
+    seen: dict[str, object] = {}
+
+    def fake_judge_request(**kwargs):
+        seen.update(kwargs)
+        return (
+            {
+                "correctness": {"rating": "meets", "justification": "supported"},
+                "completeness": {"rating": "meets", "justification": "complete"},
+            },
+            EvaluationJudgeInfo(used=True, role="judge", provider="mock", model="mock"),
+            EvaluationTrace(aiTrace={"events": []}),
+        )
+
+    monkeypatch.setattr(evaluation_module, "_judge_request", fake_judge_request)
+
+    evaluated = evaluate_run_result(
+        _run_result_for_evaluation(dataset),
+        adapter,
+        judges=[make_experiment().evaluation.judges[0]],
+        engine=Engine(),
+    )
+
+    assert evaluated is not None
+    item = evaluated.items[0]
+    assert adapter.evidence_calls == [("cv-demo", "q_year")]
+    assert adapter.oracle_calls == [("cv-demo", "q_year")]
+    assert item.details["evidence_obtained"] is True
+    assert item.details["oracle_available"] is False
+    assert item.details["oracle_used"] is False
+    assert item.evaluationTrace.aiTrace["metadata"]["oracle_used"] is False
+    assert "oracle" not in seen
+    assert "oracle" not in str(seen["prompt"]).lower()
+    assert "oracle" not in str(seen["curriculum_context"]).lower()
+
+
+def test_evaluate_run_result_records_available_oracle_but_keeps_it_out_of_prompt(monkeypatch, tmp_path):
+    from ctxbench.benchmark import evaluation as evaluation_module
+
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter(oracle={"answer": "SECRET_ORACLE_VALUE"})
+    seen: dict[str, object] = {}
+
+    def fake_judge_request(**kwargs):
+        seen.update(kwargs)
+        return (
+            {
+                "correctness": {"rating": "meets", "justification": "supported"},
+                "completeness": {"rating": "meets", "justification": "complete"},
+            },
+            EvaluationJudgeInfo(used=True, role="judge", provider="mock", model="mock"),
+            EvaluationTrace(),
+        )
+
+    monkeypatch.setattr(evaluation_module, "_judge_request", fake_judge_request)
+
+    evaluated = evaluate_run_result(
+        _run_result_for_evaluation(dataset),
+        adapter,
+        judges=[make_experiment().evaluation.judges[0]],
+        engine=Engine(),
+    )
+
+    assert evaluated is not None
+    item = evaluated.items[0]
+    assert item.details["oracle_available"] is True
+    assert item.details["oracle_used"] is False
+    assert item.evaluationTrace.aiTrace["metadata"]["oracle_available"] is True
+    assert "SECRET_ORACLE_VALUE" not in str(seen["prompt"])
+    assert "SECRET_ORACLE_VALUE" not in str(seen["curriculum_context"])
 
 
 def test_mcp_runtime_defaults_public_server_label_to_ctxbench():

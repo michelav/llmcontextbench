@@ -186,18 +186,18 @@
 
 ### Tasks
 
-- [ ] T027 [S6] Update `src/ctxbench/benchmark/evaluation.py`: import `get_default_registry` from `ctxbench.adapters.registry`; replace provider-cache construction based on `DatasetProvider.from_dataset` with adapter-cache construction based on `get_default_registry().resolve(result.dataset)` where `result.dataset` is a `DatasetProvenance` accepted by S2 registry normalization; do not change judge prompt construction in this task; add focused adapter-resolution tests in `tests/test_ai.py`
-- [ ] T028 [S6] Update evidence handling in `src/ctxbench/benchmark/evaluation.py`: replace `get_question` / `get_context_blocks` calls with `adapter.get_evidence(result.instanceId, result.questionId)` → `EvidencePayload`; access judge evidence through `evidence_payload.evidence`; access task block IDs via `evidence_payload.task.get("context_blocks", []) if isinstance(evidence_payload.task, dict) else []` — guard required because `EvidencePayload.task` is typed `object`, not `dict`; add a focused test in `tests/test_ai.py` verifying `get_evidence` is called and `EvidencePayload.evidence` is passed to the judge prompt builder
-- [ ] T029 [S6] Update oracle handling in `src/ctxbench/benchmark/evaluation.py`: import `OracleUnavailable` from `ctxbench.dataset.payloads`; call `adapter.get_oracle(result.instanceId, result.questionId)` → `oracle_result`; derive `oracle_available = not isinstance(oracle_result, OracleUnavailable)`; ensure `oracle_result` is NOT passed to `build_evaluation_job`, `_judge_request`, or any judge prompt constructor; add focused tests in `tests/test_ai.py` for unavailable oracle, oracle availability recording, and oracle isolation from prompts
-- [ ] T030 [S6] Update evaluation trace metadata in `src/ctxbench/benchmark/evaluation.py`: add `"evidence_obtained": True`, `"oracle_available": oracle_available`, and `"oracle_used": False`; add focused tests in `tests/test_ai.py` proving evaluation proceeds with `ORACLE_UNAVAILABLE` and records `oracle_used` as `False`; use local mock adapters/registries in `tests/test_ai.py` — no real provider calls
+- [X] T027 [S6] Update `src/ctxbench/benchmark/evaluation.py`: import `get_default_registry` from `ctxbench.adapters.registry`; replace provider-cache construction based on `DatasetProvider.from_dataset` with adapter-cache construction based on `get_default_registry().resolve(result.dataset)` where `result.dataset` is a `DatasetProvenance` accepted by S2 registry normalization; do not change judge prompt construction in this task; add focused adapter-resolution tests in `tests/test_ai.py`
+- [X] T028 [S6] Update evidence handling in `src/ctxbench/benchmark/evaluation.py`: replace `get_question` / `get_context_blocks` calls with `adapter.get_evidence(result.instanceId, result.questionId)` → `EvidencePayload`; access judge evidence through `evidence_payload.evidence`; access task block IDs via `evidence_payload.task.get("context_blocks", []) if isinstance(evidence_payload.task, dict) else []` — guard required because `EvidencePayload.task` is typed `object`, not `dict`; add a focused test in `tests/test_ai.py` verifying `get_evidence` is called and `EvidencePayload.evidence` is passed to the judge prompt builder
+- [X] T029 [S6] Update oracle handling in `src/ctxbench/benchmark/evaluation.py`: import `OracleUnavailable` from `ctxbench.dataset.payloads`; call `adapter.get_oracle(result.instanceId, result.questionId)` → `oracle_result`; derive `oracle_available = not isinstance(oracle_result, OracleUnavailable)`; ensure `oracle_result` is NOT passed to `build_evaluation_job`, `_judge_request`, or any judge prompt constructor; add focused tests in `tests/test_ai.py` for unavailable oracle, oracle availability recording, and oracle isolation from prompts
+- [X] T030 [S6] Update evaluation trace metadata in `src/ctxbench/benchmark/evaluation.py`: add `"evidence_obtained": True`, `"oracle_available": oracle_available`, and `"oracle_used": False`; add focused tests in `tests/test_ai.py` proving evaluation proceeds with `ORACLE_UNAVAILABLE` and records `oracle_used` as `False`; use local mock adapters/registries in `tests/test_ai.py` — no real provider calls
 
 ### Checkpoint
 
-- [ ] `pytest -k "eval" -v` passes
-- [ ] no provider-backed execution
-- [ ] no opportunistic refactor
-- [ ] diff is reviewable
-- [ ] `worklog.md` updated
+- [X] `pytest -k "eval" -v` passes
+- [X] no provider-backed execution
+- [X] no opportunistic refactor
+- [X] diff is reviewable
+- [X] `worklog.md` updated
 
 ---
 
