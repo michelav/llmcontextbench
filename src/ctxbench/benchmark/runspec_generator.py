@@ -5,7 +5,7 @@ import re
 from typing import Any, Callable
 
 from ctxbench.benchmark.models import DatasetProvenance, Experiment, MODEL_ID_PATTERN, RunMetadata, RunSpec
-from ctxbench.dataset.provider import LocalDatasetPackage
+from ctxbench.dataset.package import DatasetPackage
 from ctxbench.util.artifacts import build_short_ids, canonical_trial_identity
 from ctxbench.util.env import apply_lattes_mcp_env_overrides, resolve_env_placeholders
 
@@ -69,7 +69,7 @@ def effective_formats_for_strategy(strategy_name: str, formats: list[Any]) -> li
 def generate_runspecs(
     experiment: Experiment,
     base_dir: str | Path,
-    dataset_package: LocalDatasetPackage,
+    dataset_package: DatasetPackage,
     dataset_provenance: DatasetProvenance,
     *,
     experiment_path: str | Path | None = None,
@@ -78,7 +78,7 @@ def generate_runspecs(
     scoped_questions = set(experiment.scope.questions)
     scoped_instances = set(experiment.scope.instances)
     questions = [
-        question_id for question_id in dataset_package.list_question_ids()
+        question_id for question_id in dataset_package.list_task_ids()
         if not scoped_questions or question_id in scoped_questions
     ]
     instance_ids = [
@@ -92,11 +92,12 @@ def generate_runspecs(
     draft_specs: list[dict[str, Any]] = []
     for instance_id in instance_ids:
         for question_id in questions:
-            question = dataset_package.get_question(question_id)
-            question_instance = dataset_package.get_question_instance(question_id, instance_id)
-            parameters = dict(question_instance.parameters) if question_instance is not None else {}
+            task = dataset_package.get_task(question_id)
+            task_instance = dataset_package.get_task_instance(instance_id, question_id)
+            raw_parameters = task_instance.get("parameters", {}) if task_instance else {}
+            parameters = dict(raw_parameters) if isinstance(raw_parameters, dict) else {}
             rendered_question = render_question_template(
-                question.question,
+                task.statement,
                 parameters,
                 on_warning=on_warning,
                 question_id=question_id,
@@ -130,7 +131,7 @@ def generate_runspecs(
                                     else None,
                                     "taskId": question_id,
                                     "question": rendered_question,
-                                    "questionTemplate": question.question,
+                                    "questionTemplate": task.statement,
                                     "instanceId": instance_id,
                                     "provider": provider_name,
                                     "modelId": model_id,
@@ -143,9 +144,9 @@ def generate_runspecs(
                                     "evaluationEnabled": experiment.evaluation.enabled,
                                     "trace": experiment.trace,
                                     "artifacts": experiment.artifacts,
-                                    "questionTags": list(question.tags),
-                                    "validationType": question.validation.type,
-                                    "contextBlock": list(question.contextBlock),
+                                    "questionTags": list(task.tags),
+                                    "validationType": task.validation_type,
+                                    "contextBlock": list(task.context_blocks),
                                     "parameters": parameters,
                                 }
                             )

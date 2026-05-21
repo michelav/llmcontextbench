@@ -157,6 +157,7 @@ def write_mock_experiment(path: Path, *, evaluation_enabled: bool = True) -> Pat
         json.dumps(
             {
                 "datasetId": "mock-v2",
+                "version": "0.1.0",
                 "questions": [
                     {
                         "id": "q_year",
@@ -181,6 +182,7 @@ def write_mock_experiment(path: Path, *, evaluation_enabled: bool = True) -> Pat
         json.dumps(
             {
                 "datasetId": "mock-v2",
+                "version": "0.1.0",
                 "instances": [
                     {
                         "instanceId": "cv_demo",
@@ -372,6 +374,7 @@ def test_plan_warns_and_uses_empty_string_for_missing_template_parameter(tmp_pat
         json.dumps(
             {
                 "datasetId": "mock-v2",
+                "version": "0.1.0",
                 "questions": [
                     {
                         "id": "q_missing",
@@ -389,6 +392,7 @@ def test_plan_warns_and_uses_empty_string_for_missing_template_parameter(tmp_pat
         json.dumps(
             {
                 "datasetId": "mock-v2",
+                "version": "0.1.0",
                 "instances": [
                     {
                         "instanceId": "cv_demo",

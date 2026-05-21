@@ -5,11 +5,17 @@ import json
 
 import pytest
 
-from ctxbench.benchmark.models import ExperimentDataset
+from ctxbench.benchmark.models import DatasetProvenance, ExperimentDataset
 from ctxbench.dataset.cache import DatasetCache
 from ctxbench.dataset.materialization import MaterializationManifest
 from ctxbench.dataset.package import DatasetPackage
-from ctxbench.dataset.resolver import DatasetNotFoundError, DatasetResolver, MultiDatasetError
+from ctxbench.dataset.provider import LocalDatasetPackage
+from ctxbench.dataset.resolver import (
+    DatasetNotFoundError,
+    DatasetResolver,
+    MultiDatasetError,
+    ResolvedDatasetPackage,
+)
 
 
 def _manifest() -> MaterializationManifest:
@@ -85,6 +91,30 @@ def test_resolver_local_path_returns_dataset_package_compatible_object(tmp_path:
     assert package.origin() == str(dataset_root)
 
 
+def test_resolve_for_planning_preserves_local_root_adapter_ref(tmp_path: Path) -> None:
+    resolver = DatasetResolver()
+    cache = DatasetCache(cache_dir=tmp_path / "cache")
+    dataset_root = _write_local_dataset(tmp_path / "dataset")
+
+    resolved = resolver.resolve_for_planning(
+        ExperimentDataset(
+            root=str(dataset_root),
+            id="ctxbench/lattes",
+            version="0.1.0",
+            origin="local-origin",
+        ),
+        cache,
+    )
+
+    assert isinstance(resolved.package, LocalDatasetPackage)
+    assert resolved.adapter_ref == ExperimentDataset(
+        root=str(dataset_root),
+        id="ctxbench/lattes",
+        version="0.1.0",
+        origin="local-origin",
+    )
+
+
 def test_resolver_cached_id_version_returns_single_materialization(tmp_path: Path) -> None:
     resolver = DatasetResolver()
     cache = DatasetCache(cache_dir=tmp_path / "cache")
@@ -96,6 +126,28 @@ def test_resolver_cached_id_version_returns_single_materialization(tmp_path: Pat
     assert package.identity() == "ctxbench/fake"
     assert package.version() == "0.1.0"
     assert package.origin() == "/tmp/source-a"
+
+
+def test_resolve_for_planning_preserves_cached_materialization_ref(tmp_path: Path) -> None:
+    resolver = DatasetResolver()
+    cache = DatasetCache(cache_dir=tmp_path / "cache")
+    cache.store(_manifest(), _write_source(tmp_path / "source-a"))
+    manifest = cache.lookup("ctxbench/fake", "0.1.0")[0]
+
+    resolved = resolver.resolve_for_planning(
+        ExperimentDataset(id="ctxbench/fake", version="0.1.0"),
+        cache,
+    )
+
+    assert isinstance(resolved.package, ResolvedDatasetPackage)
+    assert resolved.adapter_ref == DatasetProvenance(
+        id="ctxbench/fake",
+        version="0.1.0",
+        origin="/tmp/source-a",
+        resolved_revision="rev-a",
+        content_hash="sha256:same",
+        materialized_path=manifest.materializedPath,
+    )
 
 
 def test_resolver_missing_dataset_suggests_fetch(tmp_path: Path) -> None:

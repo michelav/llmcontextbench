@@ -26,3 +26,8 @@
 - slice: S3d
 - summary: Replaced legacy ctxbench.datasets.lattes implementation modules with compatibility re-export stubs and added provider-free tests proving old import paths resolve to moved adapter symbols.
 - token_provenance: unavailable
+
+- event: slice-implemented
+- slice: S4
+- summary: Routed planning through the dataset adapter contract by adding resolve_for_planning, updating runspec generation to use DatasetPackage v0 methods, and resolving registered adapters in plan with a protocol fallback for unregistered local fixtures.
+- token_provenance: unavailable

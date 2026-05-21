@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ctxbench.adapters.registry import get_default_registry
 from ctxbench.benchmark.experiment_loader import load_experiment
 from ctxbench.benchmark.models import DatasetProvenance
 from ctxbench.benchmark.paths import resolve_output_root, resolve_trials_path
 from ctxbench.benchmark.runspec_generator import generate_runspecs
 from ctxbench.dataset.cache import DatasetCache
 from ctxbench.dataset.conflicts import AmbiguousDatasetError
-from ctxbench.dataset.provider import LocalDatasetPackage
+from ctxbench.dataset.errors import AdapterUnavailableError
+from ctxbench.dataset.package import DatasetPackage
 from ctxbench.dataset.resolver import DatasetNotFoundError, DatasetResolver, MultiDatasetError
 from ctxbench.dataset.validation import validate_package
 from ctxbench.util.fs import ensure_dir, write_json
@@ -16,7 +18,7 @@ from ctxbench.util.jsonl import write_jsonl
 from ctxbench.util.logging import PhaseLogger, ProgressTracker
 
 
-def _dataset_provenance(package: LocalDatasetPackage) -> DatasetProvenance:
+def _dataset_provenance(package: DatasetPackage) -> DatasetProvenance:
     capability_report = package.capability_report()
     return DatasetProvenance(
         id=package.identity(),
@@ -43,7 +45,7 @@ def plan_command(
     cache = DatasetCache(cache_dir=cache_dir)
     resolver = DatasetResolver()
     try:
-        package = resolver.resolve(experiment.dataset, cache)
+        resolved = resolver.resolve_for_planning(experiment.dataset, cache)
     except DatasetNotFoundError as exc:
         raise DatasetNotFoundError(str(exc)) from exc
     except AmbiguousDatasetError as exc:
@@ -52,16 +54,19 @@ def plan_command(
         raise MultiDatasetError(
             "Experiment references to multiple datasets are not supported."
         ) from exc
-    if not isinstance(package, LocalDatasetPackage):
-        raise ValueError("Planning requires a locally materialized dataset package.")
-    capability_report = validate_package(package)
+    try:
+        adapter = get_default_registry().resolve(resolved.adapter_ref)
+    except AdapterUnavailableError:
+        adapter = resolved.package
+    adapter_metadata = adapter.metadata()
+    capability_report = validate_package(adapter)
     logger.phase(
         "LOAD",
         "Dataset resolved",
-        dataset=capability_report.identity,
+        dataset=adapter_metadata.name,
         version=capability_report.version,
-        questions=len(package.list_question_ids()),
-        instances=len(package.list_instance_ids()),
+        questions=len(adapter.list_task_ids()),
+        instances=len(adapter.list_instance_ids()),
     )
     logger.phase(
         "LOAD",
@@ -70,11 +75,11 @@ def plan_command(
         missingMandatory=len(capability_report.missing_mandatory),
         nonconformantDescriptors=len(capability_report.nonconformant_descriptors),
     )
-    dataset_provenance = _dataset_provenance(package)
+    dataset_provenance = _dataset_provenance(adapter)
     runspecs = generate_runspecs(
         experiment,
         base_dir,
-        package,
+        adapter,
         dataset_provenance,
         experiment_path=path,
         on_warning=lambda message, **fields: logger.warn(message, **fields),
