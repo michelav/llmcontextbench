@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,9 @@ from ctxbench.commands.plan import plan_command
 from ctxbench.commands.status import status_command
 from ctxbench.dataset.errors import AdapterUnavailableError
 from ctxbench.dataset import acquisition as acquisition_module
+
+
+ARTIFACT_ONLY_FIXTURE = Path(__file__).parent / "fixtures" / "artifact_only_unavailable_dataset"
 
 
 def _forbid_dataset_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -239,144 +243,25 @@ def _write_missing_responses(root: Path) -> Path:
     return responses_path
 
 
-def _write_export_fixture(root: Path) -> Path:
-    manifest_path = root / "manifest.json"
-    manifest_path.write_text(
-        json.dumps(
-            {
-                "experimentId": "exp-no-network",
-                "dataset": {
-                    "id": "ctxbench/local-fixture",
-                    "version": "0.1.0",
-                    "origin": "forged-origin",
-                    "resolvedRevision": None,
-                    "contentHash": None,
-                    "materializedPath": str(root / "missing-dataset"),
-                },
-                "evaluation": {"judges": []},
-                "trace": {"writeFiles": False},
-            }
-        ),
-        encoding="utf-8",
-    )
-    (root / "responses.jsonl").write_text(
-        json.dumps(
-            {
-                "trialId": "trial-1",
-                "experimentId": "exp-no-network",
-                "dataset": {
-                    "id": "ctxbench/local-fixture",
-                    "version": "0.1.0",
-                    "origin": "forged-origin",
-                    "resolvedRevision": None,
-                    "contentHash": None,
-                    "materializedPath": str(root / "missing-dataset"),
-                },
-                "taskId": "q_year",
-                "instanceId": "cv-demo",
-                "provider": "mock",
-                "modelId": "mock",
-                "modelName": "mock",
-                "strategy": "inline",
-                "format": "json",
-                "repeatIndex": 1,
-                "status": "success",
-                "response": "2020",
-                "errorMessage": None,
-                "timing": {
-                    "startedAt": "2026-05-12T00:00:00Z",
-                    "finishedAt": "2026-05-12T00:00:01Z",
-                    "durationMs": 1,
-                },
-                "usage": {},
-                "metricsSummary": {},
-                "metadata": {
-                    "canonicalId": "trial-1",
-                    "taskId": "q_year",
-                    "instanceId": "cv-demo",
-                    "provider": "mock",
-                    "modelId": "mock",
-                    "modelName": "mock",
-                    "strategy": "inline",
-                    "format": "json",
-                    "repeatIndex": 1,
-                    "parameters": {},
-                },
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    (root / "evals.jsonl").write_text(
-        json.dumps(
-            {
-                "trialId": "trial-1",
-                "experimentId": "exp-no-network",
-                "dataset": {
-                    "id": "ctxbench/local-fixture",
-                    "version": "0.1.0",
-                    "origin": "forged-origin",
-                    "resolvedRevision": None,
-                    "contentHash": None,
-                    "materializedPath": str(root / "missing-dataset"),
-                },
-                "instanceId": "cv-demo",
-                "taskId": "q_year",
-                "strategy": "inline",
-                "status": "evaluated",
-                "evaluationMethod": "judge",
-                "judgeCount": 1,
-                "judgeErrorCount": 0,
-                "outcome": {
-                    "correctness": {"rating": "meets", "agreement": 1.0},
-                    "completeness": {"rating": "meets", "agreement": 1.0},
-                },
-                "evaluationInputTokens": 1,
-                "evaluationOutputTokens": 1,
-                "evaluationTotalTokens": 2,
-                "evaluationDurationMs": 1,
-                "contextBlocks": ["summary"],
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    (root / "judge_votes.jsonl").write_text(
-        json.dumps(
-            {
-                "trialId": "trial-1",
-                "experimentId": "exp-no-network",
-                "dataset": {
-                    "id": "ctxbench/local-fixture",
-                    "version": "0.1.0",
-                    "origin": "forged-origin",
-                    "resolvedRevision": None,
-                    "contentHash": None,
-                    "materializedPath": str(root / "missing-dataset"),
-                },
-                "instanceId": "cv-demo",
-                "taskId": "q_year",
-                "strategy": "inline",
-                "judgeId": "judge-a",
-                "provider": "mock",
-                "model": "judge-a",
-                "status": "evaluated",
-                "criterias": {
-                    "correctness": {"rating": "meets", "justification": "ok"},
-                    "completeness": {"rating": "meets", "justification": "ok"},
-                },
-                "inputTokens": 1,
-                "outputTokens": 1,
-                "totalTokens": 2,
-                "durationMs": 1,
-                "error": None,
-                "traceRef": None,
-            }
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+def _copy_artifact_only_fixture(root: Path) -> Path:
+    shutil.copytree(ARTIFACT_ONLY_FIXTURE, root, dirs_exist_ok=True)
     return root / "evals.jsonl"
+
+
+def _assert_recorded_dataset_is_unavailable(root: Path) -> None:
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    dataset = manifest["dataset"]
+    materialized_path = Path(dataset["materializedPath"])
+    assert not materialized_path.exists()
+
+
+def _forbid_dataset_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _blocked(*args: object, **kwargs: object) -> object:
+        raise AssertionError("dataset resolution should not be used")
+
+    monkeypatch.setattr("ctxbench.dataset.resolver.DatasetResolver.resolve", _blocked)
+    monkeypatch.setattr("ctxbench.dataset.resolver.DatasetResolver.resolve_for_planning", _blocked)
+    monkeypatch.setattr("ctxbench.adapters.registry.get_default_registry", _blocked)
 
 
 def test_plan_rejects_unresolved_dataset_without_fetching(
@@ -424,22 +309,39 @@ def test_eval_rejects_missing_dataset_evidence_without_fetching(
         evaluation_module._judge_request = original_judge_request
 
 
-def test_export_succeeds_from_artifacts_alone_and_status_avoids_resolution(
+def test_export_succeeds_from_artifacts_when_dataset_unavailable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _forbid_dataset_fetch(monkeypatch)
-    evals_path = _write_export_fixture(tmp_path)
+    _forbid_dataset_resolution(monkeypatch)
+    evals_path = _copy_artifact_only_fixture(tmp_path)
 
-    def _resolver_used(*args: object, **kwargs: object) -> object:
-        raise AssertionError("dataset resolver should not be used")
-
-    monkeypatch.setattr("ctxbench.dataset.resolver.DatasetResolver.resolve", _resolver_used)
+    _assert_recorded_dataset_is_unavailable(tmp_path)
 
     assert export_command(str(evals_path)) == 0
-    assert (tmp_path / "results.csv").exists()
+    captured = capsys.readouterr()
+    assert "Exported 1 row(s)" in captured.out
+
+    results_path = tmp_path / "results.csv"
+    assert results_path.exists()
+    assert "trial-artifact-only-1" in results_path.read_text(encoding="utf-8")
+
+
+def test_status_succeeds_from_artifacts_when_dataset_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _forbid_dataset_fetch(monkeypatch)
+    _forbid_dataset_resolution(monkeypatch)
+    _copy_artifact_only_fixture(tmp_path)
+
+    _assert_recorded_dataset_is_unavailable(tmp_path)
 
     assert status_command(str(tmp_path)) == 0
     captured = capsys.readouterr()
-    assert "exp-no-network" in captured.out
+    assert "Experiment : exp-artifact-only" in captured.out
+    assert "execute" in captured.out
+    assert "eval" in captured.out

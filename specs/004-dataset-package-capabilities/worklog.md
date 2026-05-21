@@ -46,3 +46,8 @@
 - slice: S7
 - summary: Added provider-free fake adapter conformance tests, default Lattes registry integration tests, canonical experiment fixture validation, and a clean canonical experiment fixture.
 - token_provenance: unavailable
+
+- event: slice-implemented
+- slice: S8
+- summary: Updated architecture documentation for Adapter Registry v0, adapter boundaries, format vocabulary, artifact-only export/status behavior, and trace metadata contracts; added artifact-only unavailable-dataset fixtures and provider-free export/status validation.
+- token_provenance: unavailable

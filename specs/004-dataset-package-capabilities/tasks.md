@@ -234,22 +234,22 @@
 
 ### Tasks
 
-- [ ] T035 [S8] Update `docs/architecture/container.md`: add Adapter Registry v0 as the composition point between the benchmark core and dataset adapters; show `ctxbench.adapters.registry` as the only lifecycle module that imports concrete adapter classes
-- [ ] T036 [P] [S8] Update `docs/architecture/component.md`: show `ctxbench.dataset` as generic contracts layer; `ctxbench.adapters.registry` as first-party wiring; `ctxbench.adapters.lattes` as a concrete first-party adapter; draw the dependency direction (core → dataset ← adapters)
-- [ ] T037 [P] [S8] Update `docs/architecture/vocabulary.md`: define `format` as "context representation request passed unmodified to the adapter as the `representation` parameter of `get_context`"; explicitly state it is not a physical filename or file format
-- [ ] T038 [P] [S8] Update `docs/architecture/workflow.md`: clarify that adapter resolution occurs once per run before any lifecycle phase consumes the dataset; clarify that `export` and `status` are artifact-only and succeed when the dataset is not materialized
-- [ ] T039 [S8] Update `docs/architecture/artifact-contracts.md`: document additions to executor trace metadata (`context_representation`, `context_obtained`); document removals (`context_path`, `instance_dir`); document additions to evaluation trace metadata (`evidence_obtained`, `oracle_available`, `oracle_used`); record that `lattes_id` → `instance_id` rename is backward-compatible via strategy fallback
-- [ ] T040 [S8] Add or update shared artifact-only fixtures in `tests/fixtures/artifact_only_unavailable_dataset/` proving lifecycle commands can operate from existing run artifacts when `dataset.root` is absent or not materialized; first check for existing run artifact stubs (responses.jsonl, evals.jsonl, or equivalent); if none exist, create minimal stubs — e.g. empty JSONL files or single-row JSONL stubs — sufficient for export/status tests; the dataset reference in the fixture must point to a nonexistent path; do not call real providers
-- [ ] T041 [S8] Add or update tests in `tests/test_lifecycle_no_network.py` proving `ctxbench export` operates from the T040 artifacts when the dataset is unavailable; verify the command exits 0 and uses only artifact data; do not call real providers
-- [ ] T042 [S8] Add or update tests in `tests/test_lifecycle_no_network.py` proving `ctxbench status` operates from the T040 artifacts when the dataset is unavailable; verify the command exits 0 and produces expected output using only artifact data; do not call real providers
+- [X] T035 [S8] Update `docs/architecture/container.md`: add Adapter Registry v0 as the composition point between the benchmark core and dataset adapters; show `ctxbench.adapters.registry` as the only lifecycle module that imports concrete adapter classes
+- [X] T036 [P] [S8] Update `docs/architecture/component.md`: show `ctxbench.dataset` as generic contracts layer; `ctxbench.adapters.registry` as first-party wiring; `ctxbench.adapters.lattes` as a concrete first-party adapter; draw the dependency direction (core → dataset ← adapters)
+- [X] T037 [P] [S8] Update `docs/architecture/vocabulary.md`: define `format` as "context representation request passed unmodified to the adapter as the `representation` parameter of `get_context`"; explicitly state it is not a physical filename or file format
+- [X] T038 [P] [S8] Update `docs/architecture/workflow.md`: clarify that adapter resolution occurs once per run before any lifecycle phase consumes the dataset; clarify that `export` and `status` are artifact-only and succeed when the dataset is not materialized
+- [X] T039 [S8] Update `docs/architecture/artifact-contracts.md`: document additions to executor trace metadata (`context_representation`, `context_obtained`); document removals (`context_path`, `instance_dir`); document additions to evaluation trace metadata (`evidence_obtained`, `oracle_available`, `oracle_used`); record that `lattes_id` → `instance_id` rename is backward-compatible via strategy fallback
+- [X] T040 [S8] Add or update shared artifact-only fixtures in `tests/fixtures/artifact_only_unavailable_dataset/` proving lifecycle commands can operate from existing run artifacts when `dataset.root` is absent or not materialized; first check for existing run artifact stubs (responses.jsonl, evals.jsonl, or equivalent); if none exist, create minimal stubs — e.g. empty JSONL files or single-row JSONL stubs — sufficient for export/status tests; the dataset reference in the fixture must point to a nonexistent path; do not call real providers
+- [X] T041 [S8] Add or update tests in `tests/test_lifecycle_no_network.py` proving `ctxbench export` operates from the T040 artifacts when the dataset is unavailable; verify the command exits 0 and uses only artifact data; do not call real providers
+- [X] T042 [S8] Add or update tests in `tests/test_lifecycle_no_network.py` proving `ctxbench status` operates from the T040 artifacts when the dataset is unavailable; verify the command exits 0 and produces expected output using only artifact data; do not call real providers
 
 ### Checkpoint
 
-- [ ] `pytest -k "export or status" -v` passes
-- [ ] no provider-backed execution
-- [ ] no opportunistic refactor
-- [ ] diff is reviewable
-- [ ] `worklog.md` updated
+- [X] `pytest -k "export or status" -v` passes
+- [X] no provider-backed execution
+- [X] no opportunistic refactor
+- [X] diff is reviewable
+- [X] `worklog.md` updated
 
 ---
 

@@ -1,0 +1,24 @@
+{
+  "experimentId": "exp-artifact-only",
+  "dataset": {
+    "id": "ctxbench/lattes",
+    "version": "0.1.0",
+    "origin": "tests/fixtures/artifact_only_unavailable_dataset/missing-dataset-root",
+    "resolvedRevision": null,
+    "contentHash": "sha256:artifact-only-fixture",
+    "materializedPath": "tests/fixtures/artifact_only_unavailable_dataset/missing-dataset-root"
+  },
+  "evaluation": {
+    "judges": [
+      {
+        "id": "judge-a",
+        "provider": "mock",
+        "model": "judge-a",
+        "temperature": 0
+      }
+    ]
+  },
+  "trace": {
+    "writeFiles": false
+  }
+}

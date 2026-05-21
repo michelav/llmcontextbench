@@ -8,7 +8,9 @@ flowchart TB
         ExperimentLoader["Experiment Loader"]
         DatasetResolver["Dataset Resolver"]
         DatasetCache["Dataset cache"]
-        DatasetPackage["DatasetPackage boundary"]
+        AdapterRegistry["Adapter Registry<br/>ctxbench.adapters.registry"]
+        DatasetContracts["Generic dataset contracts<br/>ctxbench.dataset"]
+        LattesAdapter["Lattes adapter<br/>ctxbench.adapters.lattes"]
         TrialPlanner["Trial Planner"]
         ManifestWriter["Manifest Writer"]
         TrialWriter["Trial Writer"]
@@ -42,13 +44,15 @@ flowchart TB
 
     ExperimentLoader --> DatasetResolver
     DatasetResolver --> DatasetCache
-    DatasetResolver --> DatasetPackage
-    DatasetPackage --> TrialPlanner
+    DatasetResolver --> AdapterRegistry
+    AdapterRegistry --> LattesAdapter
+    LattesAdapter --> DatasetContracts
+    DatasetContracts --> TrialPlanner
     TrialPlanner --> ManifestWriter
     TrialPlanner --> TrialWriter
 
     TrialReader --> ExecutionEngine
-    DatasetPackage --> ExecutionEngine
+    DatasetContracts --> ExecutionEngine
     ExecutionEngine --> StrategyFactory
     StrategyFactory --> ModelAdapter
     StrategyFactory --> ToolRuntime
@@ -56,7 +60,7 @@ flowchart TB
     ExecutionEngine --> ExecutionTraceWriter
 
     ResponseReader --> EvalJobBuilder
-    DatasetPackage --> EvalJobBuilder
+    DatasetContracts --> EvalJobBuilder
     EvalJobBuilder --> JudgeAdapter
     JudgeAdapter --> VoteWriter
     VoteWriter --> EvalAggregator
@@ -77,5 +81,25 @@ ctxbench.cli
 ctxbench.commands
 ctxbench.benchmark
 ctxbench.dataset
+ctxbench.adapters.registry
+ctxbench.adapters.lattes
 ctxbench.ai
+```
+
+## Dataset and adapter components
+
+`ctxbench.dataset` owns generic contracts, payloads, errors, capability reports, and adapter
+registry primitives. It does not import concrete adapters.
+
+`ctxbench.adapters.registry` owns first-party wiring. It registers dataset identities, such as
+`ctxbench/lattes`, to factories that create concrete adapters from resolved dataset provenance.
+
+`ctxbench.adapters.lattes` is a concrete first-party adapter. It may depend on `ctxbench.dataset`
+contracts, but the benchmark core must not import it directly.
+
+The intended dependency direction is:
+
+```text
+ctxbench.benchmark / ctxbench.commands -> ctxbench.dataset <- ctxbench.adapters.lattes
+composition root -> ctxbench.adapters.registry
 ```

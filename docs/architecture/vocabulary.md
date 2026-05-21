@@ -17,6 +17,7 @@
 | `single-dataset experiment` | Experiment model where one experiment references exactly one dataset package. |
 | `instance` | One concrete dataset unit over which tasks are executed. |
 | `context artifact` | A representation of an instance used by a strategy. |
+| `format` | Context representation request passed unmodified to the adapter as the `representation` parameter of `get_context`. It is not a physical filename or file format. |
 | `task` | Unit of work to be performed over an instance. |
 | `trial` | One planned experimental execution. |
 | `response` | Model output produced by executing a trial. |
