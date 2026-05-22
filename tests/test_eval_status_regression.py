@@ -15,23 +15,23 @@ def _write_eval_fixture(root: Path) -> Path:
     instance_dir = dataset_root / "context" / "cv_demo"
     instance_dir.mkdir(parents=True, exist_ok=True)
 
-    (dataset_root / "questions.json").write_text(
+    (dataset_root / "tasks.json").write_text(
         json.dumps(
             {
                 "datasetId": "mock-v1",
-                "questions": [
+                "tasks": [
                     {
                         "id": "q_one",
-                        "question": "Question one?",
+                        "statement": "Task one?",
                         "validation": {"type": "judge"},
-                        "contextBlock": ["q_one"],
+                        "contextBlocks": ["q_one"],
                     }
                 ],
             }
         ),
         encoding="utf-8",
     )
-    (dataset_root / "questions.instance.json").write_text(
+    (dataset_root / "tasks.instance.json").write_text(
         json.dumps(
             {
                 "datasetId": "mock-v1",
@@ -39,7 +39,7 @@ def _write_eval_fixture(root: Path) -> Path:
                     {
                         "instanceId": "cv_demo",
                         "contextBlocks": "context/cv_demo/blocks.json",
-                        "questions": [{"id": "q_one"}],
+                        "tasks": [{"id": "q_one"}],
                     }
                 ],
             }
@@ -52,7 +52,7 @@ def _write_eval_fixture(root: Path) -> Path:
                 "blocks": {
                     "q_one": {
                         "title": "q_one",
-                        "summary": "Some context for the question.",
+                        "summary": "Some context for the task.",
                     }
                 }
             }
@@ -93,6 +93,8 @@ def _write_eval_fixture(root: Path) -> Path:
                         "strategy": "inline",
                         "format": "json",
                         "repeatIndex": 1,
+                        "dataset": {"root": str(dataset_root.resolve())},
+                        "taskStatement": "Task one?",
                         "metadata": {
                             "canonicalId": "run-1",
                             "taskId": "q_one",
@@ -123,8 +125,8 @@ def _write_eval_fixture(root: Path) -> Path:
                         "experimentId": "exp_mock",
                         "dataset": {"root": str(dataset_root.resolve())},
                         "taskId": "q_one",
-                        "question": "Question one?",
-                        "questionTemplate": None,
+                        "taskStatement": "Task one?",
+                        "taskTemplate": None,
                         "instanceId": "cv_demo",
                         "provider": "mock",
                         "modelId": "model",
@@ -204,9 +206,9 @@ def test_eval_force_with_judge_preserves_other_judges(tmp_path):
         assert eval_rows[0]["taskId"] == "q_one"
         assert {"trialId", "taskId", "judgeCount"} <= set(eval_rows[0])
         summary = json.loads((root / "evals-summary.json").read_text(encoding="utf-8"))
-        assert summary["questions"][0]["trialId"] == "run-1"
-        assert summary["questions"][0]["taskId"] == "q_one"
-        assert {"trialId", "taskId"} <= set(summary["questions"][0])
+        assert summary["tasks"][0]["trialId"] == "run-1"
+        assert summary["tasks"][0]["taskId"] == "q_one"
+        assert {"trialId", "taskId"} <= set(summary["tasks"][0])
 
         judge_votes = [json.loads(line) for line in (root / "judge_votes.jsonl").read_text(encoding="utf-8").splitlines()]
         votes_by_id = {row["judgeId"]: row for row in judge_votes}

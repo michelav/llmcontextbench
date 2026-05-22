@@ -79,6 +79,36 @@ Trace artifacts preserve per-trial execution and evaluation observability.
 - `traces/executions/<trialId>.json` is the execute-phase canonical trace for one `trialId`.
 - `traces/evals/<trialId>.json` is the eval-phase canonical trace for one `trialId`.
 
+### Execution trace metadata
+
+Execution traces record dataset-context metadata using the adapter-boundary vocabulary:
+
+- `instance_id`: canonical instance identifier.
+- `context_representation`: the requested logical context representation, derived from the
+  trial `format` value and passed to `DatasetPackage.get_context(..., representation)`.
+- `context_obtained`: `true` when the execute phase obtained model-facing context through
+  `get_context`; `false` for tool-mediated strategies.
+
+Removed execution metadata:
+
+- `context_path`
+- `instance_dir`
+
+The legacy `lattes_id` metadata name was renamed to `instance_id`. Strategy internals may retain a
+temporary fallback while migration completes, but the artifact contract is `instance_id`.
+
+### Evaluation trace metadata
+
+Evaluation traces record evidence and oracle metadata without exposing oracle values to LLM judge
+prompts:
+
+- `evidence_obtained`: `true` when evaluator-facing evidence was obtained from
+  `DatasetPackage.get_evidence`.
+- `oracle_available`: `true` when `DatasetPackage.get_oracle` returned a value other than the
+  `ORACLE_UNAVAILABLE` sentinel.
+- `oracle_used`: `false` for judge-based evaluation; oracle values are not included in judge prompt
+  construction.
+
 ## Metric provenance taxonomy
 
 Every metric in a canonical or derived artifact must be representable under exactly one provenance class per record.
@@ -106,6 +136,8 @@ The following mappings are migration guidance only. Each legacy name has no alia
 | `queries.jsonl` | `trials.jsonl` | No alias. Writers and readers use the target name only. |
 | `answers.jsonl` | `responses.jsonl` | No alias. Writers and readers use the target name only. |
 | `traces/queries/<runId>.json` | `traces/executions/<trialId>.json` | No alias. Writers and readers use the target name only. |
+| `trials.jsonl.contextBlock` | `trials.jsonl.contextBlocks` | Breaking key rename. Writers use the target plural key; readers may keep documented migration fallbacks only where needed for old artifacts. |
+| `responses.jsonl.contextBlock` | `responses.jsonl.contextBlocks` | Breaking key rename. Writers use the target plural key; readers may keep documented migration fallbacks only where needed for old artifacts. |
 
 No automated migration tooling is committed to by this specification.
 
@@ -113,3 +145,5 @@ No automated migration tooling is committed to by this specification.
 
 - Writers must produce only target artifact names. No phase writes legacy names.
 - Readers do not consume legacy artifact names. If legacy files are present in an input directory, they are silently ignored rather than treated as an error.
+- `export` and `status` are artifact-only readers. They must not resolve, inspect, fetch, or
+  materialize datasets.

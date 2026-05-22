@@ -4,6 +4,12 @@ import pytest
 
 from ctxbench.dataset.capabilities import DatasetCapabilityReport
 from ctxbench.dataset.package import DatasetMetadata, DatasetPackage, StrategyDescriptor
+from ctxbench.dataset.payloads import (
+    ORACLE_UNAVAILABLE,
+    ContextPayload,
+    EvidencePayload,
+    TaskPayload,
+)
 
 
 def _metadata() -> DatasetMetadata:
@@ -28,11 +34,16 @@ def _capability_report(*, conformant: bool = True) -> DatasetCapabilityReport:
         content_hash=None,
         metadata=_metadata(),
         mandatory_capabilities={"instances": True, "tasks": True},
-        optional_capabilities={"tool_provider": False},
+        optional_capabilities={
+            "get_oracle": True,
+            "get_task_instance": True,
+            "tool_provider": False,
+            "fixtures": True,
+        },
         contributed_tools=None,
         evaluation_helpers=None,
         strategy_descriptors=[],
-        missing_mandatory=[] if conformant else ["get_context_artifact"],
+        missing_mandatory=[] if conformant else ["get_evidence"],
         nonconformant_descriptors=[],
         conformant=conformant,
     )
@@ -57,20 +68,27 @@ class CompleteDatasetPackage:
     def list_task_ids(self) -> list[str]:
         return ["task-001"]
 
-    def get_context_artifact(
+    def get_task(self, task_id: str) -> TaskPayload:
+        return TaskPayload(task_id=task_id, statement="What year?")
+
+    def get_context(
         self,
         instance_id: str,
         task_id: str,
-        strategy: str,
-        format_name: str,
-    ) -> object:
-        return {"instance": instance_id, "task": task_id, "strategy": strategy, "format": format_name}
+        representation: str,
+    ) -> ContextPayload:
+        return ContextPayload(
+            role="context",
+            representation=representation,
+            content={"instance": instance_id, "task": task_id},
+        )
 
-    def get_evidence_artifact(self, instance_id: str, task_id: str) -> object:
-        return {"instance": instance_id, "task": task_id}
-
-    def fixtures(self) -> object:
-        return {"fixture": "ok"}
+    def get_evidence(self, instance_id: str, task_id: str) -> EvidencePayload:
+        return EvidencePayload(
+            role="evidence",
+            task={"task_id": task_id},
+            evidence={"instance": instance_id},
+        )
 
     def capability_report(self) -> DatasetCapabilityReport:
         return _capability_report()
@@ -78,11 +96,14 @@ class CompleteDatasetPackage:
     def tool_provider(self) -> object | None:
         return None
 
-    def evaluation_helpers(self) -> object | None:
+    def get_oracle(self, instance_id: str, task_id: str) -> object:
+        return ORACLE_UNAVAILABLE
+
+    def get_task_instance(self, instance_id: str, task_id: str) -> dict[str, object] | None:
         return None
 
-    def strategy_descriptors(self) -> list[StrategyDescriptor] | None:
-        return None
+    def fixtures(self) -> object:
+        return {"fixture": "ok"}
 
 
 class MissingMandatoryMethod:
@@ -104,17 +125,20 @@ class MissingMandatoryMethod:
     def list_task_ids(self) -> list[str]:
         return ["task-001"]
 
-    def get_context_artifact(
+    def get_task(self, task_id: str) -> TaskPayload:
+        return TaskPayload(task_id=task_id, statement="What year?")
+
+    def get_context(
         self,
         instance_id: str,
         task_id: str,
-        strategy: str,
-        format_name: str,
-    ) -> object:
-        return {"instance": instance_id, "task": task_id, "strategy": strategy, "format": format_name}
-
-    def fixtures(self) -> object:
-        return {"fixture": "ok"}
+        representation: str,
+    ) -> ContextPayload:
+        return ContextPayload(
+            role="context",
+            representation=representation,
+            content={"instance": instance_id, "task": task_id},
+        )
 
     def capability_report(self) -> DatasetCapabilityReport:
         return _capability_report(conformant=False)
@@ -122,11 +146,14 @@ class MissingMandatoryMethod:
     def tool_provider(self) -> object | None:
         return None
 
-    def evaluation_helpers(self) -> object | None:
+    def get_oracle(self, instance_id: str, task_id: str) -> object:
+        return ORACLE_UNAVAILABLE
+
+    def get_task_instance(self, instance_id: str, task_id: str) -> dict[str, object] | None:
         return None
 
-    def strategy_descriptors(self) -> list[StrategyDescriptor] | None:
-        return None
+    def fixtures(self) -> object:
+        return {"fixture": "ok"}
 
 
 def test_dataset_package_protocol_accepts_complete_implementation() -> None:
@@ -172,4 +199,4 @@ def test_dataset_capability_report_represents_nonconformant_package() -> None:
     report = _capability_report(conformant=False)
 
     assert report.conformant is False
-    assert report.missing_mandatory == ["get_context_artifact"]
+    assert report.missing_mandatory == ["get_evidence"]

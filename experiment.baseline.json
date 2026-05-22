@@ -2,7 +2,11 @@
   "id": "baseline_001",
   "name": "Baseline run including only inline executions",
   "output": "outputs",
-  "dataset": "datasets/lattes",
+  "dataset": {
+    "id": "ctxbench/lattes",
+    "version": "2026-04-28",
+    "root": "datasets/lattes"
+  },
   "models": {
     "gpt1": {
       "provider": "openai",
@@ -152,7 +156,7 @@
       "4093653182381054",
       "5123602572479168"
     ],
-    "questions": [
+    "tasks": [
       "q_phd",
       "q_field",
       "q_coauth",
@@ -175,8 +179,8 @@
   "params": {
     "mcp_server": {
       "server_url": "https://secure-harlequin-mollusk.fastmcp.app/mcp",
-      "server_label": "copa_lattes",
-      "server_description": "COPA Lattes MCP server",
+      "server_label": "ctxbench_lattes",
+      "server_description": "CTXBench Lattes MCP server",
       "auth_token": "${LATTES_MCP_TOKEN}"
     }
   },

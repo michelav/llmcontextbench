@@ -2,10 +2,10 @@
   "datasetId": "ctxbench/fake-dataset",
   "version": "0.1.0",
   "description": "Minimal fake dataset fixture for provider-free workflow tests.",
-  "questions": [
+  "tasks": [
     {
       "id": "task_role",
-      "question": "What role does {person_name} have?",
+      "statement": "What role does {person_name} have?",
       "tags": [
         "synthetic",
         "generic"
@@ -13,7 +13,7 @@
       "validation": {
         "type": "judge"
       },
-      "contextBlock": [
+      "contextBlocks": [
         "profile"
       ]
     }

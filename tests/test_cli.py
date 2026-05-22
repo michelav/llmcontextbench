@@ -153,39 +153,41 @@ def write_mock_experiment(path: Path, *, evaluation_enabled: bool = True) -> Pat
     instance_dir = dataset_root / "context" / "cv_demo"
     instance_dir.mkdir(parents=True, exist_ok=True)
 
-    (dataset_root / "questions.json").write_text(
+    (dataset_root / "tasks.json").write_text(
         json.dumps(
             {
                 "datasetId": "mock-v2",
-                "questions": [
+                "version": "0.1.0",
+                "tasks": [
                     {
                         "id": "q_year",
-                        "question": "In which year did the researcher obtain their PhD?",
+                        "statement": "In which year did the researcher obtain their PhD?",
                         "tags": ["objective", "simple"],
                         "validation": {"type": "judge"},
-                        "contextBlock": ["summary"],
+                        "contextBlocks": ["summary"],
                     },
                     {
                         "id": "q_summary",
-                        "question": "Summarize the main research areas for {researcher_name}.",
+                        "statement": "Summarize the main research areas for {researcher_name}.",
                         "tags": ["subjective", "simple"],
                         "validation": {"type": "judge"},
-                        "contextBlock": ["summary", "research"],
+                        "contextBlocks": ["summary", "research"],
                     },
                 ],
             }
         ),
         encoding="utf-8",
     )
-    (dataset_root / "questions.instance.json").write_text(
+    (dataset_root / "tasks.instance.json").write_text(
         json.dumps(
             {
                 "datasetId": "mock-v2",
+                "version": "0.1.0",
                 "instances": [
                     {
                         "instanceId": "cv_demo",
                         "contextBlocks": "context/cv_demo/blocks.json",
-                        "questions": [
+                        "tasks": [
                             {"id": "q_year"},
                             {
                                 "id": "q_summary",
@@ -226,7 +228,7 @@ def write_mock_experiment(path: Path, *, evaluation_enabled: bool = True) -> Pat
                 "id": "exp_mock_v2",
                 "output": "outputs",
                 "dataset": str(dataset_root.resolve()),
-                "scope": {"instances": ["cv_demo"], "questions": ["q_year", "q_summary"]},
+                "scope": {"instances": ["cv_demo"], "tasks": ["q_year", "q_summary"]},
                 "factors": {
                     "model": [{"provider": "mock", "name": "mock"}],
                     "strategy": ["inline"],
@@ -268,13 +270,13 @@ def add_mock_instance(dataset_root: Path, instance_id: str, *, researcher_name: 
     (instance_dir / "clean.html").write_text((source_instance_dir / "clean.html").read_text(encoding="utf-8"), encoding="utf-8")
     (instance_dir / "blocks.json").write_text((source_instance_dir / "blocks.json").read_text(encoding="utf-8"), encoding="utf-8")
 
-    questions_instance_path = dataset_root / "questions.instance.json"
-    questions_instance_payload = json.loads(questions_instance_path.read_text(encoding="utf-8"))
+    task_instances_path = dataset_root / "tasks.instance.json"
+    questions_instance_payload = json.loads(task_instances_path.read_text(encoding="utf-8"))
     questions_instance_payload["instances"].append(
         {
             "instanceId": instance_id,
             "contextBlocks": f"context/{instance_id}/blocks.json",
-            "questions": [
+            "tasks": [
                 {"id": "q_year"},
                 {
                     "id": "q_summary",
@@ -283,7 +285,7 @@ def add_mock_instance(dataset_root: Path, instance_id: str, *, researcher_name: 
             ],
         }
     )
-    questions_instance_path.write_text(json.dumps(questions_instance_payload), encoding="utf-8")
+    task_instances_path.write_text(json.dumps(questions_instance_payload), encoding="utf-8")
 
 
 def _jsonl_rows(path: Path) -> list[dict[str, object]]:
@@ -322,10 +324,10 @@ def test_plan_writes_trials_with_scope_and_target_fields(tmp_path):
     assert first["instanceId"] == "cv_demo"
     assert first["modelId"] == "mock"
     assert first["validationType"] == "judge"
-    assert first["contextBlock"] in (["summary"], ["summary", "research"])
+    assert first["contextBlocks"] in (["summary"], ["summary", "research"])
     assert "dataset" in first
     summary = next(row for row in rows if row["taskId"] == "q_summary")
-    assert summary["question"] == "Summarize the main research areas for CV Demo."
+    assert summary["taskStatement"] == "Summarize the main research areas for CV Demo."
     assert summary["parameters"] == {"researcher_name": "CV Demo"}
 
 
@@ -344,15 +346,15 @@ def test_plan_rejects_duplicate_model_ids(tmp_path):
 def test_plan_includes_tasks_without_instance_override(tmp_path):
     experiment_path = write_mock_experiment(tmp_path / "experiment.json")
     payload = json.loads(experiment_path.read_text(encoding="utf-8"))
-    questions_instance_path = Path(payload["dataset"]) / "questions.instance.json"
-    question_instances = json.loads(questions_instance_path.read_text(encoding="utf-8"))
-    question_instances["instances"][0]["questions"] = [
+    task_instances_path = Path(payload["dataset"]) / "tasks.instance.json"
+    question_instances = json.loads(task_instances_path.read_text(encoding="utf-8"))
+    question_instances["instances"][0]["tasks"] = [
         {
             "id": "q_summary",
             "parameters": {"researcher_name": "CV Demo"},
         }
     ]
-    questions_instance_path.write_text(json.dumps(question_instances), encoding="utf-8")
+    task_instances_path.write_text(json.dumps(question_instances), encoding="utf-8")
 
     trials_path = _plan_to_root(experiment_path, tmp_path / "planned")
 
@@ -360,7 +362,7 @@ def test_plan_includes_tasks_without_instance_override(tmp_path):
     assert len(rows) == 2
     assert {row["taskId"] for row in rows} == {"q_year", "q_summary"}
     year = next(row for row in rows if row["taskId"] == "q_year")
-    assert year["question"] == "In which year did the researcher obtain their PhD?"
+    assert year["taskStatement"] == "In which year did the researcher obtain their PhD?"
     assert year["parameters"] == {}
 
 
@@ -368,32 +370,34 @@ def test_plan_warns_and_uses_empty_string_for_missing_template_parameter(tmp_pat
     dataset_root = tmp_path / "dataset"
     instance_dir = dataset_root / "context" / "cv_demo"
     instance_dir.mkdir(parents=True, exist_ok=True)
-    (dataset_root / "questions.json").write_text(
+    (dataset_root / "tasks.json").write_text(
         json.dumps(
             {
                 "datasetId": "mock-v2",
-                "questions": [
+                "version": "0.1.0",
+                "tasks": [
                     {
                         "id": "q_missing",
-                        "question": "Summarize the work of {researcher_name}.",
+                        "statement": "Summarize the work of {researcher_name}.",
                         "tags": ["subjective"],
                         "validation": {"type": "judge"},
-                        "contextBlock": ["summary"],
+                        "contextBlocks": ["summary"],
                     }
                 ],
             }
         ),
         encoding="utf-8",
     )
-    (dataset_root / "questions.instance.json").write_text(
+    (dataset_root / "tasks.instance.json").write_text(
         json.dumps(
             {
                 "datasetId": "mock-v2",
+                "version": "0.1.0",
                 "instances": [
                     {
                         "instanceId": "cv_demo",
                         "contextBlocks": "context/cv_demo/blocks.json",
-                        "questions": [{"id": "q_missing"}],
+                        "tasks": [{"id": "q_missing"}],
                     }
                 ],
             }
@@ -411,7 +415,7 @@ def test_plan_warns_and_uses_empty_string_for_missing_template_parameter(tmp_pat
                 "id": "exp_missing_template",
                 "output": "outputs",
                 "dataset": str(dataset_root.resolve()),
-                "scope": {"instances": ["cv_demo"], "questions": ["q_missing"]},
+                "scope": {"instances": ["cv_demo"], "tasks": ["q_missing"]},
                 "factors": {
                     "model": [{"provider": "mock", "name": "mock"}],
                     "strategy": ["inline"],
@@ -432,8 +436,8 @@ def test_plan_warns_and_uses_empty_string_for_missing_template_parameter(tmp_pat
 
     payload = _jsonl_rows(trials_path)[0]
     captured = capsys.readouterr()
-    assert "Missing question parameter" in captured.err
-    assert payload["question"] == "Summarize the work of ."
+    assert "Missing task parameter" in captured.err
+    assert payload["taskStatement"] == "Summarize the work of ."
     assert payload["parameters"] == {}
 
 
@@ -687,8 +691,8 @@ def test_eval_writes_qualitative_outputs_and_summary(tmp_path, monkeypatch):
     judge_votes = _jsonl_rows(trials_path.parent / "judge_votes.jsonl")
     assert len(judge_votes) == 2
     summary = json.loads((trials_path.parent / "evals-summary.json").read_text(encoding="utf-8"))
-    assert len(summary["questions"]) == 2
-    judge_summary = next(item for item in summary["questions"] if item["taskId"] == "q_summary")
+    assert len(summary["tasks"]) == 2
+    judge_summary = next(item for item in summary["tasks"] if item["taskId"] == "q_summary")
     assert judge_summary["taskId"] == "q_summary"
     assert judge_summary["trialId"]
 
@@ -1195,12 +1199,12 @@ def test_eval_batch_retrieves_gemini_results(tmp_path):
 def test_eval_allows_tasks_without_instance_override(tmp_path, monkeypatch):
     experiment_path = write_mock_experiment(tmp_path / "experiment.json", evaluation_enabled=False)
     dataset_root = Path(json.loads(experiment_path.read_text(encoding="utf-8"))["dataset"])
-    questions_instance_path = dataset_root / "questions.instance.json"
-    payload = json.loads(questions_instance_path.read_text(encoding="utf-8"))
-    payload["instances"][0]["questions"] = [
+    task_instances_path = dataset_root / "tasks.instance.json"
+    payload = json.loads(task_instances_path.read_text(encoding="utf-8"))
+    payload["instances"][0]["tasks"] = [
         {"id": "q_summary", "parameters": {"researcher_name": "CV Demo"}}
     ]
-    questions_instance_path.write_text(json.dumps(payload), encoding="utf-8")
+    task_instances_path.write_text(json.dumps(payload), encoding="utf-8")
 
     trials_path = _plan_to_root(experiment_path, tmp_path / "expanded")
     responses_path = _execute_trials(trials_path)

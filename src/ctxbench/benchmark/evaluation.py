@@ -8,36 +8,41 @@ from typing import Any, Callable, Iterable
 from ctxbench.ai.cache import build_judge_prompt_cache_key
 from ctxbench.ai.engine import Engine
 from ctxbench.ai.models.base import AIRequest, ModelInput
+from ctxbench.adapters.registry import get_default_registry
 from ctxbench.benchmark.models import (
+    DatasetProvenance,
     EvaluationBatchSummary,
     EvaluationItemResult,
     EvaluationJudgeInfo,
     EvaluationModelConfig,
-    EvaluationRunResult,
+    EvaluationTrialResult,
     EvaluationRunSummary,
     EvaluationTrace,
-    RunResult,
+    TrialResult,
 )
-from ctxbench.dataset.provider import DatasetProvider
+from ctxbench.dataset.errors import AdapterUnavailableError
+from ctxbench.dataset.package import DatasetPackage
+from ctxbench.dataset.payloads import OracleUnavailable
+from ctxbench.dataset.provider import LocalDatasetPackage
 
 EVALUATION_SYSTEM_INSTRUCTION = (
-    "You are evaluating benchmark answers.\n"
-    "Use only the provided question, answer and curriculum context.\n"
+    "You are evaluating benchmark responses.\n"
+    "Use only the provided task, candidate response, and evaluation evidence.\n"
     "Do not use external knowledge.\n"
     "Return only the requested JSON."
 )
 
-JUDGE_PROMPT_PREFIX = """You are an evaluation assistant for a benchmark. Your task is to evaluate an answer given by a model based strictly on the provided curriculum context and criteria.
+JUDGE_PROMPT_PREFIX = """You are an evaluation assistant for a benchmark. Your task is to evaluate a response given by a model based strictly on the provided task, evaluation evidence, and criteria.
 You must be objective, consistent, and conservative in your evaluation.
-Do NOT use external knowledge. Only use the provided curriculum context.
+Do NOT use external knowledge. Only use the provided task and evaluation evidence.
 Your output must strictly follow the requested JSON format.
-Evaluate the answer to the question based on the provided curriculum context.
+Evaluate the candidate response to the task based on the provided evaluation evidence.
 
 # Evaluation Instructions
-- Use only the provided curriculum context.
-- If the curriculum context is silent about something, treat that as missing support.
+- Use only the provided task and evaluation evidence.
+- If the evaluation evidence is silent about something, treat that as missing support.
 - Be strict: if unsure, prefer "partial" or "misses".
-- Each criterion MUST include a short justification grounded in the provided curriculum context.
+- Each criterion MUST include a short justification grounded in the provided evaluation evidence.
 - Do NOT include chain-of-thought or hidden reasoning. Provide only concise criterion justifications.
 
 # Evaluation Scale
@@ -51,18 +56,18 @@ Use the following scale for ALL criteria:
 # Evaluation Criteria
 
 ## Correctness
-The answer must be factually correct according to the curriculum context.
+The response must be factually correct according to the evaluation evidence.
 - Check whether the information provided is accurate.
-- Use the curriculum context as the source of truth.
-- Check whether the answer does not contradict the curriculum context.
-- Penalize claims that are not supported by the curriculum context, unless they are clearly marked as uncertainty or inference grounded in the context.
+- Use the evaluation evidence as the source of truth.
+- Check whether the response does not contradict the evaluation evidence.
+- Penalize claims that are not supported by the evaluation evidence, unless they are clearly marked as uncertainty or inference grounded in the evidence.
 
 ## Completeness
-The answer must fully address the question according to what can be answered from the curriculum context.
-- Check whether all parts of the question are answered.
-- Penalize important omissions relative to the curriculum context.
-- Do not penalize missing information when the curriculum context itself does not provide enough evidence to answer that part of the question.
-- Prefer answers that explicitly acknowledge when the curriculum context lacks enough information.
+The response must fully address the task according to what can be supported by the evaluation evidence.
+- Check whether all parts of the task are addressed.
+- Penalize important omissions relative to the evaluation evidence.
+- Do not penalize missing information when the evaluation evidence itself does not provide enough support for that part of the task.
+- Prefer responses that explicitly acknowledge when the evaluation evidence lacks enough information.
 
 # Output Format (STRICT JSON)
 Return ONLY a JSON object in the following format:
@@ -78,16 +83,16 @@ Return ONLY a JSON object in the following format:
   }}
 }}
 
-# Curriculum Context
-{curriculum_context}
+# Evaluation Evidence
+{evaluation_evidence}
 """
 
 JUDGE_PROMPT_SUFFIX = """
-# Question
-{question}
+# Task
+{task_statement}
 
-# Candidate Answer
-{answer}
+# Candidate Response
+{response}
 
 """
 
@@ -136,6 +141,16 @@ JUDGE_STRUCTURED_OUTPUT_SCHEMA = {
 }
 
 
+def _resolve_adapter(dataset: DatasetProvenance) -> DatasetPackage:
+    try:
+        return get_default_registry().resolve(dataset)
+    except AdapterUnavailableError as exc:
+        local_root = dataset.materialized_path or getattr(dataset, "root", None)
+        if local_root:
+            return LocalDatasetPackage.from_dataset(dataset)
+        raise AdapterUnavailableError(str(exc)) from exc
+
+
 def _normalize_rating(raw: str | None) -> str:
     if not isinstance(raw, str):
         return "misses"
@@ -145,12 +160,15 @@ def _normalize_rating(raw: str | None) -> str:
 @dataclass(frozen=True)
 class EvaluationJob:
     custom_id: str
-    result: RunResult
+    result: TrialResult
     judge: EvaluationModelConfig
     prompt: str
-    question_text: str
+    task_statement: str
     context_payload: dict[str, Any]
-    curriculum_context: str
+    evaluation_evidence: str
+    evidence_obtained: bool
+    oracle_available: bool
+    oracle_used: bool = False
 
 
 def judge_identifier(config: EvaluationModelConfig) -> str:
@@ -161,16 +179,16 @@ def judge_identifier(config: EvaluationModelConfig) -> str:
     return f"{config.provider}:{config.model}"
 
 
-def batch_custom_id(result: RunResult, judge: EvaluationModelConfig) -> str:
+def batch_custom_id(result: TrialResult, judge: EvaluationModelConfig) -> str:
     judge_slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", judge_identifier(judge)).strip("-_")
     if not judge_slug:
         judge_slug = "judge"
-    return f"{result.runId}-{judge_slug}"[:64]
+    return f"{result.trialId}-{judge_slug}"[:64]
 
 
 def build_evaluation_job(
-    result: RunResult,
-    provider: DatasetProvider,
+    result: TrialResult,
+    adapter: DatasetPackage,
     *,
     judge: EvaluationModelConfig,
     only: str | None = None,
@@ -179,82 +197,89 @@ def build_evaluation_job(
 ) -> EvaluationJob | None:
     if result.status != "success":
         return None
-    if only and result.questionId != only:
+    if only and result.taskId != only:
         return None
 
-    rendered_question = result.question
+    task_statement = result.taskStatement
     validation_type = result.validationType or result.metadata.validationType
     if mode and validation_type != mode:
         return None
     if validation_type != "judge":
         raise ValueError(f"Unsupported validation type: {validation_type}")
 
-    question = provider.get_question(result.questionId)
-    block_ids = list(question.contextBlock)
-    all_blocks = provider.get_context_blocks(result.instanceId)
-    context_payload, missing = _get_context_blocks(all_blocks, block_ids)
+    evidence_payload = adapter.get_evidence(result.instanceId, result.taskId)
+    oracle_result = adapter.get_oracle(result.instanceId, result.taskId)
+    oracle_available = not isinstance(oracle_result, OracleUnavailable)
+    block_ids = _evidence_task_context_blocks(evidence_payload.task)
+    context_payload, missing = _get_context_blocks(evidence_payload.evidence, block_ids)
     if missing:
         if event_logger is not None:
             event_logger(
                 "SKIP",
                 "Context blocks not found, skipping evaluation job",
                 {
-                    "runId": result.runId,
-                    "questionId": result.questionId,
+                    "trialId": result.trialId,
+                    "taskId": result.taskId,
                     "instanceId": result.instanceId,
                     "missingBlocks": missing,
                 },
             )
         return None
-    curriculum_context = _format_curriculum_context(context_payload)
+    evaluation_evidence = _format_evaluation_evidence(context_payload)
     prompt = JUDGE_PROMPT.format(
-        question=rendered_question,
-        answer=result.answer,
-        curriculum_context=curriculum_context,
+        task_statement=task_statement,
+        response=result.response,
+        evaluation_evidence=evaluation_evidence,
     )
     return EvaluationJob(
         custom_id=batch_custom_id(result, judge),
         result=result,
         judge=judge,
         prompt=prompt,
-        question_text=rendered_question,
+        task_statement=task_statement,
         context_payload=context_payload,
-        curriculum_context=curriculum_context,
+        evaluation_evidence=evaluation_evidence,
+        evidence_obtained=True,
+        oracle_available=oracle_available,
+        oracle_used=False,
     )
 
 
 def build_evaluation_jobs(
-    results: Iterable[RunResult],
+    results: Iterable[TrialResult],
     *,
     judges: list[EvaluationModelConfig],
     only: str | None = None,
     mode: str | None = None,
     event_logger: Callable[[str, str, dict[str, object]], None] | None = None,
 ) -> list[EvaluationJob]:
-    provider_cache: dict[tuple[str | None, str | None, str | None], DatasetProvider] = {}
+    adapter_cache: dict[tuple[str | None, str | None, str | None], DatasetPackage] = {}
     jobs: list[EvaluationJob] = []
     ordered_results = sorted(
         list(results),
         key=lambda item: (
-            tuple(sorted(item.contextBlock or [])),
+            tuple(sorted(item.contextBlocks or [])),
             str(item.instanceId),
-            str(item.questionId),
+            str(item.taskId),
             str(item.provider),
             str(item.modelName or ""),
-            str(item.runId),
+            str(item.trialId),
         ),
     )
     for result in ordered_results:
-        provider_key = (
+        adapter_key = (
             result.dataset.id,
             result.dataset.version,
             result.dataset.materialized_path or result.dataset.origin,
         )
-        provider = provider_cache.setdefault(provider_key, DatasetProvider.from_dataset(result.dataset))
+        adapter = adapter_cache.get(adapter_key)
+        if adapter is None:
+            adapter = _resolve_adapter(result.dataset)
+            adapter_cache[adapter_key] = adapter
         for judge in judges:
             job = build_evaluation_job(
                 result,
-                provider,
+                adapter,
                 judge=judge,
                 only=only,
                 mode=mode,
@@ -269,13 +294,13 @@ def _judge_request(
     *,
     config: EvaluationModelConfig,
     prompt: str,
-    answer_text: str,
-    run_id: str,
+    response_text: str,
+    trial_id: str,
     exp_id: str,
     instance_id: str,
-    question_id: str,
-    question_text: str,
-    curriculum_context: str,
+    task_id: str,
+    task_statement: str,
+    evaluation_evidence: str,
     engine: Engine,
 ) -> tuple[dict[str, Any] | None, EvaluationJudgeInfo, EvaluationTrace]:
     request_params = {
@@ -297,17 +322,17 @@ def _judge_request(
             build_judge_prompt_cache_key(
                 model_name=config.model,
                 instance_id=instance_id,
-                context=curriculum_context,
+                context=evaluation_evidence,
             ),
         )
     is_claude = provider_lower.startswith("anthropic") or provider_lower.startswith("claude")
     if is_claude:
         request_params["prompt_cache_prefix"] = JUDGE_PROMPT_PREFIX.format(
-            curriculum_context=curriculum_context
+            evaluation_evidence=evaluation_evidence
         )
         effective_prompt = JUDGE_PROMPT_SUFFIX.format(
-            question=question_text,
-            answer=answer_text,
+            task_statement=task_statement,
+            response=response_text,
         )
     else:
         effective_prompt = prompt
@@ -321,8 +346,9 @@ def _judge_request(
         system_instruction=EVALUATION_SYSTEM_INSTRUCTION,
         params=request_params,
         metadata={
-            "run_id": run_id,
-            "expId": exp_id,
+            "trialId": trial_id,
+            "experimentId": exp_id,
+            "taskId": task_id,
             "phase": "evaluation",
             "judge_role": "judge",
         },
@@ -356,8 +382,8 @@ def _judge_request(
 
 
 def _evaluate_judge(
-    result: RunResult,
-    question_text: str,
+    result: TrialResult,
+    task_statement: str,
     context_payload: dict[str, Any],
     judges: list[EvaluationModelConfig],
     engine: Engine,
@@ -367,11 +393,11 @@ def _evaluate_judge(
             "evaluationMethod": "judge",
             "error": "Experiment evaluation.judges is required for judge validation.",
         }, EvaluationJudgeInfo(), EvaluationTrace()
-    curriculum_context = _format_curriculum_context(context_payload)
+    evaluation_evidence = _format_evaluation_evidence(context_payload)
     prompt = JUDGE_PROMPT.format(
-        question=question_text,
-        answer=result.answer,
-        curriculum_context=curriculum_context,
+        task_statement=task_statement,
+        response=result.response,
+        evaluation_evidence=evaluation_evidence,
     )
     judge_votes: list[dict[str, Any]] = []
     judge_infos: list[EvaluationJudgeInfo] = []
@@ -381,13 +407,13 @@ def _evaluate_judge(
         payload, judge_info, trace = _judge_request(
             config=config,
             prompt=prompt,
-            answer_text=result.answer,
-            run_id=result.runId,
+            response_text=result.response,
+            trial_id=result.trialId,
             exp_id=result.experimentId,
             instance_id=result.instanceId,
-            question_id=result.questionId,
-            question_text=question_text,
-            curriculum_context=curriculum_context,
+            task_id=result.taskId,
+            task_statement=task_statement,
+            evaluation_evidence=evaluation_evidence,
             engine=engine,
         )
         judge_infos.append(judge_info)
@@ -448,12 +474,15 @@ def evaluation_from_judge_payload(
     payload: dict[str, Any] | None,
     judge_info: EvaluationJudgeInfo,
     trace: EvaluationTrace,
-) -> EvaluationRunResult:
+) -> EvaluationTrialResult:
     judge_id = judge_identifier(job.judge)
     if payload is None:
         details = {
             "evaluationMethod": "judge",
             "contextBlocks": list(job.context_payload.keys()),
+            "evidence_obtained": job.evidence_obtained,
+            "oracle_available": job.oracle_available,
+            "oracle_used": job.oracle_used,
             "judges": [{
                 "judgeId": judge_id,
                 "provider": job.judge.provider,
@@ -485,6 +514,9 @@ def evaluation_from_judge_payload(
         details = {
             "evaluationMethod": "judge",
             "contextBlocks": list(job.context_payload.keys()),
+            "evidence_obtained": job.evidence_obtained,
+            "oracle_available": job.oracle_available,
+            "oracle_used": job.oracle_used,
             "judges": [vote],
             "outcome": {
                 "correctness": agg_correctness,
@@ -493,20 +525,25 @@ def evaluation_from_judge_payload(
         }
     return _build_evaluation_result(
         job.result,
-        question_text=job.question_text,
+        task_statement=job.task_statement,
         validation_type="judge",
         details=details,
         judge_info=judge_info,
-        trace=trace,
+        trace=_with_evaluation_trace_metadata(
+            trace,
+            evidence_obtained=job.evidence_obtained,
+            oracle_available=job.oracle_available,
+            oracle_used=job.oracle_used,
+        ),
     )
 
 
 def _build_skipped_evaluation_result(
-    result: RunResult,
-    question_text: str,
+    result: TrialResult,
+    task_statement: str,
     *,
     missing_blocks: list[str],
-) -> EvaluationRunResult:
+) -> EvaluationTrialResult:
     error_msg = f"Context blocks not found: {', '.join(missing_blocks)}"
     details: dict[str, Any] = {
         "evaluationMethod": "judge",
@@ -515,11 +552,11 @@ def _build_skipped_evaluation_result(
     }
     item = EvaluationItemResult(
         experimentId=result.experimentId,
-        runId=result.runId,
+        trialId=result.trialId,
         dataset=result.dataset,
-        questionId=result.questionId,
+        taskId=result.taskId,
         instanceId=result.instanceId,
-        question=question_text,
+        taskStatement=task_statement,
         evaluationMode="judge",
         status="skipped",
         evaluationMethod="judge",
@@ -530,13 +567,13 @@ def _build_skipped_evaluation_result(
         executionInputTokens=result.usage.get("inputTokens"),
         executionOutputTokens=result.usage.get("outputTokens"),
         executionDurationMs=result.timing.durationMs,
-        questionTags=list(result.questionTags),
+        taskTags=list(result.taskTags),
     )
-    return EvaluationRunResult(
+    return EvaluationTrialResult(
         experimentId=result.experimentId,
-        runId=result.runId,
+        trialId=result.trialId,
         dataset=result.dataset,
-        questionId=result.questionId,
+        taskId=result.taskId,
         items=[item],
         summary=EvaluationRunSummary(itemCount=1),
         metadata=result.metadata,
@@ -544,29 +581,29 @@ def _build_skipped_evaluation_result(
 
 
 def _build_evaluation_result(
-    result: RunResult,
+    result: TrialResult,
     *,
-    question_text: str,
+    task_statement: str,
     validation_type: str,
     details: dict[str, Any],
     judge_info: EvaluationJudgeInfo,
     trace: EvaluationTrace,
-) -> EvaluationRunResult:
+) -> EvaluationTrialResult:
     metrics = result.trace.aiTrace.get("metrics", {}) if result.trace.aiTrace else {}
     summary = result.metricsSummary
     context_blocks = details.get("contextBlocks") if isinstance(details, dict) else None
     item = EvaluationItemResult(
         experimentId=result.experimentId,
-        runId=result.runId,
+        trialId=result.trialId,
         dataset=result.dataset,
-        questionId=result.questionId,
+        taskId=result.taskId,
         instanceId=result.instanceId,
-        question=question_text,
+        taskStatement=task_statement,
         evaluationMode=validation_type,
         status="evaluated",
         evaluationMethod=details.get("evaluationMethod"),
         details=details,
-        contextBlock=context_blocks if isinstance(context_blocks, list) and context_blocks else None,
+        contextBlocks=context_blocks if isinstance(context_blocks, list) and context_blocks else None,
         executionModel=result.modelName,
         executionStrategy=result.strategy,
         executionFormat=result.format,
@@ -576,7 +613,7 @@ def _build_evaluation_result(
         executionToolCalls=summary.get("toolCalls", metrics.get("toolCalls")),
         executionFunctionCalls=summary.get("functionCalls", metrics.get("functionCalls")),
         executionLlmCalls=summary.get("modelCalls", metrics.get("modelCalls")),
-        questionTags=list(result.questionTags),
+        taskTags=list(result.taskTags),
         evaluationJudgeUsed=judge_info.used,
         evaluationJudgeRole=judge_info.role,
         evaluationJudgeProvider=judge_info.provider,
@@ -586,11 +623,11 @@ def _build_evaluation_result(
         evaluationDurationMs=judge_info.durationMs,
         evaluationTrace=trace,
     )
-    return EvaluationRunResult(
+    return EvaluationTrialResult(
         experimentId=result.experimentId,
-        runId=result.runId,
+        trialId=result.trialId,
         dataset=result.dataset,
-        questionId=result.questionId,
+        taskId=result.taskId,
         items=[item],
         summary=EvaluationRunSummary(itemCount=1),
         metadata=result.metadata,
@@ -598,13 +635,15 @@ def _build_evaluation_result(
 
 
 def _get_context_blocks(
-    blocks: dict[str, Any],
+    blocks: object,
     block_ids: list[str],
 ) -> tuple[dict[str, Any], list[str]]:
     """Returns (found_blocks_dict, missing_block_ids).
 
     Supports both wrapped format {"blocks": {id: block, ...}} and flat {id: block, ...}.
     """
+    if not isinstance(blocks, dict):
+        return {}, list(block_ids)
     nested = blocks.get("blocks")
     inner: dict[str, Any] = nested if isinstance(nested, dict) else blocks
     found: dict[str, Any] = {}
@@ -618,7 +657,40 @@ def _get_context_blocks(
     return found, missing
 
 
-def _format_curriculum_context(context_payload: dict[str, Any]) -> str:
+def _evidence_task_context_blocks(task: object) -> list[str]:
+    if not isinstance(task, dict):
+        return []
+    raw_blocks = task.get("context_blocks", [])
+    if not isinstance(raw_blocks, list):
+        return []
+    return [str(block_id) for block_id in raw_blocks]
+
+
+def _with_evaluation_trace_metadata(
+    trace: EvaluationTrace,
+    *,
+    evidence_obtained: bool,
+    oracle_available: bool,
+    oracle_used: bool,
+) -> EvaluationTrace:
+    ai_trace = dict(trace.aiTrace or {})
+    metadata = dict(ai_trace.get("metadata") or {})
+    metadata.update(
+        {
+            "evidence_obtained": evidence_obtained,
+            "oracle_available": oracle_available,
+            "oracle_used": oracle_used,
+        }
+    )
+    ai_trace["metadata"] = metadata
+    return EvaluationTrace(
+        aiTrace=ai_trace,
+        rawResponse=trace.rawResponse,
+        error=trace.error,
+    )
+
+
+def _format_evaluation_evidence(context_payload: dict[str, Any]) -> str:
     if not context_payload:
         return ""
     parts: list[str] = []
@@ -699,21 +771,21 @@ def _merge_evaluation_traces(traces: list[EvaluationTrace]) -> EvaluationTrace:
 
 
 def evaluate_run_result(
-    result: RunResult,
-    provider: DatasetProvider,
+    result: TrialResult,
+    adapter: DatasetPackage,
     *,
     judges: list[EvaluationModelConfig],
     only: str | None = None,
     mode: str | None = None,
     engine: Engine | None = None,
     event_logger: Callable[[str, str, dict[str, object]], None] | None = None,
-) -> EvaluationRunResult | None:
+) -> EvaluationTrialResult | None:
     if result.status != "success":
         return None
-    if only and result.questionId != only:
+    if only and result.taskId != only:
         return None
 
-    rendered_question = result.question
+    task_statement = result.taskStatement
     validation_type = result.validationType or result.metadata.validationType
     if mode and validation_type != mode:
         return None
@@ -723,35 +795,45 @@ def evaluate_run_result(
             "EVALUATE",
             "Starting evaluation",
             {
-                "runId": result.runId,
-                "questionId": result.questionId,
+                "trialId": result.trialId,
+                "taskId": result.taskId,
                 "validationType": validation_type,
             },
         )
     if validation_type == "judge":
-        question = provider.get_question(result.questionId)
-        block_ids = list(question.contextBlock)
-        all_blocks = provider.get_context_blocks(result.instanceId)
-        context_payload, missing = _get_context_blocks(all_blocks, block_ids)
+        evidence_payload = adapter.get_evidence(result.instanceId, result.taskId)
+        oracle_result = adapter.get_oracle(result.instanceId, result.taskId)
+        oracle_available = not isinstance(oracle_result, OracleUnavailable)
+        block_ids = _evidence_task_context_blocks(evidence_payload.task)
+        context_payload, missing = _get_context_blocks(evidence_payload.evidence, block_ids)
         if missing:
             if event_logger is not None:
                 event_logger(
                     "SKIP",
                     "Context blocks not found, evaluation skipped",
                     {
-                        "runId": result.runId,
-                        "questionId": result.questionId,
+                        "trialId": result.trialId,
+                        "taskId": result.taskId,
                         "instanceId": result.instanceId,
                         "missingBlocks": missing,
                     },
                 )
-            return _build_skipped_evaluation_result(result, rendered_question, missing_blocks=missing)
+            return _build_skipped_evaluation_result(result, task_statement, missing_blocks=missing)
         details, judge_info, trace = _evaluate_judge(
             result,
-            rendered_question,
+            task_statement,
             context_payload,
             judges,
             active_engine,
+        )
+        details["evidence_obtained"] = True
+        details["oracle_available"] = oracle_available
+        details["oracle_used"] = False
+        trace = _with_evaluation_trace_metadata(
+            trace,
+            evidence_obtained=True,
+            oracle_available=oracle_available,
+            oracle_used=False,
         )
     else:
         raise ValueError(f"Unsupported validation type: {validation_type}")
@@ -761,15 +843,15 @@ def evaluate_run_result(
             "EVALUATE",
             "Evaluation completed",
             {
-                "runId": result.runId,
-                "questionId": result.questionId,
+                "trialId": result.trialId,
+                "taskId": result.taskId,
                 "validationType": validation_type,
                 "outcome": details.get("outcome"),
             },
         )
     return _build_evaluation_result(
         result,
-        question_text=rendered_question,
+        task_statement=task_statement,
         validation_type=validation_type,
         details=details,
         judge_info=judge_info,
@@ -778,38 +860,44 @@ def evaluate_run_result(
 
 
 def evaluate_run_results(
-    results: Iterable[RunResult],
+    results: Iterable[TrialResult],
     *,
     judges: list[EvaluationModelConfig],
     only: str | None = None,
     mode: str | None = None,
     continue_on_error: bool = False,
     event_logger: Callable[[str, str, dict[str, object]], None] | None = None,
-    on_result: Callable[[RunResult, EvaluationRunResult | None], None] | None = None,
-) -> list[EvaluationRunResult]:
-    provider_cache: dict[str, DatasetProvider] = {}
+    on_result: Callable[[TrialResult, EvaluationTrialResult | None], None] | None = None,
+) -> list[EvaluationTrialResult]:
+    adapter_cache: dict[tuple[str | None, str | None, str | None], DatasetPackage] = {}
     engine = Engine(event_logger=event_logger)
-    evaluations: list[EvaluationRunResult] = []
+    evaluations: list[EvaluationTrialResult] = []
     ordered_results = sorted(
         list(results),
         key=lambda item: (
-            tuple(sorted(item.contextBlock or [])),
+            tuple(sorted(item.contextBlocks or [])),
             str(item.instanceId),
-            str(item.questionId),
+            str(item.taskId),
             str(item.provider),
             str(item.modelName or ""),
-            str(item.runId),
+            str(item.trialId),
         ),
     )
     try:
         for result in ordered_results:
             try:
+                adapter_key = (
+                    result.dataset.id,
+                    result.dataset.version,
+                    result.dataset.materialized_path or result.dataset.origin,
+                )
+                adapter = adapter_cache.get(adapter_key)
+                if adapter is None:
+                    adapter = _resolve_adapter(result.dataset)
+                    adapter_cache[adapter_key] = adapter
                 evaluated = evaluate_run_result(
                     result,
-                    provider_cache.setdefault(
-                        result.dataset.root,
-                        DatasetProvider.from_dataset(result.dataset),
-                    ),
+                    adapter,
                     judges=judges,
                     only=only,
                     mode=mode,
@@ -835,7 +923,7 @@ def build_evaluation_summary_rows(rows: Iterable[dict[str, Any]]) -> EvaluationB
         experimentId=experiment_id,
         runCount=len(row_list),
         itemCount=len(row_list),
-        questions=[_build_evaluation_question_summary(row) for row in row_list],
+        tasks=[_build_evaluation_question_summary(row) for row in row_list],
     )
 
 

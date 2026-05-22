@@ -40,7 +40,7 @@ def matches_run_result(item: Any, selector: RunSelector) -> bool:
 
 
 def _matches_common(item: Any, selector: RunSelector) -> bool:
-    if selector.trial_id and _field(item, "runId") not in selector.trial_id:
+    if selector.trial_id and _field(item, "trialId") not in selector.trial_id:
         return False
     if selector.provider and _field(item, "provider") not in selector.provider:
         return False
@@ -51,7 +51,7 @@ def _matches_common(item: Any, selector: RunSelector) -> bool:
             return False
     if selector.instance and _field(item, "instanceId") not in selector.instance:
         return False
-    if selector.task and _field(item, "questionId") not in selector.task:
+    if selector.task and _field(item, "taskId") not in selector.task:
         return False
     if selector.strategy and _field(item, "strategy") not in selector.strategy:
         return False
@@ -68,7 +68,7 @@ def _matches_common(item: Any, selector: RunSelector) -> bool:
             return False
     if selector.not_instance and _field(item, "instanceId") in selector.not_instance:
         return False
-    if selector.not_task and _field(item, "questionId") in selector.not_task:
+    if selector.not_task and _field(item, "taskId") in selector.not_task:
         return False
     if selector.not_strategy and _field(item, "strategy") in selector.not_strategy:
         return False

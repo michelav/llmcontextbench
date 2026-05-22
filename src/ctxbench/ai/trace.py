@@ -41,7 +41,7 @@ class AIMetrics(BaseModel):
     reservedTokens: int | None = None
     contextChars: int | None = None
     contextBytes: int | None = None
-    questionChars: int | None = None
+    taskStatementChars: int | None = None
     promptChars: int | None = None
     rateLimitWaitMs: int | None = None
     retrySleepMs: int | None = None

@@ -12,9 +12,9 @@ from ctxbench.benchmark.models import (
     EvaluationJudgeInfo,
     EvaluationTrace,
     EvaluationResult,
-    RunResult,
+    TrialResult,
     RunTiming,
-    RunTrace,
+    TrialTrace,
 )
 from ctxbench.commands.eval import eval_command
 from ctxbench.commands.execute import execute_command
@@ -26,25 +26,25 @@ from ctxbench.util.jsonl import read_jsonl
 def _write_local_dataset(root: Path) -> Path:
     instance_dir = root / "context" / "cv-demo"
     instance_dir.mkdir(parents=True, exist_ok=True)
-    (root / "questions.json").write_text(
+    (root / "tasks.json").write_text(
         json.dumps(
             {
                 "datasetId": "ctxbench/local-fixture",
                 "version": "0.1.0",
-                "questions": [
+                "tasks": [
                     {
                         "id": "q_year",
-                        "question": "In which year did {researcher_name} obtain their PhD?",
+                        "statement": "In which year did {researcher_name} obtain their PhD?",
                         "tags": ["objective"],
                         "validation": {"type": "judge"},
-                        "contextBlock": ["summary"],
+                        "contextBlocks": ["summary"],
                     }
                 ],
             }
         ),
         encoding="utf-8",
     )
-    (root / "questions.instance.json").write_text(
+    (root / "tasks.instance.json").write_text(
         json.dumps(
             {
                 "datasetId": "ctxbench/local-fixture",
@@ -52,7 +52,7 @@ def _write_local_dataset(root: Path) -> Path:
                 "instances": [
                     {
                         "instanceId": "cv-demo",
-                        "questions": [{"id": "q_year", "parameters": {"researcher_name": "CV Demo"}}],
+                        "tasks": [{"id": "q_year", "parameters": {"researcher_name": "CV Demo"}}],
                     }
                 ],
             }
@@ -71,7 +71,7 @@ def _write_experiment(path: Path, dataset_root: Path) -> Path:
                 "id": "exp-dataset-provenance",
                 "output": "outputs",
                 "dataset": {"root": str(dataset_root)},
-                "scope": {"instances": [], "questions": []},
+                "scope": {"instances": [], "tasks": []},
                 "factors": {
                     "model": [{"provider": "mock", "name": "mock"}],
                     "strategy": ["inline"],
@@ -89,18 +89,18 @@ def _write_experiment(path: Path, dataset_root: Path) -> Path:
     return path
 
 
-def _fake_execute_runspec(runspec, engine) -> RunResult:
+def _fake_execute_runspec(runspec, engine) -> TrialResult:
     del engine
-    return RunResult(
-        runId=runspec.runId,
+    return TrialResult(
+        trialId=runspec.trialId,
         experimentId=runspec.experimentId,
         dataset=runspec.dataset,
-        questionId=runspec.questionId,
-        question=runspec.question,
-        questionTemplate=runspec.questionTemplate,
-        questionTags=list(runspec.questionTags),
+        taskId=runspec.taskId,
+        taskStatement=runspec.taskStatement,
+        taskTemplate=runspec.taskTemplate,
+        taskTags=list(runspec.taskTags),
         validationType=runspec.validationType,
-        contextBlock=list(runspec.contextBlock),
+        contextBlocks=list(runspec.contextBlocks),
         parameters=dict(runspec.parameters),
         instanceId=runspec.instanceId,
         provider=runspec.provider,
@@ -110,7 +110,7 @@ def _fake_execute_runspec(runspec, engine) -> RunResult:
         format=runspec.format,
         repeatIndex=runspec.repeatIndex,
         outputRoot=runspec.outputRoot,
-        answer="2020",
+        response="2020",
         status="success",
         errorMessage=None,
         timing=RunTiming(
@@ -120,7 +120,7 @@ def _fake_execute_runspec(runspec, engine) -> RunResult:
         ),
         usage={},
         metricsSummary={},
-        trace=RunTrace(),
+        trace=TrialTrace(),
         traceRef=None,
         evaluation=EvaluationResult(),
         metadata=runspec.metadata,

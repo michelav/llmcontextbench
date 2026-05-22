@@ -5,14 +5,14 @@ from typing import Any
 
 from ctxbench.ai.engine import Engine
 from ctxbench.benchmark.executor import execute_runspec
-from ctxbench.benchmark.models import RunSpec
+from ctxbench.benchmark.models import TrialSpec
 from ctxbench.benchmark.selectors import RunSelector, matches_runspec
 from ctxbench.benchmark.results import serialize_run_result
 from ctxbench.util.jsonl import append_jsonl, read_jsonl, write_jsonl
 from ctxbench.util.logging import PhaseLogger, ProgressTracker
 
 
-def _load_runspecs(path: Path) -> list[RunSpec]:
+def _load_runspecs(path: Path) -> list[TrialSpec]:
     if not path.exists():
         raise FileNotFoundError(f"Trials file not found: {path}. Run 'ctxbench plan' first.")
     payloads = [dict(item) for item in read_jsonl(path)]
@@ -22,7 +22,7 @@ def _load_runspecs(path: Path) -> list[RunSpec]:
         raise ValueError(
             "Trials file is missing context data. Re-run 'ctxbench plan' to regenerate."
         )
-    return [RunSpec.model_validate(payload) for payload in payloads]
+    return [TrialSpec.model_validate(payload) for payload in payloads]
 
 
 def _load_response_statuses(path: Path) -> dict[str, str]:
@@ -93,11 +93,11 @@ def execute_command(
     engine = Engine(event_logger=event_logger)
     try:
         for runspec in runspecs:
-            existing_status = response_statuses.get(runspec.runId)
+            existing_status = response_statuses.get(runspec.trialId)
 
             if existing_status == "success" and not force:
                 skipped += 1
-                logger.phase("SKIP", "Already responded successfully; skipping", run=runspec.runId)
+                logger.phase("SKIP", "Already responded successfully; skipping", run=runspec.trialId)
                 progress_tracker.advance()
                 completed += 1
                 continue
@@ -105,15 +105,15 @@ def execute_command(
             logger.phase(
                 "EXECUTE",
                 "Generating response",
-                run=runspec.runId,
+                run=runspec.trialId,
                 model=runspec.modelName or "",
-                question=runspec.questionId,
+                task=runspec.taskId,
             )
             result = execute_runspec(runspec, engine)
             logger.phase(
                 "EXECUTE",
                 "Response generated",
-                run=runspec.runId,
+                run=runspec.trialId,
                 status=result.status,
             )
             payload = serialize_run_result(result, artifact_root=artifact_root, write_trace=write_traces)
@@ -121,8 +121,8 @@ def execute_command(
             if existing_status is not None:
                 # Previous entry exists (error case) — will compact at end
                 has_duplicates = True
-            response_statuses[result.runId] = result.status
-            logger.phase("WRITE", "Response written", run=result.runId)
+            response_statuses[result.trialId] = result.status
+            logger.phase("WRITE", "Response written", run=result.trialId)
             progress_tracker.advance()
             completed += 1
     finally:

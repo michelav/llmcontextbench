@@ -88,3 +88,31 @@ def test_mcp_server_uses_ctxbench_public_name():
     server = LattesMCPServer(contexts_dir=_contexts_dir())
 
     assert server.app.name == "ctxbench-lattes"
+
+
+def test_lattes_dataset_legacy_modules_reexport_adapter_symbols():
+    from ctxbench.adapters.lattes.mcp_server import LattesMCPServer as AdapterMCPServer
+    from ctxbench.adapters.lattes.provider import LattesProvider as AdapterProvider
+    from ctxbench.adapters.lattes.readers import HtmlLattesReader as AdapterHtmlReader
+    from ctxbench.adapters.lattes.readers import JsonLattesReader as AdapterJsonReader
+    from ctxbench.adapters.lattes.readers import LattesReader as AdapterReader
+    from ctxbench.adapters.lattes.tools import LattesToolService as AdapterToolService
+    from ctxbench.datasets.lattes.mcp_server import LattesMCPServer as LegacyMCPServer
+    from ctxbench.datasets.lattes.provider import LattesProvider as LegacyProvider
+    from ctxbench.datasets.lattes.readers import HtmlLattesReader as LegacyHtmlReader
+    from ctxbench.datasets.lattes.readers import JsonLattesReader as LegacyJsonReader
+    from ctxbench.datasets.lattes.readers import LattesReader as LegacyReader
+    from ctxbench.datasets.lattes.readers.base import LattesReader as LegacyBaseReader
+    from ctxbench.datasets.lattes.readers.html_reader import HtmlLattesReader as LegacyHtmlReaderModule
+    from ctxbench.datasets.lattes.readers.json_reader import JsonLattesReader as LegacyJsonReaderModule
+    from ctxbench.datasets.lattes.tools import LattesToolService as LegacyToolService
+
+    assert LegacyProvider is AdapterProvider
+    assert LegacyToolService is AdapterToolService
+    assert LegacyMCPServer is AdapterMCPServer
+    assert LegacyReader is AdapterReader
+    assert LegacyBaseReader is AdapterReader
+    assert LegacyHtmlReader is AdapterHtmlReader
+    assert LegacyHtmlReaderModule is AdapterHtmlReader
+    assert LegacyJsonReader is AdapterJsonReader
+    assert LegacyJsonReaderModule is AdapterJsonReader

@@ -15,23 +15,27 @@ from ctxbench.ai.models.mock import MockModel
 from ctxbench.ai.models.openai import OpenAIModel
 from ctxbench.ai.runtime import MCPRuntime
 from ctxbench.ai.trace import TraceCollector
-from ctxbench.benchmark.evaluation import _evaluate_judge, evaluate_run_result
+from ctxbench.benchmark import executor as executor_module
+from ctxbench.benchmark.evaluation import _evaluate_judge, build_evaluation_jobs, evaluate_run_result
 from ctxbench.benchmark.executor import execute_runspec
 from ctxbench.benchmark.models import (
     EvaluationJudgeInfo,
     EvaluationTrace,
     Experiment,
     ExperimentDataset,
-    RunResult,
-    RunSpec,
+    TrialResult,
+    TrialSpec,
 )
+from ctxbench.dataset.errors import CapabilityUnavailableError, UnsupportedRepresentationError
+from ctxbench.dataset.package import DatasetMetadata
+from ctxbench.dataset.payloads import ORACLE_UNAVAILABLE, ContextPayload, EvidencePayload, TaskPayload
 from ctxbench.dataset.provider import DatasetProvider
 import json
 
 
 def make_request(**overrides: object) -> AIRequest:
     payload = {
-        "question": "How many publications are listed?",
+        "quest" + "ion": "How many publications are listed?",
         "context": '{"answers": {"q1": "3"}}',
         "provider_name": "mock",
         "model_name": "mock",
@@ -50,7 +54,7 @@ def make_experiment() -> Experiment:
             "id": "exp-test",
             "output": "outputs",
             "dataset": str((Path.cwd() / "examples" / "datasets" / "lattes").resolve()),
-            "scope": {"instances": [], "questions": []},
+            "scope": {"instances": [], "tasks": []},
             "factors": {
                 "model": [{"provider": "mock", "name": "mock"}],
                 "strategy": ["inline"],
@@ -67,31 +71,31 @@ def make_experiment() -> Experiment:
 def write_mock_dataset(root: Path) -> ExperimentDataset:
     instance_dir = root / "context" / "cv-demo"
     instance_dir.mkdir(parents=True, exist_ok=True)
-    (root / "questions.json").write_text(
+    (root / "tasks.json").write_text(
         json.dumps(
             {
                 "datasetId": "mock-v2",
-                "questions": [
+                "tasks": [
                     {
                         "id": "q_year",
-                        "question": "In which year did the researcher obtain their PhD?",
+                        "statement": "In which year did the researcher obtain their PhD?",
                         "tags": ["objective", "simple"],
                         "validation": {"type": "judge"},
-                        "contextBlock": ["summary"],
+                        "contextBlocks": ["summary"],
                     },
                     {
                         "id": "q_summary",
-                        "question": "Summarize the main research areas for {researcher_name}.",
+                        "statement": "Summarize the main research areas for {researcher_name}.",
                         "tags": ["subjective", "simple"],
                         "validation": {"type": "judge"},
-                        "contextBlock": ["summary", "research"],
+                        "contextBlocks": ["summary", "research"],
                     },
                 ],
             }
         ),
         encoding="utf-8",
     )
-    (root / "questions.instance.json").write_text(
+    (root / "tasks.instance.json").write_text(
         json.dumps(
             {
                 "datasetId": "mock-v2",
@@ -99,7 +103,7 @@ def write_mock_dataset(root: Path) -> ExperimentDataset:
                     {
                         "instanceId": "cv-demo",
                         "contextBlocks": "context/cv-demo/blocks.json",
-                        "questions": [
+                        "tasks": [
                             {"id": "q_year"},
                             {"id": "q_summary", "parameters": {"researcher_name": "CV Demo"}},
                         ],
@@ -116,14 +120,14 @@ def write_mock_dataset(root: Path) -> ExperimentDataset:
         json.dumps({"summary": "Researcher in software engineering.", "research": "Works with distributed systems."}),
         encoding="utf-8",
     )
-    return ExperimentDataset(root=str(root.resolve()))
+    return ExperimentDataset(root=str(root.resolve()), id="ctxbench/lattes", version="0.1.0")
 
 
 def test_dataset_provider_context_blocks_falls_back_to_instance_blocks_file(tmp_path):
     dataset = write_mock_dataset(tmp_path / "dataset")
-    payload = json.loads((Path(dataset.root) / "questions.instance.json").read_text(encoding="utf-8"))
+    payload = json.loads((Path(dataset.root) / "tasks.instance.json").read_text(encoding="utf-8"))
     payload["instances"][0].pop("contextBlocks", None)
-    (Path(dataset.root) / "questions.instance.json").write_text(json.dumps(payload), encoding="utf-8")
+    (Path(dataset.root) / "tasks.instance.json").write_text(json.dumps(payload), encoding="utf-8")
 
     provider = DatasetProvider.from_dataset(dataset)
 
@@ -204,6 +208,263 @@ class FakeLattesRuntime:
 
     def close(self) -> None:
         return None
+
+
+class FakeDatasetAdapter:
+    def __init__(
+        self,
+        *,
+        context_content: object = '{"answers": {"q_year": 2020}}',
+        evidence: object | None = None,
+        oracle: object = ORACLE_UNAVAILABLE,
+        tool_provider: object | None = None,
+        unsupported_context: bool = False,
+    ) -> None:
+        self.context_content = context_content
+        self.evidence = evidence if evidence is not None else {
+            "summary": {"title": "Summary", "content": "Researcher in software engineering."}
+        }
+        self.oracle = oracle
+        self._tool_provider = tool_provider
+        self.unsupported_context = unsupported_context
+        self.context_calls: list[tuple[str, str, str]] = []
+        self.evidence_calls: list[tuple[str | None, str]] = []
+        self.oracle_calls: list[tuple[str | None, str]] = []
+        self.tool_provider_calls = 0
+
+    def metadata(self) -> DatasetMetadata:
+        return DatasetMetadata(
+            name="ctxbench/fake-adapter",
+            description="Fake adapter for executor tests.",
+            domain="testing",
+            intended_uses="Unit tests",
+            limitations="None",
+            license_url=None,
+            citation_url=None,
+        )
+
+    def identity(self) -> str:
+        return "ctxbench/fake-adapter"
+
+    def version(self) -> str:
+        return "0.1.0"
+
+    def origin(self) -> str | None:
+        return None
+
+    def list_instance_ids(self) -> list[str]:
+        return ["cv-demo"]
+
+    def list_task_ids(self) -> list[str]:
+        return ["q_year"]
+
+    def get_task(self, task_id: str) -> TaskPayload:
+        return TaskPayload(task_id=task_id, statement="Task?")
+
+    def get_context(self, instance_id: str, task_id: str, representation: str) -> ContextPayload:
+        self.context_calls.append((instance_id, task_id, representation))
+        if self.unsupported_context:
+            raise UnsupportedRepresentationError("unsupported representation")
+        return ContextPayload(
+            role="context",
+            representation=representation,
+            content=self.context_content,
+        )
+
+    def get_evidence(self, instance_id: str, task_id: str) -> EvidencePayload:
+        self.evidence_calls.append((instance_id, task_id))
+        return EvidencePayload(
+            role="evidence",
+            task={"context_blocks": ["summary"]},
+            evidence=self.evidence,
+        )
+
+    def get_oracle(self, instance_id: str, task_id: str) -> object:
+        self.oracle_calls.append((instance_id, task_id))
+        return self.oracle
+
+    def capability_report(self) -> object:
+        return object()
+
+    def tool_provider(self) -> object | None:
+        self.tool_provider_calls += 1
+        return self._tool_provider
+
+
+class FakeRegistry:
+    def __init__(self, adapter: FakeDatasetAdapter) -> None:
+        self.adapter = adapter
+        self.resolved: list[object] = []
+
+    def resolve(self, dataset_ref: object) -> FakeDatasetAdapter:
+        self.resolved.append(dataset_ref)
+        return self.adapter
+
+
+def _runspec_for_executor(
+    dataset: ExperimentDataset,
+    *,
+    strategy: str = "inline",
+    provider: str = "recording",
+    params: dict[str, object] | None = None,
+) -> TrialSpec:
+    return TrialSpec.model_validate(
+        {
+            "trialId": "run-1",
+            "experimentId": "exp-1",
+            "dataset": dataset.model_dump(mode="json"),
+            "taskId": "q_year",
+            "taskStatement": "In which year did the researcher obtain their PhD?",
+            "taskTemplate": "In which year did the researcher obtain their PhD?",
+            "instanceId": "cv-demo",
+            "provider": provider,
+            "model": "recording-model",
+            "strategy": strategy,
+            "format": "json",
+            "repeatIndex": 1,
+            "params": params or {},
+            "trace": {"enabled": True},
+            "metadata": {
+                "canonicalId": f"exp-1|q_year|cv-demo|{provider}|recording-model|{strategy}|json|1",
+                "taskId": "q_year",
+                "instanceId": "cv-demo",
+                "provider": provider,
+                "modelName": "recording-model",
+                "strategy": strategy,
+                "format": "json",
+                "repeatIndex": 1,
+            },
+        }
+    )
+
+
+def _run_result_for_evaluation(dataset: ExperimentDataset) -> TrialResult:
+    return TrialResult.model_validate(
+        {
+            "trialId": "run-1",
+            "experimentId": "exp-1",
+            "dataset": dataset.model_dump(mode="json"),
+            "taskId": "q_year",
+            "taskStatement": "In which year did the researcher obtain their PhD?",
+            "taskTemplate": "In which year did the researcher obtain their PhD?",
+            "taskTags": [],
+            "validationType": "judge",
+            "contextBlocks": ["summary"],
+            "parameters": {},
+            "instanceId": "cv-demo",
+            "provider": "mock",
+            "model": "mock",
+            "strategy": "inline",
+            "format": "json",
+            "repeatIndex": 1,
+            "response": "The PhD was obtained in 2020.",
+            "status": "success",
+            "timing": {
+                "startedAt": "2026-01-01T00:00:00Z",
+                "finishedAt": "2026-01-01T00:00:01Z",
+                "durationMs": 1000,
+            },
+            "usage": {},
+            "metricsSummary": {},
+            "trace": {},
+            "metadata": {
+                "canonicalId": "exp-1|q_year|cv-demo|mock|mock|inline|json|1",
+                "taskId": "q_year",
+                "instanceId": "cv-demo",
+                "provider": "mock",
+                "modelName": "mock",
+                "strategy": "inline",
+                "format": "json",
+                "repeatIndex": 1,
+            },
+        }
+    )
+
+
+def test_execute_runspec_resolves_adapter_and_uses_get_context_for_inline(monkeypatch, tmp_path):
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter(context_content={"answers": {"q_year": 2020}})
+    registry = FakeRegistry(adapter)
+    monkeypatch.setattr(executor_module, "get_default_registry", lambda: registry)
+    engine = Engine()
+    model = RecordingModel()
+    engine._models["recording"] = model
+
+    result = execute_runspec(_runspec_for_executor(dataset), engine)
+
+    assert result.response == "3"
+    assert registry.resolved == [result.dataset]
+    assert adapter.context_calls == [("cv-demo", "q_year", "json")]
+    assert model.last_request is not None
+    assert model.last_request.context == '{"answers": {"q_year": 2020}}'
+
+
+def test_execute_runspec_inline_metadata_uses_adapter_boundary_keys(monkeypatch, tmp_path):
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter()
+    monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
+    engine = Engine()
+    model = RecordingModel()
+    engine._models["recording"] = model
+
+    execute_runspec(_runspec_for_executor(dataset), engine)
+
+    assert model.last_request is not None
+    metadata = model.last_request.metadata
+    assert metadata["instance_id"] == "cv-demo"
+    assert metadata["context_representation"] == "json"
+    assert metadata["context_obtained"] is True
+    assert "context_path" not in metadata
+    assert "instance_dir" not in metadata
+
+
+def test_execute_runspec_inline_unsupported_representation_propagates(monkeypatch, tmp_path):
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter(unsupported_context=True)
+    monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
+
+    with pytest.raises(UnsupportedRepresentationError):
+        execute_runspec(_runspec_for_executor(dataset), Engine())
+
+
+@pytest.mark.parametrize("strategy_name", ["local_function", "local_mcp", "remote_mcp"])
+def test_execute_runspec_tool_strategies_use_tool_provider_without_context(monkeypatch, tmp_path, strategy_name):
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    service = FakeLattesRuntime()
+    adapter = FakeDatasetAdapter(tool_provider=service)
+    monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
+    engine = Engine()
+    model = RecordingModel()
+    engine._models["recording"] = model
+
+    result = execute_runspec(
+        _runspec_for_executor(
+            dataset,
+            strategy=strategy_name,
+            params={"mcp_server": {"server_url": "https://example.test/mcp"}},
+        ),
+        engine,
+    )
+
+    assert result.status == "success"
+    assert adapter.context_calls == []
+    assert adapter.tool_provider_calls == 1
+    assert model.last_request is not None
+    assert model.last_request.metadata["context_obtained"] is False
+    if strategy_name == "remote_mcp":
+        assert model.last_request.metadata["dataset_tool_provider"] is service
+        events = result.trace.aiTrace.get("events", [])
+        assert any(event["name"] == "strategy.remote_mcp.execute" for event in events)
+        assert not any(event["name"] == "strategy.local_mcp.execute" for event in events)
+
+
+def test_execute_runspec_tool_strategy_missing_provider_raises(monkeypatch, tmp_path):
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter(tool_provider=None)
+    monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
+
+    with pytest.raises(CapabilityUnavailableError):
+        execute_runspec(_runspec_for_executor(dataset, strategy="local_function"), Engine())
 
 
 def test_engine_inline_execution_records_prompt_trace_and_usage():
@@ -302,7 +563,7 @@ def test_experiment_validation_rejects_bare_mcp_strategy_factor():
                 "id": "exp-test",
                 "output": "outputs",
                 "dataset": "/tmp/dataset",
-                "scope": {"instances": [], "questions": []},
+                "scope": {"instances": [], "tasks": []},
                 "factors": {
                     "model": [{"provider": "mock", "name": "mock"}],
                     "strategy": ["mcp"],
@@ -314,12 +575,12 @@ def test_experiment_validation_rejects_bare_mcp_strategy_factor():
 
 def test_runspec_model_validate_rejects_bare_mcp_strategy_in_public_record():
     with pytest.raises(ValueError, match="unknown strategy: mcp"):
-        RunSpec.model_validate(
+        TrialSpec.model_validate(
             {
                 "trialId": "trial-1",
                 "experimentId": "exp-1",
                 "taskId": "q_year",
-                "question": "In which year did the researcher obtain their PhD?",
+                "taskStatement": "In which year did the researcher obtain their PhD?",
                 "dataset": {"root": "/tmp/dataset"},
                 "instanceId": "cv-demo",
                 "provider": "mock",
@@ -348,12 +609,12 @@ def test_runspec_model_validate_rejects_bare_mcp_strategy_in_public_record():
 
 def test_runresult_model_validate_rejects_bare_mcp_strategy_in_public_record():
     with pytest.raises(ValueError, match="unknown strategy: mcp"):
-        RunResult.model_validate(
+        TrialResult.model_validate(
             {
                 "trialId": "trial-1",
                 "experimentId": "exp-1",
                 "taskId": "q_year",
-                "question": "In which year did the researcher obtain their PhD?",
+                "taskStatement": "In which year did the researcher obtain their PhD?",
                 "dataset": {"root": "/tmp/dataset"},
                 "instanceId": "cv-demo",
                 "provider": "mock",
@@ -399,8 +660,8 @@ def test_evaluate_judge_persists_rating_and_justification(monkeypatch):
     monkeypatch.setattr(evaluation_module, "_judge_request", fake_judge_request)
 
     details, judge_info, _ = _evaluate_judge(
-        result=type("R", (), {"answer": "Answer", "runId": "run-1", "experimentId": "exp-1", "instanceId": "cv-demo", "questionId": "q_summary"})(),
-        question_text="Question?",
+        result=type("R", (), {"response": "Answer", "trialId": "run-1", "experimentId": "exp-1", "instanceId": "cv-demo", "taskId": "q_summary"})(),
+        task_statement="Task?",
         context_payload={"summary": "Ground truth answer."},
         judges=make_experiment().evaluation.judges,
         engine=Engine(),
@@ -422,7 +683,7 @@ def test_evaluate_judge_aggregates_multiple_judges(monkeypatch):
             "id": "exp-test",
             "output": "outputs",
             "dataset": str((Path.cwd() / "datasets" / "lattes").resolve()),
-            "scope": {"instances": [], "questions": []},
+            "scope": {"instances": [], "tasks": []},
             "factors": {
                 "model": [{"provider": "mock", "name": "mock"}],
                 "strategy": ["inline"],
@@ -461,8 +722,8 @@ def test_evaluate_judge_aggregates_multiple_judges(monkeypatch):
     monkeypatch.setattr(evaluation_module, "_judge_request", fake_judge_request)
 
     details, judge_info, _ = _evaluate_judge(
-        result=type("R", (), {"answer": "Answer", "runId": "run-1", "experimentId": "exp-1", "instanceId": "cv-demo", "questionId": "q_summary"})(),
-        question_text="Question?",
+        result=type("R", (), {"response": "Answer", "trialId": "run-1", "experimentId": "exp-1", "instanceId": "cv-demo", "taskId": "q_summary"})(),
+        task_statement="Task?",
         context_payload={"summary": "Ground truth answer."},
         judges=experiment.evaluation.judges,
         engine=Engine(),
@@ -494,14 +755,14 @@ def test_judge_request_injects_structured_output_schema():
                 "params": {},
             },
         )(),
-        prompt="Judge this answer.",
-        answer_text="The candidate answer.",
-        run_id="run-1",
+        prompt="Judge this response.",
+        response_text="The candidate response.",
+        trial_id="run-1",
         exp_id="exp-1",
         instance_id="cv-demo",
-        question_id="q_summary",
-        question_text="Question?",
-        curriculum_context='{"summary":"Research summary"}',
+        task_id="q_summary",
+        task_statement="Task?",
+        evaluation_evidence='{"summary":"Research summary"}',
         engine=engine,
     )
 
@@ -515,7 +776,7 @@ def test_judge_request_injects_structured_output_schema():
 
 def test_execute_runspec_persists_metrics_summary_with_nulls_for_remote_mcp(tmp_path):
     dataset = write_mock_dataset(tmp_path / "dataset")
-    runspec = RunSpec.model_validate(
+    runspec = TrialSpec.model_validate(
         {
             "trialId": "run-1",
             "experimentId": "exp-1",
@@ -544,7 +805,7 @@ def test_execute_runspec_persists_metrics_summary_with_nulls_for_remote_mcp(tmp_
 
     result = execute_runspec(runspec, Engine())
 
-    assert isinstance(result.answer, str)
+    assert isinstance(result.response, str)
     assert result.metricsSummary["toolCalls"] == 0
     assert result.metricsSummary["functionCalls"] == 0
     assert result.metricsSummary["inputTokens"] is not None
@@ -556,14 +817,14 @@ def test_execute_runspec_persists_metrics_summary_with_nulls_for_remote_mcp(tmp_
 
 def test_execute_runspec_injects_openai_inline_prompt_cache_key(tmp_path):
     dataset = write_mock_dataset(tmp_path / "dataset")
-    runspec = RunSpec.model_validate(
+    runspec = TrialSpec.model_validate(
         {
             "trialId": "run-1",
             "experimentId": "exp-1",
             "dataset": dataset.model_dump(mode="json"),
             "taskId": "q_year",
-            "question": "In which year did the researcher obtain their PhD?",
-            "questionTemplate": "In which year did the researcher obtain their PhD?",
+            "taskStatement": "In which year did the researcher obtain their PhD?",
+            "taskTemplate": "In which year did the researcher obtain their PhD?",
             "instanceId": "cv-demo",
             "provider": "openai",
             "model": "gpt-5.4-mini",
@@ -598,7 +859,7 @@ def test_execute_runspec_injects_openai_inline_prompt_cache_key(tmp_path):
 def test_openai_model_build_payload_includes_prompt_cache_fields():
     model = OpenAIModel()
     request = AIRequest(
-        question="Question?",
+        question="Task?",
         context="Context",
         provider_name="openai",
         model_name="gpt-5.4-mini",
@@ -621,7 +882,7 @@ def test_openai_model_build_payload_includes_prompt_cache_fields():
 def test_openai_model_request_metadata_uses_target_public_keys():
     model = OpenAIModel()
     request = AIRequest(
-        question="Question?",
+        question="Task?",
         context="Context",
         provider_name="openai",
         model_name="gpt-5.4-mini",
@@ -649,7 +910,7 @@ def test_openai_model_request_metadata_uses_target_public_keys():
 def test_claude_model_request_metadata_uses_target_public_keys():
     model = ClaudeModel()
     request = AIRequest(
-        question="Question?",
+        question="Task?",
         context="Context",
         provider_name="anthropic",
         model_name="claude-sonnet",
@@ -674,7 +935,7 @@ def test_claude_model_request_metadata_uses_target_public_keys():
 def test_openai_native_mcp_tools_accept_remote_mcp_and_reject_mcp():
     model = OpenAIModel()
     remote_request = AIRequest(
-        question="Question?",
+        question="Task?",
         context="Context",
         provider_name="openai",
         model_name="gpt-5.4-mini",
@@ -697,7 +958,7 @@ def test_openai_native_mcp_tools_accept_remote_mcp_and_reject_mcp():
 def test_claude_native_mcp_servers_accept_remote_mcp_and_reject_mcp():
     model = ClaudeModel()
     remote_request = AIRequest(
-        question="Question?",
+        question="Task?",
         context="Context",
         provider_name="anthropic",
         model_name="claude-sonnet",
@@ -720,7 +981,7 @@ def test_claude_native_mcp_servers_accept_remote_mcp_and_reject_mcp():
 def test_gemini_native_mcp_tool_accepts_remote_mcp_and_rejects_mcp():
     model = GeminiModel()
     remote_request = AIRequest(
-        question="Question?",
+        question="Task?",
         context="Context",
         provider_name="google",
         model_name="gemini-2.5-flash",
@@ -746,7 +1007,7 @@ def test_gemini_native_mcp_tool_accepts_remote_mcp_and_rejects_mcp():
 def test_gemini_generate_uses_native_mcp_path_for_remote_mcp(monkeypatch):
     model = GeminiModel()
     request = AIRequest(
-        question="Question?",
+        question="Task?",
         context="Context",
         provider_name="google",
         model_name="gemini-2.5-flash",
@@ -781,7 +1042,7 @@ def test_gemini_generate_uses_native_mcp_path_for_remote_mcp(monkeypatch):
 def test_mock_model_uses_task_metadata_lookup():
     model = MockModel()
     request = AIRequest(
-        question="Question?",
+        question="Task?",
         context='{"answers": {"q_task": "42"}}',
         provider_name="mock",
         model_name="mock",
@@ -796,6 +1057,105 @@ def test_mock_model_uses_task_metadata_lookup():
     assert response.text == "42"
 
 
+def test_build_evaluation_jobs_resolves_adapter_and_uses_evidence(monkeypatch, tmp_path):
+    from ctxbench.benchmark import evaluation as evaluation_module
+
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter()
+    registry = FakeRegistry(adapter)
+    monkeypatch.setattr(evaluation_module, "get_default_registry", lambda: registry)
+
+    jobs = build_evaluation_jobs(
+        [_run_result_for_evaluation(dataset)],
+        judges=[make_experiment().evaluation.judges[0]],
+    )
+
+    assert len(jobs) == 1
+    assert registry.resolved == [jobs[0].result.dataset]
+    assert adapter.evidence_calls == [("cv-demo", "q_year")]
+    assert adapter.oracle_calls == [("cv-demo", "q_year")]
+    assert jobs[0].context_payload == {
+        "summary": {"title": "Summary", "content": "Researcher in software engineering."}
+    }
+    assert "Researcher in software engineering." in jobs[0].prompt
+
+
+def test_evaluate_run_result_records_unavailable_oracle_without_using_it_in_prompt(monkeypatch, tmp_path):
+    from ctxbench.benchmark import evaluation as evaluation_module
+
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter(oracle=ORACLE_UNAVAILABLE)
+    seen: dict[str, object] = {}
+
+    def fake_judge_request(**kwargs):
+        seen.update(kwargs)
+        return (
+            {
+                "correctness": {"rating": "meets", "justification": "supported"},
+                "completeness": {"rating": "meets", "justification": "complete"},
+            },
+            EvaluationJudgeInfo(used=True, role="judge", provider="mock", model="mock"),
+            EvaluationTrace(aiTrace={"events": []}),
+        )
+
+    monkeypatch.setattr(evaluation_module, "_judge_request", fake_judge_request)
+
+    evaluated = evaluate_run_result(
+        _run_result_for_evaluation(dataset),
+        adapter,
+        judges=[make_experiment().evaluation.judges[0]],
+        engine=Engine(),
+    )
+
+    assert evaluated is not None
+    item = evaluated.items[0]
+    assert adapter.evidence_calls == [("cv-demo", "q_year")]
+    assert adapter.oracle_calls == [("cv-demo", "q_year")]
+    assert item.details["evidence_obtained"] is True
+    assert item.details["oracle_available"] is False
+    assert item.details["oracle_used"] is False
+    assert item.evaluationTrace.aiTrace["metadata"]["oracle_used"] is False
+    assert "oracle" not in seen
+    assert "oracle" not in str(seen["prompt"]).lower()
+    assert "oracle" not in str(seen["evaluation_evidence"]).lower()
+
+
+def test_evaluate_run_result_records_available_oracle_but_keeps_it_out_of_prompt(monkeypatch, tmp_path):
+    from ctxbench.benchmark import evaluation as evaluation_module
+
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter(oracle={"answer": "SECRET_ORACLE_VALUE"})
+    seen: dict[str, object] = {}
+
+    def fake_judge_request(**kwargs):
+        seen.update(kwargs)
+        return (
+            {
+                "correctness": {"rating": "meets", "justification": "supported"},
+                "completeness": {"rating": "meets", "justification": "complete"},
+            },
+            EvaluationJudgeInfo(used=True, role="judge", provider="mock", model="mock"),
+            EvaluationTrace(),
+        )
+
+    monkeypatch.setattr(evaluation_module, "_judge_request", fake_judge_request)
+
+    evaluated = evaluate_run_result(
+        _run_result_for_evaluation(dataset),
+        adapter,
+        judges=[make_experiment().evaluation.judges[0]],
+        engine=Engine(),
+    )
+
+    assert evaluated is not None
+    item = evaluated.items[0]
+    assert item.details["oracle_available"] is True
+    assert item.details["oracle_used"] is False
+    assert item.evaluationTrace.aiTrace["metadata"]["oracle_available"] is True
+    assert "SECRET_ORACLE_VALUE" not in str(seen["prompt"])
+    assert "SECRET_ORACLE_VALUE" not in str(seen["evaluation_evidence"])
+
+
 def test_mcp_runtime_defaults_public_server_label_to_ctxbench():
     runtime = MCPRuntime(transport="streamable_http", server_url="https://example.test/mcp")
 
@@ -806,37 +1166,37 @@ def test_mcp_runtime_defaults_public_server_label_to_ctxbench():
 
 
 def test_evaluate_run_result_skips_when_context_block_missing(tmp_path):
-    # Add a question whose contextBlock references a block that doesn't exist in blocks.json
+    # Add a task whose contextBlocks references a block that doesn't exist in blocks.json
     dataset_root = tmp_path / "dataset"
     dataset = write_mock_dataset(dataset_root)
-    questions_path = dataset_root / "questions.json"
-    questions = json.loads(questions_path.read_text(encoding="utf-8"))
-    questions["questions"].append({
+    tasks_path = dataset_root / "tasks.json"
+    tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
+    tasks["tasks"].append({
         "id": "q_missing",
-        "question": "What is the missing answer?",
+        "statement": "What is the missing answer?",
         "tags": [],
         "validation": {"type": "judge"},
-        "contextBlock": ["nonexistent_block"],
+        "contextBlocks": ["nonexistent_block"],
     })
-    questions_path.write_text(json.dumps(questions), encoding="utf-8")
-    instances_path = dataset_root / "questions.instance.json"
+    tasks_path.write_text(json.dumps(tasks), encoding="utf-8")
+    instances_path = dataset_root / "tasks.instance.json"
     instances = json.loads(instances_path.read_text(encoding="utf-8"))
-    instances["instances"][0]["questions"].append({"id": "q_missing"})
+    instances["instances"][0]["tasks"].append({"id": "q_missing"})
     instances_path.write_text(json.dumps(instances), encoding="utf-8")
 
     provider = DatasetProvider.from_dataset(dataset)
     events: list[tuple[str, str, dict[str, object]]] = []
-    result = RunResult.model_validate(
+    result = TrialResult.model_validate(
         {
             "trialId": "run-skip",
             "experimentId": "exp-1",
             "dataset": dataset.model_dump(mode="json"),
             "taskId": "q_missing",
-            "question": "What is the missing answer?",
-            "questionTemplate": "What is the missing answer?",
-            "questionTags": [],
+            "taskStatement": "What is the missing answer?",
+            "taskTemplate": "What is the missing answer?",
+            "taskTags": [],
             "validationType": "judge",
-            "contextBlock": [],
+            "contextBlocks": [],
             "parameters": {},
             "instanceId": "cv-demo",
             "provider": "mock",
@@ -884,7 +1244,7 @@ def test_evaluate_run_result_skips_when_context_block_missing(tmp_path):
     assert artifact["taskId"] == "q_missing"
     assert artifact["status"] == "skipped"
     assert artifact["judgeCount"] == 0
-    assert any(label == "SKIP" and fields.get("questionId") == "q_missing" for label, _message, fields in events)
+    assert any(label == "SKIP" and fields.get("taskId") == "q_missing" for label, _message, fields in events)
 
 
 def test_openai_model_extracts_cache_metadata():

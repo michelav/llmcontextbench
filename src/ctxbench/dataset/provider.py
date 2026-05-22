@@ -1,40 +1,26 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from ctxbench.benchmark.models import DatasetProvenance, Experiment, ExperimentDataset
 from ctxbench.dataset.capabilities import DatasetCapabilityReport
+from ctxbench.dataset.contexts import artifact_name_for_format
 from ctxbench.dataset.package import DatasetMetadata
-from ctxbench.dataset.questions import (
-    Question,
-    QuestionDataset,
-    QuestionInstance,
-    QuestionInstanceDataset,
-    QuestionInstanceEntry,
+from ctxbench.dataset.payloads import (
+    ORACLE_UNAVAILABLE,
+    ContextPayload,
+    EvidencePayload,
+    OracleUnavailable,
+    TaskPayload,
+)
+from ctxbench.dataset.tasks import (
+    Task,
+    TaskDataset,
+    TaskInstance,
+    TaskInstanceDataset,
+    TaskInstanceEntry,
 )
 from ctxbench.util.fs import load_json
-
-
-FORMAT_ARTIFACTS = {
-    "html": "clean.html",
-    "raw_html": "raw.html",
-    "cleaned_html": "clean.html",
-    "clean_html": "clean.html",
-    "json": "parsed.json",
-    "parsed_json": "parsed.json",
-    "blocks": "blocks.json",
-}
-
-
-def _specialized_local_dataset_package(
-    dataset: ExperimentDataset,
-) -> "LocalDatasetPackage | None":
-    if dataset.id == "ctxbench/lattes" and dataset.root:
-        from ctxbench.datasets.lattes.package import LattesDatasetPackage
-
-        return LattesDatasetPackage(dataset.root)
-    return None
 
 
 class LocalDatasetPackage:
@@ -42,8 +28,8 @@ class LocalDatasetPackage:
         self.dataset_paths = dataset_paths
         if not dataset_paths.root:
             raise ValueError("LocalDatasetPackage requires a dataset root.")
-        self._questions = QuestionDataset.model_validate(load_json(dataset_paths.questions))
-        self._question_instances = self._load_question_instances(dataset_paths.question_instances)
+        self._tasks = self._load_tasks()
+        self._task_instances = self._load_task_instances(dataset_paths.task_instances)
 
     @classmethod
     def from_experiment(cls, experiment: Experiment, base_dir: str | Path) -> "LocalDatasetPackage":
@@ -55,21 +41,18 @@ class LocalDatasetPackage:
     def from_dataset(cls, dataset: ExperimentDataset | DatasetProvenance) -> "LocalDatasetPackage":
         if isinstance(dataset, DatasetProvenance):
             dataset = ExperimentDataset(
-                root=dataset.root,
+                root=dataset.materialized_path,
                 id=dataset.id,
                 version=dataset.version,
                 origin=dataset.origin,
             )
-        specialized = _specialized_local_dataset_package(dataset)
-        if specialized is not None and cls in {LocalDatasetPackage, DatasetProvider}:
-            return specialized
         return cls(dataset)
 
     def metadata(self) -> DatasetMetadata:
         return DatasetMetadata(
             name=self.identity(),
-            description=self._questions.description or "Local dataset root",
-            domain=self._questions.domain or "unknown",
+            description=self._tasks.description or "Local dataset root",
+            domain=self._tasks.domain or "unknown",
             intended_uses="Local planning and evaluation fixtures.",
             limitations="Provenance is derived from the on-disk dataset root.",
             license_url=None,
@@ -77,16 +60,16 @@ class LocalDatasetPackage:
         )
 
     def identity(self) -> str:
-        if self._questions.datasetId:
-            return self._questions.datasetId
         if self.dataset_paths.id:
             return self.dataset_paths.id
+        if self._tasks.datasetId:
+            return self._tasks.datasetId
         return Path(self.dataset_paths.root or "").name or "local-dataset"
 
     def version(self) -> str:
         return (
-            self._questions.version
-            or self._question_instances.version
+            self._tasks.version
+            or self._task_instances.version
             or self.dataset_paths.version
             or "local"
         )
@@ -94,37 +77,51 @@ class LocalDatasetPackage:
     def origin(self) -> str | None:
         return self.dataset_paths.origin or self.dataset_paths.root
 
-    def list_question_ids(self) -> list[str]:
-        return [question.id for question in self._questions.questions]
-
     def list_task_ids(self) -> list[str]:
-        return self.list_question_ids()
+        return [task.id for task in self._tasks.tasks]
 
     def list_instance_ids(self) -> list[str]:
-        return [instance.instanceId for instance in self._question_instances.instances]
+        return [instance.instanceId for instance in self._task_instances.instances]
 
     def list_context_ids(self, format_name: str | None = None) -> list[str]:
         return self.list_instance_ids()
 
-    def get_question(self, question_id: str) -> Question:
-        for question in self._questions.questions:
-            if question.id == question_id:
-                return question
-        raise KeyError(f"Unknown question id: {question_id}")
+    def get_task_model(self, task_id: str) -> Task:
+        for task in self._tasks.tasks:
+            if task.id == task_id:
+                return task
+        raise KeyError(f"Unknown task id: {task_id}")
 
-    def get_instance(self, instance_id: str) -> QuestionInstance:
-        for instance in self._question_instances.instances:
+    def get_task(self, task_id: str) -> TaskPayload:
+        task = self.get_task_model(task_id)
+        return TaskPayload(
+            task_id=task.id,
+            statement=task.statement,
+            tags=list(task.tags),
+            validation_type=task.validation.type,
+            context_blocks=list(task.contextBlocks),
+            metadata={"source": "tasks.json"},
+        )
+
+    def get_instance(self, instance_id: str) -> TaskInstance:
+        for instance in self._task_instances.instances:
             if instance.instanceId == instance_id:
                 return instance
         raise KeyError(f"Unknown instance id: {instance_id}")
 
-    def get_question_instance(self, question_id: str, context_id: str) -> QuestionInstanceEntry | None:
-        instance = self.get_instance(context_id)
-        return instance.get_question(question_id)
-
-    def list_question_ids_for_instance(self, instance_id: str) -> list[str]:
+    def get_task_instance_entry(self, instance_id: str, task_id: str) -> TaskInstanceEntry | None:
         instance = self.get_instance(instance_id)
-        return [item.id for item in instance.questions]
+        return instance.get_task(task_id)
+
+    def get_task_instance(self, instance_id: str, task_id: str) -> dict[str, object] | None:
+        task_instance_entry = self.get_task_instance_entry(instance_id, task_id)
+        if task_instance_entry is None:
+            return None
+        return {"parameters": dict(task_instance_entry.parameters)}
+
+    def list_task_ids_for_instance(self, instance_id: str) -> list[str]:
+        instance = self.get_instance(instance_id)
+        return [item.id for item in instance.tasks]
 
     def get_instance_dir(self, instance_id: str) -> Path:
         path = Path(self.dataset_paths.contexts) / instance_id
@@ -133,15 +130,30 @@ class LocalDatasetPackage:
         return path
 
     def get_context_artifact_path(self, instance_id: str, format_name: str) -> Path:
-        filename = FORMAT_ARTIFACTS.get(format_name, format_name)
+        filename = artifact_name_for_format(format_name)
         path = self.get_instance_dir(instance_id) / filename
         if not path.exists():
             raise FileNotFoundError(f"Missing context artifact: {path}")
         return path
 
-    def get_context(self, context_id: str, format_name: str) -> str:
+    def _read_context_text(self, context_id: str, format_name: str) -> str:
         path = self.get_context_artifact_path(context_id, format_name)
         return path.read_text(encoding="utf-8")
+
+    def get_context(
+        self,
+        instance_id: str,
+        task_id: str,
+        representation: str | None = None,
+    ) -> ContextPayload | str:
+        if representation is None:
+            return self._read_context_text(instance_id, task_id)
+        return ContextPayload(
+            role="context",
+            representation=representation,
+            content=self.get_context_artifact(instance_id, task_id, "inline", representation),
+            metadata={"instance_id": instance_id, "task_id": task_id},
+        )
 
     def get_context_artifact(
         self,
@@ -167,19 +179,39 @@ class LocalDatasetPackage:
         return payload
 
     def get_evidence_artifact(self, instance_id: str, task_id: str) -> object:
-        question = self.get_question(task_id)
-        question_instance = self.get_question_instance(task_id, instance_id)
+        task = self.get_task_model(task_id)
+        task_instance_entry = self.get_task_instance_entry(instance_id, task_id)
         return {
-            "question": question.model_dump(mode="python"),
-            "questionInstance": question_instance.model_dump(mode="python") if question_instance is not None else None,
+            "task": task.model_dump(mode="python"),
+            "taskInstance": task_instance_entry.model_dump(mode="python") if task_instance_entry is not None else None,
             "contextBlocks": self.get_context_blocks(instance_id),
         }
+
+    def get_evidence(self, instance_id: str, task_id: str) -> EvidencePayload:
+        artifact = self.get_evidence_artifact(instance_id, task_id)
+        if not isinstance(artifact, dict):
+            return EvidencePayload(role="evidence", task={}, evidence=artifact)
+        task = self.get_task(task_id)
+        return EvidencePayload(
+            role="evidence",
+            task={
+                "task_id": task.task_id,
+                "statement": task.statement,
+                "context_blocks": task.context_blocks,
+            },
+            task_instance=artifact.get("taskInstance"),
+            evidence=artifact.get("contextBlocks", {}),
+            metadata={"instance_id": instance_id, "task_id": task_id},
+        )
+
+    def get_oracle(self, instance_id: str, task_id: str) -> OracleUnavailable:
+        return ORACLE_UNAVAILABLE
 
     def fixtures(self) -> object:
         return {
             "root": self.dataset_paths.root,
-            "questions": len(self._questions.questions),
-            "instances": len(self._question_instances.instances),
+            "tasks": len(self._tasks.tasks),
+            "instances": len(self._task_instances.instances),
         }
 
     def capability_report(self) -> DatasetCapabilityReport:
@@ -197,14 +229,15 @@ class LocalDatasetPackage:
                 "version": True,
                 "list_instance_ids": True,
                 "list_task_ids": True,
-                "get_context_artifact": True,
-                "get_evidence_artifact": True,
-                "fixtures": True,
+                "get_task": True,
+                "get_context": True,
+                "get_evidence": True,
             },
             optional_capabilities={
+                "get_oracle": True,
+                "get_task_instance": True,
                 "tool_provider": False,
-                "evaluation_helpers": False,
-                "strategy_descriptors": False,
+                "fixtures": True,
             },
             contributed_tools=None,
             evaluation_helpers=None,
@@ -223,14 +256,21 @@ class LocalDatasetPackage:
     def strategy_descriptors(self) -> list[object] | None:
         return None
 
-    def _load_question_instances(self, path: str | None) -> QuestionInstanceDataset:
+    def _load_tasks(self) -> TaskDataset:
+        tasks_path = Path(self.dataset_paths.tasks)
+        if tasks_path.exists():
+            return TaskDataset.model_validate(load_json(tasks_path))
+        raise FileNotFoundError(f"No tasks.json found in {self.dataset_paths.root}")
+
+    def _load_task_instances(self, path: str | None) -> TaskInstanceDataset:
         if not path or not Path(path).exists():
-            return QuestionInstanceDataset(datasetId="missing", instances=[])
+            return TaskInstanceDataset(datasetId="missing", instances=[])
         raw = load_json(path)
         if not isinstance(raw, dict):
-            raise ValueError("Question instances dataset must be a JSON object.")
-        return QuestionInstanceDataset.model_validate(raw)
+            raise ValueError("Task instances dataset must be a JSON object.")
+        return TaskInstanceDataset.model_validate(raw)
 
 
 class DatasetProvider(LocalDatasetPackage):
+    # deprecated: no longer called by lifecycle phases
     pass

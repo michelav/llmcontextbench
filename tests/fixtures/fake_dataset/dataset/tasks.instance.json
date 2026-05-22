@@ -5,7 +5,7 @@
     {
       "instanceId": "person-001",
       "contextBlocks": "context/person-001/blocks.json",
-      "questions": [
+      "tasks": [
         {
           "id": "task_role",
           "parameters": {

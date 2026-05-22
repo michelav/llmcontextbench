@@ -4,12 +4,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from ctxbench.benchmark.models import ExperimentDataset
+from ctxbench.benchmark.models import DatasetProvenance, ExperimentDataset
 from ctxbench.dataset.cache import DatasetCache
 from ctxbench.dataset.capabilities import DatasetCapabilityReport
 from ctxbench.dataset.conflicts import DatasetConflictDetector
 from ctxbench.dataset.materialization import MaterializationManifest
 from ctxbench.dataset.package import DatasetMetadata, DatasetPackage
+from ctxbench.dataset.payloads import (
+    ORACLE_UNAVAILABLE,
+    ContextPayload,
+    EvidencePayload,
+    OracleUnavailable,
+    TaskPayload,
+)
 from ctxbench.dataset.provider import LocalDatasetPackage
 
 
@@ -67,17 +74,20 @@ class ResolvedDatasetPackage:
     def list_task_ids(self) -> list[str]:
         return []
 
-    def get_context_artifact(
-        self,
-        instance_id: str,
-        task_id: str,
-        strategy: str,
-        format_name: str,
-    ) -> object:
+    def get_task(self, task_id: str) -> TaskPayload:
+        raise NotImplementedError("Dataset tasks are not available from the resolver package wrapper.")
+
+    def get_context(self, instance_id: str, task_id: str, representation: str) -> ContextPayload:
         raise NotImplementedError("Dataset artifacts are not available from the S4 resolver package wrapper.")
 
-    def get_evidence_artifact(self, instance_id: str, task_id: str) -> object:
+    def get_evidence(self, instance_id: str, task_id: str) -> EvidencePayload:
         raise NotImplementedError("Dataset artifacts are not available from the S4 resolver package wrapper.")
+
+    def get_oracle(self, instance_id: str, task_id: str) -> OracleUnavailable:
+        return ORACLE_UNAVAILABLE
+
+    def get_task_instance(self, instance_id: str, task_id: str) -> dict[str, object] | None:
+        return None
 
     def fixtures(self) -> object:
         return {}
@@ -111,6 +121,12 @@ class ResolvedDatasetPackage:
         return None
 
 
+@dataclass(slots=True)
+class ResolvedDatasetForPlanning:
+    package: DatasetPackage
+    adapter_ref: ExperimentDataset | DatasetProvenance
+
+
 class DatasetResolver:
     """Local-only dataset resolver.
 
@@ -121,6 +137,20 @@ class DatasetResolver:
     """
 
     def resolve(self, ref: ExperimentDataset | dict[str, Any] | list[Any], cache: DatasetCache) -> DatasetPackage:
+        return self._resolve_for_planning(ref, cache).package
+
+    def resolve_for_planning(
+        self,
+        ref: ExperimentDataset | dict[str, Any] | list[Any],
+        cache: DatasetCache,
+    ) -> ResolvedDatasetForPlanning:
+        return self._resolve_for_planning(ref, cache)
+
+    def _resolve_for_planning(
+        self,
+        ref: ExperimentDataset | dict[str, Any] | list[Any],
+        cache: DatasetCache,
+    ) -> ResolvedDatasetForPlanning:
         if isinstance(ref, list):
             raise MultiDatasetError("Multiple datasets are not supported.")
         if isinstance(ref, dict) and "datasets" in ref:
@@ -129,7 +159,16 @@ class DatasetResolver:
         dataset_ref = ExperimentDataset.model_validate(ref)
 
         if dataset_ref.root:
-            return LocalDatasetPackage.from_dataset(dataset_ref)
+            package = LocalDatasetPackage.from_dataset(dataset_ref)
+            return ResolvedDatasetForPlanning(
+                package=package,
+                adapter_ref=ExperimentDataset(
+                    root=package.dataset_paths.root,
+                    id=dataset_ref.id or package.identity(),
+                    version=dataset_ref.version or package.version(),
+                    origin=dataset_ref.origin or package.origin(),
+                ),
+            )
 
         if dataset_ref.id and dataset_ref.version:
             DatasetConflictDetector.check(dataset_ref.id, dataset_ref.version, cache)
@@ -140,16 +179,28 @@ class DatasetResolver:
                     "Run ctxbench dataset fetch to materialize it first."
                 )
             manifest = matches[0]
+            adapter_ref = DatasetProvenance(
+                id=manifest.datasetId,
+                version=manifest.datasetVersion,
+                origin=manifest.origin,
+                resolved_revision=manifest.resolvedRevision,
+                content_hash=manifest.contentHash,
+                materialized_path=manifest.materializedPath,
+            )
             materialized_root = Path(manifest.materializedPath) if manifest.materializedPath else None
-            if materialized_root is not None and (materialized_root / "questions.json").exists():
+            if materialized_root is not None and (materialized_root / "tasks.json").exists():
                 materialized_dataset = ExperimentDataset(
                     root=str(materialized_root),
                     id=manifest.datasetId,
                     version=manifest.datasetVersion,
                     origin=manifest.origin,
                 )
-                return LocalDatasetPackage.from_dataset(materialized_dataset)
-            return ResolvedDatasetPackage(reference=dataset_ref, manifest=manifest)
+                package = LocalDatasetPackage.from_dataset(materialized_dataset)
+                return ResolvedDatasetForPlanning(package=package, adapter_ref=adapter_ref)
+            return ResolvedDatasetForPlanning(
+                package=ResolvedDatasetPackage(reference=dataset_ref, manifest=manifest),
+                adapter_ref=adapter_ref,
+            )
 
         raise DatasetNotFoundError(
             "Dataset reference is incomplete. Provide a local dataset root or an id/version pair."

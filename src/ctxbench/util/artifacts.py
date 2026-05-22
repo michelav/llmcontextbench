@@ -6,9 +6,9 @@ from typing import Protocol
 
 
 class TrialIdentity(Protocol):
-    runId: str
+    trialId: str
     experimentId: str
-    questionId: str
+    taskId: str
     instanceId: str
     provider: str
     modelName: str | None
@@ -49,7 +49,7 @@ def canonical_trial_identity(
 def canonical_identity_from_trial(trial: TrialIdentity) -> str:
     return canonical_trial_identity(
         experiment_id=trial.experimentId,
-        task_id=trial.questionId,
+        task_id=trial.taskId,
         instance_id=trial.instanceId,
         provider=trial.provider,
         model_name=trial.modelName or "",

@@ -326,8 +326,8 @@ class RateLimitedModelAdapter(ModelAdapter):
                     f"reserved_tokens={reserved_tokens} tpm={controller.rate_limiter.capacity} "
                     f"phase={request_fields['phase']} strategy={request.strategy_name}"
                 )
-                if request_fields.get("questionId"):
-                    message += f" question_id={request_fields['questionId']}"
+                if request_fields.get("taskId"):
+                    message += f" task_id={request_fields['taskId']}"
                 if request_fields.get("instanceId"):
                     message += f" instance_id={request_fields['instanceId']}"
                 if request_fields.get("judgeRole"):
@@ -495,14 +495,14 @@ class RateLimitedModelAdapter(ModelAdapter):
             "phase": request.metadata.get("phase", "execution"),
             "strategy": request.strategy_name,
         }
-        if request.metadata.get("question_id") is not None:
-            fields["questionId"] = request.metadata.get("question_id")
+        if request.metadata.get("taskId") is not None:
+            fields["taskId"] = request.metadata.get("taskId")
         if request.metadata.get("instance_id") is not None:
             fields["instanceId"] = request.metadata.get("instance_id")
         if request.metadata.get("judge_role") is not None:
             fields["judgeRole"] = request.metadata.get("judge_role")
-        if request.metadata.get("experiment_id") is not None:
-            fields["experimentId"] = request.metadata.get("experiment_id")
+        if request.metadata.get("experimentId") is not None:
+            fields["experimentId"] = request.metadata.get("experimentId")
         return fields
 
 

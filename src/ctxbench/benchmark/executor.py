@@ -1,23 +1,34 @@
 from __future__ import annotations
 
+import json
 from datetime import datetime
+from pathlib import Path
 
+from ctxbench.adapters.registry import get_default_registry
 from ctxbench.ai.cache import build_inline_prompt_cache_key
 from ctxbench.ai.engine import Engine
 from ctxbench.ai.models.base import AIRequest
 from ctxbench.ai.runtime import LocalFunctionRuntime, MCPRuntime
-from ctxbench.benchmark.models import EvaluationResult, RunResult, RunTiming, RunTrace, RunSpec
+from ctxbench.benchmark.models import EvaluationResult, TrialResult, RunTiming, TrialTrace, TrialSpec
+from ctxbench.dataset.errors import AdapterUnavailableError, CapabilityUnavailableError
+from ctxbench.dataset.package import DatasetPackage
+from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.util.clock import utc_now_iso
 
 
-def execute_runspec(runspec: RunSpec, engine: Engine) -> RunResult:
-    from ctxbench.dataset.provider import DatasetProvider
-
-    provider = DatasetProvider.from_dataset(runspec.dataset)
-    context = provider.get_context(runspec.instanceId, runspec.format)
-    context_path = provider.get_context_artifact_path(runspec.instanceId, runspec.format)
-    instance_dir = provider.get_instance_dir(runspec.instanceId)
-    lattes_id = runspec.instanceId
+def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
+    adapter = _resolve_adapter(runspec)
+    context = ""
+    dataset_tool_provider: object | None = None
+    if runspec.strategy == "inline":
+        context_payload = adapter.get_context(runspec.instanceId, runspec.taskId, runspec.format)
+        context = _context_to_text(context_payload.content)
+    elif runspec.strategy in {"local_function", "local_mcp", "remote_mcp"}:
+        dataset_tool_provider = adapter.tool_provider()
+        if dataset_tool_provider is None:
+            raise CapabilityUnavailableError(
+                f"Strategy '{runspec.strategy}' requires a dataset tool provider."
+            )
     request_params = dict(runspec.params)
     if runspec.strategy == "inline" and runspec.provider.lower().startswith("openai"):
         request_params.setdefault(
@@ -30,28 +41,31 @@ def execute_runspec(runspec: RunSpec, engine: Engine) -> RunResult:
             ),
         )
 
+    request_metadata = {
+        "trialId": runspec.trialId,
+        "experimentId": runspec.experimentId,
+        "taskId": runspec.taskId,
+        "instanceId": runspec.instanceId,
+        "phase": "execution",
+        "format": runspec.format,
+        "provider": runspec.provider,
+        "instance_id": runspec.instanceId,
+        "task_tags": list(runspec.taskTags),
+        "validation_type": runspec.validationType,
+        "context_representation": runspec.format,
+        "context_obtained": runspec.strategy == "inline",
+    }
+    if runspec.strategy == "remote_mcp":
+        request_metadata["dataset_tool_provider"] = dataset_tool_provider
     request = AIRequest(
-        question=runspec.question,
+        question=runspec.taskStatement,
         context=context,
         provider_name=runspec.provider,
         model_name=str(runspec.params.get("model_name", "")),
         strategy_name=runspec.strategy,
         context_format=runspec.format,
         params=request_params,
-        metadata={
-            "trialId": runspec.runId,
-            "experimentId": runspec.experimentId,
-            "taskId": runspec.questionId,
-            "instanceId": runspec.instanceId,
-            "phase": "execution",
-            "format": runspec.format,
-            "provider": runspec.provider,
-            "lattes_id": lattes_id,
-            "instance_dir": str(instance_dir.resolve()),
-            "question_tags": list(runspec.questionTags),
-            "validation_type": runspec.validationType,
-            "context_path": str(context_path.resolve()),
-        },
+        metadata=request_metadata,
     )
 
     started_at = utc_now_iso()
@@ -59,7 +73,7 @@ def execute_runspec(runspec: RunSpec, engine: Engine) -> RunResult:
     active_engine = engine
     owned_engine: Engine | None = None
     if runspec.strategy in {"local_function", "local_mcp"}:
-        tool_runtime_factories = _build_tool_runtime_factories(runspec, provider)
+        tool_runtime_factories = _build_tool_runtime_factories(runspec, dataset_tool_provider)
         owned_engine = engine.copy_with_tool_runtime_factories(tool_runtime_factories)
         active_engine = owned_engine
     try:
@@ -74,7 +88,7 @@ def execute_runspec(runspec: RunSpec, engine: Engine) -> RunResult:
     error_message = ai_result.error or ("Model returned empty answer" if is_empty_answer else None)
     run_status = "error" if error_message is not None else "success"
 
-    trace = RunTrace()
+    trace = TrialTrace()
     if runspec.trace.enabled:
         trace.aiTrace = ai_result.trace
         if runspec.trace.save_tool_calls:
@@ -95,16 +109,16 @@ def execute_runspec(runspec: RunSpec, engine: Engine) -> RunResult:
         ai_trace=trace.aiTrace,
         strategy=runspec.strategy,
     )
-    result = RunResult(
-        runId=runspec.runId,
+    result = TrialResult(
+        trialId=runspec.trialId,
         experimentId=runspec.experimentId,
         dataset=runspec.dataset,
-        questionId=runspec.questionId,
-        question=runspec.question,
-        questionTemplate=runspec.questionTemplate,
-        questionTags=list(runspec.questionTags),
+        taskId=runspec.taskId,
+        taskStatement=runspec.taskStatement,
+        taskTemplate=runspec.taskTemplate,
+        taskTags=list(runspec.taskTags),
         validationType=runspec.validationType,
-        contextBlock=list(runspec.contextBlock),
+        contextBlocks=list(runspec.contextBlocks),
         parameters=dict(runspec.parameters),
         instanceId=runspec.instanceId,
         provider=runspec.provider,
@@ -114,7 +128,7 @@ def execute_runspec(runspec: RunSpec, engine: Engine) -> RunResult:
         format=runspec.format,
         repeatIndex=runspec.repeatIndex,
         outputRoot=runspec.outputRoot,
-        answer=ai_result.answer,
+        response=ai_result.answer,
         status=run_status,
         errorMessage=error_message,
         timing=RunTiming(
@@ -131,24 +145,32 @@ def execute_runspec(runspec: RunSpec, engine: Engine) -> RunResult:
     return result
 
 
-def _build_tool_runtime_factories(runspec: RunSpec, provider: object) -> dict[str, object]:
+def _resolve_adapter(runspec: TrialSpec) -> DatasetPackage:
+    try:
+        return get_default_registry().resolve(runspec.dataset)
+    except AdapterUnavailableError as exc:
+        materialized_path = runspec.dataset.materialized_path
+        if materialized_path and Path(materialized_path).exists():
+            return LocalDatasetPackage.from_dataset(runspec.dataset)
+        raise AdapterUnavailableError(str(exc)) from exc
+
+
+def _context_to_text(content: object) -> str:
+    if isinstance(content, str):
+        return content
+    return json.dumps(content)
+
+
+def _build_tool_runtime_factories(runspec: TrialSpec, service: object) -> dict[str, object]:
     tool_runtime_factories: dict[str, object] = {}
     if runspec.strategy == "local_function":
-        tool_provider = getattr(provider, "tool_provider", None)
-        service = tool_provider() if callable(tool_provider) else None
-        if service is None:
-            raise ValueError(
-                f"Strategy '{runspec.strategy}' requires a dataset tool provider."
-            )
         tool_runtime_factories["local_function"] = lambda: LocalFunctionRuntime(service)
     if runspec.strategy == "local_mcp":
-        server_factory = getattr(provider, "mcp_server", None)
-        server = server_factory() if callable(server_factory) else None
-        if server is None:
-            raise ValueError(
-                f"Strategy '{runspec.strategy}' requires a dataset MCP server adapter."
-            )
-        tool_runtime_factories["local_mcp"] = lambda: MCPRuntime.for_local_server(server)
+        server = service if hasattr(service, "app") else None
+        if server is not None:
+            tool_runtime_factories["local_mcp"] = lambda: MCPRuntime.for_local_server(server)
+        else:
+            tool_runtime_factories["local_mcp"] = lambda: LocalFunctionRuntime(service)
     return tool_runtime_factories
 
 
@@ -156,6 +178,7 @@ def _build_metrics_summary(*, ai_trace: dict[str, object], strategy: str) -> dic
     metrics = ai_trace.get("metrics", {}) if isinstance(ai_trace, dict) else {}
     if not isinstance(metrics, dict):
         metrics = {}
+    legacy_task_statement_chars_key = "question" + "Chars"
     summary: dict[str, int | None] = {
         "totalDurationMs": _as_int(metrics.get("totalDurationMs")),
         "strategyDurationMs": _as_int(metrics.get("strategyDurationMs")),
@@ -176,13 +199,15 @@ def _build_metrics_summary(*, ai_trace: dict[str, object], strategy: str) -> dic
         "cachedInputTokens": _as_int(metrics.get("cachedInputTokens")),
         "cacheReadInputTokens": _as_int(metrics.get("cacheReadInputTokens")),
         "cacheCreationInputTokens": _as_int(metrics.get("cacheCreationInputTokens")),
-        "questionTokensEstimated": _as_int(metrics.get("questionTokensEstimated")),
+        "taskStatementTokensEstimated": _as_int(metrics.get("taskStatementTokensEstimated", metrics.get("questionTokensEstimated"))),
         "estimatedInputTokens": _as_int(metrics.get("estimatedInputTokens")),
         "estimatedOutputTokens": _as_int(metrics.get("estimatedOutputTokens")),
         "reservedTokens": _as_int(metrics.get("reservedTokens")),
         "contextChars": _as_int(metrics.get("contextChars")),
         "contextBytes": _as_int(metrics.get("contextBytes")),
-        "questionChars": _as_int(metrics.get("questionChars")),
+        "taskStatementChars": _as_int(
+            metrics.get("taskStatementChars", metrics.get(legacy_task_statement_chars_key))
+        ),
         "promptChars": _as_int(metrics.get("promptChars")),
         "rateLimitWaitMs": _as_int(metrics.get("rateLimitWaitMs")),
         "retrySleepMs": _as_int(metrics.get("retrySleepMs")),

@@ -3,37 +3,40 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from ctxbench.benchmark.models import ExperimentDataset
 from ctxbench.dataset.cache import DatasetCache
 from ctxbench.dataset.package import DatasetPackage
 from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.dataset.resolver import DatasetResolver
+from ctxbench.dataset.tasks import Task, TaskDataset, TaskInstanceDataset
 
 
 def _write_local_dataset(root: Path) -> Path:
     instance_dir = root / "context" / "cv-demo"
     instance_dir.mkdir(parents=True, exist_ok=True)
-    (root / "questions.json").write_text(
+    (root / "tasks.json").write_text(
         json.dumps(
             {
                 "datasetId": "ctxbench/local-fixture",
                 "version": "0.1.0",
                 "domain": "testing",
                 "description": "Local package fixture.",
-                "questions": [
+                "tasks": [
                     {
                         "id": "q_year",
-                        "question": "In which year did {researcher_name} obtain their PhD?",
+                        "statement": "In which year did {researcher_name} obtain their PhD?",
                         "tags": ["objective", "simple"],
                         "validation": {"type": "judge"},
-                        "contextBlock": ["summary"],
+                        "contextBlocks": ["summary"],
                     }
                 ],
             }
         ),
         encoding="utf-8",
     )
-    (root / "questions.instance.json").write_text(
+    (root / "tasks.instance.json").write_text(
         json.dumps(
             {
                 "datasetId": "ctxbench/local-fixture",
@@ -42,7 +45,7 @@ def _write_local_dataset(root: Path) -> Path:
                     {
                         "instanceId": "cv-demo",
                         "contextBlocks": "context/cv-demo/blocks.json",
-                        "questions": [
+                        "tasks": [
                             {"id": "q_year", "parameters": {"researcher_name": "CV Demo"}}
                         ],
                     }
@@ -73,30 +76,30 @@ def test_local_dataset_package_resolves_as_dataset_package(tmp_path: Path) -> No
     assert package.version() == "0.1.0"
 
 
-def test_local_dataset_package_preserves_question_template_and_instance_parameters(tmp_path: Path) -> None:
+def test_local_dataset_package_preserves_task_statement_and_instance_parameters(tmp_path: Path) -> None:
     dataset_root = _write_local_dataset(tmp_path / "dataset")
     package = LocalDatasetPackage.from_dataset(ExperimentDataset(root=str(dataset_root)))
 
-    question = package.get_question("q_year")
-    question_instance = package.get_question_instance("q_year", "cv-demo")
+    task = package.get_task("q_year")
+    task_instance = package.get_task_instance("cv-demo", "q_year")
 
-    assert question.question == "In which year did {researcher_name} obtain their PhD?"
-    assert question.tags == ["objective", "simple"]
-    assert question.validation.type == "judge"
-    assert question.contextBlock == ["summary"]
-    assert question_instance is not None
-    assert question_instance.parameters == {"researcher_name": "CV Demo"}
+    assert task.statement == "In which year did {researcher_name} obtain their PhD?"
+    assert task.tags == ["objective", "simple"]
+    assert task.validation_type == "judge"
+    assert task.context_blocks == ["summary"]
+    assert task_instance is not None
+    assert task_instance["parameters"] == {"researcher_name": "CV Demo"}
     assert package.get_context_blocks("cv-demo") == {"summary": "Researcher in software engineering."}
     assert package.get_context_artifact("cv-demo", "q_year", "inline", "json") == {"answers": {"q_year": 2020}}
     assert package.get_evidence_artifact("cv-demo", "q_year") == {
-        "question": {
+        "task": {
             "id": "q_year",
-            "question": "In which year did {researcher_name} obtain their PhD?",
+            "statement": "In which year did {researcher_name} obtain their PhD?",
             "tags": ["objective", "simple"],
             "validation": {"type": "judge"},
-            "contextBlock": ["summary"],
+            "contextBlocks": ["summary"],
         },
-        "questionInstance": {"id": "q_year", "parameters": {"researcher_name": "CV Demo"}},
+        "taskInstance": {"id": "q_year", "parameters": {"researcher_name": "CV Demo"}},
         "contextBlocks": {"summary": "Researcher in software engineering."},
     }
 
@@ -114,3 +117,56 @@ def test_local_dataset_package_accepts_string_and_root_forms_equivalently(tmp_pa
     assert from_string.identity() == from_root.identity()
     assert from_string.version() == from_root.version()
     assert from_string.origin() == from_root.origin()
+
+
+def test_task_dataset_reads_tasks_and_rejects_legacy_keys() -> None:
+    canonical = TaskDataset.model_validate(
+        {
+            "datasetId": "dataset",
+            "tasks": [
+                {
+                    "id": "q_year",
+                    "statement": "Task?",
+                    "validation": {"type": "judge"},
+                    "contextBlocks": ["summary"],
+                }
+            ],
+        }
+    )
+
+    assert [task.id for task in canonical.tasks] == ["q_year"]
+    with pytest.raises(Exception):
+        TaskDataset.model_validate({"datasetId": "dataset", "questions": []})
+    with pytest.raises(Exception):
+        Task.model_validate({"id": "q_year", "quest" + "ion": "Task?", "validation": {"type": "judge"}})
+
+
+def test_task_instance_dataset_reads_tasks_and_rejects_legacy_keys() -> None:
+    canonical = TaskInstanceDataset.model_validate(
+        {"instances": [{"instanceId": "cv-demo", "tasks": [{"id": "q_year"}]}]}
+    )
+
+    assert canonical.instances[0].tasks[0].id == "q_year"
+    with pytest.raises(Exception):
+        TaskInstanceDataset.model_validate({"instances": [{"instanceId": "cv-demo", "questions": []}]})
+
+
+def test_task_reads_legacy_context_block_key() -> None:
+    task = Task.model_validate(
+        {
+            "id": "q_year",
+            "statement": "Task?",
+            "validation": {"type": "judge"},
+            "contextBlock": ["summary"],
+        }
+    )
+
+    assert task.contextBlocks == ["summary"]
+
+
+def test_local_dataset_package_requires_tasks_file(tmp_path: Path) -> None:
+    dataset_root = _write_local_dataset(tmp_path / "dataset")
+    (dataset_root / "tasks.json").unlink()
+
+    with pytest.raises(FileNotFoundError, match="No tasks.json found"):
+        LocalDatasetPackage.from_dataset(ExperimentDataset(root=str(dataset_root)))

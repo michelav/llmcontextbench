@@ -4,12 +4,12 @@ from pathlib import Path
 import re
 from typing import Any, Callable
 
-from ctxbench.benchmark.models import DatasetProvenance, Experiment, MODEL_ID_PATTERN, RunMetadata, RunSpec
-from ctxbench.dataset.provider import LocalDatasetPackage
+from ctxbench.benchmark.models import DatasetProvenance, Experiment, MODEL_ID_PATTERN, TrialMetadata, TrialSpec
+from ctxbench.dataset.package import DatasetPackage
 from ctxbench.util.artifacts import build_short_ids, canonical_trial_identity
 from ctxbench.util.env import apply_lattes_mcp_env_overrides, resolve_env_placeholders
 
-QUESTION_TEMPLATE_PATTERN = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+TASK_TEMPLATE_PATTERN = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
 
 def resolve_params(experiment: Experiment, model_name: str, model_id: str | None = None) -> dict[str, Any]:
@@ -69,17 +69,17 @@ def effective_formats_for_strategy(strategy_name: str, formats: list[Any]) -> li
 def generate_runspecs(
     experiment: Experiment,
     base_dir: str | Path,
-    dataset_package: LocalDatasetPackage,
+    dataset_package: DatasetPackage,
     dataset_provenance: DatasetProvenance,
     *,
     experiment_path: str | Path | None = None,
     on_warning: Callable[..., None] | None = None,
-) -> list[RunSpec]:
-    scoped_questions = set(experiment.scope.questions)
+) -> list[TrialSpec]:
+    scoped_tasks = set(experiment.scope.tasks)
     scoped_instances = set(experiment.scope.instances)
-    questions = [
-        question_id for question_id in dataset_package.list_question_ids()
-        if not scoped_questions or question_id in scoped_questions
+    tasks = [
+        task_id for task_id in dataset_package.list_task_ids()
+        if not scoped_tasks or task_id in scoped_tasks
     ]
     instance_ids = [
         instance_id for instance_id in dataset_package.list_instance_ids()
@@ -91,15 +91,16 @@ def generate_runspecs(
     output_root = str((Path(base_dir) / experiment.output).resolve())
     draft_specs: list[dict[str, Any]] = []
     for instance_id in instance_ids:
-        for question_id in questions:
-            question = dataset_package.get_question(question_id)
-            question_instance = dataset_package.get_question_instance(question_id, instance_id)
-            parameters = dict(question_instance.parameters) if question_instance is not None else {}
-            rendered_question = render_question_template(
-                question.question,
+        for task_id in tasks:
+            task = dataset_package.get_task(task_id)
+            task_instance = dataset_package.get_task_instance(instance_id, task_id)
+            raw_parameters = task_instance.get("parameters", {}) if task_instance else {}
+            parameters = dict(raw_parameters) if isinstance(raw_parameters, dict) else {}
+            rendered_task_statement = render_task_template(
+                task.statement,
                 parameters,
                 on_warning=on_warning,
-                question_id=question_id,
+                task_id=task_id,
                 instance_id=instance_id,
             )
             for model in models:
@@ -112,7 +113,7 @@ def generate_runspecs(
                         for repeat_index in range(1, experiment.execution.repeats + 1):
                             canonical_id = canonical_trial_identity(
                                 experiment.id,
-                                question_id,
+                                task_id,
                                 instance_id,
                                 provider_name,
                                 model_name,
@@ -128,9 +129,9 @@ def generate_runspecs(
                                     "experimentPath": str(Path(experiment_path).resolve())
                                     if experiment_path
                                     else None,
-                                    "taskId": question_id,
-                                    "question": rendered_question,
-                                    "questionTemplate": question.question,
+                                    "taskId": task_id,
+                                    "taskStatement": rendered_task_statement,
+                                    "taskTemplate": task.statement,
                                     "instanceId": instance_id,
                                     "provider": provider_name,
                                     "modelId": model_id,
@@ -143,29 +144,29 @@ def generate_runspecs(
                                     "evaluationEnabled": experiment.evaluation.enabled,
                                     "trace": experiment.trace,
                                     "artifacts": experiment.artifacts,
-                                    "questionTags": list(question.tags),
-                                    "validationType": question.validation.type,
-                                    "contextBlock": list(question.contextBlock),
+                                    "taskTags": list(task.tags),
+                                    "validationType": task.validation_type,
+                                    "contextBlocks": list(task.context_blocks),
                                     "parameters": parameters,
                                 }
                             )
 
     run_ids = build_short_ids([item["canonical_id"] for item in draft_specs])
-    runspecs: list[RunSpec] = []
+    runspecs: list[TrialSpec] = []
     for item, run_id in zip(draft_specs, run_ids):
         runspecs.append(
-            RunSpec(
+            TrialSpec(
                 id=run_id,
-                runId=run_id,
+                trialId=run_id,
                 experimentId=item["experimentId"],
                 dataset=item["dataset"],
                 experimentPath=item["experimentPath"],
-                questionId=item["taskId"],
-                question=item["question"],
-                questionTemplate=item["questionTemplate"],
-                questionTags=item["questionTags"],
+                taskId=item["taskId"],
+                taskStatement=item["taskStatement"],
+                taskTemplate=item["taskTemplate"],
+                taskTags=item["taskTags"],
                 validationType=item["validationType"],
-                contextBlock=item["contextBlock"],
+                contextBlocks=item["contextBlocks"],
                 parameters=item["parameters"],
                 instanceId=item["instanceId"],
                 provider=item["provider"],
@@ -179,9 +180,9 @@ def generate_runspecs(
                 evaluationEnabled=item["evaluationEnabled"],
                 trace=item["trace"],
                 artifacts=item["artifacts"],
-                metadata=RunMetadata(
+                metadata=TrialMetadata(
                     canonicalId=item["canonical_id"],
-                    questionId=item["taskId"],
+                    taskId=item["taskId"],
                     instanceId=item["instanceId"],
                     provider=item["provider"],
                     modelId=item["modelId"],
@@ -189,7 +190,7 @@ def generate_runspecs(
                     strategy=item["strategy"],
                     format=item["format"],
                     repeatIndex=item["repeatIndex"],
-                    questionTags=item["questionTags"],
+                    taskTags=item["taskTags"],
                     validationType=item["validationType"],
                     parameters=item["parameters"],
                 ),
@@ -198,32 +199,32 @@ def generate_runspecs(
     return runspecs
 
 
-def render_question_template(
-    question_template: str,
+def render_task_template(
+    task_template: str,
     parameters: dict[str, Any],
     *,
     on_warning: Callable[..., None] | None = None,
-    question_id: str,
+    task_id: str,
     instance_id: str,
 ) -> str:
-    placeholders = QUESTION_TEMPLATE_PATTERN.findall(question_template)
+    placeholders = TASK_TEMPLATE_PATTERN.findall(task_template)
     if not placeholders:
         if parameters and on_warning is not None:
             for key in sorted(parameters):
                 on_warning(
-                    "Unused question parameter; ignoring",
-                    questionId=question_id,
+                    "Unused task parameter; ignoring",
+                    taskId=task_id,
                     instanceId=instance_id,
                     parameter=key,
                 )
-        return question_template
+        return task_template
 
-    rendered = question_template
+    rendered = task_template
     for placeholder in placeholders:
         if placeholder not in parameters and on_warning is not None:
             on_warning(
-                "Missing question parameter; substituting empty string",
-                questionId=question_id,
+                "Missing task parameter; substituting empty string",
+                taskId=task_id,
                 instanceId=instance_id,
                 parameter=placeholder,
             )
@@ -233,8 +234,8 @@ def render_question_template(
         for key in sorted(parameters):
             if key not in placeholders:
                 on_warning(
-                    "Unused question parameter; ignoring",
-                    questionId=question_id,
+                    "Unused task parameter; ignoring",
+                    taskId=task_id,
                     instanceId=instance_id,
                     parameter=key,
                 )

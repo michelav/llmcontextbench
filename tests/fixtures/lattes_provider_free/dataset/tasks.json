@@ -4,15 +4,15 @@
   "domain": "lattes",
   "language": "en",
   "description": "Minimal provider-free Lattes fixture dataset.",
-  "questions": [
+  "tasks": [
     {
       "id": "q_profile",
-      "question": "What is the main field of this researcher?",
+      "statement": "What is the main field of this researcher?",
       "tags": ["factual"],
       "validation": {
         "type": "judge"
       },
-      "contextBlock": ["profile"]
+      "contextBlocks": ["profile"]
     }
   ]
 }
