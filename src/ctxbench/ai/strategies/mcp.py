@@ -4,32 +4,37 @@ from ctxbench.ai.models.base import AIRequest, AIResult, ModelAdapter, ModelInpu
 from ctxbench.ai.strategies.base import StrategyAdapter
 from ctxbench.ai.trace import TraceCollector
 
-DEFAULT_MCP_SYSTEM_INSTRUCTION = (
-    "You are an assistant that handles the tasks proposed.\n"
-    "The tasks may vary from questions be answered to actions to be executed like search and retrieve or analysis.\n"
-    "You have access to tools to gather all information needed to perform the tasks.\n"
-    "Your goal is to produce accurate, concise and information-grounded responses.\n"
+DEFAULT_OPERATION_SYSTEM_INSTRUCTION = (
+    "You are an assistant that solves benchmark tasks using only the available operations.\n"
+    "Tasks may include question answering, retrieval, extraction, analysis, or code-related tasks.\n"
+    "Use the available functions or tools to gather the information needed to complete the task.\n"
     "Guidelines:\n"
-    "- Use only the available information from the tools to address the task.\n"
-    "- Inform if the provided information isn't enough to address the task.\n"
+    "- Use only information obtained from the available operations.\n"
+    "- If the available information is insufficient, say so.\n"
     "- Be concise and precise.\n"
     "- Do not make assumptions or use external knowledge.\n"
 )
 
-
 class MCPStrategy(StrategyAdapter):
     def execute(self, model: ModelAdapter, request: AIRequest, trace: TraceCollector) -> AIResult:
-        lattes_id = _resolve_lattes_id(request)
+        instance_id = _resolve_instance_id(request)
+        dataset_instructions = request.metadata.get("dataset_instructions")
+        instructions_block = (
+            f"# Dataset Instructions\n{dataset_instructions}\n\n"
+            if isinstance(dataset_instructions, str) and dataset_instructions.strip()
+            else ""
+        )
 
         with trace.span("strategy.remote_mcp.execute", "strategy.remote_mcp.execute"):
             trace.record_steps(1)
             prompt = (
+                f"{instructions_block}"
                 f"# Task:\n{request.question}\n\n"
-                f"# Researcher Lattes ID:\n{lattes_id}\n\n"
+                f"# Instance ID:\n{instance_id}\n\n"
             )
             trace.metrics.promptChars = len(prompt)
             model_input = ModelInput(
-                system_instruction=request.system_instruction or DEFAULT_MCP_SYSTEM_INSTRUCTION,
+                system_instruction=request.system_instruction or DEFAULT_OPERATION_SYSTEM_INSTRUCTION,
                 prompt=prompt,
             )
             model_response = model.generate(model_input, request, trace=trace)
@@ -60,8 +65,8 @@ class MCPStrategy(StrategyAdapter):
             )
 
 
-def _resolve_lattes_id(request: AIRequest) -> str:
-    value = request.metadata.get("lattes_id") or request.metadata.get("instance_id")
+def _resolve_instance_id(request: AIRequest) -> str:
+    value = request.metadata.get("instance_id") or request.metadata.get("lattes_id")
     if not isinstance(value, str) or not value:
-        raise ValueError("MCP strategy requires request.metadata['lattes_id'].")
+        raise ValueError("MCP strategy requires request.metadata['instance_id'] or 'lattes_id'.")
     return value

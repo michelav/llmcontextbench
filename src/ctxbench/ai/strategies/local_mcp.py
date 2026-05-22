@@ -7,18 +7,16 @@ from ctxbench.ai.runtime import ToolRuntime
 from ctxbench.ai.strategies.base import StrategyAdapter
 from ctxbench.ai.trace import TraceCollector
 
-DEFAULT_LOCAL_MCP_SYSTEM_INSTRUCTION = (
-    "You are an assistant that handles the tasks proposed.\n"
-    "The tasks may vary from questions be answered to actions to be executed like search and retrieve or analysis.\n"
-    "You have access to tools to gather all information needed to perform the tasks.\n"
-    "Your goal is to produce accurate, concise and information-grounded responses.\n"
+DEFAULT_OPERATION_SYSTEM_INSTRUCTION = (
+    "You are an assistant that solves benchmark tasks using only the available operations.\n"
+    "Tasks may include question answering, retrieval, extraction, analysis, or code-related tasks.\n"
+    "Use the available functions or tools to gather the information needed to complete the task.\n"
     "Guidelines:\n"
-    "- Use only the available information from the tools to address the task.\n"
-    "- Inform if the provided information isn't enough to address the task.\n"
+    "- Use only information obtained from the available operations.\n"
+    "- If the available information is insufficient, say so.\n"
     "- Be concise and precise.\n"
     "- Do not make assumptions or use external knowledge.\n"
 )
-
 
 class LocalMCPStrategy(StrategyAdapter):
     def __init__(self, runtime: ToolRuntime) -> None:
@@ -26,7 +24,7 @@ class LocalMCPStrategy(StrategyAdapter):
 
     def execute(self, model: ModelAdapter, request: AIRequest, trace: TraceCollector) -> AIResult:
         max_steps = int(request.params.get("max_steps", 8))
-        lattes_id = _resolve_lattes_id(request)
+        instance_id = _resolve_instance_id(request)
         tool_results: list[ToolResult] = []
         previous_tool_calls = []
         continuation_state: dict[str, object] = {}
@@ -36,15 +34,22 @@ class LocalMCPStrategy(StrategyAdapter):
 
         with trace.span("strategy.local_mcp.execute", "strategy.local_mcp.execute"):
             tools = self.runtime.list_tools()
+            dataset_instructions = request.metadata.get("dataset_instructions")
+            instructions_block = (
+                f"# Dataset Instructions\n{dataset_instructions}\n\n"
+                if isinstance(dataset_instructions, str) and dataset_instructions.strip()
+                else ""
+            )
             prompt = (
+                f"{instructions_block}"
                 f"# Task:\n{request.question}\n\n"
-                f"# Researcher Lattes ID:\n{lattes_id}\n\n"
+                f"# Instance ID:\n{instance_id}\n\n"
             )
             trace.metrics.promptChars = len(prompt)
 
             for step in range(max_steps):
                 model_input = ModelInput(
-                    system_instruction=DEFAULT_LOCAL_MCP_SYSTEM_INSTRUCTION,
+                    system_instruction=request.system_instruction or DEFAULT_OPERATION_SYSTEM_INSTRUCTION,
                     prompt=prompt,
                     tools=tools,
                     previous_tool_calls=previous_tool_calls,
@@ -131,8 +136,8 @@ class LocalMCPStrategy(StrategyAdapter):
         )
 
 
-def _resolve_lattes_id(request: AIRequest) -> str:
-    value = request.metadata.get("lattes_id") or request.metadata.get("instance_id")
+def _resolve_instance_id(request: AIRequest) -> str:
+    value = request.metadata.get("instance_id") or request.metadata.get("lattes_id")
     if not isinstance(value, str) or not value:
-        raise ValueError("Local MCP strategy requires request.metadata['lattes_id'].")
+        raise ValueError("Local MCP strategy requires request.metadata['instance_id'] or 'lattes_id'.")
     return value

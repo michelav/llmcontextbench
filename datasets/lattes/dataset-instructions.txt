@@ -1,0 +1,2 @@
+When a tool requires a `lattes_id`, use the `Instance ID`.
+Do not invent or modify dataset identifiers.

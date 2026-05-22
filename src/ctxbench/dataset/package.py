@@ -76,3 +76,6 @@ class DatasetPackage(Protocol):
 
     def fixtures(self) -> object | None:
         return None
+
+    def dataset_instructions(self) -> str | None:
+        return None

@@ -15,7 +15,6 @@ from ctxbench.dataset.package import DatasetPackage
 from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.util.clock import utc_now_iso
 
-
 def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
     adapter = _resolve_adapter(runspec)
     context = ""
@@ -57,6 +56,8 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
     }
     if runspec.strategy == "remote_mcp":
         request_metadata["dataset_tool_provider"] = dataset_tool_provider
+
+    request_metadata["dataset_instructions"] = adapter.dataset_instructions()
     request = AIRequest(
         question=runspec.taskStatement,
         context=context,
