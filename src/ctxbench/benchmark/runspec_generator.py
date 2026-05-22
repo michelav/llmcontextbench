@@ -96,7 +96,7 @@ def generate_runspecs(
             task_instance = dataset_package.get_task_instance(instance_id, task_id)
             raw_parameters = task_instance.get("parameters", {}) if task_instance else {}
             parameters = dict(raw_parameters) if isinstance(raw_parameters, dict) else {}
-            rendered_question = render_task_template(
+            rendered_task_statement = render_task_template(
                 task.statement,
                 parameters,
                 on_warning=on_warning,
@@ -130,7 +130,7 @@ def generate_runspecs(
                                     if experiment_path
                                     else None,
                                     "taskId": task_id,
-                                    "question": rendered_question,
+                                    "taskStatement": rendered_task_statement,
                                     "taskTemplate": task.statement,
                                     "instanceId": instance_id,
                                     "provider": provider_name,
@@ -162,7 +162,7 @@ def generate_runspecs(
                 dataset=item["dataset"],
                 experimentPath=item["experimentPath"],
                 taskId=item["taskId"],
-                question=item["question"],
+                taskStatement=item["taskStatement"],
                 taskTemplate=item["taskTemplate"],
                 taskTags=item["taskTags"],
                 validationType=item["validationType"],
@@ -212,7 +212,7 @@ def render_task_template(
         if parameters and on_warning is not None:
             for key in sorted(parameters):
                 on_warning(
-                    "Unused question parameter; ignoring",
+                    "Unused task parameter; ignoring",
                     taskId=task_id,
                     instanceId=instance_id,
                     parameter=key,
@@ -223,7 +223,7 @@ def render_task_template(
     for placeholder in placeholders:
         if placeholder not in parameters and on_warning is not None:
             on_warning(
-                "Missing question parameter; substituting empty string",
+                "Missing task parameter; substituting empty string",
                 taskId=task_id,
                 instanceId=instance_id,
                 parameter=placeholder,
@@ -234,7 +234,7 @@ def render_task_template(
         for key in sorted(parameters):
             if key not in placeholders:
                 on_warning(
-                    "Unused question parameter; ignoring",
+                    "Unused task parameter; ignoring",
                     taskId=task_id,
                     instanceId=instance_id,
                     parameter=key,

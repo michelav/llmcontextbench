@@ -59,7 +59,7 @@ def test_fake_dataset_plan_workflow_is_provider_free(monkeypatch, tmp_path: Path
     assert package.identity() == "ctxbench/fake-dataset"
     assert package.version() == "0.1.0"
     assert package.list_instance_ids() == ["person-001"]
-    assert package.list_question_ids() == ["task_role"]
+    assert package.list_task_ids() == ["task_role"]
 
     output_root = tmp_path / "planned"
     assert plan_command(str(EXPERIMENT_PATH), output=str(output_root), cache_dir=tmp_path / "cache") == 0
@@ -71,7 +71,7 @@ def test_fake_dataset_plan_workflow_is_provider_free(monkeypatch, tmp_path: Path
     assert trials[0]["taskId"] == "task_role"
     assert "questionId" not in trials[0]
     assert trials[0]["dataset"]["id"] == "ctxbench/fake-dataset"
-    assert trials[0]["question"] == "What role does Avery Example have?"
+    assert trials[0]["taskStatement"] == "What role does Avery Example have?"
 
     serialized_trials = json.dumps(trials, ensure_ascii=False).lower()
     for term in FORBIDDEN_TERMS:

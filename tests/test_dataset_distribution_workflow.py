@@ -23,7 +23,7 @@ def _write_local_dataset(root: Path) -> Path:
                 "tasks": [
                     {
                         "id": "q_year",
-                        "question": "In which year did {researcher_name} obtain their PhD?",
+                        "statement": "In which year did {researcher_name} obtain their PhD?",
                         "tags": ["objective"],
                         "validation": {"type": "judge"},
                         "contextBlocks": ["summary"],
@@ -170,7 +170,7 @@ def test_plan_string_and_root_dataset_forms_are_equivalent(
     assert manifest["dataset"]["id"] == "ctxbench/local-fixture"
     assert manifest["dataset"]["version"] == "0.1.0"
     assert len(rows) == 1
-    assert rows[0]["question"] == "In which year did CV Demo obtain their PhD?"
+    assert rows[0]["taskStatement"] == "In which year did CV Demo obtain their PhD?"
     assert rows[0]["parameters"] == {"researcher_name": "CV Demo"}
 
 

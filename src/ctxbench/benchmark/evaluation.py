@@ -200,7 +200,7 @@ def build_evaluation_job(
     if only and result.taskId != only:
         return None
 
-    rendered_question = result.question
+    rendered_question = result.taskStatement
     validation_type = result.validationType or result.metadata.validationType
     if mode and validation_type != mode:
         return None
@@ -556,7 +556,7 @@ def _build_skipped_evaluation_result(
         dataset=result.dataset,
         taskId=result.taskId,
         instanceId=result.instanceId,
-        question=question_text,
+        taskStatement=question_text,
         evaluationMode="judge",
         status="skipped",
         evaluationMethod="judge",
@@ -598,7 +598,7 @@ def _build_evaluation_result(
         dataset=result.dataset,
         taskId=result.taskId,
         instanceId=result.instanceId,
-        question=question_text,
+        taskStatement=question_text,
         evaluationMode=validation_type,
         status="evaluated",
         evaluationMethod=details.get("evaluationMethod"),
@@ -785,7 +785,7 @@ def evaluate_run_result(
     if only and result.taskId != only:
         return None
 
-    rendered_question = result.question
+    rendered_question = result.taskStatement
     validation_type = result.validationType or result.metadata.validationType
     if mode and validation_type != mode:
         return None

@@ -137,7 +137,7 @@ def _write_missing_trials(root: Path) -> Path:
                 "trialId": "trial-1",
                 "experimentId": "exp-no-network",
                 "taskId": "q_year",
-                "question": "In which year did CV Demo obtain their PhD?",
+                "taskStatement": "In which year did CV Demo obtain their PhD?",
                 "taskTemplate": "In which year did {researcher_name} obtain their PhD?",
                 "dataset": {
                     "id": "ctxbench/local-fixture",
@@ -222,7 +222,7 @@ def _write_missing_responses(root: Path) -> Path:
                     "materializedPath": str(root / "missing-dataset"),
                 },
                 "taskId": "q_year",
-                "question": "In which year did CV Demo obtain their PhD?",
+                "taskStatement": "In which year did CV Demo obtain their PhD?",
                 "taskTemplate": "In which year did {researcher_name} obtain their PhD?",
                 "instanceId": "cv-demo",
                 "provider": "mock",

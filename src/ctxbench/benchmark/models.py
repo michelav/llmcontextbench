@@ -551,7 +551,7 @@ class TrialSpec(BaseModel):
     dataset: DatasetProvenance
     experimentPath: str | None = None
     taskId: str
-    question: str = ""
+    taskStatement: str = ""
     taskTemplate: str | None = None
     taskTags: list[str] = Field(default_factory=list)
     validationType: str | None = None
@@ -582,6 +582,8 @@ class TrialSpec(BaseModel):
             raise ValueError("Public TrialSpec input must use 'trialId', not 'runId'.")
         if "questionId" in payload:
             raise ValueError("Public TrialSpec input must use 'taskId', not 'questionId'.")
+        if "question" in payload:
+            raise ValueError("Public TrialSpec input must use 'taskStatement', not 'question'.")
         strategy = payload.get("strategy")
         if isinstance(strategy, str) and strategy == "mcp":
             raise ValueError("unknown strategy: mcp")
@@ -620,7 +622,7 @@ class TrialSpec(BaseModel):
             "trialId": self.trialId,
             "experimentId": self.experimentId,
             "taskId": self.taskId,
-            "question": self.question,
+            "taskStatement": self.taskStatement,
             "taskTemplate": self.taskTemplate,
             "dataset": self.dataset.model_dump(mode="json"),
             "instanceId": self.instanceId,
@@ -690,7 +692,7 @@ class TrialResult(BaseModel):
     experimentId: str
     dataset: DatasetProvenance
     taskId: str
-    question: str = ""
+    taskStatement: str = ""
     taskTemplate: str | None = None
     taskTags: list[str] = Field(default_factory=list)
     validationType: str | None = None
@@ -728,6 +730,8 @@ class TrialResult(BaseModel):
             raise ValueError("Public TrialResult input must use 'taskId', not 'questionId'.")
         if "answer" in payload:
             raise ValueError("Public TrialResult input must use 'response', not 'answer'.")
+        if "question" in payload:
+            raise ValueError("Public TrialResult input must use 'taskStatement', not 'question'.")
         strategy = payload.get("strategy")
         if isinstance(strategy, str) and strategy == "mcp":
             raise ValueError("unknown strategy: mcp")
@@ -765,7 +769,7 @@ class TrialResult(BaseModel):
             "trialId": self.trialId,
             "experimentId": self.experimentId,
             "taskId": self.taskId,
-            "question": self.question,
+            "taskStatement": self.taskStatement,
             "taskTemplate": self.taskTemplate,
             "dataset": self.dataset.model_dump(mode="json"),
             "instanceId": self.instanceId,
@@ -830,7 +834,7 @@ class EvaluationItemResult(BaseModel):
     dataset: DatasetProvenance
     taskId: str
     instanceId: str | None = None
-    question: str
+    taskStatement: str
     evaluationMode: str
     status: str = "evaluated"
     evaluationMethod: str | None = None

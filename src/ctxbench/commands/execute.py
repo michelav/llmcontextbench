@@ -107,7 +107,7 @@ def execute_command(
                 "Generating response",
                 run=runspec.trialId,
                 model=runspec.modelName or "",
-                question=runspec.taskId,
+                task=runspec.taskId,
             )
             result = execute_runspec(runspec, engine)
             logger.phase(

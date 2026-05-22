@@ -22,7 +22,7 @@ class TaskValidation(BaseModel):
 
 class Task(BaseModel):
     id: str
-    question: str
+    statement: str
     tags: list[str] = Field(default_factory=list)
     validation: TaskValidation
     contextBlocks: list[str] = Field(default_factory=list)
@@ -36,11 +36,15 @@ class Task(BaseModel):
         context_blocks = data.get("contextBlocks", data.get("contextBlock", []))
         return cls(
             id=str(data.get("id", "")).strip(),
-            question=str(data.get("question", "")),
+            statement=str(data.get("statement", data.get("question", ""))),
             tags=[str(item) for item in data.get("tags", []) if isinstance(item, str)],
             validation=TaskValidation.model_validate(data.get("validation", {})),
             contextBlocks=[str(item) for item in context_blocks if isinstance(item, str)],
         )
+
+    @property
+    def question(self) -> str:
+        return self.statement
 
 
 class TaskDataset(BaseModel):
@@ -98,17 +102,17 @@ class TaskInstanceEntry(BaseModel):
         )
 
 
-class QuestionInstance(BaseModel):
+class TaskInstance(BaseModel):
     instanceId: str
     contextBlocks: str = ""
     tasks: list[TaskInstanceEntry] = Field(default_factory=list)
 
     @classmethod
-    def model_validate(cls, data: Any) -> "QuestionInstance":
+    def model_validate(cls, data: Any) -> "TaskInstance":
         if isinstance(data, cls):
             return data
         if not isinstance(data, dict):
-            raise ValidationError("QuestionInstance requires an object input.")
+            raise ValidationError("TaskInstance requires an object input.")
         task_items = data.get("tasks", data.get("questions", []))
         return cls(
             instanceId=str(data.get("instanceId", "")).strip(),
@@ -141,7 +145,7 @@ class TaskInstanceDataset(BaseModel):
     datasetId: str = ""
     domain: str | None = None
     version: str | None = None
-    instances: list[QuestionInstance] = Field(default_factory=list)
+    instances: list[TaskInstance] = Field(default_factory=list)
 
     @classmethod
     def model_validate(cls, data: Any) -> "TaskInstanceDataset":
@@ -154,7 +158,7 @@ class TaskInstanceDataset(BaseModel):
             domain=data.get("domain"),
             version=data.get("version"),
             instances=[
-                QuestionInstance.model_validate(item)
+                TaskInstance.model_validate(item)
                 for item in data.get("instances", [])
                 if isinstance(item, dict)
             ],
@@ -162,6 +166,7 @@ class TaskInstanceDataset(BaseModel):
 
 
 QuestionValidation = TaskValidation
+QuestionInstance = TaskInstance
 Question = Task
 QuestionDataset = TaskDataset
 QuestionInstanceEntry = TaskInstanceEntry

@@ -96,7 +96,7 @@ def _fake_execute_runspec(runspec, engine) -> TrialResult:
         experimentId=runspec.experimentId,
         dataset=runspec.dataset,
         taskId=runspec.taskId,
-        question=runspec.question,
+        taskStatement=runspec.taskStatement,
         taskTemplate=runspec.taskTemplate,
         taskTags=list(runspec.taskTags),
         validationType=runspec.validationType,

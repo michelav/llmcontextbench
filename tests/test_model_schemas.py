@@ -68,7 +68,7 @@ def make_runspec_payload() -> dict[str, object]:
         "trialId": "trial-1",
         "experimentId": "exp-1",
         "taskId": "q_year",
-        "question": "In which year did the researcher obtain their PhD?",
+        "taskStatement": "In which year did the researcher obtain their PhD?",
         "taskTemplate": "In which year did the researcher obtain their PhD?",
         "dataset": {"root": "/tmp/dataset"},
         "instanceId": "cv-demo",
@@ -109,7 +109,7 @@ def make_runresult_payload() -> dict[str, object]:
         "trialId": "trial-1",
         "experimentId": "exp-1",
         "taskId": "q_year",
-        "question": "In which year did the researcher obtain their PhD?",
+        "taskStatement": "In which year did the researcher obtain their PhD?",
         "taskTemplate": "In which year did the researcher obtain their PhD?",
         "dataset": {"root": "/tmp/dataset"},
         "instanceId": "cv-demo",
@@ -161,6 +161,7 @@ def test_runspec_model_validate_accepts_target_public_fields():
     [
         ("runId", "trial-1"),
         ("questionId", "q_year"),
+        ("question", "In which year did the researcher obtain their PhD?"),
     ],
 )
 def test_runspec_model_validate_rejects_legacy_public_fields(field: str, value: str):
@@ -196,6 +197,7 @@ def test_runresult_model_validate_accepts_target_public_fields():
     [
         ("runId", "trial-1"),
         ("questionId", "q_year"),
+        ("question", "In which year did the researcher obtain their PhD?"),
         ("answer", "2018"),
     ],
 )
@@ -232,7 +234,7 @@ def test_evaluation_item_serializers_use_trial_and_task_ids():
         ),
         taskId="q_year",
         instanceId="cv-demo",
-        question="In which year did the researcher obtain their PhD?",
+        taskStatement="In which year did the researcher obtain their PhD?",
         evaluationMode="judge",
         executionStrategy="inline",
         details={

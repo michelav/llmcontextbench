@@ -170,7 +170,7 @@ def _write_eval_fixture(root: Path) -> Path:
                 "format": "json",
                 "repeatIndex": 1,
                 "dataset": {"root": str(dataset_root.resolve())},
-                "question": "Question one?",
+                "taskStatement": "Question one?",
                 "metadata": {
                     "canonicalId": "run-1",
                     "taskId": "q_one",
@@ -197,7 +197,7 @@ def _write_eval_fixture(root: Path) -> Path:
                 "experimentId": "exp_mock",
                 "dataset": {"root": str(dataset_root.resolve())},
                 "taskId": "q_one",
-                "question": "Question one?",
+                "taskStatement": "Question one?",
                 "taskTemplate": None,
                 "instanceId": "cv_demo",
                 "provider": "mock",

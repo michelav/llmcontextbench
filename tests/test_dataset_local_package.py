@@ -26,7 +26,7 @@ def _write_local_dataset(root: Path) -> Path:
                 "tasks": [
                     {
                         "id": "q_year",
-                        "question": "In which year did {researcher_name} obtain their PhD?",
+                        "statement": "In which year did {researcher_name} obtain their PhD?",
                         "tags": ["objective", "simple"],
                         "validation": {"type": "judge"},
                         "contextBlocks": ["summary"],
@@ -80,26 +80,26 @@ def test_local_dataset_package_preserves_question_template_and_instance_paramete
     dataset_root = _write_local_dataset(tmp_path / "dataset")
     package = LocalDatasetPackage.from_dataset(ExperimentDataset(root=str(dataset_root)))
 
-    question = package.get_question("q_year")
-    question_instance = package.get_question_instance("q_year", "cv-demo")
+    task = package.get_task("q_year")
+    task_instance = package.get_task_instance("cv-demo", "q_year")
 
-    assert question.question == "In which year did {researcher_name} obtain their PhD?"
-    assert question.tags == ["objective", "simple"]
-    assert question.validation.type == "judge"
-    assert question.contextBlocks == ["summary"]
-    assert question_instance is not None
-    assert question_instance.parameters == {"researcher_name": "CV Demo"}
+    assert task.statement == "In which year did {researcher_name} obtain their PhD?"
+    assert task.tags == ["objective", "simple"]
+    assert task.validation_type == "judge"
+    assert task.context_blocks == ["summary"]
+    assert task_instance is not None
+    assert task_instance["parameters"] == {"researcher_name": "CV Demo"}
     assert package.get_context_blocks("cv-demo") == {"summary": "Researcher in software engineering."}
     assert package.get_context_artifact("cv-demo", "q_year", "inline", "json") == {"answers": {"q_year": 2020}}
     assert package.get_evidence_artifact("cv-demo", "q_year") == {
         "task": {
             "id": "q_year",
-            "question": "In which year did {researcher_name} obtain their PhD?",
+            "statement": "In which year did {researcher_name} obtain their PhD?",
             "tags": ["objective", "simple"],
             "validation": {"type": "judge"},
             "contextBlocks": ["summary"],
         },
-        "questionInstance": {"id": "q_year", "parameters": {"researcher_name": "CV Demo"}},
+        "taskInstance": {"id": "q_year", "parameters": {"researcher_name": "CV Demo"}},
         "contextBlocks": {"summary": "Researcher in software engineering."},
     }
 

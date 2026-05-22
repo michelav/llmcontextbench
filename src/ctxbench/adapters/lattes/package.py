@@ -66,7 +66,7 @@ class LattesDatasetAdapter(LocalDatasetPackage):
         task = self.get_task_model(task_id)
         return TaskPayload(
             task_id=task.id,
-            statement=task.question,
+            statement=task.statement,
             tags=list(task.tags),
             validation_type=task.validation.type,
             context_blocks=list(task.contextBlocks),
@@ -108,12 +108,6 @@ class LattesDatasetAdapter(LocalDatasetPackage):
             evidence=blocks,
             task_instance=task_instance,
         )
-
-    def get_task_instance(self, instance_id: str, task_id: str) -> dict[str, object] | None:
-        question_instance = self.get_question_instance(task_id, instance_id)
-        if question_instance is None:
-            return None
-        return {"parameters": dict(question_instance.parameters)}
 
     def get_oracle(self, instance_id: str, task_id: str) -> OracleUnavailable:
         del instance_id, task_id

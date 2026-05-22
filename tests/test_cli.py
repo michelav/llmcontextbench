@@ -161,14 +161,14 @@ def write_mock_experiment(path: Path, *, evaluation_enabled: bool = True) -> Pat
                 "tasks": [
                     {
                         "id": "q_year",
-                        "question": "In which year did the researcher obtain their PhD?",
+                        "statement": "In which year did the researcher obtain their PhD?",
                         "tags": ["objective", "simple"],
                         "validation": {"type": "judge"},
                         "contextBlocks": ["summary"],
                     },
                     {
                         "id": "q_summary",
-                        "question": "Summarize the main research areas for {researcher_name}.",
+                        "statement": "Summarize the main research areas for {researcher_name}.",
                         "tags": ["subjective", "simple"],
                         "validation": {"type": "judge"},
                         "contextBlocks": ["summary", "research"],
@@ -327,7 +327,7 @@ def test_plan_writes_trials_with_scope_and_target_fields(tmp_path):
     assert first["contextBlocks"] in (["summary"], ["summary", "research"])
     assert "dataset" in first
     summary = next(row for row in rows if row["taskId"] == "q_summary")
-    assert summary["question"] == "Summarize the main research areas for CV Demo."
+    assert summary["taskStatement"] == "Summarize the main research areas for CV Demo."
     assert summary["parameters"] == {"researcher_name": "CV Demo"}
 
 
@@ -362,7 +362,7 @@ def test_plan_includes_tasks_without_instance_override(tmp_path):
     assert len(rows) == 2
     assert {row["taskId"] for row in rows} == {"q_year", "q_summary"}
     year = next(row for row in rows if row["taskId"] == "q_year")
-    assert year["question"] == "In which year did the researcher obtain their PhD?"
+    assert year["taskStatement"] == "In which year did the researcher obtain their PhD?"
     assert year["parameters"] == {}
 
 
@@ -378,7 +378,7 @@ def test_plan_warns_and_uses_empty_string_for_missing_template_parameter(tmp_pat
                 "tasks": [
                     {
                         "id": "q_missing",
-                        "question": "Summarize the work of {researcher_name}.",
+                        "statement": "Summarize the work of {researcher_name}.",
                         "tags": ["subjective"],
                         "validation": {"type": "judge"},
                         "contextBlocks": ["summary"],
@@ -436,8 +436,8 @@ def test_plan_warns_and_uses_empty_string_for_missing_template_parameter(tmp_pat
 
     payload = _jsonl_rows(trials_path)[0]
     captured = capsys.readouterr()
-    assert "Missing question parameter" in captured.err
-    assert payload["question"] == "Summarize the work of ."
+    assert "Missing task parameter" in captured.err
+    assert payload["taskStatement"] == "Summarize the work of ."
     assert payload["parameters"] == {}
 
 

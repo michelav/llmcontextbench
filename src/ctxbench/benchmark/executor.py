@@ -50,7 +50,6 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
         "format": runspec.format,
         "provider": runspec.provider,
         "instance_id": runspec.instanceId,
-        "lattes_id": runspec.instanceId,
         "task_tags": list(runspec.taskTags),
         "validation_type": runspec.validationType,
         "context_representation": runspec.format,
@@ -59,7 +58,7 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
     if runspec.strategy == "remote_mcp":
         request_metadata["dataset_tool_provider"] = dataset_tool_provider
     request = AIRequest(
-        question=runspec.question,
+        question=runspec.taskStatement,
         context=context,
         provider_name=runspec.provider,
         model_name=str(runspec.params.get("model_name", "")),
@@ -115,7 +114,7 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
         experimentId=runspec.experimentId,
         dataset=runspec.dataset,
         taskId=runspec.taskId,
-        question=runspec.question,
+        taskStatement=runspec.taskStatement,
         taskTemplate=runspec.taskTemplate,
         taskTags=list(runspec.taskTags),
         validationType=runspec.validationType,
@@ -199,7 +198,7 @@ def _build_metrics_summary(*, ai_trace: dict[str, object], strategy: str) -> dic
         "cachedInputTokens": _as_int(metrics.get("cachedInputTokens")),
         "cacheReadInputTokens": _as_int(metrics.get("cacheReadInputTokens")),
         "cacheCreationInputTokens": _as_int(metrics.get("cacheCreationInputTokens")),
-        "questionTokensEstimated": _as_int(metrics.get("questionTokensEstimated")),
+        "taskStatementTokensEstimated": _as_int(metrics.get("taskStatementTokensEstimated", metrics.get("questionTokensEstimated"))),
         "estimatedInputTokens": _as_int(metrics.get("estimatedInputTokens")),
         "estimatedOutputTokens": _as_int(metrics.get("estimatedOutputTokens")),
         "reservedTokens": _as_int(metrics.get("reservedTokens")),

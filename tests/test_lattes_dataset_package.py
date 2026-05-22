@@ -48,6 +48,22 @@ def test_lattes_dataset_package_capability_report_is_conformant() -> None:
     assert report.identity == "ctxbench/lattes"
 
 
+def test_lattes_dataset_adapter_returns_task_instance_parameters() -> None:
+    package = LattesDatasetAdapter(FIXTURE_ROOT)
+
+    task_instance = package.get_task_instance("1234567890123456", "q_profile")
+
+    assert task_instance == {"parameters": {}}
+
+
+def test_lattes_dataset_adapter_evidence_includes_task_instance() -> None:
+    package = LattesDatasetAdapter(FIXTURE_ROOT)
+
+    evidence = package.get_evidence("1234567890123456", "q_profile")
+
+    assert evidence.task_instance == {"parameters": {}}
+
+
 def test_legacy_lattes_dataset_package_aliases_adapter() -> None:
     from ctxbench.datasets.lattes import LattesDatasetAdapter as LegacyAdapter
     from ctxbench.datasets.lattes import LattesDatasetPackage as LegacyPackage

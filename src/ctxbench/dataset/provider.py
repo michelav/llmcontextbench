@@ -15,9 +15,9 @@ from ctxbench.dataset.payloads import (
     TaskPayload,
 )
 from ctxbench.dataset.tasks import (
-    QuestionInstance,
     Task,
     TaskDataset,
+    TaskInstance,
     TaskInstanceDataset,
     TaskInstanceEntry,
 )
@@ -78,9 +78,6 @@ class LocalDatasetPackage:
     def origin(self) -> str | None:
         return self.dataset_paths.origin or self.dataset_paths.root
 
-    def list_question_ids(self) -> list[str]:
-        return self.list_task_ids()
-
     def list_task_ids(self) -> list[str]:
         return [task.id for task in self._tasks.tasks]
 
@@ -89,9 +86,6 @@ class LocalDatasetPackage:
 
     def list_context_ids(self, format_name: str | None = None) -> list[str]:
         return self.list_instance_ids()
-
-    def get_question(self, question_id: str) -> Task:
-        return self.get_task_model(question_id)
 
     def get_task_model(self, task_id: str) -> Task:
         for task in self._tasks.tasks:
@@ -103,32 +97,32 @@ class LocalDatasetPackage:
         task = self.get_task_model(task_id)
         return TaskPayload(
             task_id=task.id,
-            statement=task.question,
+            statement=task.statement,
             tags=list(task.tags),
             validation_type=task.validation.type,
             context_blocks=list(task.contextBlocks),
             metadata={"source": "tasks.json"},
         )
 
-    def get_instance(self, instance_id: str) -> QuestionInstance:
+    def get_instance(self, instance_id: str) -> TaskInstance:
         for instance in self._task_instances.instances:
             if instance.instanceId == instance_id:
                 return instance
         raise KeyError(f"Unknown instance id: {instance_id}")
 
-    def get_question_instance(self, question_id: str, context_id: str) -> TaskInstanceEntry | None:
-        instance = self.get_instance(context_id)
-        return instance.get_question(question_id)
+    def get_task_instance_entry(self, instance_id: str, task_id: str) -> TaskInstanceEntry | None:
+        instance = self.get_instance(instance_id)
+        return instance.get_task(task_id)
 
     def get_task_instance(self, instance_id: str, task_id: str) -> dict[str, object] | None:
-        question_instance = self.get_question_instance(task_id, instance_id)
-        if question_instance is None:
+        task_instance_entry = self.get_task_instance_entry(instance_id, task_id)
+        if task_instance_entry is None:
             return None
-        return {"parameters": dict(question_instance.parameters)}
+        return {"parameters": dict(task_instance_entry.parameters)}
 
-    def list_question_ids_for_instance(self, instance_id: str) -> list[str]:
+    def list_task_ids_for_instance(self, instance_id: str) -> list[str]:
         instance = self.get_instance(instance_id)
-        return [item.id for item in instance.questions]
+        return [item.id for item in instance.tasks]
 
     def get_instance_dir(self, instance_id: str) -> Path:
         path = Path(self.dataset_paths.contexts) / instance_id
@@ -187,10 +181,10 @@ class LocalDatasetPackage:
 
     def get_evidence_artifact(self, instance_id: str, task_id: str) -> object:
         task = self.get_task_model(task_id)
-        question_instance = self.get_question_instance(task_id, instance_id)
+        task_instance_entry = self.get_task_instance_entry(instance_id, task_id)
         return {
             "task": task.model_dump(mode="python"),
-            "questionInstance": question_instance.model_dump(mode="python") if question_instance is not None else None,
+            "taskInstance": task_instance_entry.model_dump(mode="python") if task_instance_entry is not None else None,
             "contextBlocks": self.get_context_blocks(instance_id),
         }
 
@@ -206,7 +200,7 @@ class LocalDatasetPackage:
                 "statement": task.statement,
                 "context_blocks": task.context_blocks,
             },
-            task_instance=artifact.get("questionInstance"),
+            task_instance=artifact.get("taskInstance"),
             evidence=artifact.get("contextBlocks", {}),
             metadata={"instance_id": instance_id, "task_id": task_id},
         )
