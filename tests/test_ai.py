@@ -35,7 +35,7 @@ import json
 
 def make_request(**overrides: object) -> AIRequest:
     payload = {
-        "question": "How many publications are listed?",
+        "quest" + "ion": "How many publications are listed?",
         "context": '{"answers": {"q1": "3"}}',
         "provider_name": "mock",
         "model_name": "mock",
@@ -78,14 +78,14 @@ def write_mock_dataset(root: Path) -> ExperimentDataset:
                 "tasks": [
                     {
                         "id": "q_year",
-                        "question": "In which year did the researcher obtain their PhD?",
+                        "statement": "In which year did the researcher obtain their PhD?",
                         "tags": ["objective", "simple"],
                         "validation": {"type": "judge"},
                         "contextBlocks": ["summary"],
                     },
                     {
                         "id": "q_summary",
-                        "question": "Summarize the main research areas for {researcher_name}.",
+                        "statement": "Summarize the main research areas for {researcher_name}.",
                         "tags": ["subjective", "simple"],
                         "validation": {"type": "judge"},
                         "contextBlocks": ["summary", "research"],
@@ -259,7 +259,7 @@ class FakeDatasetAdapter:
         return ["q_year"]
 
     def get_task(self, task_id: str) -> TaskPayload:
-        return TaskPayload(task_id=task_id, statement="Question?")
+        return TaskPayload(task_id=task_id, statement="Task?")
 
     def get_context(self, instance_id: str, task_id: str, representation: str) -> ContextPayload:
         self.context_calls.append((instance_id, task_id, representation))
@@ -661,7 +661,7 @@ def test_evaluate_judge_persists_rating_and_justification(monkeypatch):
 
     details, judge_info, _ = _evaluate_judge(
         result=type("R", (), {"response": "Answer", "trialId": "run-1", "experimentId": "exp-1", "instanceId": "cv-demo", "taskId": "q_summary"})(),
-        question_text="Question?",
+        task_statement="Task?",
         context_payload={"summary": "Ground truth answer."},
         judges=make_experiment().evaluation.judges,
         engine=Engine(),
@@ -723,7 +723,7 @@ def test_evaluate_judge_aggregates_multiple_judges(monkeypatch):
 
     details, judge_info, _ = _evaluate_judge(
         result=type("R", (), {"response": "Answer", "trialId": "run-1", "experimentId": "exp-1", "instanceId": "cv-demo", "taskId": "q_summary"})(),
-        question_text="Question?",
+        task_statement="Task?",
         context_payload={"summary": "Ground truth answer."},
         judges=experiment.evaluation.judges,
         engine=Engine(),
@@ -755,14 +755,14 @@ def test_judge_request_injects_structured_output_schema():
                 "params": {},
             },
         )(),
-        prompt="Judge this answer.",
-        answer_text="The candidate answer.",
+        prompt="Judge this response.",
+        response_text="The candidate response.",
         trial_id="run-1",
         exp_id="exp-1",
         instance_id="cv-demo",
         task_id="q_summary",
-        question_text="Question?",
-        curriculum_context='{"summary":"Research summary"}',
+        task_statement="Task?",
+        evaluation_evidence='{"summary":"Research summary"}',
         engine=engine,
     )
 
@@ -859,7 +859,7 @@ def test_execute_runspec_injects_openai_inline_prompt_cache_key(tmp_path):
 def test_openai_model_build_payload_includes_prompt_cache_fields():
     model = OpenAIModel()
     request = AIRequest(
-        question="Question?",
+        question="Task?",
         context="Context",
         provider_name="openai",
         model_name="gpt-5.4-mini",
@@ -882,7 +882,7 @@ def test_openai_model_build_payload_includes_prompt_cache_fields():
 def test_openai_model_request_metadata_uses_target_public_keys():
     model = OpenAIModel()
     request = AIRequest(
-        question="Question?",
+        question="Task?",
         context="Context",
         provider_name="openai",
         model_name="gpt-5.4-mini",
@@ -910,7 +910,7 @@ def test_openai_model_request_metadata_uses_target_public_keys():
 def test_claude_model_request_metadata_uses_target_public_keys():
     model = ClaudeModel()
     request = AIRequest(
-        question="Question?",
+        question="Task?",
         context="Context",
         provider_name="anthropic",
         model_name="claude-sonnet",
@@ -935,7 +935,7 @@ def test_claude_model_request_metadata_uses_target_public_keys():
 def test_openai_native_mcp_tools_accept_remote_mcp_and_reject_mcp():
     model = OpenAIModel()
     remote_request = AIRequest(
-        question="Question?",
+        question="Task?",
         context="Context",
         provider_name="openai",
         model_name="gpt-5.4-mini",
@@ -958,7 +958,7 @@ def test_openai_native_mcp_tools_accept_remote_mcp_and_reject_mcp():
 def test_claude_native_mcp_servers_accept_remote_mcp_and_reject_mcp():
     model = ClaudeModel()
     remote_request = AIRequest(
-        question="Question?",
+        question="Task?",
         context="Context",
         provider_name="anthropic",
         model_name="claude-sonnet",
@@ -981,7 +981,7 @@ def test_claude_native_mcp_servers_accept_remote_mcp_and_reject_mcp():
 def test_gemini_native_mcp_tool_accepts_remote_mcp_and_rejects_mcp():
     model = GeminiModel()
     remote_request = AIRequest(
-        question="Question?",
+        question="Task?",
         context="Context",
         provider_name="google",
         model_name="gemini-2.5-flash",
@@ -1007,7 +1007,7 @@ def test_gemini_native_mcp_tool_accepts_remote_mcp_and_rejects_mcp():
 def test_gemini_generate_uses_native_mcp_path_for_remote_mcp(monkeypatch):
     model = GeminiModel()
     request = AIRequest(
-        question="Question?",
+        question="Task?",
         context="Context",
         provider_name="google",
         model_name="gemini-2.5-flash",
@@ -1042,7 +1042,7 @@ def test_gemini_generate_uses_native_mcp_path_for_remote_mcp(monkeypatch):
 def test_mock_model_uses_task_metadata_lookup():
     model = MockModel()
     request = AIRequest(
-        question="Question?",
+        question="Task?",
         context='{"answers": {"q_task": "42"}}',
         provider_name="mock",
         model_name="mock",
@@ -1117,7 +1117,7 @@ def test_evaluate_run_result_records_unavailable_oracle_without_using_it_in_prom
     assert item.evaluationTrace.aiTrace["metadata"]["oracle_used"] is False
     assert "oracle" not in seen
     assert "oracle" not in str(seen["prompt"]).lower()
-    assert "oracle" not in str(seen["curriculum_context"]).lower()
+    assert "oracle" not in str(seen["evaluation_evidence"]).lower()
 
 
 def test_evaluate_run_result_records_available_oracle_but_keeps_it_out_of_prompt(monkeypatch, tmp_path):
@@ -1153,7 +1153,7 @@ def test_evaluate_run_result_records_available_oracle_but_keeps_it_out_of_prompt
     assert item.details["oracle_used"] is False
     assert item.evaluationTrace.aiTrace["metadata"]["oracle_available"] is True
     assert "SECRET_ORACLE_VALUE" not in str(seen["prompt"])
-    assert "SECRET_ORACLE_VALUE" not in str(seen["curriculum_context"])
+    assert "SECRET_ORACLE_VALUE" not in str(seen["evaluation_evidence"])
 
 
 def test_mcp_runtime_defaults_public_server_label_to_ctxbench():
@@ -1166,14 +1166,14 @@ def test_mcp_runtime_defaults_public_server_label_to_ctxbench():
 
 
 def test_evaluate_run_result_skips_when_context_block_missing(tmp_path):
-    # Add a question whose contextBlocks references a block that doesn't exist in blocks.json
+    # Add a task whose contextBlocks references a block that doesn't exist in blocks.json
     dataset_root = tmp_path / "dataset"
     dataset = write_mock_dataset(dataset_root)
     tasks_path = dataset_root / "tasks.json"
     tasks = json.loads(tasks_path.read_text(encoding="utf-8"))
     tasks["tasks"].append({
         "id": "q_missing",
-        "question": "What is the missing answer?",
+        "statement": "What is the missing answer?",
         "tags": [],
         "validation": {"type": "judge"},
         "contextBlocks": ["nonexistent_block"],

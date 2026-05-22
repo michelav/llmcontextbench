@@ -15,13 +15,13 @@ Reference:
 
 ## Minimum package layout
 
-The current compatibility path for a local dataset root is:
+The canonical local dataset root layout is:
 
 ```text
 dataset-root/
   ctxbench.dataset.json
-  questions.json
-  questions.instance.json
+  tasks.json
+  tasks.instance.json
   context/
     <instanceId>/
       parsed.json
@@ -52,8 +52,8 @@ Minimum recommended shape:
   "name": "CTXBench Lattes",
   "description": "Lattes benchmark dataset for CTXBench.",
   "layout": {
-    "tasks": "questions.json",
-    "taskInstances": "questions.instance.json",
+    "tasks": "tasks.json",
+    "taskInstances": "tasks.instance.json",
     "contextRoot": "context/"
   }
 }

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import warnings
 
 from ctxbench.benchmark.models import DatasetProvenance, Experiment, ExperimentDataset
 from ctxbench.dataset.capabilities import DatasetCapabilityReport
@@ -259,30 +258,13 @@ class LocalDatasetPackage:
 
     def _load_tasks(self) -> TaskDataset:
         tasks_path = Path(self.dataset_paths.tasks)
-        questions_path = Path(self.dataset_paths.root or "") / "questions.json"
         if tasks_path.exists():
             return TaskDataset.model_validate(load_json(tasks_path))
-        if questions_path.exists():
-            warnings.warn(
-                "questions.json is deprecated; rename to tasks.json",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            return TaskDataset.model_validate(load_json(questions_path))
-        raise FileNotFoundError(f"No tasks.json or questions.json found in {self.dataset_paths.root}")
+        raise FileNotFoundError(f"No tasks.json found in {self.dataset_paths.root}")
 
     def _load_task_instances(self, path: str | None) -> TaskInstanceDataset:
         if not path or not Path(path).exists():
-            legacy_path = Path(self.dataset_paths.root or "") / "questions.instance.json"
-            if legacy_path.exists():
-                warnings.warn(
-                    "questions.instance.json is deprecated; rename to tasks.instance.json",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                path = str(legacy_path)
-            else:
-                return TaskInstanceDataset(datasetId="missing", instances=[])
+            return TaskInstanceDataset(datasetId="missing", instances=[])
         raw = load_json(path)
         if not isinstance(raw, dict):
             raise ValueError("Task instances dataset must be a JSON object.")
@@ -290,5 +272,5 @@ class LocalDatasetPackage:
 
 
 class DatasetProvider(LocalDatasetPackage):
-    # deprecated: no longer called by lifecycle phases; retained for Spec 004 migration safety
+    # deprecated: no longer called by lifecycle phases
     pass

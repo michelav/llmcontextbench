@@ -27,7 +27,7 @@ class MockModel(ModelAdapter):
             metadata={"provider": "mock"},
         )
 
-    def _extract_answer(self, context: str, question_id: str) -> str:
+    def _extract_answer(self, context: str, task_id: str) -> str:
         try:
             payload = json.loads(context)
         except json.JSONDecodeError:
@@ -35,12 +35,12 @@ class MockModel(ModelAdapter):
         if isinstance(payload, dict):
             answers = payload.get("answers")
             if isinstance(answers, dict):
-                value = answers.get(question_id)
+                value = answers.get(task_id)
                 if value is not None:
                     return str(value)
         for pattern in [
-            rf"^{re.escape(question_id)}\s*=\s*(.+)$",
-            rf"^ANSWER\[{re.escape(question_id)}\]\s*:\s*(.+)$",
+            rf"^{re.escape(task_id)}\s*=\s*(.+)$",
+            rf"^ANSWER\[{re.escape(task_id)}\]\s*:\s*(.+)$",
             r"^ANSWER\s*:\s*(.+)$",
         ]:
             match = re.search(pattern, context, flags=re.MULTILINE)

@@ -120,7 +120,7 @@ def _write_local_dataset(root: Path) -> Path:
                 "tasks": [
                     {
                         "id": "q_year",
-                        "question": "When?",
+                        "statement": "When?",
                         "tags": ["objective"],
                         "validation": {"type": "judge"},
                         "contextBlocks": ["summary"],

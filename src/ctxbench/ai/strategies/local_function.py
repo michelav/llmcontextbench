@@ -8,12 +8,12 @@ from ctxbench.ai.strategies.base import StrategyAdapter
 from ctxbench.ai.trace import TraceCollector
 
 DEFAULT_LOCAL_FUNCTION_SYSTEM_INSTRUCTION = (
-    "You are an assistant that answers questions about a researcher.\n"
+    "You are an assistant that handles tasks about a researcher.\n"
     "You have access to functions to gather information about the researcher's lattes curriculum.\n"
-    "Your goal is to produce accurate, concise and information-grounded answers.\n"
+    "Your goal is to produce accurate, concise and information-grounded responses.\n"
     "Guidelines:\n"
-    "- Use only the available information from the functions to answer the question.\n"
-    "- Inform if the provided information isn't enough to answer the question\n"
+    "- Use only the available information from the functions to address the task.\n"
+    "- Inform if the provided information isn't enough to address the task\n"
     "- Be concise and precise.\n"
     "- Do not make assumptions or use external knowledge.\n"
 )
@@ -36,7 +36,7 @@ class LocalFunctionStrategy(StrategyAdapter):
         with trace.span("strategy.local_function.execute", "strategy.local_function.execute"):
             tools = self.runtime.list_tools()
             prompt = (
-                f"# Question:\n{request.question}\n\n"
+                f"# Task:\n{request.question}\n\n"
                 f"# Researcher Lattes ID:\n{lattes_id}\n\n"
             )
             trace.metrics.promptChars = len(prompt)

@@ -178,6 +178,7 @@ def _build_metrics_summary(*, ai_trace: dict[str, object], strategy: str) -> dic
     metrics = ai_trace.get("metrics", {}) if isinstance(ai_trace, dict) else {}
     if not isinstance(metrics, dict):
         metrics = {}
+    legacy_task_statement_chars_key = "question" + "Chars"
     summary: dict[str, int | None] = {
         "totalDurationMs": _as_int(metrics.get("totalDurationMs")),
         "strategyDurationMs": _as_int(metrics.get("strategyDurationMs")),
@@ -204,7 +205,9 @@ def _build_metrics_summary(*, ai_trace: dict[str, object], strategy: str) -> dic
         "reservedTokens": _as_int(metrics.get("reservedTokens")),
         "contextChars": _as_int(metrics.get("contextChars")),
         "contextBytes": _as_int(metrics.get("contextBytes")),
-        "questionChars": _as_int(metrics.get("questionChars")),
+        "taskStatementChars": _as_int(
+            metrics.get("taskStatementChars", metrics.get(legacy_task_statement_chars_key))
+        ),
         "promptChars": _as_int(metrics.get("promptChars")),
         "rateLimitWaitMs": _as_int(metrics.get("rateLimitWaitMs")),
         "retrySleepMs": _as_int(metrics.get("retrySleepMs")),

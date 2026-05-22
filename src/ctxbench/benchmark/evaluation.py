@@ -26,23 +26,23 @@ from ctxbench.dataset.payloads import OracleUnavailable
 from ctxbench.dataset.provider import LocalDatasetPackage
 
 EVALUATION_SYSTEM_INSTRUCTION = (
-    "You are evaluating benchmark answers.\n"
-    "Use only the provided question, answer and curriculum context.\n"
+    "You are evaluating benchmark responses.\n"
+    "Use only the provided task, candidate response, and evaluation evidence.\n"
     "Do not use external knowledge.\n"
     "Return only the requested JSON."
 )
 
-JUDGE_PROMPT_PREFIX = """You are an evaluation assistant for a benchmark. Your task is to evaluate an answer given by a model based strictly on the provided curriculum context and criteria.
+JUDGE_PROMPT_PREFIX = """You are an evaluation assistant for a benchmark. Your task is to evaluate a response given by a model based strictly on the provided task, evaluation evidence, and criteria.
 You must be objective, consistent, and conservative in your evaluation.
-Do NOT use external knowledge. Only use the provided curriculum context.
+Do NOT use external knowledge. Only use the provided task and evaluation evidence.
 Your output must strictly follow the requested JSON format.
-Evaluate the answer to the question based on the provided curriculum context.
+Evaluate the candidate response to the task based on the provided evaluation evidence.
 
 # Evaluation Instructions
-- Use only the provided curriculum context.
-- If the curriculum context is silent about something, treat that as missing support.
+- Use only the provided task and evaluation evidence.
+- If the evaluation evidence is silent about something, treat that as missing support.
 - Be strict: if unsure, prefer "partial" or "misses".
-- Each criterion MUST include a short justification grounded in the provided curriculum context.
+- Each criterion MUST include a short justification grounded in the provided evaluation evidence.
 - Do NOT include chain-of-thought or hidden reasoning. Provide only concise criterion justifications.
 
 # Evaluation Scale
@@ -56,18 +56,18 @@ Use the following scale for ALL criteria:
 # Evaluation Criteria
 
 ## Correctness
-The answer must be factually correct according to the curriculum context.
+The response must be factually correct according to the evaluation evidence.
 - Check whether the information provided is accurate.
-- Use the curriculum context as the source of truth.
-- Check whether the answer does not contradict the curriculum context.
-- Penalize claims that are not supported by the curriculum context, unless they are clearly marked as uncertainty or inference grounded in the context.
+- Use the evaluation evidence as the source of truth.
+- Check whether the response does not contradict the evaluation evidence.
+- Penalize claims that are not supported by the evaluation evidence, unless they are clearly marked as uncertainty or inference grounded in the evidence.
 
 ## Completeness
-The answer must fully address the question according to what can be answered from the curriculum context.
-- Check whether all parts of the question are answered.
-- Penalize important omissions relative to the curriculum context.
-- Do not penalize missing information when the curriculum context itself does not provide enough evidence to answer that part of the question.
-- Prefer answers that explicitly acknowledge when the curriculum context lacks enough information.
+The response must fully address the task according to what can be supported by the evaluation evidence.
+- Check whether all parts of the task are addressed.
+- Penalize important omissions relative to the evaluation evidence.
+- Do not penalize missing information when the evaluation evidence itself does not provide enough support for that part of the task.
+- Prefer responses that explicitly acknowledge when the evaluation evidence lacks enough information.
 
 # Output Format (STRICT JSON)
 Return ONLY a JSON object in the following format:
@@ -83,16 +83,16 @@ Return ONLY a JSON object in the following format:
   }}
 }}
 
-# Curriculum Context
-{curriculum_context}
+# Evaluation Evidence
+{evaluation_evidence}
 """
 
 JUDGE_PROMPT_SUFFIX = """
-# Question
-{question}
+# Task
+{task_statement}
 
-# Candidate Answer
-{answer}
+# Candidate Response
+{response}
 
 """
 
@@ -163,9 +163,9 @@ class EvaluationJob:
     result: TrialResult
     judge: EvaluationModelConfig
     prompt: str
-    question_text: str
+    task_statement: str
     context_payload: dict[str, Any]
-    curriculum_context: str
+    evaluation_evidence: str
     evidence_obtained: bool
     oracle_available: bool
     oracle_used: bool = False
@@ -200,7 +200,7 @@ def build_evaluation_job(
     if only and result.taskId != only:
         return None
 
-    rendered_question = result.taskStatement
+    task_statement = result.taskStatement
     validation_type = result.validationType or result.metadata.validationType
     if mode and validation_type != mode:
         return None
@@ -225,20 +225,20 @@ def build_evaluation_job(
                 },
             )
         return None
-    curriculum_context = _format_curriculum_context(context_payload)
+    evaluation_evidence = _format_evaluation_evidence(context_payload)
     prompt = JUDGE_PROMPT.format(
-        question=rendered_question,
-        answer=result.response,
-        curriculum_context=curriculum_context,
+        task_statement=task_statement,
+        response=result.response,
+        evaluation_evidence=evaluation_evidence,
     )
     return EvaluationJob(
         custom_id=batch_custom_id(result, judge),
         result=result,
         judge=judge,
         prompt=prompt,
-        question_text=rendered_question,
+        task_statement=task_statement,
         context_payload=context_payload,
-        curriculum_context=curriculum_context,
+        evaluation_evidence=evaluation_evidence,
         evidence_obtained=True,
         oracle_available=oracle_available,
         oracle_used=False,
@@ -294,13 +294,13 @@ def _judge_request(
     *,
     config: EvaluationModelConfig,
     prompt: str,
-    answer_text: str,
+    response_text: str,
     trial_id: str,
     exp_id: str,
     instance_id: str,
     task_id: str,
-    question_text: str,
-    curriculum_context: str,
+    task_statement: str,
+    evaluation_evidence: str,
     engine: Engine,
 ) -> tuple[dict[str, Any] | None, EvaluationJudgeInfo, EvaluationTrace]:
     request_params = {
@@ -322,17 +322,17 @@ def _judge_request(
             build_judge_prompt_cache_key(
                 model_name=config.model,
                 instance_id=instance_id,
-                context=curriculum_context,
+                context=evaluation_evidence,
             ),
         )
     is_claude = provider_lower.startswith("anthropic") or provider_lower.startswith("claude")
     if is_claude:
         request_params["prompt_cache_prefix"] = JUDGE_PROMPT_PREFIX.format(
-            curriculum_context=curriculum_context
+            evaluation_evidence=evaluation_evidence
         )
         effective_prompt = JUDGE_PROMPT_SUFFIX.format(
-            question=question_text,
-            answer=answer_text,
+            task_statement=task_statement,
+            response=response_text,
         )
     else:
         effective_prompt = prompt
@@ -383,7 +383,7 @@ def _judge_request(
 
 def _evaluate_judge(
     result: TrialResult,
-    question_text: str,
+    task_statement: str,
     context_payload: dict[str, Any],
     judges: list[EvaluationModelConfig],
     engine: Engine,
@@ -393,11 +393,11 @@ def _evaluate_judge(
             "evaluationMethod": "judge",
             "error": "Experiment evaluation.judges is required for judge validation.",
         }, EvaluationJudgeInfo(), EvaluationTrace()
-    curriculum_context = _format_curriculum_context(context_payload)
+    evaluation_evidence = _format_evaluation_evidence(context_payload)
     prompt = JUDGE_PROMPT.format(
-        question=question_text,
-        answer=result.response,
-        curriculum_context=curriculum_context,
+        task_statement=task_statement,
+        response=result.response,
+        evaluation_evidence=evaluation_evidence,
     )
     judge_votes: list[dict[str, Any]] = []
     judge_infos: list[EvaluationJudgeInfo] = []
@@ -407,13 +407,13 @@ def _evaluate_judge(
         payload, judge_info, trace = _judge_request(
             config=config,
             prompt=prompt,
-            answer_text=result.response,
+            response_text=result.response,
             trial_id=result.trialId,
             exp_id=result.experimentId,
             instance_id=result.instanceId,
             task_id=result.taskId,
-            question_text=question_text,
-            curriculum_context=curriculum_context,
+            task_statement=task_statement,
+            evaluation_evidence=evaluation_evidence,
             engine=engine,
         )
         judge_infos.append(judge_info)
@@ -525,7 +525,7 @@ def evaluation_from_judge_payload(
         }
     return _build_evaluation_result(
         job.result,
-        question_text=job.question_text,
+        task_statement=job.task_statement,
         validation_type="judge",
         details=details,
         judge_info=judge_info,
@@ -540,7 +540,7 @@ def evaluation_from_judge_payload(
 
 def _build_skipped_evaluation_result(
     result: TrialResult,
-    question_text: str,
+    task_statement: str,
     *,
     missing_blocks: list[str],
 ) -> EvaluationTrialResult:
@@ -556,7 +556,7 @@ def _build_skipped_evaluation_result(
         dataset=result.dataset,
         taskId=result.taskId,
         instanceId=result.instanceId,
-        taskStatement=question_text,
+        taskStatement=task_statement,
         evaluationMode="judge",
         status="skipped",
         evaluationMethod="judge",
@@ -583,7 +583,7 @@ def _build_skipped_evaluation_result(
 def _build_evaluation_result(
     result: TrialResult,
     *,
-    question_text: str,
+    task_statement: str,
     validation_type: str,
     details: dict[str, Any],
     judge_info: EvaluationJudgeInfo,
@@ -598,7 +598,7 @@ def _build_evaluation_result(
         dataset=result.dataset,
         taskId=result.taskId,
         instanceId=result.instanceId,
-        taskStatement=question_text,
+        taskStatement=task_statement,
         evaluationMode=validation_type,
         status="evaluated",
         evaluationMethod=details.get("evaluationMethod"),
@@ -690,7 +690,7 @@ def _with_evaluation_trace_metadata(
     )
 
 
-def _format_curriculum_context(context_payload: dict[str, Any]) -> str:
+def _format_evaluation_evidence(context_payload: dict[str, Any]) -> str:
     if not context_payload:
         return ""
     parts: list[str] = []
@@ -785,7 +785,7 @@ def evaluate_run_result(
     if only and result.taskId != only:
         return None
 
-    rendered_question = result.taskStatement
+    task_statement = result.taskStatement
     validation_type = result.validationType or result.metadata.validationType
     if mode and validation_type != mode:
         return None
@@ -818,10 +818,10 @@ def evaluate_run_result(
                         "missingBlocks": missing,
                     },
                 )
-            return _build_skipped_evaluation_result(result, rendered_question, missing_blocks=missing)
+            return _build_skipped_evaluation_result(result, task_statement, missing_blocks=missing)
         details, judge_info, trace = _evaluate_judge(
             result,
-            rendered_question,
+            task_statement,
             context_payload,
             judges,
             active_engine,
@@ -851,7 +851,7 @@ def evaluate_run_result(
         )
     return _build_evaluation_result(
         result,
-        question_text=rendered_question,
+        task_statement=task_statement,
         validation_type=validation_type,
         details=details,
         judge_info=judge_info,

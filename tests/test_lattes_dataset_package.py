@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from ctxbench.dataset.package import DatasetPackage
@@ -14,6 +15,7 @@ FIXTURE_ROOT = (
     / "lattes_provider_free"
     / "dataset"
 )
+REAL_DATASET_ROOT = Path(__file__).resolve().parents[1] / "datasets" / "lattes"
 
 
 def test_lattes_dataset_package_satisfies_dataset_package_protocol() -> None:
@@ -29,6 +31,29 @@ def test_lattes_dataset_package_fixtures_path_contains_instance_and_task_files()
     assert (fixtures_root / "tasks.json").exists()
     assert (fixtures_root / "tasks.instance.json").exists()
     assert any((fixtures_root / "context").iterdir())
+
+
+def test_real_lattes_dataset_uses_canonical_task_payloads() -> None:
+    package = LattesDatasetAdapter(REAL_DATASET_ROOT)
+
+    assert (REAL_DATASET_ROOT / "tasks.json").exists()
+    assert (REAL_DATASET_ROOT / "tasks.instance.json").exists()
+    assert not (REAL_DATASET_ROOT / "questions.json").exists()
+    assert not (REAL_DATASET_ROOT / "questions.instance.json").exists()
+
+    task = package.get_task("q_phd")
+    instance = package.get_instance("3457219624656691")
+    raw_tasks = json.loads((REAL_DATASET_ROOT / "tasks.json").read_text(encoding="utf-8"))
+    raw_instances = json.loads(
+        (REAL_DATASET_ROOT / "tasks.instance.json").read_text(encoding="utf-8")
+    )
+
+    assert task.statement == "Where and how long ago did the researcher complete their PhD?"
+    assert "tasks" in raw_tasks
+    assert "questions" not in raw_tasks
+    assert instance.tasks
+    assert "tasks" in raw_instances["instances"][0]
+    assert "questions" not in raw_instances["instances"][0]
 
 
 def test_lattes_dataset_package_identity_and_version_are_non_empty() -> None:

@@ -49,7 +49,7 @@ def expand_experiment(
     logger.phase(
         "LOAD",
         "Dataset loading completed",
-        questions=len(provider.list_question_ids()),
+        tasks=len(provider.list_task_ids()),
         instances=len(provider.list_instance_ids()),
     )
     runspecs = generate_runspecs(

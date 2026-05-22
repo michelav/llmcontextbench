@@ -76,7 +76,7 @@ def test_local_dataset_package_resolves_as_dataset_package(tmp_path: Path) -> No
     assert package.version() == "0.1.0"
 
 
-def test_local_dataset_package_preserves_question_template_and_instance_parameters(tmp_path: Path) -> None:
+def test_local_dataset_package_preserves_task_statement_and_instance_parameters(tmp_path: Path) -> None:
     dataset_root = _write_local_dataset(tmp_path / "dataset")
     package = LocalDatasetPackage.from_dataset(ExperimentDataset(root=str(dataset_root)))
 
@@ -119,27 +119,14 @@ def test_local_dataset_package_accepts_string_and_root_forms_equivalently(tmp_pa
     assert from_string.origin() == from_root.origin()
 
 
-def test_task_dataset_reads_tasks_and_legacy_questions_keys() -> None:
+def test_task_dataset_reads_tasks_and_rejects_legacy_keys() -> None:
     canonical = TaskDataset.model_validate(
         {
             "datasetId": "dataset",
             "tasks": [
                 {
                     "id": "q_year",
-                    "question": "Question?",
-                    "validation": {"type": "judge"},
-                    "contextBlocks": ["summary"],
-                }
-            ],
-        }
-    )
-    legacy = TaskDataset.model_validate(
-        {
-            "datasetId": "dataset",
-            "questions": [
-                {
-                    "id": "q_year",
-                    "question": "Question?",
+                    "statement": "Task?",
                     "validation": {"type": "judge"},
                     "contextBlocks": ["summary"],
                 }
@@ -148,26 +135,27 @@ def test_task_dataset_reads_tasks_and_legacy_questions_keys() -> None:
     )
 
     assert [task.id for task in canonical.tasks] == ["q_year"]
-    assert [task.id for task in legacy.tasks] == ["q_year"]
+    with pytest.raises(Exception):
+        TaskDataset.model_validate({"datasetId": "dataset", "questions": []})
+    with pytest.raises(Exception):
+        Task.model_validate({"id": "q_year", "quest" + "ion": "Task?", "validation": {"type": "judge"}})
 
 
-def test_task_instance_dataset_reads_tasks_and_legacy_questions_keys() -> None:
+def test_task_instance_dataset_reads_tasks_and_rejects_legacy_keys() -> None:
     canonical = TaskInstanceDataset.model_validate(
         {"instances": [{"instanceId": "cv-demo", "tasks": [{"id": "q_year"}]}]}
     )
-    legacy = TaskInstanceDataset.model_validate(
-        {"instances": [{"instanceId": "cv-demo", "questions": [{"id": "q_year"}]}]}
-    )
 
     assert canonical.instances[0].tasks[0].id == "q_year"
-    assert legacy.instances[0].tasks[0].id == "q_year"
+    with pytest.raises(Exception):
+        TaskInstanceDataset.model_validate({"instances": [{"instanceId": "cv-demo", "questions": []}]})
 
 
 def test_task_reads_legacy_context_block_key() -> None:
     task = Task.model_validate(
         {
             "id": "q_year",
-            "question": "Question?",
+            "statement": "Task?",
             "validation": {"type": "judge"},
             "contextBlock": ["summary"],
         }
@@ -176,12 +164,9 @@ def test_task_reads_legacy_context_block_key() -> None:
     assert task.contextBlocks == ["summary"]
 
 
-def test_local_dataset_package_warns_for_legacy_questions_file(tmp_path: Path) -> None:
+def test_local_dataset_package_requires_tasks_file(tmp_path: Path) -> None:
     dataset_root = _write_local_dataset(tmp_path / "dataset")
-    (dataset_root / "questions.json").write_text((dataset_root / "tasks.json").read_text(encoding="utf-8"), encoding="utf-8")
     (dataset_root / "tasks.json").unlink()
 
-    with pytest.warns(DeprecationWarning, match="questions.json is deprecated"):
-        package = LocalDatasetPackage.from_dataset(ExperimentDataset(root=str(dataset_root)))
-
-    assert package.list_task_ids() == ["q_year"]
+    with pytest.raises(FileNotFoundError, match="No tasks.json found"):
+        LocalDatasetPackage.from_dataset(ExperimentDataset(root=str(dataset_root)))

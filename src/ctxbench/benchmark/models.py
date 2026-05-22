@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 import re
 from typing import Any
-import warnings
 
 from ctxbench._compat import BaseModel, Field, ValidationError
 
@@ -54,7 +53,7 @@ class ExperimentDataset(BaseModel):
                     version=str(data["version"]) if data.get("version") is not None else None,
                     origin=str(data["origin"]) if data.get("origin") is not None else None,
                 )
-            legacy_paths = {"tasks", "contexts", "task_instances", "questions", "question_instances"}
+            legacy_paths = {"tasks", "contexts", "task_instances"}
             if legacy_paths & set(data):
                 raise ValidationError(
                     "Experiment dataset must be a dataset directory path. "
@@ -82,15 +81,6 @@ class ExperimentDataset(BaseModel):
         return str(Path(self.root) / "tasks.json")
 
     @property
-    def questions(self) -> str:
-        warnings.warn(
-            "ExperimentDataset.questions is deprecated; use ExperimentDataset.tasks.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.tasks
-
-    @property
     def contexts(self) -> str:
         if not self.root:
             raise ValueError("Dataset contexts path is only available for local-root datasets.")
@@ -101,15 +91,6 @@ class ExperimentDataset(BaseModel):
         if not self.root:
             raise ValueError("Dataset task_instances path is only available for local-root datasets.")
         return str(Path(self.root) / "tasks.instance.json")
-
-    @property
-    def question_instances(self) -> str:
-        warnings.warn(
-            "ExperimentDataset.question_instances is deprecated; use ExperimentDataset.task_instances.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.task_instances
 
 
 class DatasetProvenance(BaseModel):
@@ -144,7 +125,7 @@ class DatasetProvenance(BaseModel):
             )
         if isinstance(data, dict):
             payload = dict(data)
-            legacy_paths = {"tasks", "contexts", "task_instances", "questions", "question_instances"}
+            legacy_paths = {"tasks", "contexts", "task_instances"}
             if legacy_paths & set(payload) and "root" not in payload and "id" not in payload:
                 raise ValidationError(
                     "Dataset provenance must reference a dataset root or id/version. "
@@ -205,15 +186,6 @@ class DatasetProvenance(BaseModel):
         return str(Path(self.root) / "tasks.json")
 
     @property
-    def questions(self) -> str:
-        warnings.warn(
-            "DatasetProvenance.questions is deprecated; use DatasetProvenance.tasks.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.tasks
-
-    @property
     def contexts(self) -> str:
         if not self.root:
             raise ValueError("Dataset contexts path is unavailable without a local materialized path.")
@@ -224,15 +196,6 @@ class DatasetProvenance(BaseModel):
         if not self.root:
             raise ValueError("Dataset task_instances path is unavailable without a local materialized path.")
         return str(Path(self.root) / "tasks.instance.json")
-
-    @property
-    def question_instances(self) -> str:
-        warnings.warn(
-            "DatasetProvenance.question_instances is deprecated; use DatasetProvenance.task_instances.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.task_instances
 
 
 class ModelEntry(BaseModel):
@@ -297,15 +260,13 @@ class ExperimentScope(BaseModel):
             return cls()
         if not isinstance(data, dict):
             raise ValidationError("ExperimentScope requires an object input.")
-        task_items = data.get("tasks", data.get("questions", []))
+        if "questions" in data:
+            raise ValidationError("ExperimentScope input must use 'tasks', not 'questions'.")
+        task_items = data.get("tasks", [])
         return cls(
             instances=[str(item) for item in data.get("instances", []) if isinstance(item, str)],
             tasks=[str(item) for item in task_items if isinstance(item, str)],
         )
-
-    @property
-    def questions(self) -> list[str]:
-        return self.tasks
 
 
 class ExperimentExpansion(BaseModel):

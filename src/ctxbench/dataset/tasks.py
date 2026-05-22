@@ -33,18 +33,16 @@ class Task(BaseModel):
             return data
         if not isinstance(data, dict):
             raise ValidationError("Task requires an object input.")
+        if "question" in data:
+            raise ValidationError("Task input must use 'statement', not 'question'.")
         context_blocks = data.get("contextBlocks", data.get("contextBlock", []))
         return cls(
             id=str(data.get("id", "")).strip(),
-            statement=str(data.get("statement", data.get("question", ""))),
+            statement=str(data.get("statement", "")),
             tags=[str(item) for item in data.get("tags", []) if isinstance(item, str)],
             validation=TaskValidation.model_validate(data.get("validation", {})),
             contextBlocks=[str(item) for item in context_blocks if isinstance(item, str)],
         )
-
-    @property
-    def question(self) -> str:
-        return self.statement
 
 
 class TaskDataset(BaseModel):
@@ -61,7 +59,9 @@ class TaskDataset(BaseModel):
             return data
         if not isinstance(data, dict):
             raise ValidationError("TaskDataset requires an object input.")
-        task_items = data.get("tasks", data.get("questions", []))
+        if "questions" in data:
+            raise ValidationError("TaskDataset input must use 'tasks', not 'questions'.")
+        task_items = data.get("tasks", [])
         return cls(
             datasetId=str(data.get("datasetId", "")),
             domain=data.get("domain"),
@@ -74,10 +74,6 @@ class TaskDataset(BaseModel):
                 if isinstance(item, dict)
             ],
         )
-
-    @property
-    def questions(self) -> list[Task]:
-        return self.tasks
 
 
 class TaskInstanceEntry(BaseModel):
@@ -113,7 +109,9 @@ class TaskInstance(BaseModel):
             return data
         if not isinstance(data, dict):
             raise ValidationError("TaskInstance requires an object input.")
-        task_items = data.get("tasks", data.get("questions", []))
+        if "questions" in data:
+            raise ValidationError("TaskInstance input must use 'tasks', not 'questions'.")
+        task_items = data.get("tasks", [])
         return cls(
             instanceId=str(data.get("instanceId", "")).strip(),
             contextBlocks=str(data.get("contextBlocks", "")).strip(),
@@ -124,19 +122,9 @@ class TaskInstance(BaseModel):
             ],
         )
 
-    @property
-    def questions(self) -> list[TaskInstanceEntry]:
-        return self.tasks
-
     def get_task(self, task_id: str) -> TaskInstanceEntry | None:
         for item in self.tasks:
             if item.id == task_id:
-                return item
-        return None
-
-    def get_question(self, question_id: str) -> TaskInstanceEntry | None:
-        for item in self.tasks:
-            if item.id == question_id:
                 return item
         return None
 
@@ -163,11 +151,3 @@ class TaskInstanceDataset(BaseModel):
                 if isinstance(item, dict)
             ],
         )
-
-
-QuestionValidation = TaskValidation
-QuestionInstance = TaskInstance
-Question = Task
-QuestionDataset = TaskDataset
-QuestionInstanceEntry = TaskInstanceEntry
-QuestionInstanceDataset = TaskInstanceDataset

@@ -5,11 +5,11 @@ from ctxbench.ai.strategies.base import StrategyAdapter
 from ctxbench.ai.trace import TraceCollector
 
 DEFAULT_SYSTEM_INSTRUCTION = (
-    "You are an assistant that answers questions about a researcher using his / her Lattes curriculum as context.\n"
-    "Your goal is to produce  accurate, concise and context-grounded answers.\n"
+    "You are an assistant that handles tasks about a researcher using his / her Lattes curriculum as context.\n"
+    "Your goal is to produce  accurate, concise and context-grounded responses.\n"
     "Guidelines:\n"
-    "- Base your answer strictly on the provided data.\n"
-    "- Inform if the provided context isn't enough to answer the question\n"
+    "- Base your respond strictly on the provided data.\n"
+    "- Inform if the provided context isn't enough to address the task\n"
     "- Be concise and precise.\n"
     "- Do not make assumptions or use external knowledge.\n"
 )
@@ -21,7 +21,7 @@ class InlineStrategy(StrategyAdapter):
             trace.record_steps(1)
             prompt = (
                 f"# Context:\n{request.context}\n\n"
-                f"# Question:\n{request.question}\n"
+                f"# Task:\n{request.question}\n"
             )
             trace.metrics.promptChars = len(prompt)
             model_input = ModelInput(

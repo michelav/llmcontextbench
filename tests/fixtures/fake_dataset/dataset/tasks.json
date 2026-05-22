@@ -5,7 +5,7 @@
   "tasks": [
     {
       "id": "task_role",
-      "question": "What role does {person_name} have?",
+      "statement": "What role does {person_name} have?",
       "tags": [
         "synthetic",
         "generic"

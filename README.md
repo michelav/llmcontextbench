@@ -4,7 +4,7 @@ CTXBench is a benchmark runner for comparing how LLMs respond to dataset-backed 
 
 The current codebase is centered on a simple idea:
 
-- keep the question set fixed
+- keep the task set fixed
 - vary how the model accesses the source information
 - evaluate the response qualitatively with either deterministic heuristics or a judge model
 
@@ -17,7 +17,7 @@ This version no longer uses the legacy evaluation model based on `exact`, `analy
 The benchmark now uses:
 
 - dataset instances organized by folder
-- question-level `validation.type`
+- task-level `validation.type`
 - instance-level `acceptedAnswers`, `contextRefs`, and `themes`
 - qualitative evaluation only
 - Lattes tools named as `get_<resource>`
@@ -29,40 +29,42 @@ The benchmark now uses:
 A dataset is composed of:
 
 - `ctxbench.dataset.json`
-- `questions.json`
-- `questions.instance.json`
+- `tasks.json`
+- `tasks.instance.json`
 - `context/<instanceId>/...`
 
 `ctxbench.dataset.json` identifies the dataset package and its `datasetVersion`.
 
-`questions.json` defines the stable question catalog.
+`tasks.json` defines the stable task catalog.
 
 ```json
 {
   "datasetId": "example-lattes-v2",
-  "questions": [
+  "tasks": [
     {
       "id": "q_phd_year",
-      "question": "In which year did the researcher obtain their PhD?",
+      "statement": "In which year did the researcher obtain their PhD?",
       "tags": ["objective", "factual", "simple"],
       "validation": {
         "type": "heuristic",
         "schema": { "type": "number" }
-      }
+      },
+      "contextBlocks": ["education"]
     },
     {
       "id": "q_research_summary",
-      "question": "Summarize the researcher's main research areas based only on the available context.",
+      "statement": "Summarize the researcher's main research areas based only on the available context.",
       "tags": ["subjective", "factual", "simple"],
       "validation": {
         "type": "judge"
-      }
+      },
+      "contextBlocks": ["summary", "research"]
     }
   ]
 }
 ```
 
-`questions.instance.json` binds each question to one instance.
+`tasks.instance.json` binds each task to one instance.
 
 ```json
 {
@@ -71,7 +73,7 @@ A dataset is composed of:
     {
       "instanceId": "5660469902738038",
       "contextBlocks": "context/5660469902738038/blocks.json",
-      "questions": [
+      "tasks": [
         {
           "id": "q_phd_year",
           "acceptedAnswers": [1999]
@@ -92,8 +94,8 @@ Each instance lives in its own directory:
 ```text
 dataset-root/
   ctxbench.dataset.json
-  questions.json
-  questions.instance.json
+  tasks.json
+  tasks.instance.json
   context/
     5660469902738038/
       raw.html
@@ -134,7 +136,7 @@ There is no `score` and no `meanScore`.
 An experiment selects:
 
 - which dataset to use
-- which instances and questions to include via `scope`
+- which instances and tasks to include via `scope`
 - which provider/model pairs to run
 - which strategies and formats to test
 - whether evaluation is enabled
@@ -148,7 +150,7 @@ Example:
   "dataset": "lattes/",
   "scope": {
     "instances": [],
-    "questions": []
+    "tasks": []
   },
   "factors": {
     "model": [
@@ -171,7 +173,7 @@ Example:
 }
 ```
 
-`scope.instances` and `scope.questions` act as filters. Empty lists mean "all available".
+`scope.instances` and `scope.tasks` act as filters. Empty lists mean "all available".
 
 ## Strategies
 

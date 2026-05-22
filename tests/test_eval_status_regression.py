@@ -22,7 +22,7 @@ def _write_eval_fixture(root: Path) -> Path:
                 "tasks": [
                     {
                         "id": "q_one",
-                        "question": "Question one?",
+                        "statement": "Task one?",
                         "validation": {"type": "judge"},
                         "contextBlocks": ["q_one"],
                     }
@@ -52,7 +52,7 @@ def _write_eval_fixture(root: Path) -> Path:
                 "blocks": {
                     "q_one": {
                         "title": "q_one",
-                        "summary": "Some context for the question.",
+                        "summary": "Some context for the task.",
                     }
                 }
             }
@@ -94,7 +94,7 @@ def _write_eval_fixture(root: Path) -> Path:
                         "format": "json",
                         "repeatIndex": 1,
                         "dataset": {"root": str(dataset_root.resolve())},
-                        "taskStatement": "Question one?",
+                        "taskStatement": "Task one?",
                         "metadata": {
                             "canonicalId": "run-1",
                             "taskId": "q_one",
@@ -125,7 +125,7 @@ def _write_eval_fixture(root: Path) -> Path:
                         "experimentId": "exp_mock",
                         "dataset": {"root": str(dataset_root.resolve())},
                         "taskId": "q_one",
-                        "taskStatement": "Question one?",
+                        "taskStatement": "Task one?",
                         "taskTemplate": None,
                         "instanceId": "cv_demo",
                         "provider": "mock",

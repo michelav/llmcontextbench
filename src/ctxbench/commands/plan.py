@@ -65,7 +65,7 @@ def plan_command(
         "Dataset resolved",
         dataset=adapter_metadata.name,
         version=capability_report.version,
-        questions=len(adapter.list_task_ids()),
+        tasks=len(adapter.list_task_ids()),
         instances=len(adapter.list_instance_ids()),
     )
     logger.phase(

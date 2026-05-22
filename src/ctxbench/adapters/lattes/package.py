@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-import warnings
 
 from ctxbench.benchmark.models import ExperimentDataset
 from ctxbench.dataset.capabilities import DatasetCapabilityReport
@@ -125,23 +124,7 @@ class LattesDatasetAdapter(LocalDatasetPackage):
     def _detect_version(dataset_root: str | Path) -> str:
         root = Path(dataset_root)
         tasks_payload = root / "tasks.json"
-        legacy_questions_payload = root / "questions.json"
         instances_payload = root / "tasks.instance.json"
-        legacy_instances_payload = root / "questions.instance.json"
-        if not tasks_payload.exists() and legacy_questions_payload.exists():
-            warnings.warn(
-                "questions.json is deprecated; rename to tasks.json",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            tasks_payload = legacy_questions_payload
-        if not instances_payload.exists() and legacy_instances_payload.exists():
-            warnings.warn(
-                "questions.instance.json is deprecated; rename to tasks.instance.json",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            instances_payload = legacy_instances_payload
         if tasks_payload.exists():
             import json
 

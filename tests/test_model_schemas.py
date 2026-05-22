@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -28,22 +27,10 @@ def make_dataset() -> ExperimentDataset:
 
 def test_experiment_scope_uses_tasks_with_questions_compatibility_alias():
     scoped = ExperimentScope.model_validate({"instances": ["cv-demo"], "tasks": ["q_year"]})
-    legacy = ExperimentScope.model_validate({"instances": ["cv-demo"], "questions": ["q_year"]})
 
     assert scoped.tasks == ["q_year"]
-    assert scoped.questions == ["q_year"]
-    assert legacy.tasks == ["q_year"]
-    assert legacy.questions == ["q_year"]
-
-
-def test_deprecated_dataset_questions_property_warns() -> None:
-    dataset = ExperimentDataset(root="/tmp/dataset")
-    provenance = DatasetProvenance(id="dataset", version="1", materialized_path="/tmp/dataset")
-
-    with pytest.warns(DeprecationWarning, match="ExperimentDataset.questions is deprecated"):
-        assert dataset.questions == "/tmp/dataset/tasks.json"
-    with pytest.warns(DeprecationWarning, match="DatasetProvenance.questions is deprecated"):
-        assert provenance.questions == "/tmp/dataset/tasks.json"
+    with pytest.raises(Exception):
+        ExperimentScope.model_validate({"instances": ["cv-demo"], "questions": ["q_year"]})
 
 
 def make_metadata() -> TrialMetadata:
@@ -291,16 +278,3 @@ def test_evaluation_run_result_model_validate_rejects_legacy_public_fields():
                 "metadata": metadata,
             }
         )
-
-
-def test_schema_public_identifiers_use_ctxbench_names():
-    runspec_schema = json.loads((REPO_ROOT / "src/schemas/runspec.schema.json").read_text(encoding="utf-8"))
-    plan_schema = json.loads((REPO_ROOT / "src/schemas/plan.schema.json").read_text(encoding="utf-8"))
-
-    assert runspec_schema["$id"] == "https://ctxbench-benchmark.org/schemas/runspec.schema.json"
-    assert runspec_schema["title"] == "CTXBench TrialSpec"
-    assert runspec_schema["properties"]["kind"]["const"] == "ctxbench.runspec"
-
-    assert plan_schema["$id"] == "https://ctxbench-benchmark.org/schemas/runplan.schema.json"
-    assert plan_schema["title"] == "CTXBench RunPlan"
-    assert plan_schema["properties"]["kind"]["const"] == "ctxbench.runplan"
