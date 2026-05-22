@@ -8,8 +8,9 @@ from ctxbench.ai.strategies.base import StrategyAdapter
 from ctxbench.ai.trace import TraceCollector
 
 DEFAULT_LOCAL_FUNCTION_SYSTEM_INSTRUCTION = (
-    "You are an assistant that handles tasks about a researcher.\n"
-    "You have access to functions to gather information about the researcher's lattes curriculum.\n"
+    "You are an assistant that handles the tasks proposed.\n"
+    "The tasks may vary from questions be answered to actions to be executed like search and retrieve or analysis.\n"
+    "You have access to functions to gather all information needed to perform the tasks.\n"
     "Your goal is to produce accurate, concise and information-grounded responses.\n"
     "Guidelines:\n"
     "- Use only the available information from the functions to address the task.\n"

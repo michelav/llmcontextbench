@@ -5,7 +5,9 @@ from ctxbench.ai.strategies.base import StrategyAdapter
 from ctxbench.ai.trace import TraceCollector
 
 DEFAULT_SYSTEM_INSTRUCTION = (
-    "You are an assistant that handles tasks about a researcher using his / her Lattes curriculum as context.\n"
+    "You are an assistant that handles tasks proposed.\n"
+    "The tasks may vary from questions be answered to actions to be executed like search and retrieve or analysis.\n"
+    "You have access to a context section to gather all information needed to perform the tasks.\n"
     "Your goal is to produce  accurate, concise and context-grounded responses.\n"
     "Guidelines:\n"
     "- Base your respond strictly on the provided data.\n"
