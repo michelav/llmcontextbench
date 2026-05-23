@@ -339,7 +339,6 @@ def prepare_instances_native(
             INSTRUCTION,
             TEMPLATE,
             CleanComment,
-            make_code_context,
         )
         from repoqa.utility import topological_sort
     except Exception as exc:  # pragma: no cover - optional dependency
@@ -1140,11 +1139,7 @@ def strip_json_strings(value: Any) -> Any:
 
 
 def write_json(path: Path, payload: Any) -> None:
-    path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "
-",
-        encoding="utf-8",
-    )
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "", encoding="utf-8")
 
 
 if __name__ == "__main__":
