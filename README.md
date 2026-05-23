@@ -458,7 +458,7 @@ cd tools/repoqa
 uv sync --locked
 
 cd ../..
-scripts/repoqa_build_dataset --help
+tools/repoqa/repoqa_build_dataset --help
 ```
 
 See [docs/repoqa.md](docs/repoqa.md) for the small dataset build command and `REPOQA_PYTHON` local clone override.

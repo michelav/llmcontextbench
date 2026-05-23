@@ -19,7 +19,7 @@ The lockfile pins RepoQA to `evalplus/repoqa` commit `ae876deb1365dbf5a15b053372
 From the repository root:
 
 ```bash
-scripts/repoqa_build_dataset \
+tools/repoqa/repoqa_build_dataset \
   --output datasets/repoqa-experimental \
   --version 2026-05-23.1 \
   --language python \
@@ -29,8 +29,20 @@ scripts/repoqa_build_dataset \
   --force
 ```
 
-The wrapper uses `tools/repoqa/.venv/bin/python` by default, verifies the required RepoQA imports, then forwards all arguments to `scripts/build_repoqa_dataset.py`.
-On Nix systems, the wrapper also adds a discovered GCC runtime library path so binary wheels such as NumPy can load `libstdc++.so.6`.
+The wrapper uses `tools/repoqa/.venv/bin/python` by default, verifies the required RepoQA imports, then forwards all arguments to `tools/repoqa/build_repoqa_dataset.py`.
+On Nix systems, RepoQA commands should go through `tools/repoqa/repoqa_python`, which adds discovered runtime library paths for binary wheels such as NumPy before invoking Python.
+
+## Score Exported Outputs
+
+Exported RepoQA model outputs can be scored with the shared Python wrapper:
+
+```bash
+tools/repoqa/repoqa_python -m repoqa.compute_score \
+  --model_output_path outputs/repoqa_inline_local_001/repoqa_outputs/gpt-mini_inline_code_context.jsonl \
+  --dataset_path datasets/repoqa-minimal/raw/*
+```
+
+Calling `tools/repoqa/.venv/bin/python` directly can fail on Nix because PyPI binary wheels may not be able to find runtime libraries such as `libstdc++.so.6` and `libz.so.1`. Use `tools/repoqa/repoqa_python` for RepoQA modules unless you are already inside an environment that provides those libraries.
 
 ## Local RepoQA Clone Override
 
@@ -38,7 +50,7 @@ For RepoQA development, point the wrapper at another Python environment:
 
 ```bash
 REPOQA_PYTHON="$HOME/repos/doutorado/repoqa/.venv/bin/python" \
-scripts/repoqa_build_dataset \
+tools/repoqa/repoqa_build_dataset \
   --output datasets/repoqa-experimental \
   --version 2026-05-23.1 \
   --language python \
