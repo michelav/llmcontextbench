@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import gzip
 import json
 import re
@@ -25,6 +26,54 @@ Do not use external knowledge.
 Do not invent code that is not present in the context.
 """
 
+TREE_SITTER_LANGUAGE_ALIASES = {
+    "python": "python",
+    "java": "java",
+    "javascript": "javascript",
+    "typescript": "typescript",
+    "go": "go",
+    "rust": "rust",
+}
+
+TREE_SITTER_SYMBOL_NODE_TYPES = {
+    "python": {
+        "function_definition": "function",
+        "class_definition": "class",
+    },
+    "java": {
+        "method_declaration": "method",
+        "constructor_declaration": "constructor",
+        "class_declaration": "class",
+        "interface_declaration": "interface",
+        "enum_declaration": "enum",
+    },
+    "javascript": {
+        "function_declaration": "function",
+        "method_definition": "method",
+        "class_declaration": "class",
+        "generator_function_declaration": "function",
+    },
+    "typescript": {
+        "function_declaration": "function",
+        "method_definition": "method",
+        "class_declaration": "class",
+        "interface_declaration": "interface",
+        "type_alias_declaration": "type_alias",
+    },
+    "go": {
+        "function_declaration": "function",
+        "method_declaration": "method",
+        "type_declaration": "type",
+    },
+    "rust": {
+        "function_item": "function",
+        "impl_item": "impl",
+        "struct_item": "struct",
+        "trait_item": "trait",
+        "enum_item": "enum",
+    },
+}
+
 
 @dataclass(frozen=True)
 class BaseNeedle:
@@ -47,7 +96,8 @@ class PreparedInstance:
     needle_name: str
     description: str
     repoqa_description: str
-    code_context: str
+    native_code_context: str
+    model_code_context: str
     repoqa_prompt: str
     target_function: str
     position_ratio: float
@@ -210,7 +260,8 @@ def load_repoqa_dataset(input_path: str | None) -> dict[str, Any]:
         except Exception as exc:  # pragma: no cover - optional dependency
             raise SystemExit(
                 "RepoQA is not importable. Either pass --input or install RepoQA, e.g.\n"
-                "  uv pip install 'git+https://github.com/evalplus/repoqa.git'"
+                "  uv pip install 'git+https://github.com/evalplus/repoqa.git'\n"
+                f"Original import error: {type(exc).__name__}: {exc}"
             ) from exc
         payload = get_repoqa_data()
 
@@ -288,6 +339,7 @@ def prepare_instances_native(
             INSTRUCTION,
             TEMPLATE,
             CleanComment,
+            make_code_context,
         )
         from repoqa.utility import topological_sort
     except Exception as exc:  # pragma: no cover - optional dependency
@@ -295,7 +347,8 @@ def prepare_instances_native(
             "RepoQA is required for native dataset generation. Install it or add it to PYTHONPATH, e.g.\n"
             "  uv pip install 'git+https://github.com/evalplus/repoqa.git'\n"
             "or\n"
-            "  PYTHONPATH=/path/to/repoqa:$PYTHONPATH python scripts/build_repoqa_dataset.py ..."
+            "  PYTHONPATH=/path/to/repoqa:$PYTHONPATH python scripts/build_repoqa_dataset.py ...\n"
+            f"Original import error: {type(exc).__name__}: {exc}"
         ) from exc
 
     clean_mode = {
@@ -378,6 +431,12 @@ def prepare_single_native_instance(
     )
     native_task.update(code_context_info)
 
+    native_code_context = str(native_task["code_context"])
+    model_code_context = render_model_code_context(
+        repo=base.repo_name,
+        primary_path=needle_path,
+        native_code_context=native_code_context,
+    )
     target_function = extract_target_function_like_repoqa(
         target_file=content[needle_path],
         start_line=as_optional_int(needle.get("start_line")),
@@ -404,7 +463,8 @@ def prepare_single_native_instance(
         needle_name=needle_name,
         description=clean_description,
         repoqa_description=repoqa_description,
-        code_context=str(native_task["code_context"]),
+        native_code_context=native_code_context,
+        model_code_context=model_code_context,
         repoqa_prompt=render_repoqa_prompt(native_task),
         target_function=target_function,
         position_ratio=position_ratio,
@@ -417,6 +477,22 @@ def prepare_single_native_instance(
         end_byte=as_optional_int(needle.get("end_byte")),
         native_task=native_task,
     )
+
+
+def render_model_code_context(*, repo: str, primary_path: str, native_code_context: str) -> str:
+    """Render CTXBench's text context.
+
+    The model-facing text context adds repository/file orientation but no token
+    or analysis metadata. native_code_context.txt keeps the exact RepoQA output.
+    """
+    context = native_code_context.strip("\n")
+    if contains_path_marker(context):
+        return f"# Repository: {repo}\n\n{context}\n"
+    return f"# Repository: {repo}\n# File: {primary_path}\n\n{context}\n"
+
+
+def contains_path_marker(text: str) -> bool:
+    return bool(re.search(r"(?m)^\s*(#|//|/\*|<!--)\s*(Path|File)\s*:", text))
 
 
 def render_repoqa_prompt(native_task: dict[str, Any]) -> str:
@@ -553,29 +629,36 @@ def write_context_artifacts(*, output_root: Path, prepared: list[PreparedInstanc
         instance_dir = output_root / "context" / item.instance_id
         instance_dir.mkdir(parents=True, exist_ok=True)
 
-        # Primary CTXBench model-facing context for format="code_context".
-        (instance_dir / "code_context.txt").write_text(item.code_context, encoding="utf-8")
+        # Primary CTXBench model-facing text context for format="code_context".
+        # Includes repository/file orientation but no token/analysis metadata.
+        (instance_dir / "code_context.txt").write_text(item.model_code_context, encoding="utf-8")
 
-        # Native RepoQA prompt for calibration/reproducibility only.
-        # Do not expose this as the default CTXBench model-facing context.
+        # Native RepoQA context and prompt for calibration/reproducibility only.
+        # native_code_context.txt intentionally preserves RepoQA's raw generated context.
+        (instance_dir / "native_code_context.txt").write_text(item.native_code_context, encoding="utf-8")
         (instance_dir / "repoqa_prompt.txt").write_text(item.repoqa_prompt, encoding="utf-8")
 
         # Model-facing structured context for format="json"/"parsed".
         # It deliberately excludes needleName, targetFunction, and native task name.
-        parsed = {
-            "context_type": "repoqa_code_context",
-            "context_builder": "repoqa-native",
-            "requested_context_tokens": item.requested_context_tokens,
-            "actual_code_context_tokens": item.code_context_ntokens,
-            "code_context": item.code_context,
-        }
+        parsed = strip_json_strings(build_parsed_context(item))
         write_json(instance_dir / "parsed.json", parsed)
 
-        # Evidence for optional judge/audit. It contains the task description and code
-        # context, but not the hidden target function body.
+        # Evidence/audit wrapper. This can be used by optional judge/audit steps,
+        # while RepoQA deterministic scoring should use native_task.json + responses.
         blocks = {
             "function_description": item.description,
-            "code_context": item.code_context,
+            "evidence": [
+                {
+                    "id": "code_context",
+                    "type": "text",
+                    "content": item.model_code_context,
+                },
+                {
+                    "id": "parsed_context",
+                    "type": "structured_code",
+                    "source": "parsed.json",
+                },
+            ],
             "metadata": {
                 "language": item.language,
                 "repo": item.repo,
@@ -586,7 +669,7 @@ def write_context_artifacts(*, output_root: Path, prepared: list[PreparedInstanc
                 "position_ratio": item.position_ratio,
             },
         }
-        write_json(instance_dir / "blocks.json", blocks)
+        write_json(instance_dir / "blocks.json", strip_json_strings(blocks))
 
         # Hidden ground truth/evaluation artifact.
         oracle = {
@@ -600,18 +683,397 @@ def write_context_artifacts(*, output_root: Path, prepared: list[PreparedInstanc
             "endByte": item.end_byte,
             "targetFunction": item.target_function,
         }
-        write_json(instance_dir / "oracle.json", oracle)
+        write_json(instance_dir / "oracle.json", strip_json_strings(oracle))
 
         # Native RepoQA task used to reconstruct RepoQA model-output JSONL for scoring.
         # Contains ground-truth name; do not expose as model-facing context.
         write_json(instance_dir / "native_task.json", item.native_task)
 
         metadata = asdict(item)
-        metadata.pop("code_context", None)
+        metadata.pop("native_code_context", None)
+        metadata.pop("model_code_context", None)
         metadata.pop("repoqa_prompt", None)
         metadata.pop("target_function", None)
         metadata.pop("native_task", None)
-        write_json(instance_dir / "metadata.json", metadata)
+        write_json(instance_dir / "metadata.json", strip_json_strings(metadata))
+
+
+def build_parsed_context(item: PreparedInstance) -> dict[str, Any]:
+    files = parse_code_context_to_files(
+        language=item.language,
+        repo=item.repo,
+        default_path=item.path,
+        model_code_context=item.model_code_context,
+    )
+    return {
+        "context_type": "repoqa_structured_code_context",
+        "context_builder": "repoqa-native",
+        "repository": item.repo,
+        "files": files,
+        "metadata": {
+            "language": item.language,
+            "base_id": item.base_id,
+            "requested_context_tokens": item.requested_context_tokens,
+            "actual_code_context_tokens": item.code_context_ntokens,
+            "position_ratio": item.position_ratio,
+        },
+    }
+
+
+def parse_code_context_to_files(
+    *,
+    language: str,
+    repo: str,
+    default_path: str,
+    model_code_context: str,
+) -> list[dict[str, Any]]:
+    segments = split_context_by_file_markers(model_code_context, default_path=default_path)
+    files: list[dict[str, Any]] = []
+    for path, code in segments:
+        parser_language = TREE_SITTER_LANGUAGE_ALIASES.get(language, language)
+        if language == "python":
+            files.append(parse_python_file(path=path, language=language, code=code))
+        else:
+            files.append(parse_with_tree_sitter_or_fallback(path=path, language=parser_language, code=code))
+    return files
+
+
+def split_context_by_file_markers(text: str, *, default_path: str) -> list[tuple[str, str]]:
+    lines = text.splitlines(keepends=True)
+    segments: list[tuple[str, list[str]]] = []
+    current_path = default_path
+    current_lines: list[str] = []
+
+    marker_re = re.compile(
+        r"^\s*(?:#|//|--|/\*+|<!--)\s*(?:Path|File)\s*:\s*(?P<path>.+?)\s*(?:\*/|-->)?\s*$"
+    )
+    repo_re = re.compile(r"^\s*(?:#|//|--|/\*+|<!--)\s*Repository\s*:")
+
+    for line in lines:
+        if repo_re.match(line):
+            continue
+        marker = marker_re.match(line)
+        if marker:
+            if current_lines:
+                segments.append((current_path, current_lines))
+                current_lines = []
+            current_path = marker.group("path").strip() or default_path
+            continue
+        current_lines.append(line)
+
+    if current_lines:
+        segments.append((current_path, current_lines))
+
+    if not segments:
+        return [(default_path, text)]
+
+    return [(path, "".join(code_lines).strip("\n")) for path, code_lines in segments]
+
+
+def parse_python_file(*, path: str, language: str, code: str) -> dict[str, Any]:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        return parse_python_file_fallback(path=path, language=language, code=code, error=exc)
+
+    lines = code.splitlines()
+    symbols: list[dict[str, Any]] = []
+
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            symbols.append(python_function_symbol(node=node, lines=lines, kind="function"))
+        elif isinstance(node, ast.ClassDef):
+            symbols.append(python_class_symbol(node=node, lines=lines))
+
+    return {
+        "path": path,
+        "language": language,
+        "symbols": symbols,
+        "unparsed_code": None,
+        "parse_status": "ok",
+        "parse_error": None,
+    }
+
+
+def parse_python_file_fallback(*, path: str, language: str, code: str, error: SyntaxError) -> dict[str, Any]:
+    lines = code.splitlines()
+    symbols: list[dict[str, Any]] = []
+    block_starts: list[tuple[int, str]] = []
+    for index, line in enumerate(lines):
+        if re.match(r"^(async\s+def|def)\s+", line):
+            block_starts.append((index, "function"))
+        elif re.match(r"^class\s+", line):
+            block_starts.append((index, "class"))
+
+    for pos, (start, kind) in enumerate(block_starts):
+        end = block_starts[pos + 1][0] if pos + 1 < len(block_starts) else len(lines)
+        block = strip_structured_text("\n".join(lines[start:end]))
+        header = strip_required_text(lines[start].rstrip(":"))
+        symbols.append(
+            {
+                "kind": kind,
+                "name": strip_optional_text(extract_name_from_header(header, kind=kind)),
+                "signature": header,
+                "documentation": strip_optional_text(extract_docstring_textual(block)),
+                "code": block,
+                "start_line": start + 1,
+                "end_line": end,
+                "children": [],
+            }
+        )
+
+    return {
+        "path": path,
+        "language": language,
+        "symbols": symbols,
+        "unparsed_code": code,
+        "parse_status": "fallback",
+        "parse_error": f"{error.__class__.__name__}: {error}",
+    }
+
+
+def python_class_symbol(*, node: ast.ClassDef, lines: list[str]) -> dict[str, Any]:
+    children: list[dict[str, Any]] = []
+    for child in node.body:
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            children.append(python_function_symbol(node=child, lines=lines, kind="method"))
+        elif isinstance(child, ast.ClassDef):
+            children.append(python_class_symbol(node=child, lines=lines))
+
+    return {
+        "kind": "class",
+        "name": strip_optional_text(node.name),
+        "signature": strip_required_text(extract_python_header(node=node, lines=lines)),
+        "documentation": strip_optional_text(ast.get_docstring(node, clean=True)),
+        "code": strip_structured_text(source_for_node(node=node, lines=lines)),
+        "start_line": getattr(node, "lineno", None),
+        "end_line": getattr(node, "end_lineno", None),
+        "children": children,
+    }
+
+
+def python_function_symbol(
+    *,
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    lines: list[str],
+    kind: str,
+) -> dict[str, Any]:
+    if isinstance(node, ast.AsyncFunctionDef):
+        kind = f"async_{kind}"
+    return {
+        "kind": kind,
+        "name": strip_optional_text(node.name),
+        "signature": strip_required_text(extract_python_header(node=node, lines=lines)),
+        "documentation": strip_optional_text(ast.get_docstring(node, clean=True)),
+        "code": strip_structured_text(source_for_node(node=node, lines=lines)),
+        "start_line": getattr(node, "lineno", None),
+        "end_line": getattr(node, "end_lineno", None),
+        "children": [],
+    }
+
+
+def parse_with_tree_sitter_or_fallback(*, path: str, language: str, code: str) -> dict[str, Any]:
+    try:
+        from tree_sitter_languages import get_parser
+    except Exception as exc:
+        return unsupported_file(path=path, language=language, code=code, reason=f"tree_sitter_unavailable: {exc}")
+
+    try:
+        parser = get_parser(language)
+        code_bytes = code.encode("utf-8")
+        tree = parser.parse(code_bytes)
+        symbols = extract_tree_sitter_symbols(language=language, code=code, code_bytes=code_bytes, root=tree.root_node)
+        return {
+            "path": path,
+            "language": language,
+            "symbols": symbols,
+            "unparsed_code": None if symbols else code,
+            "parse_status": "partial" if getattr(tree.root_node, "has_error", False) else "ok",
+            "parse_error": None,
+        }
+    except Exception as exc:
+        return unsupported_file(path=path, language=language, code=code, reason=f"tree_sitter_parse_failed: {exc}")
+
+
+def unsupported_file(*, path: str, language: str, code: str, reason: str) -> dict[str, Any]:
+    return {
+        "path": path,
+        "language": language,
+        "symbols": [],
+        "unparsed_code": code,
+        "parse_status": "unsupported_language",
+        "parse_error": reason,
+    }
+
+
+def extract_tree_sitter_symbols(*, language: str, code: str, code_bytes: bytes, root: Any) -> list[dict[str, Any]]:
+    node_types = TREE_SITTER_SYMBOL_NODE_TYPES.get(language, {})
+    if not node_types:
+        return []
+
+    symbols: list[dict[str, Any]] = []
+    for node in walk_tree_sitter_nodes(root):
+        kind = node_types.get(getattr(node, "type", ""))
+        if kind is None:
+            continue
+        code_text = text_for_tree_sitter_node(node=node, code_bytes=code_bytes)
+        symbols.append(
+            {
+                "kind": kind,
+                "name": strip_optional_text(name_for_tree_sitter_node(node=node, code_bytes=code_bytes, code_text=code_text)),
+                "signature": strip_required_text(signature_for_tree_sitter_code(code_text=code_text, kind=kind)),
+                "documentation": strip_optional_text(documentation_before_node(code=code, start_line=node.start_point[0] + 1)),
+                "code": strip_structured_text(code_text),
+                "start_line": node.start_point[0] + 1,
+                "end_line": node.end_point[0] + 1,
+                "children": [],
+            }
+        )
+    return symbols
+
+
+def walk_tree_sitter_nodes(root: Any) -> list[Any]:
+    nodes: list[Any] = []
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        nodes.append(node)
+        children = getattr(node, "children", [])
+        stack.extend(reversed(children))
+    return nodes
+
+
+def text_for_tree_sitter_node(*, node: Any, code_bytes: bytes) -> str:
+    return code_bytes[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
+
+
+def name_for_tree_sitter_node(*, node: Any, code_bytes: bytes, code_text: str) -> str | None:
+    name_node = None
+    try:
+        name_node = node.child_by_field_name("name")
+    except Exception:
+        name_node = None
+    if name_node is not None:
+        return text_for_tree_sitter_node(node=name_node, code_bytes=code_bytes)
+
+    patterns = [
+        r"\bfunction\s+([A-Za-z_$][\w$]*)",
+        r"\bclass\s+([A-Za-z_$][\w$]*)",
+        r"\binterface\s+([A-Za-z_$][\w$]*)",
+        r"\bstruct\s+([A-Za-z_][\w]*)",
+        r"\btrait\s+([A-Za-z_][\w]*)",
+        r"\bfn\s+([A-Za-z_][\w]*)",
+        r"\bfunc\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w]*)",
+        r"\b(?:public|private|protected|static|final|synchronized|abstract|native|strictfp|async|export|default|const|let|var)\s+([A-Za-z_$][\w$]*)\s*[=(]",
+        r"^\s*([A-Za-z_$][\w$]*)\s*\(",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, code_text)
+        if match:
+            return match.group(1)
+    return None
+
+
+def signature_for_tree_sitter_code(*, code_text: str, kind: str) -> str:
+    lines = code_text.splitlines()
+    signature_lines: list[str] = []
+    balance = 0
+    for line in lines:
+        signature_lines.append(line)
+        balance += line.count("(") + line.count("[") + line.count("{")
+        balance -= line.count(")") + line.count("]") + line.count("}")
+        stripped = line.strip()
+        if kind in {"class", "interface", "struct", "trait", "enum", "impl", "type", "type_alias"}:
+            if "{" in stripped or stripped.endswith(";"):
+                break
+        elif balance <= 0 and (stripped.endswith("{") or stripped.endswith(";") or stripped.endswith(":")):
+            break
+    signature = "\n".join(signature_lines).strip()
+    return signature.rstrip("{").rstrip(":").rstrip()
+
+
+def documentation_before_node(*, code: str, start_line: int) -> str | None:
+    lines = code.splitlines()
+    index = max(0, start_line - 2)
+    docs: list[str] = []
+    while index >= 0:
+        stripped = lines[index].strip()
+        if not stripped:
+            if docs:
+                break
+            index -= 1
+            continue
+        if stripped.startswith(("#", "//", "///", "//!", "*", "/*", "/**")):
+            docs.append(strip_comment_prefix(stripped))
+            index -= 1
+            continue
+        break
+    docs.reverse()
+    text = "\n".join(line for line in docs if line is not None).strip()
+    return text or None
+
+
+def strip_comment_prefix(line: str) -> str:
+    line = re.sub(r"^/\*+", "", line)
+    line = re.sub(r"\*/$", "", line)
+    line = re.sub(r"^(#|//+|\*+|!+)", "", line)
+    return line.strip()
+
+
+def extract_python_header(*, node: ast.AST, lines: list[str]) -> str:
+    start = max(0, getattr(node, "lineno", 1) - 1)
+    header_lines: list[str] = []
+    balance = 0
+    for line in lines[start:]:
+        header_lines.append(line)
+        stripped = line.strip()
+        balance += line.count("(") + line.count("[") + line.count("{")
+        balance -= line.count(")") + line.count("]") + line.count("}")
+        if stripped.endswith(":") and balance <= 0:
+            break
+    header = "\n".join(header_lines).strip()
+    return header[:-1].rstrip() if header.endswith(":") else header
+
+
+def source_for_node(*, node: ast.AST, lines: list[str]) -> str:
+    start = getattr(node, "lineno", None)
+    end = getattr(node, "end_lineno", None)
+    if start is None or end is None:
+        return ""
+    return "\n".join(lines[start - 1 : end])
+
+
+def strip_optional_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def strip_required_text(value: object) -> str:
+    return str(value).strip()
+
+
+def strip_structured_text(value: str) -> str:
+    # JSON fields are structured values, not executable files. Strip leading and
+    # trailing whitespace/newlines from the field value. The exact indentation is
+    # preserved in code_context.txt, native_code_context.txt, and repoqa_prompt.txt.
+    return value.strip()
+
+
+def extract_name_from_header(header: str, *, kind: str) -> str | None:
+    if kind == "function":
+        match = re.match(r"^(?:async\s+def|def)\s+([A-Za-z_][A-Za-z0-9_]*)", header)
+    else:
+        match = re.match(r"^class\s+([A-Za-z_][A-Za-z0-9_]*)", header)
+    return match.group(1) if match else None
+
+
+def extract_docstring_textual(block: str) -> str | None:
+    match = re.search(r'^[ \t]*([rRuUbBfF]*)("""|\'\'\')(?P<doc>.*?)(\2)', block, flags=re.DOTALL | re.MULTILINE)
+    if not match:
+        return None
+    return match.group("doc").strip()
 
 
 def write_instances_index(*, output_root: Path, prepared: list[PreparedInstance]) -> None:
@@ -660,9 +1122,27 @@ def as_optional_int(value: Any) -> int | None:
         return None
 
 
+def strip_json_strings(value: Any) -> Any:
+    """Strip leading/trailing whitespace from string values in structured JSON.
+
+    This is intentionally applied to CTXBench-facing structured artifacts such
+    as parsed.json, blocks.json, metadata.json, and oracle.json. It is not
+    applied to raw RepoQA data or native_task.json, which should preserve
+    RepoQA-native fields.
+    """
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        return [strip_json_strings(item) for item in value]
+    if isinstance(value, dict):
+        return {key: strip_json_strings(item) for key, item in value.items()}
+    return value
+
+
 def write_json(path: Path, payload: Any) -> None:
     path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "
+",
         encoding="utf-8",
     )
 
