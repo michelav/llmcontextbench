@@ -1,0 +1,23 @@
+{
+  "datasetId": "ctxbench/repoqa",
+  "domain": "software-repository",
+  "version": "2024-06-23-local.1",
+  "instances": [
+    {
+      "instanceId": "python__demo__target_function__ctx1k",
+      "contextBlocks": "context/python__demo__target_function__ctx1k/blocks.json",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "language": "python",
+            "repo": "demo",
+            "needleName": "target_function",
+            "path": "demo.py",
+            "description": "Return the normalized sum of two numbers."
+          }
+        }
+      ]
+    }
+  ]
+}

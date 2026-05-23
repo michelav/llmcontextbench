@@ -1,0 +1,25 @@
+{
+  "datasetId": "ctxbench/repoqa",
+  "domain": "software-repository",
+  "language": "multi",
+  "version": "2024-06-23-local.1",
+  "description": "RepoQA Search Needle Function task adapted to CTXBench.",
+  "tasks": [
+    {
+      "id": "snf_retrieve_function",
+      "statement": "Based on the function description and code context, retrieve and repeat the exact described function from the code context in a code block wrapped by triple backticks. Function description: {description}",
+      "tags": [
+        "code",
+        "repository",
+        "retrieval",
+        "long-context",
+        "needle",
+        "function-search"
+      ],
+      "validation": {
+        "type": "judge"
+      },
+      "contextBlocks": ["function_description", "code_context"]
+    }
+  ]
+}

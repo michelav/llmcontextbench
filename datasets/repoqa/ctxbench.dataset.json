@@ -1,0 +1,13 @@
+{
+  "id": "ctxbench/repoqa",
+  "datasetVersion": "2024-06-23-local.1",
+  "manifestSchemaVersion": 1,
+  "name": "CTXBench RepoQA Local",
+  "description": "Local RepoQA package for CTXBench adapter development.",
+  "domain": "software-repository",
+  "layout": {
+    "tasks": "tasks.json",
+    "taskInstances": "tasks.instance.json",
+    "contextRoot": "context/"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "language": "python",
+  "repo": "demo",
+  "path": "demo.py",
+  "needleName": "target_function",
+  "instruction": "Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:",
+  "description": "\nFunction Description: Return the normalized sum of two numbers.\n",
+  "code_context": "# Path: demo.py\n\ndef helper(x):\n    return x * 2\n\n\ndef target_function(a, b):\n    total = a + b\n    return total / 2\n\n\ndef unrelated(value):\n    return str(value)\n",
+  "template": "instruction\ncode_context\ndescription\ninstruction",
+  "position_ratio": 0.5,
+  "needle_token_start": 20,
+  "needle_token_end": 45,
+  "code_context_ntokens": 100
+}

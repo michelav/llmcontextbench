@@ -1,0 +1,9 @@
+{
+  "language": "python",
+  "repo": "demo",
+  "needleName": "target_function",
+  "path": "demo.py",
+  "startLine": 6,
+  "endLine": 8,
+  "targetFunction": "def target_function(a, b):\n    total = a + b\n    return total / 2\n"
+}
