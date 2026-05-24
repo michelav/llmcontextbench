@@ -7,12 +7,14 @@ import gzip
 import json
 import re
 import shutil
+from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 DEFAULT_DATASET_ID = "ctxbench/repoqa"
 DEFAULT_TASK_ID = "snf_retrieve_function"
+DEFAULT_VALIDATION_TYPE = "repoqa-scorer"
 
 TASK_STATEMENT = (
     "Based on the function description and code context, retrieve and repeat "
@@ -26,12 +28,17 @@ Do not use external knowledge.
 Do not invent code that is not present in the context.
 """
 
-TREE_SITTER_LANGUAGE_ALIASES = {
+LANGUAGE_ALIASES = {
+    "py": "python",
     "python": "python",
     "java": "java",
+    "js": "javascript",
     "javascript": "javascript",
+    "ts": "typescript",
     "typescript": "typescript",
     "go": "go",
+    "golang": "go",
+    "rs": "rust",
     "rust": "rust",
 }
 
@@ -52,6 +59,8 @@ TREE_SITTER_SYMBOL_NODE_TYPES = {
         "method_definition": "method",
         "class_declaration": "class",
         "generator_function_declaration": "function",
+        "lexical_declaration": "declaration",
+        "variable_declaration": "declaration",
     },
     "typescript": {
         "function_declaration": "function",
@@ -59,6 +68,8 @@ TREE_SITTER_SYMBOL_NODE_TYPES = {
         "class_declaration": "class",
         "interface_declaration": "interface",
         "type_alias_declaration": "type_alias",
+        "lexical_declaration": "declaration",
+        "variable_declaration": "declaration",
     },
     "go": {
         "function_declaration": "function",
@@ -78,6 +89,7 @@ TREE_SITTER_SYMBOL_NODE_TYPES = {
 @dataclass(frozen=True)
 class BaseNeedle:
     language: str
+    normalized_language: str
     repo_name: str
     repo_raw: dict[str, Any]
     needle_raw: dict[str, Any]
@@ -91,6 +103,7 @@ class PreparedInstance:
     base_id: str
     requested_context_tokens: int
     language: str
+    normalized_language: str
     repo: str
     path: str
     needle_name: str
@@ -108,6 +121,7 @@ class PreparedInstance:
     end_line: int | None
     start_byte: int | None
     end_byte: int | None
+    repo_content: dict[str, str]
     native_task: dict[str, Any]
 
 
@@ -115,6 +129,7 @@ def main() -> int:
     args = parse_args()
     output_root = Path(args.output).expanduser().resolve()
     context_sizes = normalize_context_sizes(args.context_tokens)
+    requested_languages = normalize_requested_languages(args.language)
 
     recreate_output_dir(output_root, force=args.force)
     dataset = load_repoqa_dataset(args.input)
@@ -125,8 +140,8 @@ def main() -> int:
     raw_file = write_raw_copy(dataset=dataset, output_root=output_root, version=args.version)
     base_needles = select_base_needles(
         dataset=dataset,
-        languages=set(args.language) if args.language else None,
-        max_base_instances=args.max_base_instances,
+        requested_languages=requested_languages,
+        max_base_instances_per_language=args.max_base_instances,
     )
     if not base_needles:
         raise SystemExit("No RepoQA base needles were selected. Check input data and filters.")
@@ -148,9 +163,17 @@ def main() -> int:
         clean_comments=args.clean_comments,
         base_count=len(base_needles),
         instance_count=len(prepared),
+        validation_threshold=args.validation_threshold,
+        ignore_comments=args.ignore_comments,
     )
     write_dataset_instructions(output_root)
-    write_tasks_json(output_root=output_root, dataset_id=args.dataset_id, version=args.version)
+    write_tasks_json(
+        output_root=output_root,
+        dataset_id=args.dataset_id,
+        version=args.version,
+        threshold=args.validation_threshold,
+        ignore_comments=args.ignore_comments,
+    )
     write_task_instances_json(
         output_root=output_root,
         dataset_id=args.dataset_id,
@@ -165,6 +188,7 @@ def main() -> int:
     print(f"Context sizes: {', '.join(str(size) for size in context_sizes)}")
     print(f"Instances: {len(prepared)}")
     print(f"Task: {DEFAULT_TASK_ID}")
+    print(f"Validation: {DEFAULT_VALIDATION_TYPE}")
     print("Next:")
     print(f"  ctxbench dataset inspect {output_root}")
     return 0
@@ -205,15 +229,34 @@ def parse_args() -> argparse.Namespace:
         default="none",
         help="Comment-cleaning mode passed to RepoQA's native context builder.",
     )
-    parser.add_argument("--language", action="append", default=[], help="Language to include. Can be repeated.")
+    parser.add_argument(
+        "--language",
+        action="append",
+        default=[],
+        help=(
+            "Language to include. Can be repeated, e.g. "
+            "--language python --language java --language typescript. Matching is case-insensitive."
+        ),
+    )
     parser.add_argument(
         "--max-base-instances",
         type=int,
         default=None,
         help=(
-            "Limit the number of selected RepoQA base needles before context-size expansion. "
-            "Example: 2 base needles x 3 context sizes = 6 CTXBench instances."
+            "Limit selected RepoQA base needles per language before context-size expansion. "
+            "Example: 2 languages x 2 base needles per language x 3 context sizes = 12 instances."
         ),
+    )
+    parser.add_argument(
+        "--validation-threshold",
+        type=float,
+        default=0.8,
+        help="Threshold used by repoqa-scorer evaluation metadata. Default: 0.8.",
+    )
+    parser.add_argument(
+        "--ignore-comments",
+        action="store_true",
+        help="Set ignoreComments=true in repoqa-scorer validation metadata.",
     )
     parser.add_argument("--force", action="store_true", help="Replace output directory if it exists.")
     return parser.parse_args()
@@ -230,6 +273,17 @@ def normalize_context_sizes(raw_sizes: list[int] | None) -> list[int]:
             normalized.append(value)
             seen.add(value)
     return normalized
+
+
+def normalize_language_name(language: str) -> str:
+    key = str(language).strip().lower()
+    return LANGUAGE_ALIASES.get(key, key)
+
+
+def normalize_requested_languages(raw_languages: list[str]) -> set[str] | None:
+    if not raw_languages:
+        return None
+    return {normalize_language_name(language) for language in raw_languages if str(language).strip()}
 
 
 def recreate_output_dir(output_root: Path, *, force: bool) -> None:
@@ -280,19 +334,23 @@ def write_raw_copy(*, dataset: dict[str, Any], output_root: Path, version: str) 
 def select_base_needles(
     *,
     dataset: dict[str, Any],
-    languages: set[str] | None,
-    max_base_instances: int | None,
+    requested_languages: set[str] | None,
+    max_base_instances_per_language: int | None,
 ) -> list[BaseNeedle]:
     selected: list[BaseNeedle] = []
+    selected_per_language: dict[str, int] = defaultdict(int)
 
-    for language, repos_raw in dataset.items():
-        if languages is not None and language not in languages:
+    for raw_language, repos_raw in dataset.items():
+        normalized_language = normalize_language_name(raw_language)
+        if requested_languages is not None and normalized_language not in requested_languages:
             continue
         if not isinstance(repos_raw, list):
-            print(f"Skipping language {language!r}: expected a list of repositories.")
+            print(f"Skipping language {raw_language!r}: expected a list of repositories.")
             continue
 
         for repo_raw in repos_raw:
+            if max_base_instances_per_language is not None and selected_per_language[normalized_language] >= max_base_instances_per_language:
+                break
             if not isinstance(repo_raw, dict):
                 continue
             repo_name = str(repo_raw.get("repo") or "").strip()
@@ -302,6 +360,8 @@ def select_base_needles(
                 continue
 
             for needle_index, needle_raw in enumerate(needles):
+                if max_base_instances_per_language is not None and selected_per_language[normalized_language] >= max_base_instances_per_language:
+                    break
                 if not isinstance(needle_raw, dict):
                     continue
                 needle_name = str(needle_raw.get("name") or "").strip()
@@ -314,7 +374,8 @@ def select_base_needles(
 
                 selected.append(
                     BaseNeedle(
-                        language=language,
+                        language=str(raw_language),
+                        normalized_language=normalized_language,
                         repo_name=repo_name,
                         repo_raw=repo_raw,
                         needle_raw=needle_raw,
@@ -322,8 +383,7 @@ def select_base_needles(
                         needle_count=len(needles),
                     )
                 )
-                if max_base_instances is not None and len(selected) >= max_base_instances:
-                    return selected
+                selected_per_language[normalized_language] += 1
 
     return selected
 
@@ -403,7 +463,11 @@ def prepare_single_native_instance(
         raise RuntimeError("RepoQA make_code_context is unavailable.") from exc
 
     needle = base.needle_raw
-    content = base.repo_raw["content"]
+    content = {
+        str(path): value
+        for path, value in base.repo_raw["content"].items()
+        if isinstance(value, str)
+    }
     needle_name = str(needle["name"]).strip()
     needle_path = str(needle["path"]).strip()
     clean_description = str(needle["description"]).strip()
@@ -432,6 +496,7 @@ def prepare_single_native_instance(
 
     native_code_context = str(native_task["code_context"])
     model_code_context = render_model_code_context(
+        language=base.normalized_language,
         repo=base.repo_name,
         primary_path=needle_path,
         native_code_context=native_code_context,
@@ -444,7 +509,7 @@ def prepare_single_native_instance(
         end_byte=as_optional_int(needle.get("end_byte")),
     )
 
-    base_id = make_base_id(language=base.language, repo=base.repo_name, needle_name=needle_name)
+    base_id = make_base_id(language=base.normalized_language, repo=base.repo_name, needle_name=needle_name)
     instance_id = make_instance_id(base_id=base_id, context_tokens=context_tokens)
 
     native_task["ctxbench_instance_id"] = instance_id
@@ -457,6 +522,7 @@ def prepare_single_native_instance(
         base_id=base_id,
         requested_context_tokens=context_tokens,
         language=base.language,
+        normalized_language=base.normalized_language,
         repo=base.repo_name,
         path=needle_path,
         needle_name=needle_name,
@@ -474,24 +540,32 @@ def prepare_single_native_instance(
         end_line=as_optional_int(needle.get("end_line")),
         start_byte=as_optional_int(needle.get("start_byte")),
         end_byte=as_optional_int(needle.get("end_byte")),
+        repo_content=content,
         native_task=native_task,
     )
 
 
-def render_model_code_context(*, repo: str, primary_path: str, native_code_context: str) -> str:
+def render_model_code_context(*, language: str, repo: str, primary_path: str, native_code_context: str) -> str:
     """Render CTXBench's text context.
 
     The model-facing text context adds repository/file orientation but no token
     or analysis metadata. native_code_context.txt keeps the exact RepoQA output.
     """
+    prefix = comment_prefix_for_language(language)
     context = native_code_context.strip("\n")
     if contains_path_marker(context):
-        return f"# Repository: {repo}\n\n{context}\n"
-    return f"# Repository: {repo}\n# File: {primary_path}\n\n{context}\n"
+        return f"{prefix} Repository: {repo}\n\n{context}\n"
+    return f"{prefix} Repository: {repo}\n{prefix} File: {primary_path}\n\n{context}\n"
+
+
+def comment_prefix_for_language(language: str) -> str:
+    if language in {"python", "ruby", "shell", "bash"}:
+        return "#"
+    return "//"
 
 
 def contains_path_marker(text: str) -> bool:
-    return bool(re.search(r"(?m)^\s*(#|//|/\*|<!--)\s*(Path|File)\s*:", text))
+    return bool(re.search(r"(?m)^\s*(#|//|--|/\*|<!--)\s*(Path|File)\s*:", text))
 
 
 def render_repoqa_prompt(native_task: dict[str, Any]) -> str:
@@ -533,6 +607,8 @@ def write_manifest(
     clean_comments: str,
     base_count: int,
     instance_count: int,
+    validation_threshold: float,
+    ignore_comments: bool,
 ) -> None:
     write_json(
         output_root / "ctxbench.dataset.json",
@@ -551,6 +627,11 @@ def write_manifest(
                 "baseNeedles": base_count,
                 "instances": instance_count,
             },
+            "validation": {
+                "type": DEFAULT_VALIDATION_TYPE,
+                "threshold": validation_threshold,
+                "ignoreComments": ignore_comments,
+            },
             "layout": {
                 "tasks": "tasks.json",
                 "taskInstances": "tasks.instance.json",
@@ -564,7 +645,14 @@ def write_dataset_instructions(output_root: Path) -> None:
     (output_root / "dataset-instructions.md").write_text(DATASET_INSTRUCTIONS, encoding="utf-8")
 
 
-def write_tasks_json(*, output_root: Path, dataset_id: str, version: str) -> None:
+def write_tasks_json(
+    *,
+    output_root: Path,
+    dataset_id: str,
+    version: str,
+    threshold: float,
+    ignore_comments: bool,
+) -> None:
     write_json(
         output_root / "tasks.json",
         {
@@ -585,7 +673,11 @@ def write_tasks_json(*, output_root: Path, dataset_id: str, version: str) -> Non
                         "needle",
                         "function-search",
                     ],
-                    "validation": {"type": "judge"},
+                    "validation": {
+                        "type": DEFAULT_VALIDATION_TYPE,
+                        "threshold": threshold,
+                        "ignoreComments": ignore_comments,
+                    },
                     "contextBlocks": ["function_description", "code_context"],
                 }
             ],
@@ -660,6 +752,7 @@ def write_context_artifacts(*, output_root: Path, prepared: list[PreparedInstanc
             ],
             "metadata": {
                 "language": item.language,
+                "normalized_language": item.normalized_language,
                 "repo": item.repo,
                 "path": item.path,
                 "base_id": item.base_id,
@@ -673,6 +766,7 @@ def write_context_artifacts(*, output_root: Path, prepared: list[PreparedInstanc
         # Hidden ground truth/evaluation artifact.
         oracle = {
             "language": item.language,
+            "normalizedLanguage": item.normalized_language,
             "repo": item.repo,
             "needleName": item.needle_name,
             "path": item.path,
@@ -694,14 +788,16 @@ def write_context_artifacts(*, output_root: Path, prepared: list[PreparedInstanc
         metadata.pop("repoqa_prompt", None)
         metadata.pop("target_function", None)
         metadata.pop("native_task", None)
+        metadata.pop("repo_content", None)
         write_json(instance_dir / "metadata.json", strip_json_strings(metadata))
 
 
 def build_parsed_context(item: PreparedInstance) -> dict[str, Any]:
-    files = parse_code_context_to_files(
+    files = parse_context_projection(
         language=item.language,
-        repo=item.repo,
+        normalized_language=item.normalized_language,
         default_path=item.path,
+        repo_content=item.repo_content,
         model_code_context=item.model_code_context,
     )
     return {
@@ -711,6 +807,7 @@ def build_parsed_context(item: PreparedInstance) -> dict[str, Any]:
         "files": files,
         "metadata": {
             "language": item.language,
+            "normalized_language": item.normalized_language,
             "base_id": item.base_id,
             "requested_context_tokens": item.requested_context_tokens,
             "actual_code_context_tokens": item.code_context_ntokens,
@@ -719,21 +816,33 @@ def build_parsed_context(item: PreparedInstance) -> dict[str, Any]:
     }
 
 
-def parse_code_context_to_files(
+def parse_context_projection(
     *,
     language: str,
-    repo: str,
+    normalized_language: str,
     default_path: str,
+    repo_content: dict[str, str],
     model_code_context: str,
 ) -> list[dict[str, Any]]:
-    segments = split_context_by_file_markers(model_code_context, default_path=default_path)
-    files: list[dict[str, Any]] = []
-    for path, code in segments:
-        parser_language = TREE_SITTER_LANGUAGE_ALIASES.get(language, language)
-        if language == "python":
-            files.append(parse_python_file(path=path, language=language, code=code))
+    visible_segments = split_context_by_file_markers(model_code_context, default_path=default_path)
+    visible_by_path: dict[str, str] = {}
+    for path, code in visible_segments:
+        if path in visible_by_path:
+            visible_by_path[path] += "\n\n" + code
         else:
-            files.append(parse_with_tree_sitter_or_fallback(path=path, language=parser_language, code=code))
+            visible_by_path[path] = code
+
+    files: list[dict[str, Any]] = []
+    for path, visible_code in visible_by_path.items():
+        full_source = repo_content.get(path)
+        if full_source is None:
+            files.append(partial_context_file(path=path, language=normalized_language, visible_code=visible_code, reason="source_file_not_found"))
+            continue
+
+        if normalized_language == "python":
+            files.append(parse_python_full_file_filtered(path=path, language=normalized_language, full_source=full_source, visible_code=visible_code))
+        else:
+            files.append(parse_tree_sitter_full_file_filtered(path=path, language=normalized_language, full_source=full_source, visible_code=visible_code))
     return files
 
 
@@ -769,79 +878,47 @@ def split_context_by_file_markers(text: str, *, default_path: str) -> list[tuple
     return [(path, "".join(code_lines).strip("\n")) for path, code_lines in segments]
 
 
-def parse_python_file(*, path: str, language: str, code: str) -> dict[str, Any]:
+def parse_python_full_file_filtered(*, path: str, language: str, full_source: str, visible_code: str) -> dict[str, Any]:
     try:
-        tree = ast.parse(code)
+        tree = ast.parse(full_source, type_comments=True)
     except SyntaxError as exc:
-        return parse_python_file_fallback(path=path, language=language, code=code, error=exc)
+        return partial_context_file(path=path, language=language, visible_code=visible_code, reason=f"full_source_parse_error: {exc}")
 
-    lines = code.splitlines()
-    symbols: list[dict[str, Any]] = []
-
+    lines = full_source.splitlines()
+    all_symbols: list[dict[str, Any]] = []
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            symbols.append(python_function_symbol(node=node, lines=lines, kind="function"))
+            all_symbols.append(python_function_symbol(path=path, node=node, lines=lines, kind="function", parent_id=None, parent_name=None))
         elif isinstance(node, ast.ClassDef):
-            symbols.append(python_class_symbol(node=node, lines=lines))
+            all_symbols.append(python_class_symbol(path=path, node=node, lines=lines, parent_id=None, parent_name=None))
 
+    visible_symbols = filter_visible_symbols(all_symbols, visible_code=visible_code)
     return {
         "path": path,
         "language": language,
-        "symbols": symbols,
-        "unparsed_code": None,
-        "parse_status": "ok",
+        "symbols": visible_symbols,
+        "unparsed_code": None if visible_symbols else visible_code,
+        "parse_status": "ok_filtered",
         "parse_error": None,
     }
 
 
-def parse_python_file_fallback(*, path: str, language: str, code: str, error: SyntaxError) -> dict[str, Any]:
-    lines = code.splitlines()
-    symbols: list[dict[str, Any]] = []
-    block_starts: list[tuple[int, str]] = []
-    for index, line in enumerate(lines):
-        if re.match(r"^(async\s+def|def)\s+", line):
-            block_starts.append((index, "function"))
-        elif re.match(r"^class\s+", line):
-            block_starts.append((index, "class"))
-
-    for pos, (start, kind) in enumerate(block_starts):
-        end = block_starts[pos + 1][0] if pos + 1 < len(block_starts) else len(lines)
-        block = strip_structured_text("\n".join(lines[start:end]))
-        header = strip_required_text(lines[start].rstrip(":"))
-        symbols.append(
-            {
-                "kind": kind,
-                "name": strip_optional_text(extract_name_from_header(header, kind=kind)),
-                "signature": header,
-                "documentation": strip_optional_text(extract_docstring_textual(block)),
-                "code": block,
-                "start_line": start + 1,
-                "end_line": end,
-                "children": [],
-            }
-        )
-
-    return {
-        "path": path,
-        "language": language,
-        "symbols": symbols,
-        "unparsed_code": code,
-        "parse_status": "fallback",
-        "parse_error": f"{error.__class__.__name__}: {error}",
-    }
-
-
-def python_class_symbol(*, node: ast.ClassDef, lines: list[str]) -> dict[str, Any]:
+def python_class_symbol(*, path: str, node: ast.ClassDef, lines: list[str], parent_id: str | None, parent_name: str | None) -> dict[str, Any]:
+    symbol_name = strip_optional_text(node.name)
+    symbol_id = make_symbol_id(path=path, name=symbol_name, kind="class", start_line=getattr(node, "lineno", None), parent_name=parent_name)
     children: list[dict[str, Any]] = []
     for child in node.body:
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            children.append(python_function_symbol(node=child, lines=lines, kind="method"))
+            children.append(python_function_symbol(path=path, node=child, lines=lines, kind="method", parent_id=symbol_id, parent_name=symbol_name))
         elif isinstance(child, ast.ClassDef):
-            children.append(python_class_symbol(node=child, lines=lines))
+            children.append(python_class_symbol(path=path, node=child, lines=lines, parent_id=symbol_id, parent_name=symbol_name))
 
     return {
+        "symbol_id": symbol_id,
+        "parent_id": parent_id,
+        "parent_name": parent_name,
         "kind": "class",
-        "name": strip_optional_text(node.name),
+        "name": symbol_name,
         "signature": strip_required_text(extract_python_header(node=node, lines=lines)),
         "documentation": strip_optional_text(ast.get_docstring(node, clean=True)),
         "code": strip_structured_text(source_for_node(node=node, lines=lines)),
@@ -853,15 +930,23 @@ def python_class_symbol(*, node: ast.ClassDef, lines: list[str]) -> dict[str, An
 
 def python_function_symbol(
     *,
+    path: str,
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     lines: list[str],
     kind: str,
+    parent_id: str | None,
+    parent_name: str | None,
 ) -> dict[str, Any]:
     if isinstance(node, ast.AsyncFunctionDef):
         kind = f"async_{kind}"
+    symbol_name = strip_optional_text(node.name)
+    symbol_id = make_symbol_id(path=path, name=symbol_name, kind=kind, start_line=getattr(node, "lineno", None), parent_name=parent_name)
     return {
+        "symbol_id": symbol_id,
+        "parent_id": parent_id,
+        "parent_name": parent_name,
         "kind": kind,
-        "name": strip_optional_text(node.name),
+        "name": symbol_name,
         "signature": strip_required_text(extract_python_header(node=node, lines=lines)),
         "documentation": strip_optional_text(ast.get_docstring(node, clean=True)),
         "code": strip_structured_text(source_for_node(node=node, lines=lines)),
@@ -871,59 +956,65 @@ def python_function_symbol(
     }
 
 
-def parse_with_tree_sitter_or_fallback(*, path: str, language: str, code: str) -> dict[str, Any]:
+def parse_tree_sitter_full_file_filtered(*, path: str, language: str, full_source: str, visible_code: str) -> dict[str, Any]:
     try:
         from tree_sitter_languages import get_parser
     except Exception as exc:
-        return unsupported_file(path=path, language=language, code=code, reason=f"tree_sitter_unavailable: {exc}")
+        return partial_context_file(path=path, language=language, visible_code=visible_code, reason=f"tree_sitter_unavailable: {exc}")
+
+    if language not in TREE_SITTER_SYMBOL_NODE_TYPES:
+        return partial_context_file(path=path, language=language, visible_code=visible_code, reason="unsupported_language")
 
     try:
         parser = get_parser(language)
-        code_bytes = code.encode("utf-8")
-        tree = parser.parse(code_bytes)
-        symbols = extract_tree_sitter_symbols(language=language, code=code, code_bytes=code_bytes, root=tree.root_node)
+        source_bytes = full_source.encode("utf-8")
+        tree = parser.parse(source_bytes)
+        all_symbols = extract_tree_sitter_symbols(language=language, path=path, source=full_source, source_bytes=source_bytes, root=tree.root_node)
+        visible_symbols = filter_visible_symbols(all_symbols, visible_code=visible_code)
         return {
             "path": path,
             "language": language,
-            "symbols": symbols,
-            "unparsed_code": None if symbols else code,
-            "parse_status": "partial" if getattr(tree.root_node, "has_error", False) else "ok",
+            "symbols": visible_symbols,
+            "unparsed_code": None if visible_symbols else visible_code,
+            "parse_status": "partial" if getattr(tree.root_node, "has_error", False) else "ok_filtered",
             "parse_error": None,
         }
     except Exception as exc:
-        return unsupported_file(path=path, language=language, code=code, reason=f"tree_sitter_parse_failed: {exc}")
+        return partial_context_file(path=path, language=language, visible_code=visible_code, reason=f"tree_sitter_parse_failed: {exc}")
 
 
-def unsupported_file(*, path: str, language: str, code: str, reason: str) -> dict[str, Any]:
+def partial_context_file(*, path: str, language: str, visible_code: str, reason: str) -> dict[str, Any]:
     return {
         "path": path,
         "language": language,
         "symbols": [],
-        "unparsed_code": code,
-        "parse_status": "unsupported_language",
+        "unparsed_code": visible_code,
+        "parse_status": "partial_context",
         "parse_error": reason,
     }
 
 
-def extract_tree_sitter_symbols(*, language: str, code: str, code_bytes: bytes, root: Any) -> list[dict[str, Any]]:
+def extract_tree_sitter_symbols(*, language: str, path: str, source: str, source_bytes: bytes, root: Any) -> list[dict[str, Any]]:
     node_types = TREE_SITTER_SYMBOL_NODE_TYPES.get(language, {})
-    if not node_types:
-        return []
-
     symbols: list[dict[str, Any]] = []
     for node in walk_tree_sitter_nodes(root):
         kind = node_types.get(getattr(node, "type", ""))
         if kind is None:
             continue
-        code_text = text_for_tree_sitter_node(node=node, code_bytes=code_bytes)
+        code_text = text_for_tree_sitter_node(node=node, source_bytes=source_bytes)
+        name = strip_optional_text(name_for_tree_sitter_node(node=node, source_bytes=source_bytes, code_text=code_text))
+        start_line = node.start_point[0] + 1
         symbols.append(
             {
+                "symbol_id": make_symbol_id(path=path, name=name, kind=kind, start_line=start_line, parent_name=None),
+                "parent_id": None,
+                "parent_name": None,
                 "kind": kind,
-                "name": strip_optional_text(name_for_tree_sitter_node(node=node, code_bytes=code_bytes, code_text=code_text)),
+                "name": name,
                 "signature": strip_required_text(signature_for_tree_sitter_code(code_text=code_text, kind=kind)),
-                "documentation": strip_optional_text(documentation_before_node(code=code, start_line=node.start_point[0] + 1)),
+                "documentation": strip_optional_text(documentation_before_node(code=source, start_line=start_line)),
                 "code": strip_structured_text(code_text),
-                "start_line": node.start_point[0] + 1,
+                "start_line": start_line,
                 "end_line": node.end_point[0] + 1,
                 "children": [],
             }
@@ -942,18 +1033,18 @@ def walk_tree_sitter_nodes(root: Any) -> list[Any]:
     return nodes
 
 
-def text_for_tree_sitter_node(*, node: Any, code_bytes: bytes) -> str:
-    return code_bytes[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
+def text_for_tree_sitter_node(*, node: Any, source_bytes: bytes) -> str:
+    return source_bytes[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
 
 
-def name_for_tree_sitter_node(*, node: Any, code_bytes: bytes, code_text: str) -> str | None:
+def name_for_tree_sitter_node(*, node: Any, source_bytes: bytes, code_text: str) -> str | None:
     name_node = None
     try:
         name_node = node.child_by_field_name("name")
     except Exception:
         name_node = None
     if name_node is not None:
-        return text_for_tree_sitter_node(node=name_node, code_bytes=code_bytes)
+        return text_for_tree_sitter_node(node=name_node, source_bytes=source_bytes)
 
     patterns = [
         r"\bfunction\s+([A-Za-z_$][\w$]*)",
@@ -1019,6 +1110,37 @@ def strip_comment_prefix(line: str) -> str:
     return line.strip()
 
 
+def filter_visible_symbols(symbols: list[dict[str, Any]], *, visible_code: str) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+    for symbol in symbols:
+        visible = is_code_visible(symbol.get("code"), visible_code)
+        filtered_children = filter_visible_symbols(symbol.get("children") or [], visible_code=visible_code)
+        if visible:
+            copied = dict(symbol)
+            copied["children"] = filtered_children
+            filtered.append(copied)
+        elif filtered_children:
+            copied = dict(symbol)
+            copied["code"] = None
+            copied["documentation"] = None
+            copied["signature"] = copied.get("signature") if is_code_visible(copied.get("signature"), visible_code) else None
+            copied["children"] = filtered_children
+            filtered.append(copied)
+    return filtered
+
+
+def is_code_visible(code: object, visible_code: str) -> bool:
+    if not isinstance(code, str) or not code.strip():
+        return False
+    haystack = normalize_for_visibility_match(visible_code)
+    needle = normalize_for_visibility_match(code)
+    return bool(needle and needle in haystack)
+
+
+def normalize_for_visibility_match(value: str) -> str:
+    return value.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
 def extract_python_header(*, node: ast.AST, lines: list[str]) -> str:
     start = max(0, getattr(node, "lineno", 1) - 1)
     header_lines: list[str] = []
@@ -1060,19 +1182,15 @@ def strip_structured_text(value: str) -> str:
     return value.strip()
 
 
-def extract_name_from_header(header: str, *, kind: str) -> str | None:
-    if kind == "function":
-        match = re.match(r"^(?:async\s+def|def)\s+([A-Za-z_][A-Za-z0-9_]*)", header)
-    else:
-        match = re.match(r"^class\s+([A-Za-z_][A-Za-z0-9_]*)", header)
-    return match.group(1) if match else None
-
-
-def extract_docstring_textual(block: str) -> str | None:
-    match = re.search(r'^[ \t]*([rRuUbBfF]*)("""|\'\'\')(?P<doc>.*?)(\2)', block, flags=re.DOTALL | re.MULTILINE)
-    if not match:
-        return None
-    return match.group("doc").strip()
+def make_symbol_id(*, path: str, name: str | None, kind: str, start_line: int | None, parent_name: str | None) -> str:
+    parts = [path, "::"]
+    if parent_name:
+        parts.append(f"{parent_name}.")
+    parts.append(name or "anonymous")
+    parts.append(f"#{kind}")
+    if start_line is not None:
+        parts.append(f":{start_line}")
+    return "".join(parts)
 
 
 def write_instances_index(*, output_root: Path, prepared: list[PreparedInstance]) -> None:
@@ -1083,6 +1201,7 @@ def write_instances_index(*, output_root: Path, prepared: list[PreparedInstance]
                 "instanceId": item.instance_id,
                 "baseId": item.base_id,
                 "language": item.language,
+                "normalizedLanguage": item.normalized_language,
                 "repo": item.repo,
                 "path": item.path,
                 "requestedContextTokens": item.requested_context_tokens,
@@ -1139,7 +1258,10 @@ def strip_json_strings(value: Any) -> Any:
 
 
 def write_json(path: Path, payload: Any) -> None:
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":
