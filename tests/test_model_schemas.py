@@ -46,6 +46,7 @@ def make_metadata() -> TrialMetadata:
         repeatIndex=1,
         taskTags=["objective"],
         validationType="judge",
+        validationConfig={},
         parameters={},
     )
 
@@ -72,6 +73,7 @@ def make_runspec_payload() -> dict[str, object]:
         "artifacts": {"writeJsonl": True, "writeIndividualJson": False},
         "taskTags": ["objective"],
         "validationType": "judge",
+        "validationConfig": {"threshold": 0.8},
         "contextBlocks": ["summary"],
         "parameters": {},
         "metadata": {
@@ -86,6 +88,7 @@ def make_runspec_payload() -> dict[str, object]:
             "repeatIndex": 1,
             "taskTags": ["objective"],
             "validationType": "judge",
+            "validationConfig": {"threshold": 0.8},
             "parameters": {},
         },
     }
@@ -116,6 +119,7 @@ def make_runresult_payload() -> dict[str, object]:
         "traceRef": None,
         "taskTags": ["objective"],
         "validationType": "judge",
+        "validationConfig": {"threshold": 0.8},
         "contextBlocks": ["summary"],
         "parameters": {},
         "metadata": {
@@ -130,6 +134,7 @@ def make_runresult_payload() -> dict[str, object]:
             "repeatIndex": 1,
             "taskTags": ["objective"],
             "validationType": "judge",
+            "validationConfig": {"threshold": 0.8},
             "parameters": {},
         },
     }
@@ -141,6 +146,8 @@ def test_runspec_model_validate_accepts_target_public_fields():
     assert runspec.trialId == "trial-1"
     assert runspec.taskId == "q_year"
     assert runspec.metadata.taskId == "q_year"
+    assert runspec.validationConfig == {"threshold": 0.8}
+    assert runspec.metadata.validationConfig == {"threshold": 0.8}
 
 
 @pytest.mark.parametrize(
@@ -177,6 +184,24 @@ def test_runresult_model_validate_accepts_target_public_fields():
     assert result.trialId == "trial-1"
     assert result.taskId == "q_year"
     assert result.response == "2018"
+    assert result.validationConfig == {"threshold": 0.8}
+    assert result.metadata.validationConfig == {"threshold": 0.8}
+
+
+def test_validation_config_defaults_for_existing_artifacts():
+    runspec_payload = make_runspec_payload()
+    runspec_payload.pop("validationConfig", None)
+    dict(runspec_payload["metadata"]).pop("validationConfig", None)
+    runspec_payload["metadata"] = dict(runspec_payload["metadata"])
+    runspec_payload["metadata"].pop("validationConfig", None)
+
+    result_payload = make_runresult_payload()
+    result_payload.pop("validationConfig", None)
+    result_payload["metadata"] = dict(result_payload["metadata"])
+    result_payload["metadata"].pop("validationConfig", None)
+
+    assert TrialSpec.model_validate(runspec_payload).validationConfig == {}
+    assert TrialResult.model_validate(result_payload).validationConfig == {}
 
 
 @pytest.mark.parametrize(

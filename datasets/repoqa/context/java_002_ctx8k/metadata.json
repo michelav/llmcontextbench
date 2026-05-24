@@ -1,0 +1,21 @@
+{
+  "base_id": "java_002",
+  "code_context_ntokens": 4208,
+  "description": "1. **Purpose**: To convert a JSON formatted string into a structured parse tree of elements that can be easily manipulated within a program.\n2. **Input**: A string formatted in JSON.\n3. **Output**: A structured parse tree of elements that represent the JSON data.\n4. **Procedure**: The function reads the input string using a reader tailored for JSON, processes it in a lenient mode allowing some flexibility in JSON syntax, and constructs a parse tree that represents all the elements and structures in the JSON string. If the input string is not valid JSON, it throws an exception indicating the syntax error.",
+  "end_byte": 1874,
+  "end_line": 54,
+  "instance_id": "java_002_ctx8k",
+  "language": "java",
+  "needle_name": "parseString",
+  "needle_token_end": 1181,
+  "needle_token_start": 1151,
+  "normalized_language": "java",
+  "path": "gson/src/main/java/com/google/gson/JsonParser.java",
+  "position_ratio": 0.15,
+  "repo": "google/gson",
+  "repoqa_description": "Function Description:1. **Purpose**: To convert a JSON formatted string into a structured parse tree of elements that can be easily manipulated within a program.\n2. **Input**: A string formatted in JSON.\n3. **Output**: A structured parse tree of elements that represent the JSON data.\n4. **Procedure**: The function reads the input string using a reader tailored for JSON, processes it in a lenient mode allowing some flexibility in JSON syntax, and constructs a parse tree that represents all the elements and structures in the JSON string. If the input string is not valid JSON, it throws an exception indicating the syntax error.",
+  "requested_context_tokens": 8192,
+  "sequence": 2,
+  "start_byte": 1743,
+  "start_line": 51
+}

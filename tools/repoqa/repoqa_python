@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+default_python="$repo_root/tools/repoqa/.venv/bin/python"
+python_bin="${REPOQA_PYTHON:-$default_python}"
+setup_hint="cd tools/repoqa && uv sync --locked"
+
+prepend_ld_library_path() {
+  local lib_dir="$1"
+
+  case ":${LD_LIBRARY_PATH:-}:" in
+    *":$lib_dir:"*) return ;;
+  esac
+
+  export LD_LIBRARY_PATH="$lib_dir${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+}
+
+add_nix_library_dir() {
+  local library_name="$1"
+  shift
+
+  local candidate
+  for candidate in "$@"; do
+    if [[ -e "$candidate/$library_name" ]]; then
+      prepend_ld_library_path "$candidate"
+      return
+    fi
+  done
+}
+
+if [[ -d /nix/store ]]; then
+  shopt -s nullglob
+  add_nix_library_dir \
+    "libstdc++.so.6" \
+    /nix/store/*gcc-*-lib/lib \
+    /nix/store/*gfortran-*-lib/lib
+  add_nix_library_dir "libz.so.1" /nix/store/*zlib-*/lib
+  shopt -u nullglob
+fi
+
+if [[ ! -x "$python_bin" ]]; then
+  {
+    echo "RepoQA Python environment is missing or not executable: $python_bin"
+    echo "Create the default tool environment with:"
+    echo "  $setup_hint"
+    echo "Or set REPOQA_PYTHON to a Python executable from a local RepoQA environment."
+  } >&2
+  exit 2
+fi
+
+exec "$python_bin" "$@"

@@ -1,0 +1,15 @@
+{
+  "baseId": "ts_004",
+  "endByte": 24072,
+  "endLine": 585,
+  "instanceId": "ts_004_ctx8k",
+  "language": "typescript",
+  "needleName": "getModelJSON",
+  "normalizedLanguage": "typescript",
+  "path": "src/utils/hub.js",
+  "repo": "xenova/transformers.js",
+  "sequence": 4,
+  "startByte": 23714,
+  "startLine": 573,
+  "targetFunction": "export async function getModelJSON(modelPath, fileName, fatal = true, options = {}) {\n    let buffer = await getModelFile(modelPath, fileName, fatal, options);\n    if (buffer === null) {\n        // Return empty object\n        return {}\n    }\n\n    let decoder = new TextDecoder('utf-8');\n    let jsonData = decoder.decode(buffer);\n\n    return JSON.parse(jsonData);\n}"
+}

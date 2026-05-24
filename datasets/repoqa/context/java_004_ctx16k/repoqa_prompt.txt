@@ -1,0 +1,1696 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:// Path: gson/src/main/java/com/google/gson/internal/bind/TypeAdapters.java
+/*
+ * Copyright (C) 2011 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.gson.internal.bind;
+
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonIOException;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
+import com.google.gson.JsonSyntaxException;
+import com.google.gson.TypeAdapter;
+import com.google.gson.TypeAdapterFactory;
+import com.google.gson.annotations.SerializedName;
+import com.google.gson.internal.LazilyParsedNumber;
+import com.google.gson.internal.NumberLimits;
+import com.google.gson.internal.TroubleshootingGuide;
+import com.google.gson.reflect.TypeToken;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
+import com.google.gson.stream.JsonWriter;
+import java.io.IOException;
+import java.lang.reflect.AccessibleObject;
+import java.lang.reflect.Field;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.net.InetAddress;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.BitSet;
+import java.util.Calendar;
+import java.util.Currency;
+import java.util.Deque;
+import java.util.GregorianCalendar;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.StringTokenizer;
+import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicIntegerArray;
+
+/** Type adapters for basic types. */
+public final class TypeAdapters {
+  private TypeAdapters() {
+    throw new UnsupportedOperationException();
+  }
+
+  @SuppressWarnings("rawtypes")
+  public static final TypeAdapter<Class> CLASS =
+      new TypeAdapter<Class>() {
+        @Override
+        public void write(JsonWriter out, Class value) throws IOException {
+          throw new UnsupportedOperationException(
+              "Attempted to serialize java.lang.Class: "
+                  + value.getName()
+                  + ". Forgot to register a type adapter?"
+                  + "\nSee "
+                  + TroubleshootingGuide.createUrl("java-lang-class-unsupported"));
+        }
+
+        @Override
+        public Class read(JsonReader in) throws IOException {
+          throw new UnsupportedOperationException(
+              "Attempted to deserialize a java.lang.Class. Forgot to register a type adapter?"
+                  + "\nSee "
+                  + TroubleshootingGuide.createUrl("java-lang-class-unsupported"));
+        }
+      }.nullSafe();
+
+  public static final TypeAdapterFactory CLASS_FACTORY = newFactory(Class.class, CLASS);
+
+  public static final TypeAdapter<BitSet> BIT_SET =
+      new TypeAdapter<BitSet>() {
+        @Override
+        public BitSet read(JsonReader in) throws IOException {
+          BitSet bitset = new BitSet();
+          in.beginArray();
+          int i = 0;
+          JsonToken tokenType = in.peek();
+          while (tokenType != JsonToken.END_ARRAY) {
+            boolean set;
+            switch (tokenType) {
+              case NUMBER:
+              case STRING:
+                int intValue = in.nextInt();
+                if (intValue == 0) {
+                  set = false;
+                } else if (intValue == 1) {
+                  set = true;
+                } else {
+                  throw new JsonSyntaxException(
+                      "Invalid bitset value "
+                          + intValue
+                          + ", expected 0 or 1; at path "
+                          + in.getPreviousPath());
+                }
+                break;
+              case BOOLEAN:
+                set = in.nextBoolean();
+                break;
+              default:
+                throw new JsonSyntaxException(
+                    "Invalid bitset value type: " + tokenType + "; at path " + in.getPath());
+            }
+            if (set) {
+              bitset.set(i);
+            }
+            ++i;
+            tokenType = in.peek();
+          }
+          in.endArray();
+          return bitset;
+        }
+
+        @Override
+        public void write(JsonWriter out, BitSet src) throws IOException {
+          out.beginArray();
+          for (int i = 0, length = src.length(); i < length; i++) {
+            int value = src.get(i) ? 1 : 0;
+            out.value(value);
+          }
+          out.endArray();
+        }
+      }.nullSafe();
+
+  public static final TypeAdapterFactory BIT_SET_FACTORY = newFactory(BitSet.class, BIT_SET);
+
+  public static final TypeAdapter<Boolean> BOOLEAN =
+      new TypeAdapter<Boolean>() {
+        @Override
+        public Boolean read(JsonReader in) throws IOException {
+          JsonToken peek = in.peek();
+          if (peek == JsonToken.NULL) {
+            in.nextNull();
+            return null;
+          } else if (peek == JsonToken.STRING) {
+            // support strings for compatibility with GSON 1.7
+            return Boolean.parseBoolean(in.nextString());
+          }
+          return in.nextBoolean();
+        }
+
+        @Override
+        public void write(JsonWriter out, Boolean value) throws IOException {
+          out.value(value);
+        }
+      };
+
+  /**
+   * Writes a boolean as a string. Useful for map keys, where booleans aren't otherwise permitted.
+   */
+  public static final TypeAdapter<Boolean> BOOLEAN_AS_STRING =
+      new TypeAdapter<Boolean>() {
+        @Override
+        public Boolean read(JsonReader in) throws IOException {
+          if (in.peek() == JsonToken.NULL) {
+            in.nextNull();
+            return null;
+          }
+          return Boolean.valueOf(in.nextString());
+        }
+
+        @Override
+        public void write(JsonWriter out, Boolean value) throws IOException {
+          out.value(value == null ? "null" : value.toString());
+        }
+      };
+
+  public static final TypeAdapterFactory BOOLEAN_FACTORY =
+      newFactory(boolean.class, Boolean.class, BOOLEAN);
+
+  public static final TypeAdapter<Number> BYTE =
+      new TypeAdapter<Number>() {
+        @Override
+        public Number read(JsonReader in) throws IOException {
+          if (in.peek() == JsonToken.NULL) {
+            in.nextNull();
+            return null;
+          }
+
+          int intValue;
+          try {
+            intValue = in.nextInt();
+          } catch (NumberFormatException e) {
+            throw new JsonSyntaxException(e);
+          }
+          // Allow up to 255 to support unsigned values
+          if (intValue > 255 || intValue < Byte.MIN_VALUE) {
+            throw new JsonSyntaxException(
+                "Lossy conversion from " + intValue + " to byte; at path " + in.getPreviousPath());
+          }
+          return (byte) intValue;
+        }
+
+        @Override
+        public void write(JsonWriter out, Number value) throws IOException {
+          if (value == null) {
+            out.nullValue();
+          } else {
+            out.value(value.byteValue());
+          }
+        }
+      };
+
+  public static final TypeAdapterFactory BYTE_FACTORY = newFactory(byte.class, Byte.class, BYTE);
+
+  public static final TypeAdapter<Number> SHORT =
+      new TypeAdapter<Number>() {
+        @Override
+        public Number read(JsonReader in) throws IOException {
+          if (in.peek() == JsonToken.NULL) {
+            in.nextNull();
+            return null;
+          }
+
+          int intValue;
+          try {
+            intValue = in.nextInt();
+          } catch (NumberFormatException e) {
+            throw new JsonSyntaxException(e);
+          }
+          // Allow up to 65535 to support unsigned values
+...
+// Path: gson/src/main/java/com/google/gson/stream/MalformedJsonException.java
+/*
+ * Copyright (C) 2010 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.gson.stream;
+
+import com.google.gson.Strictness;
+import java.io.IOException;
+
+/**
+ * Thrown when a reader encounters malformed JSON. Some syntax errors can be ignored by using {@link
+ * Strictness#LENIENT} for {@link JsonReader#setStrictness(Strictness)}.
+ */
+public final class MalformedJsonException extends IOException {
+  private static final long serialVersionUID = 1L;
+
+  public MalformedJsonException(String msg) {
+    super(msg);
+  }
+
+  public MalformedJsonException(String msg, Throwable throwable) {
+    super(msg, throwable);
+  }
+
+  public MalformedJsonException(Throwable throwable) {
+    super(throwable);
+  }
+}
+
+// Path: gson/src/main/java/com/google/gson/internal/Streams.java
+/*
+ * Copyright (C) 2010 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.gson.internal;
+
+import com.google.gson.JsonElement;
+import com.google.gson.JsonIOException;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonParseException;
+import com.google.gson.JsonSyntaxException;
+import com.google.gson.internal.bind.TypeAdapters;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
+import com.google.gson.stream.JsonWriter;
+import com.google.gson.stream.MalformedJsonException;
+import java.io.EOFException;
+import java.io.IOException;
+import java.io.Writer;
+import java.util.Objects;
+
+/** Reads and writes GSON parse trees over streams. */
+public final class Streams {
+  private Streams() {
+    throw new UnsupportedOperationException();
+  }
+
+  /** Takes a reader in any state and returns the next value as a JsonElement. */
+  public static JsonElement parse(JsonReader reader) throws JsonParseException {
+    boolean isEmpty = true;
+    try {
+      JsonToken unused = reader.peek();
+      isEmpty = false;
+      return TypeAdapters.JSON_ELEMENT.read(reader);
+    } catch (EOFException e) {
+      /*
+       * For compatibility with JSON 1.5 and earlier, we return a JsonNull for
+       * empty documents instead of throwing.
+       */
+      if (isEmpty) {
+        return JsonNull.INSTANCE;
+      }
+      // The stream ended prematurely so it is likely a syntax error.
+      throw new JsonSyntaxException(e);
+    } catch (MalformedJsonException e) {
+      throw new JsonSyntaxException(e);
+    } catch (IOException e) {
+      throw new JsonIOException(e);
+    } catch (NumberFormatException e) {
+      throw new JsonSyntaxException(e);
+    }
+  }
+
+  /** Writes the JSON element to the writer, recursively. */
+  public static void write(JsonElement element, JsonWriter writer) throws IOException {
+    TypeAdapters.JSON_ELEMENT.write(writer, element);
+  }
+
+  public static Writer writerForAppendable(Appendable appendable) {
+    return appendable instanceof Writer ? (Writer) appendable : new AppendableWriter(appendable);
+  }
+
+  /** Adapts an {@link Appendable} so it can be passed anywhere a {@link Writer} is used. */
+  private static final class AppendableWriter extends Writer {
+    private final Appendable appendable;
+    private final CurrentWrite currentWrite = new CurrentWrite();
+
+    AppendableWriter(Appendable appendable) {
+      this.appendable = appendable;
+    }
+
+    @SuppressWarnings("UngroupedOverloads") // this is intentionally ungrouped, see comment below
+    @Override
+    public void write(char[] chars, int offset, int length) throws IOException {
+      currentWrite.setChars(chars);
+      appendable.append(currentWrite, offset, offset + length);
+    }
+
+    @Override
+    public void flush() {}
+
+    @Override
+    public void close() {}
+
+    // Override these methods for better performance
+    // They would otherwise unnecessarily create Strings or char arrays
+
+    @Override
+    public void write(int i) throws IOException {
+      appendable.append((char) i);
+    }
+
+    @Override
+    public void write(String str, int off, int len) throws IOException {
+      // Appendable.append turns null -> "null", which is not desired here
+      Objects.requireNonNull(str);
+      appendable.append(str, off, off + len);
+    }
+
+    @Override
+    public Writer append(CharSequence csq) throws IOException {
+      appendable.append(csq);
+      return this;
+    }
+
+    @Override
+    public Writer append(CharSequence csq, int start, int end) throws IOException {
+      appendable.append(csq, start, end);
+      return this;
+    }
+
+    /** A mutable char sequence pointing at a single char[]. */
+    private static class CurrentWrite implements CharSequence {
+      private char[] chars;
+      private String cachedString;
+
+      void setChars(char[] chars) {
+        this.chars = chars;
+        this.cachedString = null;
+      }
+
+      @Override
+      public int length() {
+        return chars.length;
+      }
+
+      @Override
+      public char charAt(int i) {
+        return chars[i];
+      }
+
+      @Override
+      public CharSequence subSequence(int start, int end) {
+        return new String(chars, start, end - start);
+      }
+
+      // Must return string representation to satisfy toString() contract
+      @Override
+      public String toString() {
+        if (cachedString == null) {
+          cachedString = new String(chars);
+        }
+        return cachedString;
+      }
+    }
+  }
+}
+
+// Path: gson/src/main/java/com/google/gson/JsonElement.java
+/*
+ * Copyright (C) 2008 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.gson;
+
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import com.google.gson.internal.Streams;
+import com.google.gson.stream.JsonWriter;
+import java.io.IOException;
+import java.io.StringWriter;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+
+/**
+ * A class representing an element of JSON. It could either be a {@link JsonObject}, a {@link
+ * JsonArray}, a {@link JsonPrimitive} or a {@link JsonNull}.
+ *
+ * @author Inderjeet Singh
+ * @author Joel Leitch
+ */
+public abstract class JsonElement {
+  /**
+   * @deprecated Creating custom {@code JsonElement} subclasses is highly discouraged and can lead
+   *     to undefined behavior.<br>
+   *     This constructor is only kept for backward compatibility.
+   */
+  @Deprecated
+  public JsonElement() {}
+
+  /**
+   * Returns a deep copy of this element. Immutable elements like primitives and nulls are not
+   * copied.
+   *
+   * @since 2.8.2
+   */
+  public abstract JsonElement deepCopy();
+
+  /**
+   * Provides a check for verifying if this element is a JSON array or not.
+   *
+   * @return true if this element is of type {@link JsonArray}, false otherwise.
+   */
+  public boolean isJsonArray() {
+    return this instanceof JsonArray;
+  }
+
+  /**
+   * Provides a check for verifying if this element is a JSON object or not.
+   *
+   * @return true if this element is of type {@link JsonObject}, false otherwise.
+   */
+  public boolean isJsonObject() {
+    return this instanceof JsonObject;
+  }
+
+  /**
+   * Provides a check for verifying if this element is a primitive or not.
+   *
+   * @return true if this element is of type {@link JsonPrimitive}, false otherwise.
+   */
+  public boolean isJsonPrimitive() {
+    return this instanceof JsonPrimitive;
+  }
+
+  /**
+   * Provides a check for verifying if this element represents a null value or not.
+   *
+   * @return true if this element is of type {@link JsonNull}, false otherwise.
+   * @since 1.2
+   */
+  public boolean isJsonNull() {
+    return this instanceof JsonNull;
+  }
+
+  /**
+   * Convenience method to get this element as a {@link JsonObject}. If this element is of some
+   * other type, an {@link IllegalStateException} will result. Hence it is best to use this method
+   * after ensuring that this element is of the desired type by calling {@link #isJsonObject()}
+   * first.
+   *
+   * @return this element as a {@link JsonObject}.
+   * @throws IllegalStateException if this element is of another type.
+   */
+  public JsonObject getAsJsonObject() {
+    if (isJsonObject()) {
+      return (JsonObject) this;
+    }
+    throw new IllegalStateException("Not a JSON Object: " + this);
+  }
+
+  /**
+   * Convenience method to get this element as a {@link JsonArray}. If this element is of some other
+   * type, an {@link IllegalStateException} will result. Hence it is best to use this method after
+   * ensuring that this element is of the desired type by calling {@link #isJsonArray()} first.
+   *
+   * @return this element as a {@link JsonArray}.
+   * @throws IllegalStateException if this element is of another type.
+   */
+  public JsonArray getAsJsonArray() {
+    if (isJsonArray()) {
+      return (JsonArray) this;
+    }
+    throw new IllegalStateException("Not a JSON Array: " + this);
+  }
+
+  /**
+   * Convenience method to get this element as a {@link JsonPrimitive}. If this element is of some
+   * other type, an {@link IllegalStateException} will result. Hence it is best to use this method
+   * after ensuring that this element is of the desired type by calling {@link #isJsonPrimitive()}
+   * first.
+   *
+   * @return this element as a {@link JsonPrimitive}.
+   * @throws IllegalStateException if this element is of another type.
+   */
+  public JsonPrimitive getAsJsonPrimitive() {
+    if (isJsonPrimitive()) {
+      return (JsonPrimitive) this;
+    }
+    throw new IllegalStateException("Not a JSON Primitive: " + this);
+  }
+
+  /**
+   * Convenience method to get this element as a {@link JsonNull}. If this element is of some other
+   * type, an {@link IllegalStateException} will result. Hence it is best to use this method after
+   * ensuring that this element is of the desired type by calling {@link #isJsonNull()} first.
+   *
+   * @return this element as a {@link JsonNull}.
+   * @throws IllegalStateException if this element is of another type.
+   * @since 1.2
+   */
+  
+@CanIgnoreReturnValue // When this method is used only to verify that the value is JsonNull
+  public JsonNull getAsJsonNull() {
+    if (isJsonNull()) {
+      return (JsonNull) this;
+    }
+    throw new IllegalStateException("Not a JSON Null: " + this);
+  }
+
+  /**
+   * Convenience method to get this element as a boolean value.
+   *
+   * @return this element as a primitive boolean value.
+   * @throws UnsupportedOperationException if this element is not a {@link JsonPrimitive} or {@link
+   *     JsonArray}.
+   * @throws IllegalStateException if this element is of the type {@link JsonArray} but contains
+   *     more than a single element.
+   */
+  public boolean getAsBoolean() {
+    throw new UnsupportedOperationException(getClass().getSimpleName());
+  }
+
+  /**
+   * Convenience method to get this element as a {@link Number}.
+   *
+   * @return this element as a {@link Number}.
+   * @throws UnsupportedOperationException if this element is not a {@link JsonPrimitive} or {@link
+   *     JsonArray}, or cannot be converted to a number.
+   * @throws IllegalStateException if this element is of the type {@link JsonArray} but contains
+   *     more than a single element.
+   */
+  public Number getAsNumber() {
+    throw new UnsupportedOperationException(getClass().getSimpleName());
+  }
+
+  /**
+   * Convenience method to get this element as a string value.
+   *
+   * @return this element as a string value.
+   * @throws UnsupportedOperationException if this element is not a {@link JsonPrimitive} or {@link
+   *     JsonArray}.
+   * @throws IllegalStateException if this element is of the type {@link JsonArray} but contains
+   *     more than a single element.
+   */
+  public String getAsString() {
+    throw new UnsupportedOperationException(getClass().getSimpleName());
+  }
+
+  /**
+   * Convenience method to get this element as a primitive double value.
+   *
+   * @return this element as a primitive double value.
+   * @throws UnsupportedOperationException if this element is not a {@link JsonPrimitive} or {@link
+   *     JsonArray}.
+   * @throws NumberFormatException if the value contained is not a valid double.
+   * @throws IllegalStateException if this element is of the type {@link JsonArray} but contains
+   *     more than a single element.
+   */
+  public double getAsDouble() {
+    throw new UnsupportedOperationException(getClass().getSimpleName());
+  }
+
+  /**
+   * Convenience method to get this element as a primitive float value.
+   *
+   * @return this element as a primitive float value.
+   * @throws UnsupportedOperationException if this element is not a {@link JsonPrimitive} or {@link
+   *     JsonArray}.
+   * @throws NumberFormatException if the value contained is not a valid float.
+   * @throws IllegalStateException if this element is of the type {@link JsonArray} but contains
+   *     more than a single element.
+   */
+  public float getAsFloat() {
+    throw new UnsupportedOperationException(getClass().getSimpleName());
+  }
+
+  /**
+   * Convenience method to get this element as a primitive long value.
+   *
+   * @return this element as a primitive long value.
+   * @throws UnsupportedOperationException if this element is not a {@link JsonPrimitive} or {@link
+   *     JsonArray}.
+   * @throws NumberFormatException if the value contained is not a valid long.
+   * @throws IllegalStateException if this element is of the type {@link JsonArray} but contains
+   *     more than a single element.
+   */
+  public long getAsLong() {
+    throw new UnsupportedOperationException(getClass().getSimpleName());
+  }
+
+  /**
+   * Convenience method to get this element as a primitive integer value.
+   *
+   * @return this element as a primitive integer value.
+   * @throws UnsupportedOperationException if this element is not a {@link JsonPrimitive} or {@link
+   *     JsonArray}.
+   * @throws NumberFormatException if the value contained is not a valid integer.
+   * @throws IllegalStateException if this element is of the type {@link JsonArray} but contains
+   *     more than a single element.
+   */
+  public int getAsInt() {
+    throw new UnsupportedOperationException(getClass().getSimpleName());
+  }
+
+  /**
+   * Convenience method to get this element as a primitive byte value.
+   *
+   * @return this element as a primitive byte value.
+   * @throws UnsupportedOperationException if this element is not a {@link JsonPrimitive} or {@link
+   *     JsonArray}.
+   * @throws NumberFormatException if the value contained is not a valid byte.
+   * @throws IllegalStateException if this element is of the type {@link JsonArray} but contains
+   *     more than a single element.
+   * @since 1.3
+   */
+  public byte getAsByte() {
+    throw new UnsupportedOperationException(getClass().getSimpleName());
+  }
+
+  /**
+   * Convenience method to get the first character of the string value of this element.
+   *
+   * @return the first character of the string value.
+   * @throws UnsupportedOperationException if this element is not a {@link JsonPrimitive} or {@link
+   *     JsonArray}, or if its string value is empty.
+   * @throws IllegalStateException if this element is of the type {@link JsonArray} but contains
+   *     more than a single element.
+   * @since 1.3
+   * @deprecated This method is misleading, as it does not get this element as a char but rather as
+   *     a string's first character.
+   */
+  @Deprecated
+  public char getAsCharacter() {
+    throw new UnsupportedOperationException(getClass().getSimpleName());
+  }
+
+  /**
+   * Convenience method to get this element as a {@link BigDecimal}.
+   *
+   * @return this element as a {@link BigDecimal}.
+   * @throws UnsupportedOperationException if this element is not a {@link JsonPrimitive} or {@link
+   *     JsonArray}.
+   * @throws NumberFormatException if this element is not a valid {@link BigDecimal}.
+   * @throws IllegalStateException if this element is of the type {@link JsonArray} but contains
+   *     more than a single element.
+   * @since 1.2
+   */
+  public BigDecimal getAsBigDecimal() {
+    throw new UnsupportedOperationException(getClass().getSimpleName());
+  }
+
+  /**
+   * Convenience method to get this element as a {@link BigInteger}.
+   *
+   * @return this element as a {@link BigInteger}.
+   * @throws UnsupportedOperationException if this element is not a {@link JsonPrimitive} or {@link
+   *     JsonArray}.
+   * @throws NumberFormatException if this element is not a valid {@link BigInteger}.
+   * @throws IllegalStateException if this element is of the type {@link JsonArray} but contains
+   *     more than a single element.
+   * @since 1.2
+   */
+  public BigInteger getAsBigInteger() {
+    throw new UnsupportedOperationException(getClass().getSimpleName());
+  }
+
+  /**
+   * Convenience method to get this element as a primitive short value.
+   *
+   * @return this element as a primitive short value.
+   * @throws UnsupportedOperationException if this element is not a {@link JsonPrimitive} or {@link
+   *     JsonArray}.
+   * @throws NumberFormatException if the value contained is not a valid short.
+   * @throws IllegalStateException if this element is of the type {@link JsonArray} but contains
+   *     more than a single element.
+   */
+  public short getAsShort() {
+    throw new UnsupportedOperationException(getClass().getSimpleName());
+  }
+
+  /** Returns a String representation of this element. */
+  @Override
+  public String toString() {
+    try {
+      StringWriter stringWriter = new StringWriter();
+      JsonWriter jsonWriter = new JsonWriter(stringWriter);
+      // Make writer lenient because toString() must not fail, even if for example JsonPrimitive
+      // contains NaN
+      jsonWriter.setStrictness(Strictness.LENIENT);
+      Streams.write(this, jsonWriter);
+      return stringWriter.toString();
+    } catch (IOException e) {
+      throw new AssertionError(e);
+    }
+  }
+}
+
+// Path: gson/src/main/java/com/google/gson/internal/bind/JsonTreeReader.java
+/*
+ * Copyright (C) 2011 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.gson.internal.bind;
+
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
+import com.google.gson.stream.MalformedJsonException;
+import java.io.IOException;
+import java.io.Reader;
+import java.util.Arrays;
+import java.util.Iterator;
+import java.util.Map;
+
+/**
+ * This reader walks the elements of a JsonElement as if it was coming from a character stream.
+ *
+ * @author Jesse Wilson
+ */
+public final class JsonTreeReader extends JsonReader {
+  private static final Reader UNREADABLE_READER =
+      new Reader() {
+        @Override
+        public int read(char[] buffer, int offset, int count) {
+          throw new AssertionError();
+        }
+
+        @Override
+        public void close() {
+          throw new AssertionError();
+        }
+      };
+  private static final Object SENTINEL_CLOSED = new Object();
+
+  /*
+   * The nesting stack. Using a manual array rather than an ArrayList saves 20%.
+   */
+  private Object[] stack = new Object[32];
+  private int stackSize = 0;
+
+  /*
+   * The path members. It corresponds directly to stack: At indices where the
+   * stack contains an object (EMPTY_OBJECT, DANGLING_NAME or NONEMPTY_OBJECT),
+   * pathNames contains the name at this scope. Where it contains an array
+   * (EMPTY_ARRAY, NONEMPTY_ARRAY) pathIndices contains the current index in
+   * that array. Otherwise the value is undefined, and we take advantage of that
+   * by incrementing pathIndices when doing so isn't useful.
+   */
+  private String[] pathNames = new String[32];
+  private int[] pathIndices = new int[32];
+
+  public JsonTreeReader(JsonElement element) {
+    super(UNREADABLE_READER);
+    push(element);
+  }
+
+  @Override
+  public void beginArray() throws IOException {
+    expect(JsonToken.BEGIN_ARRAY);
+    JsonArray array = (JsonArray) peekStack();
+    push(array.iterator());
+    pathIndices[stackSize - 1] = 0;
+  }
+
+  @Override
+  public void endArray() throws IOException {
+    expect(JsonToken.END_ARRAY);
+    popStack(); // empty iterator
+    popStack(); // array
+    if (stackSize > 0) {
+      pathIndices[stackSize - 1]++;
+    }
+  }
+
+  @Override
+  public void beginObject() throws IOException {
+    expect(JsonToken.BEGIN_OBJECT);
+    JsonObject object = (JsonObject) peekStack();
+    push(object.entrySet().iterator());
+  }
+
+  @Override
+  public void endObject() throws IOException {
+    expect(JsonToken.END_OBJECT);
+    pathNames[stackSize - 1] = null; // Free the last path name so that it can be garbage collected
+    popStack(); // empty iterator
+    popStack(); // object
+    if (stackSize > 0) {
+      pathIndices[stackSize - 1]++;
+    }
+  }
+
+  @Override
+  public boolean hasNext() throws IOException {
+    JsonToken token = peek();
+    return token != JsonToken.END_OBJECT
+        && token != JsonToken.END_ARRAY
+        && token != JsonToken.END_DOCUMENT;
+  }
+
+  @Override
+  public JsonToken peek() throws IOException {
+    if (stackSize == 0) {
+      return JsonToken.END_DOCUMENT;
+    }
+
+    Object o = peekStack();
+    if (o instanceof Iterator) {
+      boolean isObject = stack[stackSize - 2] instanceof JsonObject;
+      Iterator<?> iterator = (Iterator<?>) o;
+      if (iterator.hasNext()) {
+        if (isObject) {
+          return JsonToken.NAME;
+        } else {
+          push(iterator.next());
+          return peek();
+        }
+      } else {
+        return isObject ? JsonToken.END_OBJECT : JsonToken.END_ARRAY;
+      }
+    } else if (o instanceof JsonObject) {
+      return JsonToken.BEGIN_OBJECT;
+    } else if (o instanceof JsonArray) {
+      return JsonToken.BEGIN_ARRAY;
+    } else if (o instanceof JsonPrimitive) {
+      JsonPrimitive primitive = (JsonPrimitive) o;
+      if (primitive.isString()) {
+        return JsonToken.STRING;
+      } else if (primitive.isBoolean()) {
+        return JsonToken.BOOLEAN;
+      } else if (primitive.isNumber()) {
+        return JsonToken.NUMBER;
+      } else {
+        throw new AssertionError();
+      }
+    } else if (o instanceof JsonNull) {
+      return JsonToken.NULL;
+    } else if (o == SENTINEL_CLOSED) {
+      throw new IllegalStateException("JsonReader is closed");
+    } else {
+      throw new MalformedJsonException(
+          "Custom JsonElement subclass " + o.getClass().getName() + " is not supported");
+    }
+  }
+
+  private Object peekStack() {
+    return stack[stackSize - 1];
+  }
+
+  @CanIgnoreReturnValue
+  private Object popStack() {
+    Object result = stack[--stackSize];
+    stack[stackSize] = null;
+    return result;
+  }
+
+  private void expect(JsonToken expected) throws IOException {
+    if (peek() != expected) {
+      throw new IllegalStateException(
+          "Expected " + expected + " but was " + peek() + locationString());
+    }
+  }
+
+  private String nextName(boolean skipName) throws IOException {
+    expect(JsonToken.NAME);
+    Iterator<?> i = (Iterator<?>) peekStack();
+    Map.Entry<?, ?> entry = (Map.Entry<?, ?>) i.next();
+    String result = (String) entry.getKey();
+    pathNames[stackSize - 1] = skipName ? "<skipped>" : result;
+    push(entry.getValue());
+    return result;
+  }
+
+  @Override
+  public String nextName() throws IOException {
+    return nextName(false);
+  }
+
+  @Override
+  public String nextString() throws IOException {
+    JsonToken token = peek();
+    if (token != JsonToken.STRING && token != JsonToken.NUMBER) {
+      throw new IllegalStateException(
+          "Expected " + JsonToken.STRING + " but was " + token + locationString());
+    }
+    String result = ((JsonPrimitive) popStack()).getAsString();
+    if (stackSize > 0) {
+      pathIndices[stackSize - 1]++;
+    }
+    return result;
+  }
+
+  @Override
+  public boolean nextBoolean() throws IOException {
+    expect(JsonToken.BOOLEAN);
+    boolean result = ((JsonPrimitive) popStack()).getAsBoolean();
+    if (stackSize > 0) {
+      pathIndices[stackSize - 1]++;
+    }
+    return result;
+  }
+
+  @Override
+  public void nextNull() throws IOException {
+    expect(JsonToken.NULL);
+    popStack();
+    if (stackSize > 0) {
+      pathIndices[stackSize - 1]++;
+    }
+  }
+
+  @Override
+  public double nextDouble() throws IOException {
+    JsonToken token = peek();
+    if (token != JsonToken.NUMBER && token != JsonToken.STRING) {
+      throw new IllegalStateException(
+          "Expected " + JsonToken.NUMBER + " but was " + token + locationString());
+    }
+    double result = ((JsonPrimitive) peekStack()).getAsDouble();
+    if (!isLenient() && (Double.isNaN(result) || Double.isInfinite(result))) {
+      throw new MalformedJsonException("JSON forbids NaN and infinities: " + result);
+    }
+    popStack();
+    if (stackSize > 0) {
+      pathIndices[stackSize - 1]++;
+    }
+    return result;
+  }
+
+  @Override
+  public long nextLong() throws IOException {
+    JsonToken token = peek();
+    if (token != JsonToken.NUMBER && token != JsonToken.STRING) {
+      throw new IllegalStateException(
+          "Expected " + JsonToken.NUMBER + " but was " + token + locationString());
+    }
+    long result = ((JsonPrimitive) peekStack()).getAsLong();
+    popStack();
+    if (stackSize > 0) {
+      pathIndices[stackSize - 1]++;
+    }
+    return result;
+  }
+
+  @Override
+  public int nextInt() throws IOException {
+    JsonToken token = peek();
+    if (token != JsonToken.NUMBER && token != JsonToken.STRING) {
+      throw new IllegalStateException(
+          "Expected " + JsonToken.NUMBER + " but was " + token + locationString());
+    }
+    int result = ((JsonPrimitive) peekStack()).getAsInt();
+    popStack();
+    if (stackSize > 0) {
+      pathIndices[stackSize - 1]++;
+    }
+    return result;
+  }
+
+  JsonElement nextJsonElement() throws IOException {
+    final JsonToken peeked = peek();
+    if (peeked == JsonToken.NAME
+        || peeked == JsonToken.END_ARRAY
+        || peeked == JsonToken.END_OBJECT
+        || peeked == JsonToken.END_DOCUMENT) {
+      throw new IllegalStateException("Unexpected " + peeked + " when reading a JsonElement.");
+    }
+    final JsonElement element = (JsonElement) peekStack();
+    skipValue();
+    return element;
+  }
+
+  @Override
+  public void close() throws IOException {
+    stack = new Object[] {SENTINEL_CLOSED};
+    stackSize = 1;
+  }
+
+  @Override
+  public void skipValue() throws IOException {
+    JsonToken peeked = peek();
+    switch (peeked) {
+      case NAME:
+        @SuppressWarnings("unused")
+        String unused = nextName(true);
+        break;
+      case END_ARRAY:
+        endArray();
+        break;
+      case END_OBJECT:
+        endObject();
+        break;
+      case END_DOCUMENT:
+        // Do nothing
+        break;
+      default:
+        popStack();
+        if (stackSize > 0) {
+          pathIndices[stackSize - 1]++;
+        }
+        break;
+    }
+  }
+
+  @Override
+  public String toString() {
+    return getClass().getSimpleName() + locationString();
+  }
+
+  public void promoteNameToValue() throws IOException {
+    expect(JsonToken.NAME);
+    Iterator<?> i = (Iterator<?>) peekStack();
+    Map.Entry<?, ?> entry = (Map.Entry<?, ?>) i.next();
+    push(entry.getValue());
+    push(new JsonPrimitive((String) entry.getKey()));
+  }
+
+  private void push(Object newTop) {
+    if (stackSize == stack.length) {
+      int newLength = stackSize * 2;
+      stack = Arrays.copyOf(stack, newLength);
+      pathIndices = Arrays.copyOf(pathIndices, newLength);
+      pathNames = Arrays.copyOf(pathNames, newLength);
+    }
+    stack[stackSize++] = newTop;
+  }
+
+  private String getPath(boolean usePreviousPath) {
+    StringBuilder result = new StringBuilder().append('$');
+    for (int i = 0; i < stackSize; i++) {
+      if (stack[i] instanceof JsonArray) {
+        if (++i < stackSize && stack[i] instanceof Iterator) {
+          int pathIndex = pathIndices[i];
+          // If index is last path element it points to next array element; have to decrement
+          // `- 1` covers case where iterator for next element is on stack
+          // `- 2` covers case where peek() already pushed next element onto stack
+          if (usePreviousPath && pathIndex > 0 && (i == stackSize - 1 || i == stackSize - 2)) {
+            pathIndex--;
+          }
+          result.append('[').append(pathIndex).append(']');
+        }
+      } else if (stack[i] instanceof JsonObject) {
+        if (++i < stackSize && stack[i] instanceof Iterator) {
+          result.append('.');
+          if (pathNames[i] != null) {
+            result.append(pathNames[i]);
+          }
+        }
+      }
+    }
+    return result.toString();
+  }
+
+  @Override
+  public String getPath() {
+    return getPath(false);
+  }
+
+  @Override
+  public String getPreviousPath() {
+    return getPath(true);
+  }
+
+  private String locationString() {
+    return " at path " + getPath();
+  }
+}
+
+// Path: gson/src/main/java/com/google/gson/internal/bind/JsonTreeWriter.java
+/*
+ * Copyright (C) 2011 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.gson.internal.bind;
+
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonNull;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
+import com.google.gson.stream.JsonWriter;
+import java.io.IOException;
+import java.io.Writer;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
+/** This writer creates a JsonElement. */
+public final class JsonTreeWriter extends JsonWriter {
+  private static final Writer UNWRITABLE_WRITER =
+      new Writer() {
+        @Override
+        public void write(char[] buffer, int offset, int counter) {
+          throw new AssertionError();
+        }
+
+        @Override
+        public void flush() {
+          throw new AssertionError();
+        }
+
+        @Override
+        public void close() {
+          throw new AssertionError();
+        }
+      };
+
+  /** Added to the top of the stack when this writer is closed to cause following ops to fail. */
+  private static final JsonPrimitive SENTINEL_CLOSED = new JsonPrimitive("closed");
+
+  /** The JsonElements and JsonArrays under modification, outermost to innermost. */
+  private final List<JsonElement> stack = new ArrayList<>();
+
+  /** The name for the next JSON object value. If non-null, the top of the stack is a JsonObject. */
+  private String pendingName;
+
+  /** the JSON element constructed by this writer. */
+  private JsonElement product = JsonNull.INSTANCE; // TODO: is this really what we want?;
+
+  public JsonTreeWriter() {
+    super(UNWRITABLE_WRITER);
+  }
+
+  /** Returns the top level object produced by this writer. */
+  public JsonElement get() {
+    if (!stack.isEmpty()) {
+      throw new IllegalStateException("Expected one JSON element but was " + stack);
+    }
+    return product;
+  }
+
+  private JsonElement peek() {
+    return stack.get(stack.size() - 1);
+  }
+
+  private void put(JsonElement value) {
+    if (pendingName != null) {
+      if (!value.isJsonNull() || getSerializeNulls()) {
+        JsonObject object = (JsonObject) peek();
+        object.add(pendingName, value);
+      }
+      pendingName = null;
+    } else if (stack.isEmpty()) {
+      product = value;
+    } else {
+      JsonElement element = peek();
+      if (element instanceof JsonArray) {
+        ((JsonArray) element).add(value);
+      } else {
+        throw new IllegalStateException();
+      }
+    }
+  }
+
+  @CanIgnoreReturnValue
+  @Override
+  public JsonWriter beginArray() throws IOException {
+    JsonArray array = new JsonArray();
+    put(array);
+    stack.add(array);
+    return this;
+  }
+
+  @CanIgnoreReturnValue
+  @Override
+  public JsonWriter endArray() throws IOException {
+    if (stack.isEmpty() || pendingName != null) {
+      throw new IllegalStateException();
+    }
+    JsonElement element = peek();
+    if (element instanceof JsonArray) {
+      stack.remove(stack.size() - 1);
+      return this;
+    }
+    throw new IllegalStateException();
+  }
+
+  @CanIgnoreReturnValue
+  @Override
+  public JsonWriter beginObject() throws IOException {
+    JsonObject object = new JsonObject();
+    put(object);
+    stack.add(object);
+    return this;
+  }
+
+  @CanIgnoreReturnValue
+  @Override
+  public JsonWriter endObject() throws IOException {
+    if (stack.isEmpty() || pendingName != null) {
+      throw new IllegalStateException();
+    }
+    JsonElement element = peek();
+    if (element instanceof JsonObject) {
+      stack.remove(stack.size() - 1);
+      return this;
+    }
+    throw new IllegalStateException();
+  }
+
+  @CanIgnoreReturnValue
+  @Override
+  public JsonWriter name(String name) throws IOException {
+    Objects.requireNonNull(name, "name == null");
+    if (stack.isEmpty() || pendingName != null) {
+      throw new IllegalStateException("Did not expect a name");
+    }
+    JsonElement element = peek();
+    if (element instanceof JsonObject) {
+      pendingName = name;
+      return this;
+    }
+    throw new IllegalStateException("Please begin an object before writing a name.");
+  }
+
+  @CanIgnoreReturnValue
+  @Override
+  public JsonWriter value(String value) throws IOException {
+    if (value == null) {
+      return nullValue();
+    }
+    put(new JsonPrimitive(value));
+    return this;
+  }
+
+  @CanIgnoreReturnValue
+  @Override
+  public JsonWriter value(boolean value) throws IOException {
+    put(new JsonPrimitive(value));
+    return this;
+  }
+
+  @CanIgnoreReturnValue
+  @Override
+  public JsonWriter value(Boolean value) throws IOException {
+    if (value == null) {
+      return nullValue();
+    }
+    put(new JsonPrimitive(value));
+    return this;
+  }
+
+  @CanIgnoreReturnValue
+  @Override
+  public JsonWriter value(float value) throws IOException {
+    if (!isLenient() && (Float.isNaN(value) || Float.isInfinite(value))) {
+      throw new IllegalArgumentException("JSON forbids NaN and infinities: " + value);
+    }
+    put(new JsonPrimitive(value));
+    return this;
+  }
+
+  @CanIgnoreReturnValue
+  @Override
+  public JsonWriter value(double value) throws IOException {
+    if (!isLenient() && (Double.isNaN(value) || Double.isInfinite(value))) {
+      throw new IllegalArgumentException("JSON forbids NaN and infinities: " + value);
+    }
+    put(new JsonPrimitive(value));
+    return this;
+  }
+
+  @CanIgnoreReturnValue
+  @Override
+  public JsonWriter value(long value) throws IOException {
+    put(new JsonPrimitive(value));
+    return this;
+  }
+
+  @CanIgnoreReturnValue
+  @Override
+  public JsonWriter value(Number value) throws IOException {
+    if (value == null) {
+      return nullValue();
+    }
+
+    if (!isLenient()) {
+      double d = value.doubleValue();
+      if (Double.isNaN(d) || Double.isInfinite(d)) {
+        throw new IllegalArgumentException("JSON forbids NaN and infinities: " + value);
+      }
+    }
+
+    put(new JsonPrimitive(value));
+    return this;
+  }
+
+  @CanIgnoreReturnValue
+  @Override
+  public JsonWriter nullValue() throws IOException {
+    put(JsonNull.INSTANCE);
+    return this;
+  }
+
+  @Override
+  public JsonWriter jsonValue(String value) throws IOException {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public void flush() throws IOException {}
+
+  @Override
+  public void close() throws IOException {
+    if (!stack.isEmpty()) {
+      throw new IOException("Incomplete document");
+    }
+    stack.add(SENTINEL_CLOSED);
+  }
+}
+
+// Path: gson/src/main/java/com/google/gson/TypeAdapter.java
+/*
+ * Copyright (C) 2011 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.gson;
+
+import com.google.gson.internal.bind.JsonTreeReader;
+import com.google.gson.internal.bind.JsonTreeWriter;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
+import com.google.gson.stream.JsonWriter;
+import java.io.IOException;
+import java.io.Reader;
+import java.io.StringReader;
+import java.io.StringWriter;
+import java.io.Writer;
+
+/**
+ * Converts Java objects to and from JSON.
+ *
+ * <h2>Defining a type's JSON form</h2>
+ *
+ * By default Gson converts application classes to JSON using its built-in type adapters. If Gson's
+ * default JSON conversion isn't appropriate for a type, extend this class to customize the
+ * conversion. Here's an example of a type adapter for an (X,Y) coordinate point:
+ *
+ * <pre>{@code
+ * public class PointAdapter extends TypeAdapter<Point> {
+ *   public Point read(JsonReader reader) throws IOException {
+ *     if (reader.peek() == JsonToken.NULL) {
+ *       reader.nextNull();
+ *       return null;
+ *     }
+ *     String xy = reader.nextString();
+ *     String[] parts = xy.split(",");
+ *     int x = Integer.parseInt(parts[0]);
+ *     int y = Integer.parseInt(parts[1]);
+ *     return new Point(x, y);
+ *   }
+ *   public void write(JsonWriter writer, Point value) throws IOException {
+ *     if (value == null) {
+ *       writer.nullValue();
+ *       return;
+ *     }
+ *     String xy = value.getX() + "," + value.getY();
+ *     writer.value(xy);
+ *   }
+ * }
+ * }</pre>
+ *
+ * With this type adapter installed, Gson will convert {@code Points} to JSON as strings like {@code
+ * "5,8"} rather than objects like {@code {"x":5,"y":8}}. In this case the type adapter binds a rich
+ * Java class to a compact JSON value.
+ *
+ * <p>The {@link #read(JsonReader) read()} method must read exactly one value and {@link
+ * #write(JsonWriter,Object) write()} must write exactly one value. For primitive types this is
+ * means readers should make exactly one call to {@code nextBoolean()}, {@code nextDouble()}, {@code
+ * nextInt()}, {@code nextLong()}, {@code nextString()} or {@code nextNull()}. Writers should make
+ * exactly one call to one of {@code value()} or {@code nullValue()}. For arrays, type adapters
+ * should start with a call to {@code beginArray()}, convert all elements, and finish with a call to
+ * {@code endArray()}. For objects, they should start with {@code beginObject()}, convert the
+ * object, and finish with {@code endObject()}. Failing to convert a value or converting too many
+ * values may cause the application to crash.
+ *
+ * <p>Type adapters should be prepared to read null from the stream and write it to the stream.
+ * Alternatively, they should use {@link #nullSafe()} method while registering the type adapter with
+ * Gson. If your {@code Gson} instance has been configured to {@link GsonBuilder#serializeNulls()},
+ * these nulls will be written to the final document. Otherwise the value (and the corresponding
+ * name when writing to a JSON object) will be omitted automatically. In either case your type
+ * adapter must handle null.
+ *
+ * <p>Type adapters should be stateless and thread-safe, otherwise the thread-safety guarantees of
+ * {@link Gson} might not apply.
+ *
+ * <p>To use a custom type adapter with Gson, you must <i>register</i> it with a {@link
+ * GsonBuilder}:
+ *
+ * <pre>{@code
+ * GsonBuilder builder = new GsonBuilder();
+ * builder.registerTypeAdapter(Point.class, new PointAdapter());
+ * // if PointAdapter didn't check for nulls in its read/write methods, you should instead use
+ * // builder.registerTypeAdapter(Point.class, new PointAdapter().nullSafe());
+ * ...
+ * Gson gson = builder.create();
+ * }</pre>
+ *
+ * @since 2.1
+ */
+// non-Javadoc:
+//
+// <h2>JSON Conversion</h2>
+// <p>A type adapter registered with Gson is automatically invoked while serializing
+// or deserializing JSON. However, you can also use type adapters directly to serialize
+// and deserialize JSON. Here is an example for deserialization: <pre>{@code
+//   String json = "{'origin':'0,0','points':['1,2','3,4']}";
+//   TypeAdapter<Graph> graphAdapter = gson.getAdapter(Graph.class);
+//   Graph graph = graphAdapter.fromJson(json);
+// }</pre>
+// And an example for serialization: <pre>{@code
+//   Graph graph = new Graph(...);
+//   TypeAdapter<Graph> graphAdapter = gson.getAdapter(Graph.class);
+//   String json = graphAdapter.toJson(graph);
+// }</pre>
+//
+// <p>Type adapters are <strong>type-specific</strong>. For example, a {@code
+// TypeAdapter<Date>} can convert {@code Date} instances to JSON and JSON to
+// instances of {@code Date}, but cannot convert any other types.
+//
+public abstract class TypeAdapter<T> {
+
+  public TypeAdapter() {}
+
+  /**
+   * Writes one JSON value (an array, object, string, number, boolean or null) for {@code value}.
+   *
+   * @param value the Java object to write. May be null.
+   */
+  public abstract void write(JsonWriter out, T value) throws IOException;
+
+  /**
+   * Converts {@code value} to a JSON document and writes it to {@code out}.
+   *
+   * <p>A {@link JsonWriter} with default configuration is used for writing the JSON data. To
+   * customize this behavior, create a {@link JsonWriter}, configure it and then use {@link
+   * #write(JsonWriter, Object)} instead.
+   *
+   * @param value the Java object to convert. May be {@code null}.
+   * @since 2.2
+   */
+  public final void toJson(Writer out, T value) throws IOException {
+    JsonWriter writer = new JsonWriter(out);
+    write(writer, value);
+  }
+
+  /**
+   * Converts {@code value} to a JSON document.
+   *
+   * <p>A {@link JsonWriter} with default configuration is used for writing the JSON data. To
+   * customize this behavior, create a {@link JsonWriter}, configure it and then use {@link
+   * #write(JsonWriter, Object)} instead.
+   *
+   * @throws JsonIOException wrapping {@code IOException}s thrown by {@link #write(JsonWriter,
+   *     Object)}
+   * @param value the Java object to convert. May be {@code null}.
+   * @since 2.2
+   */
+  public final String toJson(T value) {
+    StringWriter stringWriter = new StringWriter();
+    try {
+      toJson(stringWriter, value);
+    } catch (IOException e) {
+      throw new JsonIOException(e);
+    }
+    return stringWriter.toString();
+  }
+
+  /**
+   * Converts {@code value} to a JSON tree.
+   *
+   * @param value the Java object to convert. May be {@code null}.
+   * @return the converted JSON tree. May be {@link JsonNull}.
+   * @throws JsonIOException wrapping {@code IOException}s thrown by {@link #write(JsonWriter,
+   *     Object)}
+   * @since 2.2
+   */
+  public final JsonElement toJsonTree(T value) {
+    try {
+      JsonTreeWriter jsonWriter = new JsonTreeWriter();
+      write(jsonWriter, value);
+      return jsonWriter.get();
+    } catch (IOException e) {
+      throw new JsonIOException(e);
+    }
+  }
+
+  /**
+   * Reads one JSON value (an array, object, string, number, boolean or null) and converts it to a
+   * Java object. Returns the converted object.
+   *
+   * @return the converted Java object. May be {@code null}.
+   */
+  public abstract T read(JsonReader in) throws IOException;
+
+  /**
+   * Converts the JSON document in {@code in} to a Java object.
+   *
+   * <p>A {@link JsonReader} with default configuration (that is with {@link
+   * Strictness#LEGACY_STRICT} as strictness) is used for reading the JSON data. To customize this
+   * behavior, create a {@link JsonReader}, configure it and then use {@link #read(JsonReader)}
+   * instead.
+   *
+   * <p>No exception is thrown if the JSON data has multiple top-level JSON elements, or if there is
+   * trailing data.
+   *
+   * @return the converted Java object. May be {@code null}.
+   * @since 2.2
+   */
+  public final T fromJson(Reader in) throws IOException {
+    JsonReader reader = new JsonReader(in);
+    return read(reader);
+  }
+
+  /**
+   * Converts the JSON document in {@code json} to a Java object.
+   *
+   * <p>A {@link JsonReader} with default configuration (that is with {@link
+   * Strictness#LEGACY_STRICT} as strictness) is used for reading the JSON data. To customize this
+   * behavior, create a {@link JsonReader}, configure it and then use {@link #read(JsonReader)}
+   * instead.
+   *
+   * <p>No exception is thrown if the JSON data has multiple top-level JSON elements, or if there is
+   * trailing data.
+   *
+   * @return the converted Java object. May be {@code null}.
+   * @since 2.2
+   */
+  public final T fromJson(String json) throws IOException {
+    return fromJson(new StringReader(json));
+  }
+
+  /**
+   * Converts {@code jsonTree} to a Java object.
+   *
+   * @param jsonTree the JSON element to convert. May be {@link JsonNull}.
+   * @return the converted Java object. May be {@code null}.
+   * @throws JsonIOException wrapping {@code IOException}s thrown by {@link #read(JsonReader)}
+   * @since 2.2
+   */
+  public final T fromJsonTree(JsonElement jsonTree) {
+    try {
+      JsonReader jsonReader = new JsonTreeReader(jsonTree);
+      return read(jsonReader);
+    } catch (IOException e) {
+      throw new JsonIOException(e);
+    }
+  }
+
+  /**
+   * This wrapper method is used to make a type adapter null tolerant. In general, a type adapter is
+   * required to handle nulls in write and read methods. Here is how this is typically done:<br>
+   *
+...
+
+Function Description:1. **Purpose**: To retrieve the current element as a specific null type representation if it is indeed that type, ensuring type safety before casting.
+2. **Input**: No parameters are required as it operates on the current instance of the element.
+3. **Output**: Returns the element as a null type representation if it is valid; otherwise, it throws an exception.
+4. **Procedure**: The method first checks if the current element is of the null type using a type-checking method. If the check passes, the element is cast to the null type and returned. If the check fails, an exception is thrown indicating that the element is not of the expected null type.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

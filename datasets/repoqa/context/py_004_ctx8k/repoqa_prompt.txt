@@ -1,0 +1,767 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:            child.remove()
+        # After wrapping, the with_stmt will look like this:
+        #   with_stmt
+        #     NAME 'with'
+        #     atom
+        #       LPAR ''
+        #       testlist_gexp
+        #         ... <-- context_managers
+        #       /testlist_gexp
+        #       RPAR ''
+        #     /atom
+        #     COLON ':'
+        new_child = Node(
+            syms.atom, [lpar, Node(syms.testlist_gexp, context_managers), rpar]
+        )
+        node.insert_child(1, new_child)
+
+
+def remove_with_parens(node: Node, parent: Node) -> None:
+    """Recursively hide optional parens in `with` statements."""
+    # Removing all unnecessary parentheses in with statements in one pass is a tad
+    # complex as different variations of bracketed statements result in pretty
+    # different parse trees:
+    #
+    # with (open("file")) as f:                       # this is an asexpr_test
+    #     ...
+    #
+    # with (open("file") as f):                       # this is an atom containing an
+    #     ...                                         # asexpr_test
+    #
+    # with (open("file")) as f, (open("file")) as f:  # this is asexpr_test, COMMA,
+    #     ...                                         # asexpr_test
+    #
+    # with (open("file") as f, open("file") as f):    # an atom containing a
+    #     ...                                         # testlist_gexp which then
+    #                                                 # contains multiple asexpr_test(s)
+    if node.type == syms.atom:
+        if maybe_make_parens_invisible_in_atom(
+            node,
+            parent=parent,
+            remove_brackets_around_comma=True,
+        ):
+            wrap_in_parentheses(parent, node, visible=False)
+        if isinstance(node.children[1], Node):
+            remove_with_parens(node.children[1], node)
+    elif node.type == syms.testlist_gexp:
+        for child in node.children:
+            if isinstance(child, Node):
+                remove_with_parens(child, node)
+    elif node.type == syms.asexpr_test and not any(
+        leaf.type == token.COLONEQUAL for leaf in node.leaves()
+    ):
+        if maybe_make_parens_invisible_in_atom(
+            node.children[0],
+            parent=node,
+            remove_brackets_around_comma=True,
+        ):
+            wrap_in_parentheses(node, node.children[0], visible=False)
+
+
+def maybe_make_parens_invisible_in_atom(
+    node: LN,
+    parent: LN,
+    remove_brackets_around_comma: bool = False,
+) -> bool:
+    """If it's safe, make the parens in the atom `node` invisible, recursively.
+    Additionally, remove repeated, adjacent invisible parens from the atom `node`
+    as they are redundant.
+
+    Returns whether the node should itself be wrapped in invisible parentheses.
+    """
+    if (
+        node.type not in (syms.atom, syms.expr)
+        or is_empty_tuple(node)
+        or is_one_tuple(node)
+        or (is_yield(node) and parent.type != syms.expr_stmt)
+        or (
+            # This condition tries to prevent removing non-optional brackets
+            # around a tuple, however, can be a bit overzealous so we provide
+            # and option to skip this check for `for` and `with` statements.
+            not remove_brackets_around_comma
+            and max_delimiter_priority_in_atom(node) >= COMMA_PRIORITY
+        )
+        or is_tuple_containing_walrus(node)
+    ):
+        return False
+
+    if is_walrus_assignment(node):
+        if parent.type in [
+            syms.annassign,
+            syms.expr_stmt,
+            syms.assert_stmt,
+            syms.return_stmt,
+            syms.except_clause,
+            syms.funcdef,
+            syms.with_stmt,
+            syms.tname,
+            # these ones aren't useful to end users, but they do please fuzzers
+            syms.for_stmt,
+            syms.del_stmt,
+            syms.for_stmt,
+        ]:
+            return False
+
+    first = node.children[0]
+    last = node.children[-1]
+    if is_lpar_token(first) and is_rpar_token(last):
+        middle = node.children[1]
+        # make parentheses invisible
+        if (
+            # If the prefix of `middle` includes a type comment with
+            # ignore annotation, then we do not remove the parentheses
+            not is_type_ignore_comment_string(middle.prefix.strip())
+        ):
+            first.value = ""
+            if first.prefix.strip():
+                # Preserve comments before first paren
+                middle.prefix = first.prefix + middle.prefix
+            last.value = ""
+        maybe_make_parens_invisible_in_atom(
+            middle,
+            parent=parent,
+            remove_brackets_around_comma=remove_brackets_around_comma,
+        )
+
+        if is_atom_with_invisible_parens(middle):
+            # Strip the invisible parens from `middle` by replacing
+            # it with the child in-between the invisible parens
+            middle.replace(middle.children[1])
+            if middle.children[-1].prefix.strip():
+                # Preserve comments before last paren
+                last.prefix = middle.children[-1].prefix + last.prefix
+
+        return False
+
+    return True
+
+
+def should_split_line(line: Line, opening_bracket: Leaf) -> bool:
+    """Should `line` be immediately split with `delimiter_split()` after RHS?"""
+
+    if not (opening_bracket.parent and opening_bracket.value in "[{("):
+        return False
+
+    # We're essentially checking if the body is delimited by commas and there's more
+    # than one of them (we're excluding the trailing comma and if the delimiter priority
+    # is still commas, that means there's more).
+    exclude = set()
+    trailing_comma = False
+    try:
+        last_leaf = line.leaves[-1]
+        if last_leaf.type == token.COMMA:
+            trailing_comma = True
+            exclude.add(id(last_leaf))
+        max_priority = line.bracket_tracker.max_delimiter_priority(exclude=exclude)
+    except (IndexError, ValueError):
+        return False
+
+    return max_priority == COMMA_PRIORITY and (
+        (line.mode.magic_trailing_comma and trailing_comma)
+        # always explode imports
+        or opening_bracket.parent.type in {syms.atom, syms.import_from}
+    )
+
+
+def generate_trailers_to_omit(line: Line, line_length: int) -> Iterator[Set[LeafID]]:
+    """Generate sets of closing bracket IDs that should be omitted in a RHS.
+
+    Brackets can be omitted if the entire trailer up to and including
+    a preceding closing bracket fits in one line.
+
+    Yielded sets are cumulative (contain results of previous yields, too).  First
+    set is empty, unless the line should explode, in which case bracket pairs until
+    the one that needs to explode are omitted.
+    """
+
+    omit: Set[LeafID] = set()
+    if not line.magic_trailing_comma:
+        yield omit
+
+    length = 4 * line.depth
+    opening_bracket: Optional[Leaf] = None
+    closing_bracket: Optional[Leaf] = None
+    inner_brackets: Set[LeafID] = set()
+    for index, leaf, leaf_length in line.enumerate_with_length(is_reversed=True):
+        length += leaf_length
+        if length > line_length:
+            break
+
+        has_inline_comment = leaf_length > len(leaf.value) + len(leaf.prefix)
+        if leaf.type == STANDALONE_COMMENT or has_inline_comment:
+            break
+
+        if opening_bracket:
+            if leaf is opening_bracket:
+                opening_bracket = None
+            elif leaf.type in CLOSING_BRACKETS:
+                prev = line.leaves[index - 1] if index > 0 else None
+                if (
+                    prev
+                    and prev.type == token.COMMA
+                    and leaf.opening_bracket is not None
+                    and not is_one_sequence_between(
+                        leaf.opening_bracket, leaf, line.leaves
+                    )
+                ):
+                    # Never omit bracket pairs with trailing commas.
+                    # We need to explode on those.
+                    break
+
+                inner_brackets.add(id(leaf))
+        elif leaf.type in CLOSING_BRACKETS:
+            prev = line.leaves[index - 1] if index > 0 else None
+            if prev and prev.type in OPENING_BRACKETS:
+                # Empty brackets would fail a split so treat them as "inner"
+                # brackets (e.g. only add them to the `omit` set if another
+                # pair of brackets was good enough.
+                inner_brackets.add(id(leaf))
+                continue
+
+            if closing_bracket:
+                omit.add(id(closing_bracket))
+                omit.update(inner_brackets)
+                inner_brackets.clear()
+                yield omit
+
+            if (
+                prev
+                and prev.type == token.COMMA
+                and leaf.opening_bracket is not None
+                and not is_one_sequence_between(leaf.opening_bracket, leaf, line.leaves)
+            ):
+                # Never omit bracket pairs with trailing commas.
+                # We need to explode on those.
+                break
+
+            if leaf.value:
+                opening_bracket = leaf.opening_bracket
+                closing_bracket = leaf
+
+
+def run
+_transformer(
+    line: Line,
+    transform: Transformer,
+    mode: Mode,
+    features: Collection[Feature],
+    *,
+    line_str: str = "",
+) -> List[Line]:
+    if not line_str:
+        line_str = line_to_string(line)
+    result: List[Line] = []
+    for transformed_line in transform(line, features, mode):
+        if str(transformed_line).strip("\n") == line_str:
+            raise CannotTransform("Line transformer returned an unchanged result")
+
+        result.extend(transform_line(transformed_line, mode=mode, features=features))
+
+    features_set = set(features)
+    if (
+        Feature.FORCE_OPTIONAL_PARENTHESES in features_set
+        or transform.__class__.__name__ != "rhs"
+        or not line.bracket_tracker.invisible
+        or any(bracket.value for bracket in line.bracket_tracker.invisible)
+        or line.contains_multiline_strings()
+        or result[0].contains_uncollapsable_type_comments()
+        or result[0].contains_unsplittable_type_ignore()
+        or is_line_short_enough(result[0], mode=mode)
+        # If any leaves have no parents (which _can_ occur since
+        # `transform(line)` potentially destroys the line's underlying node
+        # structure), then we can't proceed. Doing so would cause the below
+        # call to `append_leaves()` to fail.
+        or any(leaf.parent is None for leaf in line.leaves)
+    ):
+        return result
+
+    line_copy = line.clone()
+    append_leaves(line_copy, line, line.leaves)
+    features_fop = features_set | {Feature.FORCE_OPTIONAL_PARENTHESES}
+    second_opinion = run_transformer(
+        line_copy, transform, mode, features_fop, line_str=line_str
+    )
+    if all(is_line_short_enough(ln, mode=mode) for ln in second_opinion):
+        result = second_opinion
+    return result
+
+# Path: src/black/parsing.py
+"""
+Parse Python code and perform AST validation.
+"""
+
+import ast
+import sys
+import warnings
+from typing import Iterable, Iterator, List, Set, Tuple
+
+from black.mode import VERSION_TO_FEATURES, Feature, TargetVersion, supports_feature
+from black.nodes import syms
+from blib2to3 import pygram
+from blib2to3.pgen2 import driver
+from blib2to3.pgen2.grammar import Grammar
+from blib2to3.pgen2.parse import ParseError
+from blib2to3.pgen2.tokenize import TokenError
+from blib2to3.pytree import Leaf, Node
+
+
+class InvalidInput(ValueError):
+    """Raised when input source code fails all parse attempts."""
+
+
+def get_grammars(target_versions: Set[TargetVersion]) -> List[Grammar]:
+    if not target_versions:
+        # No target_version specified, so try all grammars.
+        return [
+            # Python 3.7-3.9
+            pygram.python_grammar_async_keywords,
+            # Python 3.0-3.6
+            pygram.python_grammar,
+            # Python 3.10+
+            pygram.python_grammar_soft_keywords,
+        ]
+
+    grammars = []
+    # If we have to parse both, try to parse async as a keyword first
+    if not supports_feature(
+        target_versions, Feature.ASYNC_IDENTIFIERS
+    ) and not supports_feature(target_versions, Feature.PATTERN_MATCHING):
+        # Python 3.7-3.9
+        grammars.append(pygram.python_grammar_async_keywords)
+    if not supports_feature(target_versions, Feature.ASYNC_KEYWORDS):
+        # Python 3.0-3.6
+        grammars.append(pygram.python_grammar)
+    if any(Feature.PATTERN_MATCHING in VERSION_TO_FEATURES[v] for v in target_versions):
+        # Python 3.10+
+        grammars.append(pygram.python_grammar_soft_keywords)
+
+    # At least one of the above branches must have been taken, because every Python
+    # version has exactly one of the two 'ASYNC_*' flags
+    return grammars
+
+
+def lib2to3_parse(src_txt: str, target_versions: Iterable[TargetVersion] = ()) -> Node:
+    """Given a string with source, return the lib2to3 Node."""
+    if not src_txt.endswith("\n"):
+        src_txt += "\n"
+
+    grammars = get_grammars(set(target_versions))
+    errors = {}
+    for grammar in grammars:
+        drv = driver.Driver(grammar)
+        try:
+            result = drv.parse_string(src_txt, True)
+            break
+
+        except ParseError as pe:
+            lineno, column = pe.context[1]
+            lines = src_txt.splitlines()
+            try:
+                faulty_line = lines[lineno - 1]
+            except IndexError:
+                faulty_line = "<line number missing in source>"
+            errors[grammar.version] = InvalidInput(
+                f"Cannot parse: {lineno}:{column}: {faulty_line}"
+            )
+
+        except TokenError as te:
+            # In edge cases these are raised; and typically don't have a "faulty_line".
+            lineno, column = te.args[1]
+            errors[grammar.version] = InvalidInput(
+                f"Cannot parse: {lineno}:{column}: {te.args[0]}"
+            )
+
+    else:
+        # Choose the latest version when raising the actual parsing error.
+        assert len(errors) >= 1
+        exc = errors[max(errors)]
+        raise exc from None
+
+    if isinstance(result, Leaf):
+        result = Node(syms.file_input, [result])
+    return result
+
+
+def matches_grammar(src_txt: str, grammar: Grammar) -> bool:
+    drv = driver.Driver(grammar)
+    try:
+        drv.parse_string(src_txt, True)
+    except (ParseError, TokenError, IndentationError):
+        return False
+    else:
+        return True
+
+
+def lib2to3_unparse(node: Node) -> str:
+    """Given a lib2to3 node, return its string representation."""
+    code = str(node)
+    return code
+
+
+def _parse_single_version(
+    src: str, version: Tuple[int, int], *, type_comments: bool
+) -> ast.AST:
+    filename = "<unknown>"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", SyntaxWarning)
+        warnings.simplefilter("ignore", DeprecationWarning)
+        return ast.parse(
+            src, filename, feature_version=version, type_comments=type_comments
+        )
+
+
+def parse_ast(src: str) -> ast.AST:
+    # TODO: support Python 4+ ;)
+    versions = [(3, minor) for minor in range(3, sys.version_info[1] + 1)]
+
+    first_error = ""
+    for version in sorted(versions, reverse=True):
+        try:
+            return _parse_single_version(src, version, type_comments=True)
+        except SyntaxError as e:
+            if not first_error:
+                first_error = str(e)
+
+    # Try to parse without type comments
+    for version in sorted(versions, reverse=True):
+        try:
+            return _parse_single_version(src, version, type_comments=False)
+        except SyntaxError:
+            pass
+
+    raise SyntaxError(first_error)
+
+
+def _normalize(lineend: str, value: str) -> str:
+    # To normalize, we strip any leading and trailing space from
+    # each line...
+    stripped: List[str] = [i.strip() for i in value.splitlines()]
+    normalized = lineend.join(stripped)
+    # ...and remove any blank lines at the beginning and end of
+    # the whole string
+    return normalized.strip()
+
+
+def stringify_ast(node: ast.AST, depth: int = 0) -> Iterator[str]:
+    """Simple visitor generating strings to compare ASTs by content."""
+
+    if (
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and node.kind == "u"
+    ):
+        # It's a quirk of history that we strip the u prefix over here. We used to
+        # rewrite the AST nodes for Python version compatibility and we never copied
+        # over the kind
+        node.kind = None
+
+    yield f"{'  ' * depth}{node.__class__.__name__}("
+
+    for field in sorted(node._fields):  # noqa: F402
+        # TypeIgnore has only one field 'lineno' which breaks this comparison
+        if isinstance(node, ast.TypeIgnore):
+            break
+
+        try:
+            value: object = getattr(node, field)
+        except AttributeError:
+            continue
+
+        yield f"{'  ' * (depth + 1)}{field}="
+
+        if isinstance(value, list):
+            for item in value:
+                # Ignore nested tuples within del statements, because we may insert
+                # parentheses and they change the AST.
+                if (
+                    field == "targets"
+                    and isinstance(node, ast.Delete)
+                    and isinstance(item, ast.Tuple)
+                ):
+                    for elt in item.elts:
+                        yield from stringify_ast(elt, depth + 2)
+
+                elif isinstance(item, ast.AST):
+                    yield from stringify_ast(item, depth + 2)
+
+        elif isinstance(value, ast.AST):
+            yield from stringify_ast(value, depth + 2)
+
+        else:
+            normalized: object
+            if (
+                isinstance(node, ast.Constant)
+                and field == "value"
+                and isinstance(value, str)
+            ):
+                # Constant strings may be indented across newlines, if they are
+                # docstrings; fold spaces after newlines when comparing. Similarly,
+                # trailing and leading space may be removed.
+                normalized = _normalize("\n", value)
+            elif field == "type_comment" and isinstance(value, str):
+                # Trailing whitespace in type comments is removed.
+                normalized = value.rstrip()
+            else:
+                normalized = value
+            yield f"{'  ' * (depth + 2)}{normalized!r},  # {value.__class__.__name__}"
+
+    yield f"{'  ' * depth})  # /{node.__class__.__name__}"
+
+# Path: src/black/ranges.py
+"""Functions related to Black's formatting by line ranges feature."""
+
+import difflib
+from dataclasses import dataclass
+from typing import Collection, Iterator, List, Sequence, Set, Tuple, Union
+
+from black.nodes import (
+    LN,
+    STANDALONE_COMMENT,
+    Leaf,
+    Node,
+    Visitor,
+    first_leaf,
+    furthest_ancestor_with_last_leaf,
+    last_leaf,
+    syms,
+)
+from blib2to3.pgen2.token import ASYNC, NEWLINE
+
+
+def parse_line_ranges(line_ranges: Sequence[str]) -> List[Tuple[int, int]]:
+    lines: List[Tuple[int, int]] = []
+    for lines_str in line_ranges:
+        parts = lines_str.split("-")
+        if len(parts) != 2:
+            raise ValueError(
+                "Incorrect --line-ranges format, expect 'START-END', found"
+                f" {lines_str!r}"
+            )
+        try:
+            start = int(parts[0])
+            end = int(parts[1])
+        except ValueError:
+            raise ValueError(
+                "Incorrect --line-ranges value, expect integer ranges, found"
+                f" {lines_str!r}"
+            ) from None
+        else:
+            lines.append((start, end))
+    return lines
+
+
+def is_valid_line_range(lines: Tuple[int, int]) -> bool:
+    """Returns whether the line range is valid."""
+    return not lines or lines[0] <= lines[1]
+
+
+def adjusted_lines(
+    lines: Collection[Tuple[int, int]],
+    original_source: str,
+    modified_source: str,
+) -> List[Tuple[int, int]]:
+    """Returns the adjusted line ranges based on edits from the original code.
+
+    This computes the new line ranges by diffing original_source and
+    modified_source, and adjust each range based on how the range overlaps with
+    the diffs.
+
+    Note the diff can contain lines outside of the original line ranges. This can
+    happen when the formatting has to be done in adjacent to maintain consistent
+    local results. For example:
+
+    1. def my_func(arg1, arg2,
+    2.             arg3,):
+    3.   pass
+
+    If it restricts to line 2-2, it can't simply reformat line 2, it also has
+    to reformat line 1:
+
+    1. def my_func(
+    2.     arg1,
+    3.     arg2,
+    4.     arg3,
+    5. ):
+    6.   pass
+
+    In this case, we will expand the line ranges to also include the whole diff
+    block.
+
+    Args:
+      lines: a collection of line ranges.
+      original_source: the original source.
+      modified_source: the modified source.
+    """
+    lines_mappings = _calculate_lines_mappings(original_source, modified_source)
+
+    new_lines = []
+    # Keep an index of the current search. Since the lines and lines_mappings are
+    # sorted, this makes the search complexity linear.
+    current_mapping_index = 0
+    for start, end in sorted(lines):
+        start_mapping_index = _find_lines_mapping_index(
+            start,
+            lines_mappings,
+            current_mapping_index,
+        )
+        end_mapping_index = _find_lines_mapping_index(
+            end,
+            lines_mappings,
+            start_mapping_index,
+        )
+        current_mapping_index = start_mapping_index
+        if start_mapping_index >= len(lines_mappings) or end_mapping_index >= len(
+            lines_mappings
+        ):
+            # Protect against invalid inputs.
+            continue
+        start_mapping = lines_mappings[start_mapping_index]
+        end_mapping = lines_mappings[end_mapping_index]
+        if start_mapping.is_changed_block:
+            # When the line falls into a changed block, expands to the whole block.
+            new_start = start_mapping.modified_start
+        else:
+            new_start = (
+                start - start_mapping.original_start + start_mapping.modified_start
+            )
+        if end_mapping.is_changed_block:
+            # When the line falls into a changed block, expands to the whole block.
+            new_end = end_mapping.modified_end
+        else:
+            new_end = end - end_mapping.original_start + end_mapping.modified_start
+        new_range = (new_start, new_end)
+        if is_valid_line_range(new_range):
+            new_lines.append(new_range)
+    return new_lines
+
+
+def convert_unchanged_lines(src_node: Node, lines: Collection[Tuple[int, int]]) -> None:
+    """Converts unchanged lines to STANDALONE_COMMENT.
+
+    The idea is similar to how `# fmt: on/off` is implemented. It also converts the
+    nodes between those markers as a single `STANDALONE_COMMENT` leaf node with
+    the unformatted code as its value. `STANDALONE_COMMENT` is a "fake" token
+    that will be formatted as-is with its prefix normalized.
+
+    Here we perform two passes:
+
+    1. Visit the top-level statements, and convert them to a single
+       `STANDALONE_COMMENT` when unchanged. This speeds up formatting when some
+       of the top-level statements aren't changed.
+    2. Convert unchanged "unwrapped lines" to `STANDALONE_COMMENT` nodes line by
+       line. "unwrapped lines" are divided by the `NEWLINE` token. e.g. a
+       multi-line statement is *one* "unwrapped line" that ends with `NEWLINE`,
+       even though this statement itself can span multiple lines, and the
+       tokenizer only sees the last '\n' as the `NEWLINE` token.
+
+    NOTE: During pass (2), comment prefixes and indentations are ALWAYS
+    normalized even when the lines aren't changed. This is fixable by moving
+    more formatting to pass (1). However, it's hard to get it correct when
+    incorrect indentations are used. So we defer this to future optimizations.
+    """
+    lines_set: Set[int] = set()
+    for start, end in lines:
+        lines_set.update(range(start, end + 1))
+    visitor = _TopLevelStatementsVisitor(lines_set)
+    _ = list(visitor.visit(src_node))  # Consume all results.
+    _convert_unchanged_line_by_line(src_node, lines_set)
+
+
+def _contains_standalone_comment(node: LN) -> bool:
+    if isinstance(node, Leaf):
+        return node.type == STANDALONE_COMMENT
+    else:
+        for child in node.children:
+            if _contains_standalone_comment(child):
+                return True
+        return False
+
+
+class _TopLevelStatementsVisitor(Visitor[None]):
+    """
+    A node visitor that converts unchanged top-level statements to
+    STANDALONE_COMMENT.
+
+    This is used in addition to _convert_unchanged_line_by_line, to
+    speed up formatting when there are unchanged top-level
+    classes/functions/statements.
+    """
+
+    def __init__(self, lines_set: Set[int]):
+        self._lines_set = lines_set
+
+    def visit_simple_stmt(self, node: Node) -> Iterator[None]:
+        # This is only called for top-level statements, since `visit_suite`
+        # won't visit its children nodes.
+        yield from []
+        newline_leaf = last_leaf(node)
+        if not newline_leaf:
+            return
+        assert (
+            newline_leaf.type == NEWLINE
+        ), f"Unexpectedly found leaf.type={newline_leaf.type}"
+        # We need to find the furthest ancestor with the NEWLINE as the last
+        # leaf, since a `suite` can simply be a `simple_stmt` when it puts
+        # its body on the same line. Example: `if cond: pass`.
+        ancestor = furthest_ancestor_with_last_leaf(newline_leaf)
+        if not _get_line_range(ancestor).intersection(self._lines_set):
+            _convert_node_to_standalone_comment(ancestor)
+
+    def visit_suite(self, node: Node) -> Iterator[None]:
+        yield from []
+        # If there is a STANDALONE_COMMENT node, it means parts of the node tree
+        # have fmt on/off/skip markers. Those STANDALONE_COMMENT nodes can't
+        # be simply converted by calling str(node). So we just don't convert
+        # here.
+        if _contains_standalone_comment(node):
+            return
+        # Find the semantic parent of this suite. For `async_stmt` and
+        # `async_funcdef`, the ASYNC token is defined on a separate level by the
+        # grammar.
+        semantic_parent = node.parent
+        if semantic_parent is not None:
+            if (
+                semantic_parent.prev_sibling is not None
+                and semantic_parent.prev_sibling.type == ASYNC
+            ):
+                semantic_parent = semantic_parent.parent
+        if semantic_parent is not None and not _get_line_range(
+            semantic_parent
+        ).intersection(self._lines_set):
+            _convert_node_to_standalone_comment(semantic_parent)
+
+
+def _convert_unchanged_line_by_line(node: Node, lines_set: Set[int]) -> None:
+    """Converts unchanged to STANDALONE_COMMENT line by line."""
+    for leaf in node.leaves():
+        if leaf.type != NEWLINE:
+            # We only consider "unwrapped lines", which are divided by the NEWLINE
+            # token.
+            continue
+        if leaf.parent and leaf.parent.type == syms.match_stmt:
+            # The `suite` node is defined as:
+            #   match_stmt: "match" subject_expr ':' NEWLINE INDENT case_block+ DEDENT
+            # Here we need to check `subject_expr`. The `case_block+` will be
+            # checked by their own NEWLINEs.
+            nodes_to_ignore: List[LN] = []
+            prev_sibling = leaf.prev_sibling
+            while prev_sibling:
+                nodes_to_ignore.insert(0, prev_sibling)
+                prev_sibling = prev_sibling.prev_sibling
+            if not _get_line_range(nodes_to_ignore).intersection(lines_set):
+                _convert_nodes_to_standalone_comment(nodes_to_ignore, newline=leaf)
+        elif leaf.parent and leaf.parent.type == syms.suite:
+            # The `suite` node is defined as:
+...
+
+Function Description:1. **Purpose**: The function is designed to apply a transformation to a line of code based on specified rules and conditions, and then evaluate the transformed line to ensure it meets certain criteria. If the initial transformation does not meet the criteria, a secondary transformation is attempted with additional constraints.
+2. **Input**: The function accepts a line of code, a transformation function, a mode specifying formatting rules, a collection of features that may influence the transformation, and optionally a string representation of the line.
+3. **Output**: It returns a list of transformed lines of code. If the transformation is unsuccessful or unnecessary, the original line or its direct transformation is returned.
+4. **Procedure**: 
+   - Convert the input line to a string if not provided.
+   - Apply the transformation function to the line.
+   - Check if the transformed line is unchanged; if so, raise an exception.
+   - Validate the transformed line against a set of criteria including line length and structural integrity.
+   - If the initial transformation does not meet all criteria, clone the original line and attempt a secondary transformation with an additional feature.
+   - Return the result of the transformation that best meets the criteria.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

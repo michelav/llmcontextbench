@@ -1,0 +1,21 @@
+{
+  "base_id": "ts_003",
+  "code_context_ntokens": 1939,
+  "description": "1. **Purpose**: To convert a variety of image formats into a standardized format suitable for further processing in machine learning tasks.\n2. **Input**: A single image or an array of images, where each image can be a string URL, a path, or a raw image object.\n3. **Output**: A promise that resolves to an array of processed raw image objects.\n4. **Procedure**: The function first ensures the input is in array form. It then processes each item in the array by converting it into a raw image object, handling different input formats like URLs or paths. This conversion is done concurrently for all items in the array.",
+  "end_byte": 2273,
+  "end_line": 93,
+  "instance_id": "ts_003_ctx2k",
+  "language": "typescript",
+  "needle_name": "prepareImages",
+  "needle_token_end": 524,
+  "needle_token_start": 458,
+  "normalized_language": "typescript",
+  "path": "src/pipelines.js",
+  "position_ratio": 0.25,
+  "repo": "xenova/transformers.js",
+  "repoqa_description": "Function Description:1. **Purpose**: To convert a variety of image formats into a standardized format suitable for further processing in machine learning tasks.\n2. **Input**: A single image or an array of images, where each image can be a string URL, a path, or a raw image object.\n3. **Output**: A promise that resolves to an array of processed raw image objects.\n4. **Procedure**: The function first ensures the input is in array form. It then processes each item in the array by converting it into a raw image object, handling different input formats like URLs or paths. This conversion is done concurrently for all items in the array.",
+  "requested_context_tokens": 2048,
+  "sequence": 3,
+  "start_byte": 2051,
+  "start_line": 85
+}

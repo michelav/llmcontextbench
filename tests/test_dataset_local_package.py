@@ -104,6 +104,24 @@ def test_local_dataset_package_preserves_task_statement_and_instance_parameters(
     }
 
 
+def test_task_validation_accepts_repoqa_scorer_and_preserves_config(tmp_path: Path) -> None:
+    payload = {
+        "id": "q_repoqa",
+        "statement": "Find the function.",
+        "validation": {
+            "type": "repoqa-scorer",
+            "threshold": 0.9,
+            "ignoreComments": True,
+        },
+    }
+
+    task = Task.model_validate(payload)
+
+    assert task.validation.type == "repoqa-scorer"
+    assert task.validation.validation_config() == {"threshold": 0.9, "ignoreComments": True}
+    assert task.model_dump(mode="python")["validation"] == payload["validation"]
+
+
 def test_local_dataset_package_accepts_string_and_root_forms_equivalently(tmp_path: Path) -> None:
     dataset_root = _write_local_dataset(tmp_path / "dataset")
     resolver = DatasetResolver()

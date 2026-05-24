@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from ctxbench.adapters.repoqa.evaluation import evaluate_response as evaluate_repoqa_response
 from ctxbench.benchmark.evaluation import (
     build_evaluation_jobs,
     build_evaluation_summary_rows,
@@ -135,6 +136,16 @@ def _load_skipped_run_ids(path: Path) -> set[str]:
     }
 
 
+def _load_evaluated_run_ids(path: Path, *, method: str) -> set[str]:
+    if not path.exists():
+        return set()
+    return {
+        _trial_id(item)
+        for item in read_jsonl(path)
+        if item.get("evaluationMethod") == method and _trial_id(item)
+    }
+
+
 def _load_votes_index(path: Path) -> dict[str, list[dict[str, Any]]]:
     """Returns {trialId: [vote dicts]} from judge_votes.jsonl."""
     if not path.exists():
@@ -204,6 +215,22 @@ def _compact_judge_votes(path: Path) -> None:
     write_jsonl(path, list(seen.values()))
 
 
+def _validation_type(result: TrialResult) -> str | None:
+    return result.validationType or result.metadata.validationType
+
+
+def _repoqa_threshold(config: dict[str, Any]) -> float:
+    raw = config.get("threshold", 0.8)
+    try:
+        return float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"RepoQA validationConfig.threshold must be numeric, got {raw!r}.") from exc
+
+
+def _repoqa_ignore_comments(config: dict[str, Any]) -> bool:
+    return bool(config.get("ignoreComments", False))
+
+
 # ---------------------------------------------------------------------------
 # eval command
 # ---------------------------------------------------------------------------
@@ -248,14 +275,30 @@ def eval_command(
         print("No responses matched the selector.")
         return 0
 
-    judges = _filter_judges(
-        _load_judges(source_root),
-        judge=judge,
-        not_judge=not_judge,
-    )
-    if not judges:
-        selected = ", ".join(list(judge) or ["<all>"])
-        raise ValueError(f"No judges matched the selector(s): {selected}.")
+    supported_validation_types = {"judge", "repoqa-scorer"}
+    unsupported = sorted({
+        str(_validation_type(result))
+        for result in results
+        if _validation_type(result) not in supported_validation_types
+    })
+    if unsupported:
+        raise ValueError(f"Unsupported validation type(s): {', '.join(unsupported)}")
+
+    repoqa_results = [result for result in results if _validation_type(result) == "repoqa-scorer"]
+    judge_results = [result for result in results if _validation_type(result) == "judge"]
+    if batch and repoqa_results:
+        raise ValueError("--batch is not supported for repoqa-scorer validation.")
+
+    judges: list[EvaluationModelConfig] = []
+    if judge_results:
+        judges = _filter_judges(
+            _load_judges(source_root),
+            judge=judge,
+            not_judge=not_judge,
+        )
+        if not judges:
+            selected = ", ".join(list(judge) or ["<all>"])
+            raise ValueError(f"No judges matched the selector(s): {selected}.")
 
     trace_config = _load_trace_config(source_root)
     write_traces = trace_config.writeFiles
@@ -270,13 +313,16 @@ def eval_command(
         for run_id, votes in votes_index.items()
     }
     skipped_run_ids: set[str] = _load_skipped_run_ids(evals_path) if not force else set()
+    evaluated_repoqa_ids: set[str] = (
+        _load_evaluated_run_ids(evals_path, method="repoqa-scorer") if not force else set()
+    )
     has_duplicates = False
 
     # Group pending runs by which judges they still need.
     # A run is pending if at least one selected judge hasn't voted for it yet.
     # Runs already marked as "skipped" (missing context blocks) are excluded unless --force.
     groups: dict[tuple[str, ...], tuple[list[TrialResult], list[EvaluationModelConfig]]] = {}
-    for r in results:
+    for r in judge_results:
         if not force and r.trialId in skipped_run_ids:
             continue
         if force:
@@ -291,7 +337,12 @@ def eval_command(
             groups[key] = ([], missing)
         groups[key][0].append(r)
 
-    pending = [r for runs, _ in groups.values() for r in runs]
+    pending_repoqa = [
+        result
+        for result in repoqa_results
+        if force or result.trialId not in evaluated_repoqa_ids
+    ]
+    pending = [r for runs, _ in groups.values() for r in runs] + pending_repoqa
     logger.phase(
         "LOAD",
         "Responses loaded",
@@ -310,7 +361,8 @@ def eval_command(
             return
         item = evaluated.items[0] if evaluated.items else None
         is_skipped = item is not None and item.status == "skipped"
-        if not is_skipped:
+        is_repoqa = item is not None and item.evaluationMethod == "repoqa-scorer"
+        if not is_skipped and not is_repoqa:
             existing = votes_index.get(evaluated.trialId)
             if item is not None and existing:
                 _merge_existing_votes(item.details, existing)
@@ -323,7 +375,9 @@ def eval_command(
             votes = serialize_judge_votes(evaluated, trace_ref=trace_ref)
             if votes:
                 append_jsonl(votes_path, votes)
-        if is_skipped:
+        if is_skipped and is_repoqa:
+            logger.phase("SKIP", "Evaluation skipped", run=evaluated.trialId)
+        elif is_skipped:
             logger.phase("SKIP", "Evaluation skipped (missing context blocks)", run=evaluated.trialId)
         else:
             logger.phase("WRITE", "Evaluation written", run=evaluated.trialId)
@@ -333,7 +387,7 @@ def eval_command(
         if len(judges) != 1:
             raise ValueError("--batch requires exactly one judge. Use --judge to select one.")
         jobs = build_evaluation_jobs(
-            pending,
+            [r for runs, _ in groups.values() for r in runs],
             judges=judges,
             only=None,
             mode=None,
@@ -374,7 +428,7 @@ def eval_command(
         progress_tracker.total = len(batch_evaluations)
         progress_tracker.current = 0
         progress_tracker.start()
-        results_by_run_id = {r.trialId: r for r in pending}
+        results_by_run_id = {r.trialId: r for runs, _ in groups.values() for r in runs}
         for evaluated in batch_evaluations:
             source_result = results_by_run_id.get(evaluated.trialId)
             if source_result is not None:
@@ -386,6 +440,15 @@ def eval_command(
         _write_summary(evals_path, source_root)
         print(f"Collected batch {resolved_batch_id} ({len(batch_evaluations)} result(s)).")
         return 0
+
+    for result in pending_repoqa:
+        config = dict(result.validationConfig or result.metadata.validationConfig)
+        evaluated = evaluate_repoqa_response(
+            result,
+            threshold=_repoqa_threshold(config),
+            ignore_comments=_repoqa_ignore_comments(config),
+        )
+        _persist(result, evaluated)
 
     for group_runs, group_judges in groups.values():
         evaluate_run_results(

@@ -1,0 +1,142 @@
+ * @returns {Promise<Float32Array>} The decoded audio as a `Float32Array`.
+ */
+export async function read_audio(url, sampling_rate) {
+    if (typeof AudioContext === 'undefined') {
+        // Running in node or an environment without AudioContext
+        throw Error(
+            "Unable to load audio from path/URL since `AudioContext` is not available in your environment. " +
+            "Instead, audio data should be passed directly to the pipeline/processor. " +
+            "For more information and some example code, see https://huggingface.co/docs/transformers.js/guides/node-audio-processing."
+        )
+    }
+
+    const response = await (await getFile(url)).arrayBuffer();
+    const audioCTX = new AudioContext({ sampleRate: sampling_rate });
+    if (typeof sampling_rate === 'undefined') {
+        console.warn(`No sampling rate provided, using default of ${audioCTX.sampleRate}Hz.`)
+    }
+    const decoded = await audioCTX.decodeAudioData(response);
+
+    /** @type {Float32Array} */
+    let audio;
+
+    // We now replicate HuggingFace's `ffmpeg_read` method:
+    if (decoded.numberOfChannels === 2) {
+        // When downmixing a stereo audio file to mono using the -ac 1 option in FFmpeg,
+        // the audio signal is summed across both channels to create a single mono channel.
+        // However, if the audio is at full scale (i.e. the highest possible volume level),
+        // the summing of the two channels can cause the audio signal to clip or distort.
+
+        // To prevent this clipping, FFmpeg applies a scaling factor of 1/sqrt(2) (~ 0.707)
+        // to the audio signal before summing the two channels. This scaling factor ensures
+        // that the combined audio signal will not exceed the maximum possible level, even
+        // if both channels are at full scale.
+
+        // After applying this scaling factor, the audio signal from both channels is summed
+        // to create a single mono channel. It's worth noting that this scaling factor is
+        // only applied when downmixing stereo audio to mono using the -ac 1 option in FFmpeg.
+        // If you're using a different downmixing method, or if you're not downmixing the
+        // audio at all, this scaling factor may not be needed.
+        const SCALING_FACTOR = Math.sqrt(2);
+
+        const left = decoded.getChannelData(0);
+        const right = decoded.getChannelData(1);
+
+        audio = new Float32Array(left.length);
+        for (let i = 0; i < decoded.length; ++i) {
+            audio[i] = SCALING_FACTOR * (left[i] + right[i]) / 2;
+        }
+
+    } else {
+        // If the audio is not stereo, we can just use the first channel:
+        audio = decoded.getChannelData(0);
+    }
+
+    return audio;
+}
+
+/**
+ * Generates a Hanning window of length M.
+ *
+ * @param {number} M The length of the Hanning window to generate.
+ * @returns {Float64Array} The generated Hanning window.
+ */
+export 
+function hanning(M) {
+    if (M < 1) {
+        return new Float64Array();
+    }
+    if (M === 1) {
+        return new Float64Array([1]);
+    }
+    const denom = M - 1;
+    const factor = Math.PI / denom;
+    const cos_vals = new Float64Array(M);
+    for (let i = 0; i < M; ++i) {
+        const n = 2 * i - denom;
+        cos_vals[i] = 0.5 + 0.5 * Math.cos(factor * n);
+    }
+    return cos_vals;
+}
+
+const HERTZ_TO_MEL_MAPPING = {
+    "htk": (/** @type {number} */ freq) => 2595.0 * Math.log10(1.0 + (freq / 700.0)),
+    "kaldi": (/** @type {number} */ freq) => 1127.0 * Math.log(1.0 + (freq / 700.0)),
+    "slaney": (/** @type {number} */ freq, min_log_hertz = 1000.0, min_log_mel = 15.0, logstep = 27.0 / Math.log(6.4)) =>
+        freq >= min_log_hertz
+            ? min_log_mel + Math.log(freq / min_log_hertz) * logstep
+            : 3.0 * freq / 200.0,
+}
+
+/**
+ * @template {Float32Array|Float64Array|number} T 
+ * @param {T} freq 
+ * @param {string} [mel_scale]
+ * @returns {T}
+ */
+function hertz_to_mel(freq, mel_scale = "htk") {
+    const fn = HERTZ_TO_MEL_MAPPING[mel_scale];
+    if (!fn) {
+        throw new Error('mel_scale should be one of "htk", "slaney" or "kaldi".');
+    }
+
+    return typeof freq === 'number' ? fn(freq) : freq.map(x => fn(x));
+}
+
+const MEL_TO_HERTZ_MAPPING = {
+    "htk": (/** @type {number} */ mels) => 700.0 * (10.0 ** (mels / 2595.0) - 1.0),
+    "kaldi": (/** @type {number} */ mels) => 700.0 * (Math.exp(mels / 1127.0) - 1.0),
+    "slaney": (/** @type {number} */ mels, min_log_hertz = 1000.0, min_log_mel = 15.0, logstep = Math.log(6.4) / 27.0) => mels >= min_log_mel
+        ? min_log_hertz * Math.exp(logstep * (mels - min_log_mel))
+        : 200.0 * mels / 3.0,
+}
+
+/**
+ * @template {Float32Array|Float64Array|number} T 
+ * @param {T} mels 
+ * @param {string} [mel_scale]
+ * @returns {T}
+ */
+function mel_to_hertz(mels, mel_scale = "htk") {
+    const fn = MEL_TO_HERTZ_MAPPING[mel_scale];
+    if (!fn) {
+        throw new Error('mel_scale should be one of "htk", "slaney" or "kaldi".');
+    }
+
+    return typeof mels === 'number' ? fn(mels) : mels.map(x => fn(x));
+}
+
+/**
+* Creates a triangular filter bank.
+*
+* Adapted from torchaudio and librosa.
+*
+* @param {Float64Array} fft_freqs Discrete frequencies of the FFT bins in Hz, of shape `(num_frequency_bins,)`.
+* @param {Float64Array} filter_freqs Center frequencies of the triangular filters to create, in Hz, of shape `(num_mel_filters,)`.
+* @returns {number[][]} of shape `(num_frequency_bins, num_mel_filters)`.
+*/
+function _create_triangular_filter_bank(fft_freqs, filter_freqs) {
+    const filter_diff = Float64Array.from(
+        { length: filter_freqs.length - 1 },
+        (_, i) => filter_freqs[i + 1] - filter_freqs[i]
+...

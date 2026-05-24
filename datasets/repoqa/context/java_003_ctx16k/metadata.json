@@ -1,0 +1,21 @@
+{
+  "base_id": "java_003",
+  "code_context_ntokens": 16261,
+  "description": "1. **Purpose**: To create a new builder instance that retains all custom settings and factory configurations from the current instance.\n2. **Input**: None.\n3. **Output**: A new instance of a builder with all the configurations and customizations copied from the existing instance.\n4. **Procedure**: The method initializes a new builder instance by passing the current instance to its constructor, ensuring that all customizations and settings are preserved in the new instance.",
+  "end_byte": 19532,
+  "end_line": 410,
+  "instance_id": "java_003_ctx16k",
+  "language": "java",
+  "needle_name": "newBuilder",
+  "needle_token_end": 4050,
+  "needle_token_start": 4029,
+  "normalized_language": "java",
+  "path": "gson/src/main/java/com/google/gson/Gson.java",
+  "position_ratio": 0.25,
+  "repo": "google/gson",
+  "repoqa_description": "Function Description:1. **Purpose**: To create a new builder instance that retains all custom settings and factory configurations from the current instance.\n2. **Input**: None.\n3. **Output**: A new instance of a builder with all the configurations and customizations copied from the existing instance.\n4. **Procedure**: The method initializes a new builder instance by passing the current instance to its constructor, ensuring that all customizations and settings are preserved in the new instance.",
+  "requested_context_tokens": 16384,
+  "sequence": 3,
+  "start_byte": 19461,
+  "start_line": 407
+}

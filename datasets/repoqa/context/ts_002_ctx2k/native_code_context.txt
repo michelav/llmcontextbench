@@ -1,0 +1,162 @@
+    }
+}
+
+const SPECIAL_TOKEN_ATTRIBUTES = [
+    'bos_token',
+    'eos_token',
+    'unk_token',
+    'sep_token',
+    'pad_token',
+    'cls_token',
+    'mask_token',
+    // additional_special_tokens (TODO)
+]
+
+/**
+ * 
+ * Helper function for padding values of an object, which are each arrays.
+ * NOTE: No additional checks are made here for validity of arguments.
+ * @param {Record<string, any[]>} item The input object.
+ * @param {number} length The length to pad to.
+ * @param {(key: string) => any} value_fn Determine the value to fill the array, based on its key.
+ * @param {'right'|'left'} side Which side to pad the array.
+ * @private
+ */
+functi
+on padHelper(item, length, value_fn, side) {
+    for (const key of Object.keys(item)) {
+        const diff = length - item[key].length;
+        const value = value_fn(key);
+
+        const padData = new Array(diff).fill(value);
+        item[key] = side === 'right'
+            ? mergeArrays(item[key], padData)
+            : mergeArrays(padData, item[key]);
+    }
+}
+
+/**
+ * Helper function for truncating values of an object, which are each arrays.
+ * NOTE: No additional checks are made here for validity of arguments.
+ * @param {Record<string, any[]>} item The input object.
+ * @param {number} length The length to truncate to.
+ * @private
+ */
+function truncateHelper(item, length) {
+    // Setting .length to a lower value truncates the array in-place:
+    // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/length
+    for (const key of Object.keys(item)) {
+        item[key].length = length;
+    }
+}
+
+
+/**
+ * @typedef {Object} Message
+ * @property {string} role The role of the message (e.g., "user" or "assistant" or "system").
+ * @property {string} content The content of the message.
+ */
+
+export class PreTrainedTokenizer extends Callable {
+    return_token_type_ids = false;
+
+    _default_chat_template = `{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}`;
+
+    /**
+     * Create a new PreTrainedTokenizer instance.
+     * @param {Object} tokenizerJSON The JSON of the tokenizer.
+     * @param {Object} tokenizerConfig The config of the tokenizer.
+     */
+    constructor(tokenizerJSON, tokenizerConfig) {
+        super();
+
+        this._tokenizer_config = tokenizerConfig;
+
+        // Construct parts of the tokenizer from the JSON
+        this.normalizer = Normalizer.fromConfig(tokenizerJSON.normalizer);
+        this.pre_tokenizer = PreTokenizer.fromConfig(tokenizerJSON.pre_tokenizer);
+        this.model = TokenizerModel.fromConfig(tokenizerJSON.model, tokenizerConfig);
+        this.post_processor = PostProcessor.fromConfig(tokenizerJSON.post_processor);
+        this.decoder = Decoder.fromConfig(tokenizerJSON.decoder);
+
+        // Add added_tokens to model
+        this.special_tokens = [];
+        this.all_special_ids = [];
+
+        /** @type {AddedToken[]} */
+        this.added_tokens = [];
+        for (const addedToken of tokenizerJSON.added_tokens) {
+            const token = new AddedToken(addedToken);
+            this.added_tokens.push(token);
+
+            this.model.tokens_to_ids.set(token.content, token.id);
+            this.model.vocab[token.id] = token.content;
+
+            if (token.special) {
+                this.special_tokens.push(token.content);
+                this.all_special_ids.push(token.id);
+            }
+        }
+
+        // Update additional_special_tokens
+        this.additional_special_tokens = tokenizerConfig.additional_special_tokens ?? [];
+        this.special_tokens.push(...this.additional_special_tokens);
+        this.special_tokens = [...new Set(this.special_tokens)]; // Remove duplicates
+
+        if (this.decoder) {
+            // Slight hack, but it prevents code duplication:
+            this.decoder.added_tokens = this.added_tokens;
+
+            // Another slight hack to add `end_of_word_suffix` (if present) to the decoder
+            // This is needed for cases where BPE model and ByteLevel decoder are used
+            // For more information, see https://github.com/xenova/transformers.js/issues/74
+            // TODO: save this to the decoder when exporting?
+            this.decoder.end_of_word_suffix = this.model.end_of_word_suffix;
+        }
+
+
+        this.added_tokens_regex = this.added_tokens.length > 0 ? new RegExp(
+            this.added_tokens.map(x => `${x.lstrip ? '\\s*' : ''}(${escapeRegExp(x.content)})${x.rstrip ? '\\s*' : ''}`).join('|')
+        ) : null;
+
+        // Set mask token if present (otherwise will be undefined, which is fine)
+        this.mask_token = this.getToken('mask_token');
+        this.mask_token_id = this.model.tokens_to_ids.get(this.mask_token);
+
+        this.pad_token = this.getToken('pad_token', 'eos_token');
+        this.pad_token_id = this.model.tokens_to_ids.get(this.pad_token);
+
+        this.sep_token = this.getToken('sep_token');
+        this.sep_token_id = this.model.tokens_to_ids.get(this.sep_token);
+
+        this.unk_token = this.getToken('unk_token');
+        this.unk_token_id = this.model.tokens_to_ids.get(this.unk_token);
+
+        this.model_max_length = tokenizerConfig.model_max_length;
+
+        /** @type {boolean} Whether or not to strip the text when tokenizing (removing excess spaces before and after the string). */
+        this.remove_space = tokenizerConfig.remove_space;
+
+        this.clean_up_tokenization_spaces = tokenizerConfig.clean_up_tokenization_spaces ?? true;
+        this.do_lowercase_and_remove_accent = tokenizerConfig.do_lowercase_and_remove_accent ?? false;
+
+        // TODO allow user to change this
+        /** @type {'right'|'left'} */
+        this.padding_side = 'right';
+
+        this.legacy = false;
+
+        this.chat_template = tokenizerConfig.chat_template ?? null;
+        if (Array.isArray(this.chat_template)) {
+            // Chat templates are stored as lists of dicts with fixed key names,
+            // we reconstruct that into a single dict while loading them.
+            const chat_template = Object.create(null);
+            for (const { name, template } of this.chat_template) {
+                if (typeof name !== 'string' || typeof template !== 'string') {
+                    throw new Error('Chat template must be a list of objects with "name" and "template" properties');
+                }
+                chat_template[name] = template;
+            }
+            this.chat_template = chat_template;
+        }
+...

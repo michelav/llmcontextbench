@@ -1,0 +1,21 @@
+{
+  "base_id": "rs_002",
+  "code_context_ntokens": 16278,
+  "description": "1. **Purpose**: The function tests the parsing of 2-byte integers from byte arrays to ensure correct interpretation of both positive and negative values, as well as handling incomplete data.\n2. **Input**: The function takes arrays of bytes representing 16-bit integers in big-endian format.\n3. **Output**: The function returns a tuple containing the remaining unparsed bytes and the parsed 16-bit integer, or an error if the input is incomplete.\n4. **Procedure**: The function checks several cases including the parsing of zero, the maximum positive value, the minimum negative value, and scenarios where the input byte array is incomplete (either completely empty or missing bytes).",
+  "end_byte": 45913,
+  "end_line": 1490,
+  "instance_id": "rs_002_ctx16k",
+  "language": "rust",
+  "needle_name": "i16_tests",
+  "needle_token_end": 2550,
+  "needle_token_start": 2310,
+  "normalized_language": "rust",
+  "path": "src/number/streaming.rs",
+  "position_ratio": 0.15,
+  "repo": "rust-bakery/nom",
+  "repoqa_description": "Function Description:1. **Purpose**: The function tests the parsing of 2-byte integers from byte arrays to ensure correct interpretation of both positive and negative values, as well as handling incomplete data.\n2. **Input**: The function takes arrays of bytes representing 16-bit integers in big-endian format.\n3. **Output**: The function returns a tuple containing the remaining unparsed bytes and the parsed 16-bit integer, or an error if the input is incomplete.\n4. **Procedure**: The function checks several cases including the parsing of zero, the maximum positive value, the minimum negative value, and scenarios where the input byte array is incomplete (either completely empty or missing bytes).",
+  "requested_context_tokens": 16384,
+  "sequence": 2,
+  "start_byte": 45461,
+  "start_line": 1482
+}

@@ -1,0 +1,967 @@
+{
+  "datasetId": "ctxbench/repoqa",
+  "domain": "software-repository",
+  "instances": [
+    {
+      "contextBlocks": "context/py_001_ctx2k/blocks.json",
+      "instanceId": "py_001_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To combine adjacent strings into a single string within a line of code, ensuring that the merged result is syntactically correct.\n2. **Input**: A line of code and a list of indices indicating the starting points of groups of strings to be merged.\n3. **Output**: A modified line of code with the specified groups of strings merged, or an error if the merge cannot be performed.\n4. **Procedure**: \n   - The function iterates over the provided indices, each representing the start of a group of adjacent strings.\n   - For each index, it checks if the group of strings can be merged without violating syntax rules.\n   - If valid, it merges the strings and updates a dictionary with the new string and its position.\n   - If no strings can be merged, it returns an error.\n   - Otherwise, it constructs a new line of code with the merged strings and any remaining elements from the original line, including comments."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_001_ctx4k/blocks.json",
+      "instanceId": "py_001_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To combine adjacent strings into a single string within a line of code, ensuring that the merged result is syntactically correct.\n2. **Input**: A line of code and a list of indices indicating the starting points of groups of strings to be merged.\n3. **Output**: A modified line of code with the specified groups of strings merged, or an error if the merge cannot be performed.\n4. **Procedure**: \n   - The function iterates over the provided indices, each representing the start of a group of adjacent strings.\n   - For each index, it checks if the group of strings can be merged without violating syntax rules.\n   - If valid, it merges the strings and updates a dictionary with the new string and its position.\n   - If no strings can be merged, it returns an error.\n   - Otherwise, it constructs a new line of code with the merged strings and any remaining elements from the original line, including comments."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_001_ctx8k/blocks.json",
+      "instanceId": "py_001_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To combine adjacent strings into a single string within a line of code, ensuring that the merged result is syntactically correct.\n2. **Input**: A line of code and a list of indices indicating the starting points of groups of strings to be merged.\n3. **Output**: A modified line of code with the specified groups of strings merged, or an error if the merge cannot be performed.\n4. **Procedure**: \n   - The function iterates over the provided indices, each representing the start of a group of adjacent strings.\n   - For each index, it checks if the group of strings can be merged without violating syntax rules.\n   - If valid, it merges the strings and updates a dictionary with the new string and its position.\n   - If no strings can be merged, it returns an error.\n   - Otherwise, it constructs a new line of code with the merged strings and any remaining elements from the original line, including comments."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_001_ctx16k/blocks.json",
+      "instanceId": "py_001_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To combine adjacent strings into a single string within a line of code, ensuring that the merged result is syntactically correct.\n2. **Input**: A line of code and a list of indices indicating the starting points of groups of strings to be merged.\n3. **Output**: A modified line of code with the specified groups of strings merged, or an error if the merge cannot be performed.\n4. **Procedure**: \n   - The function iterates over the provided indices, each representing the start of a group of adjacent strings.\n   - For each index, it checks if the group of strings can be merged without violating syntax rules.\n   - If valid, it merges the strings and updates a dictionary with the new string and its position.\n   - If no strings can be merged, it returns an error.\n   - Otherwise, it constructs a new line of code with the merged strings and any remaining elements from the original line, including comments."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_002_ctx2k/blocks.json",
+      "instanceId": "py_002_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to transform specific lines of code that have not been modified into a special comment format that preserves their original formatting during further processing. This is particularly useful in scenarios where selective formatting is required, ensuring that unchanged parts of the code remain visually consistent and untouched.\n2. **Input**: The function takes two parameters: a node representing the parsed source code and a collection of line ranges that specify which lines have not been altered.\n3. **Output**: There is no direct output from this function as it modifies the input node in place. The changes involve converting specified lines into a format that will not be altered in subsequent formatting steps.\n4. **Procedure**: The function operates in two main phases:\n   - First, it identifies top-level statements within the unchanged lines and converts these blocks into a special comment type that preserves their formatting.\n   - Second, it processes individual unchanged lines within the node, converting them into the same special comment type. This includes normalizing comment prefixes and indentations to ensure consistency, even though the content itself remains unchanged."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_002_ctx4k/blocks.json",
+      "instanceId": "py_002_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to transform specific lines of code that have not been modified into a special comment format that preserves their original formatting during further processing. This is particularly useful in scenarios where selective formatting is required, ensuring that unchanged parts of the code remain visually consistent and untouched.\n2. **Input**: The function takes two parameters: a node representing the parsed source code and a collection of line ranges that specify which lines have not been altered.\n3. **Output**: There is no direct output from this function as it modifies the input node in place. The changes involve converting specified lines into a format that will not be altered in subsequent formatting steps.\n4. **Procedure**: The function operates in two main phases:\n   - First, it identifies top-level statements within the unchanged lines and converts these blocks into a special comment type that preserves their formatting.\n   - Second, it processes individual unchanged lines within the node, converting them into the same special comment type. This includes normalizing comment prefixes and indentations to ensure consistency, even though the content itself remains unchanged."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_002_ctx8k/blocks.json",
+      "instanceId": "py_002_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to transform specific lines of code that have not been modified into a special comment format that preserves their original formatting during further processing. This is particularly useful in scenarios where selective formatting is required, ensuring that unchanged parts of the code remain visually consistent and untouched.\n2. **Input**: The function takes two parameters: a node representing the parsed source code and a collection of line ranges that specify which lines have not been altered.\n3. **Output**: There is no direct output from this function as it modifies the input node in place. The changes involve converting specified lines into a format that will not be altered in subsequent formatting steps.\n4. **Procedure**: The function operates in two main phases:\n   - First, it identifies top-level statements within the unchanged lines and converts these blocks into a special comment type that preserves their formatting.\n   - Second, it processes individual unchanged lines within the node, converting them into the same special comment type. This includes normalizing comment prefixes and indentations to ensure consistency, even though the content itself remains unchanged."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_002_ctx16k/blocks.json",
+      "instanceId": "py_002_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to transform specific lines of code that have not been modified into a special comment format that preserves their original formatting during further processing. This is particularly useful in scenarios where selective formatting is required, ensuring that unchanged parts of the code remain visually consistent and untouched.\n2. **Input**: The function takes two parameters: a node representing the parsed source code and a collection of line ranges that specify which lines have not been altered.\n3. **Output**: There is no direct output from this function as it modifies the input node in place. The changes involve converting specified lines into a format that will not be altered in subsequent formatting steps.\n4. **Procedure**: The function operates in two main phases:\n   - First, it identifies top-level statements within the unchanged lines and converts these blocks into a special comment type that preserves their formatting.\n   - Second, it processes individual unchanged lines within the node, converting them into the same special comment type. This includes normalizing comment prefixes and indentations to ensure consistency, even though the content itself remains unchanged."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_003_ctx2k/blocks.json",
+      "instanceId": "py_003_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function generates a string used to format text with new lines and optionally a form feed character, typically used to control spacing in formatted output.\n2. **Input**: The function takes three parameters: an integer representing the number of new lines, a boolean indicating whether a form feed character should be included, and an optional string representing the line break character (defaulting to a newline).\n3. **Output**: It returns a string composed of the specified number of newline characters, and if requested, includes a form feed character followed by an additional newline.\n4. **Procedure**: The function first checks if the form feed should be included. If true, it concatenates the specified number of newline characters minus one with a form feed character and another newline. If false, it simply returns a string of newline characters multiplied by the specified integer."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_003_ctx4k/blocks.json",
+      "instanceId": "py_003_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function generates a string used to format text with new lines and optionally a form feed character, typically used to control spacing in formatted output.\n2. **Input**: The function takes three parameters: an integer representing the number of new lines, a boolean indicating whether a form feed character should be included, and an optional string representing the line break character (defaulting to a newline).\n3. **Output**: It returns a string composed of the specified number of newline characters, and if requested, includes a form feed character followed by an additional newline.\n4. **Procedure**: The function first checks if the form feed should be included. If true, it concatenates the specified number of newline characters minus one with a form feed character and another newline. If false, it simply returns a string of newline characters multiplied by the specified integer."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_003_ctx8k/blocks.json",
+      "instanceId": "py_003_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function generates a string used to format text with new lines and optionally a form feed character, typically used to control spacing in formatted output.\n2. **Input**: The function takes three parameters: an integer representing the number of new lines, a boolean indicating whether a form feed character should be included, and an optional string representing the line break character (defaulting to a newline).\n3. **Output**: It returns a string composed of the specified number of newline characters, and if requested, includes a form feed character followed by an additional newline.\n4. **Procedure**: The function first checks if the form feed should be included. If true, it concatenates the specified number of newline characters minus one with a form feed character and another newline. If false, it simply returns a string of newline characters multiplied by the specified integer."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_003_ctx16k/blocks.json",
+      "instanceId": "py_003_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function generates a string used to format text with new lines and optionally a form feed character, typically used to control spacing in formatted output.\n2. **Input**: The function takes three parameters: an integer representing the number of new lines, a boolean indicating whether a form feed character should be included, and an optional string representing the line break character (defaulting to a newline).\n3. **Output**: It returns a string composed of the specified number of newline characters, and if requested, includes a form feed character followed by an additional newline.\n4. **Procedure**: The function first checks if the form feed should be included. If true, it concatenates the specified number of newline characters minus one with a form feed character and another newline. If false, it simply returns a string of newline characters multiplied by the specified integer."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_004_ctx2k/blocks.json",
+      "instanceId": "py_004_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to apply a transformation to a line of code based on specified rules and conditions, and then evaluate the transformed line to ensure it meets certain criteria. If the initial transformation does not meet the criteria, a secondary transformation is attempted with additional constraints.\n2. **Input**: The function accepts a line of code, a transformation function, a mode specifying formatting rules, a collection of features that may influence the transformation, and optionally a string representation of the line.\n3. **Output**: It returns a list of transformed lines of code. If the transformation is unsuccessful or unnecessary, the original line or its direct transformation is returned.\n4. **Procedure**: \n   - Convert the input line to a string if not provided.\n   - Apply the transformation function to the line.\n   - Check if the transformed line is unchanged; if so, raise an exception.\n   - Validate the transformed line against a set of criteria including line length and structural integrity.\n   - If the initial transformation does not meet all criteria, clone the original line and attempt a secondary transformation with an additional feature.\n   - Return the result of the transformation that best meets the criteria."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_004_ctx4k/blocks.json",
+      "instanceId": "py_004_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to apply a transformation to a line of code based on specified rules and conditions, and then evaluate the transformed line to ensure it meets certain criteria. If the initial transformation does not meet the criteria, a secondary transformation is attempted with additional constraints.\n2. **Input**: The function accepts a line of code, a transformation function, a mode specifying formatting rules, a collection of features that may influence the transformation, and optionally a string representation of the line.\n3. **Output**: It returns a list of transformed lines of code. If the transformation is unsuccessful or unnecessary, the original line or its direct transformation is returned.\n4. **Procedure**: \n   - Convert the input line to a string if not provided.\n   - Apply the transformation function to the line.\n   - Check if the transformed line is unchanged; if so, raise an exception.\n   - Validate the transformed line against a set of criteria including line length and structural integrity.\n   - If the initial transformation does not meet all criteria, clone the original line and attempt a secondary transformation with an additional feature.\n   - Return the result of the transformation that best meets the criteria."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_004_ctx8k/blocks.json",
+      "instanceId": "py_004_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to apply a transformation to a line of code based on specified rules and conditions, and then evaluate the transformed line to ensure it meets certain criteria. If the initial transformation does not meet the criteria, a secondary transformation is attempted with additional constraints.\n2. **Input**: The function accepts a line of code, a transformation function, a mode specifying formatting rules, a collection of features that may influence the transformation, and optionally a string representation of the line.\n3. **Output**: It returns a list of transformed lines of code. If the transformation is unsuccessful or unnecessary, the original line or its direct transformation is returned.\n4. **Procedure**: \n   - Convert the input line to a string if not provided.\n   - Apply the transformation function to the line.\n   - Check if the transformed line is unchanged; if so, raise an exception.\n   - Validate the transformed line against a set of criteria including line length and structural integrity.\n   - If the initial transformation does not meet all criteria, clone the original line and attempt a secondary transformation with an additional feature.\n   - Return the result of the transformation that best meets the criteria."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_004_ctx16k/blocks.json",
+      "instanceId": "py_004_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to apply a transformation to a line of code based on specified rules and conditions, and then evaluate the transformed line to ensure it meets certain criteria. If the initial transformation does not meet the criteria, a secondary transformation is attempted with additional constraints.\n2. **Input**: The function accepts a line of code, a transformation function, a mode specifying formatting rules, a collection of features that may influence the transformation, and optionally a string representation of the line.\n3. **Output**: It returns a list of transformed lines of code. If the transformation is unsuccessful or unnecessary, the original line or its direct transformation is returned.\n4. **Procedure**: \n   - Convert the input line to a string if not provided.\n   - Apply the transformation function to the line.\n   - Check if the transformed line is unchanged; if so, raise an exception.\n   - Validate the transformed line against a set of criteria including line length and structural integrity.\n   - If the initial transformation does not meet all criteria, clone the original line and attempt a secondary transformation with an additional feature.\n   - Return the result of the transformation that best meets the criteria."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_005_ctx2k/blocks.json",
+      "instanceId": "py_005_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: Determines if a specified syntax element is part of a type annotation in the source code.\n2. **Input**: A syntax element from the parsed source code.\n3. **Output**: A boolean value indicating whether the given syntax element is involved in a type annotation.\n4. **Procedure**: The function checks the type of annotation associated with the syntax element by tracing its position in the syntax tree and examining its relationship with surrounding elements. If the element is identified as part of either a return type or parameter type annotation, the function returns true; otherwise, it returns false."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_005_ctx4k/blocks.json",
+      "instanceId": "py_005_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: Determines if a specified syntax element is part of a type annotation in the source code.\n2. **Input**: A syntax element from the parsed source code.\n3. **Output**: A boolean value indicating whether the given syntax element is involved in a type annotation.\n4. **Procedure**: The function checks the type of annotation associated with the syntax element by tracing its position in the syntax tree and examining its relationship with surrounding elements. If the element is identified as part of either a return type or parameter type annotation, the function returns true; otherwise, it returns false."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_005_ctx8k/blocks.json",
+      "instanceId": "py_005_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: Determines if a specified syntax element is part of a type annotation in the source code.\n2. **Input**: A syntax element from the parsed source code.\n3. **Output**: A boolean value indicating whether the given syntax element is involved in a type annotation.\n4. **Procedure**: The function checks the type of annotation associated with the syntax element by tracing its position in the syntax tree and examining its relationship with surrounding elements. If the element is identified as part of either a return type or parameter type annotation, the function returns true; otherwise, it returns false."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/py_005_ctx16k/blocks.json",
+      "instanceId": "py_005_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: Determines if a specified syntax element is part of a type annotation in the source code.\n2. **Input**: A syntax element from the parsed source code.\n3. **Output**: A boolean value indicating whether the given syntax element is involved in a type annotation.\n4. **Procedure**: The function checks the type of annotation associated with the syntax element by tracing its position in the syntax tree and examining its relationship with surrounding elements. If the element is identified as part of either a return type or parameter type annotation, the function returns true; otherwise, it returns false."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_001_ctx2k/blocks.json",
+      "instanceId": "java_001_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To configure serialization and deserialization adapters for date-related types based on specified patterns or styles.\n2. **Input**: A string pattern for dates, two integers representing date and time styles, and a list to which the adapters will be added.\n3. **Output**: There is no direct output as it modifies the list of factories by adding new type adapters.\n4. **Procedure**: The function checks if a non-empty date pattern is provided and creates date adapters accordingly. If no pattern is provided but styles are specified, it creates adapters based on these styles. It also checks for SQL types support and adds corresponding SQL date adapters if supported. These adapters are then added to the provided list of factories."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_001_ctx4k/blocks.json",
+      "instanceId": "java_001_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To configure serialization and deserialization adapters for date-related types based on specified patterns or styles.\n2. **Input**: A string pattern for dates, two integers representing date and time styles, and a list to which the adapters will be added.\n3. **Output**: There is no direct output as it modifies the list of factories by adding new type adapters.\n4. **Procedure**: The function checks if a non-empty date pattern is provided and creates date adapters accordingly. If no pattern is provided but styles are specified, it creates adapters based on these styles. It also checks for SQL types support and adds corresponding SQL date adapters if supported. These adapters are then added to the provided list of factories."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_001_ctx8k/blocks.json",
+      "instanceId": "java_001_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To configure serialization and deserialization adapters for date-related types based on specified patterns or styles.\n2. **Input**: A string pattern for dates, two integers representing date and time styles, and a list to which the adapters will be added.\n3. **Output**: There is no direct output as it modifies the list of factories by adding new type adapters.\n4. **Procedure**: The function checks if a non-empty date pattern is provided and creates date adapters accordingly. If no pattern is provided but styles are specified, it creates adapters based on these styles. It also checks for SQL types support and adds corresponding SQL date adapters if supported. These adapters are then added to the provided list of factories."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_001_ctx16k/blocks.json",
+      "instanceId": "java_001_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To configure serialization and deserialization adapters for date-related types based on specified patterns or styles.\n2. **Input**: A string pattern for dates, two integers representing date and time styles, and a list to which the adapters will be added.\n3. **Output**: There is no direct output as it modifies the list of factories by adding new type adapters.\n4. **Procedure**: The function checks if a non-empty date pattern is provided and creates date adapters accordingly. If no pattern is provided but styles are specified, it creates adapters based on these styles. It also checks for SQL types support and adds corresponding SQL date adapters if supported. These adapters are then added to the provided list of factories."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_002_ctx2k/blocks.json",
+      "instanceId": "java_002_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To convert a JSON formatted string into a structured parse tree of elements that can be easily manipulated within a program.\n2. **Input**: A string formatted in JSON.\n3. **Output**: A structured parse tree of elements that represent the JSON data.\n4. **Procedure**: The function reads the input string using a reader tailored for JSON, processes it in a lenient mode allowing some flexibility in JSON syntax, and constructs a parse tree that represents all the elements and structures in the JSON string. If the input string is not valid JSON, it throws an exception indicating the syntax error."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_002_ctx4k/blocks.json",
+      "instanceId": "java_002_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To convert a JSON formatted string into a structured parse tree of elements that can be easily manipulated within a program.\n2. **Input**: A string formatted in JSON.\n3. **Output**: A structured parse tree of elements that represent the JSON data.\n4. **Procedure**: The function reads the input string using a reader tailored for JSON, processes it in a lenient mode allowing some flexibility in JSON syntax, and constructs a parse tree that represents all the elements and structures in the JSON string. If the input string is not valid JSON, it throws an exception indicating the syntax error."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_002_ctx8k/blocks.json",
+      "instanceId": "java_002_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To convert a JSON formatted string into a structured parse tree of elements that can be easily manipulated within a program.\n2. **Input**: A string formatted in JSON.\n3. **Output**: A structured parse tree of elements that represent the JSON data.\n4. **Procedure**: The function reads the input string using a reader tailored for JSON, processes it in a lenient mode allowing some flexibility in JSON syntax, and constructs a parse tree that represents all the elements and structures in the JSON string. If the input string is not valid JSON, it throws an exception indicating the syntax error."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_002_ctx16k/blocks.json",
+      "instanceId": "java_002_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To convert a JSON formatted string into a structured parse tree of elements that can be easily manipulated within a program.\n2. **Input**: A string formatted in JSON.\n3. **Output**: A structured parse tree of elements that represent the JSON data.\n4. **Procedure**: The function reads the input string using a reader tailored for JSON, processes it in a lenient mode allowing some flexibility in JSON syntax, and constructs a parse tree that represents all the elements and structures in the JSON string. If the input string is not valid JSON, it throws an exception indicating the syntax error."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_003_ctx2k/blocks.json",
+      "instanceId": "java_003_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To create a new builder instance that retains all custom settings and factory configurations from the current instance.\n2. **Input**: None.\n3. **Output**: A new instance of a builder with all the configurations and customizations copied from the existing instance.\n4. **Procedure**: The method initializes a new builder instance by passing the current instance to its constructor, ensuring that all customizations and settings are preserved in the new instance."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_003_ctx4k/blocks.json",
+      "instanceId": "java_003_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To create a new builder instance that retains all custom settings and factory configurations from the current instance.\n2. **Input**: None.\n3. **Output**: A new instance of a builder with all the configurations and customizations copied from the existing instance.\n4. **Procedure**: The method initializes a new builder instance by passing the current instance to its constructor, ensuring that all customizations and settings are preserved in the new instance."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_003_ctx8k/blocks.json",
+      "instanceId": "java_003_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To create a new builder instance that retains all custom settings and factory configurations from the current instance.\n2. **Input**: None.\n3. **Output**: A new instance of a builder with all the configurations and customizations copied from the existing instance.\n4. **Procedure**: The method initializes a new builder instance by passing the current instance to its constructor, ensuring that all customizations and settings are preserved in the new instance."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_003_ctx16k/blocks.json",
+      "instanceId": "java_003_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To create a new builder instance that retains all custom settings and factory configurations from the current instance.\n2. **Input**: None.\n3. **Output**: A new instance of a builder with all the configurations and customizations copied from the existing instance.\n4. **Procedure**: The method initializes a new builder instance by passing the current instance to its constructor, ensuring that all customizations and settings are preserved in the new instance."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_004_ctx2k/blocks.json",
+      "instanceId": "java_004_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To retrieve the current element as a specific null type representation if it is indeed that type, ensuring type safety before casting.\n2. **Input**: No parameters are required as it operates on the current instance of the element.\n3. **Output**: Returns the element as a null type representation if it is valid; otherwise, it throws an exception.\n4. **Procedure**: The method first checks if the current element is of the null type using a type-checking method. If the check passes, the element is cast to the null type and returned. If the check fails, an exception is thrown indicating that the element is not of the expected null type."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_004_ctx4k/blocks.json",
+      "instanceId": "java_004_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To retrieve the current element as a specific null type representation if it is indeed that type, ensuring type safety before casting.\n2. **Input**: No parameters are required as it operates on the current instance of the element.\n3. **Output**: Returns the element as a null type representation if it is valid; otherwise, it throws an exception.\n4. **Procedure**: The method first checks if the current element is of the null type using a type-checking method. If the check passes, the element is cast to the null type and returned. If the check fails, an exception is thrown indicating that the element is not of the expected null type."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_004_ctx8k/blocks.json",
+      "instanceId": "java_004_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To retrieve the current element as a specific null type representation if it is indeed that type, ensuring type safety before casting.\n2. **Input**: No parameters are required as it operates on the current instance of the element.\n3. **Output**: Returns the element as a null type representation if it is valid; otherwise, it throws an exception.\n4. **Procedure**: The method first checks if the current element is of the null type using a type-checking method. If the check passes, the element is cast to the null type and returned. If the check fails, an exception is thrown indicating that the element is not of the expected null type."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_004_ctx16k/blocks.json",
+      "instanceId": "java_004_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To retrieve the current element as a specific null type representation if it is indeed that type, ensuring type safety before casting.\n2. **Input**: No parameters are required as it operates on the current instance of the element.\n3. **Output**: Returns the element as a null type representation if it is valid; otherwise, it throws an exception.\n4. **Procedure**: The method first checks if the current element is of the null type using a type-checking method. If the check passes, the element is cast to the null type and returned. If the check fails, an exception is thrown indicating that the element is not of the expected null type."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_005_ctx2k/blocks.json",
+      "instanceId": "java_005_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function ensures that the provided element is not null, throwing an exception if it is.\n2. **Input**: A single element of a generic type.\n3. **Output**: The same element if it is not null; otherwise, it throws a `NullPointerException`.\n4. **Procedure**: The function checks if the input element is null. If it is, it throws a `NullPointerException` with a specific error message. If the element is not null, it simply returns the element."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_005_ctx4k/blocks.json",
+      "instanceId": "java_005_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function ensures that the provided element is not null, throwing an exception if it is.\n2. **Input**: A single element of a generic type.\n3. **Output**: The same element if it is not null; otherwise, it throws a `NullPointerException`.\n4. **Procedure**: The function checks if the input element is null. If it is, it throws a `NullPointerException` with a specific error message. If the element is not null, it simply returns the element."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_005_ctx8k/blocks.json",
+      "instanceId": "java_005_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function ensures that the provided element is not null, throwing an exception if it is.\n2. **Input**: A single element of a generic type.\n3. **Output**: The same element if it is not null; otherwise, it throws a `NullPointerException`.\n4. **Procedure**: The function checks if the input element is null. If it is, it throws a `NullPointerException` with a specific error message. If the element is not null, it simply returns the element."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/java_005_ctx16k/blocks.json",
+      "instanceId": "java_005_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function ensures that the provided element is not null, throwing an exception if it is.\n2. **Input**: A single element of a generic type.\n3. **Output**: The same element if it is not null; otherwise, it throws a `NullPointerException`.\n4. **Procedure**: The function checks if the input element is null. If it is, it throws a `NullPointerException` with a specific error message. If the element is not null, it simply returns the element."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_001_ctx2k/blocks.json",
+      "instanceId": "ts_001_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to transform a one-dimensional array into a multi-dimensional array based on specified dimensions.\n2. **Input**: The function accepts two parameters: a one-dimensional array containing data elements, and an array of integers representing the desired dimensions of the output array.\n3. **Output**: It returns a nested array structured according to the provided dimensions. The depth of the nested array corresponds to the number of dimensions specified.\n4. **Procedure**: The function first calculates the total number of elements in the input array and the product of the specified dimensions to ensure they match. If they do not match, an error is thrown. It then iteratively groups elements of the input array into nested arrays based on the dimensions specified, starting from the innermost dimension and working outwards."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_001_ctx4k/blocks.json",
+      "instanceId": "ts_001_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to transform a one-dimensional array into a multi-dimensional array based on specified dimensions.\n2. **Input**: The function accepts two parameters: a one-dimensional array containing data elements, and an array of integers representing the desired dimensions of the output array.\n3. **Output**: It returns a nested array structured according to the provided dimensions. The depth of the nested array corresponds to the number of dimensions specified.\n4. **Procedure**: The function first calculates the total number of elements in the input array and the product of the specified dimensions to ensure they match. If they do not match, an error is thrown. It then iteratively groups elements of the input array into nested arrays based on the dimensions specified, starting from the innermost dimension and working outwards."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_001_ctx8k/blocks.json",
+      "instanceId": "ts_001_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to transform a one-dimensional array into a multi-dimensional array based on specified dimensions.\n2. **Input**: The function accepts two parameters: a one-dimensional array containing data elements, and an array of integers representing the desired dimensions of the output array.\n3. **Output**: It returns a nested array structured according to the provided dimensions. The depth of the nested array corresponds to the number of dimensions specified.\n4. **Procedure**: The function first calculates the total number of elements in the input array and the product of the specified dimensions to ensure they match. If they do not match, an error is thrown. It then iteratively groups elements of the input array into nested arrays based on the dimensions specified, starting from the innermost dimension and working outwards."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_001_ctx16k/blocks.json",
+      "instanceId": "ts_001_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to transform a one-dimensional array into a multi-dimensional array based on specified dimensions.\n2. **Input**: The function accepts two parameters: a one-dimensional array containing data elements, and an array of integers representing the desired dimensions of the output array.\n3. **Output**: It returns a nested array structured according to the provided dimensions. The depth of the nested array corresponds to the number of dimensions specified.\n4. **Procedure**: The function first calculates the total number of elements in the input array and the product of the specified dimensions to ensure they match. If they do not match, an error is thrown. It then iteratively groups elements of the input array into nested arrays based on the dimensions specified, starting from the innermost dimension and working outwards."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_002_ctx2k/blocks.json",
+      "instanceId": "ts_002_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to extend the length of arrays within an object to a specified length by adding additional elements either to the beginning or the end of each array.\n2. **Input**: The function takes four parameters: an object where each property is an array, a target length for the arrays, a function that determines the value to be added based on the array's key, and a direction indicating whether to add the new elements to the 'right' (end) or 'left' (beginning) of the array.\n3. **Output**: There is no direct output as the function modifies the arrays in the input object in place.\n4. **Procedure**: The function iterates over each key in the object. For each key, it calculates the difference between the current array length and the target length. It then creates a new array filled with the value returned by the provided function for that key, with a length equal to the calculated difference. Depending on the specified direction, this new array is concatenated to either the beginning or the end of the original array, updating the array in the object."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_002_ctx4k/blocks.json",
+      "instanceId": "ts_002_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to extend the length of arrays within an object to a specified length by adding additional elements either to the beginning or the end of each array.\n2. **Input**: The function takes four parameters: an object where each property is an array, a target length for the arrays, a function that determines the value to be added based on the array's key, and a direction indicating whether to add the new elements to the 'right' (end) or 'left' (beginning) of the array.\n3. **Output**: There is no direct output as the function modifies the arrays in the input object in place.\n4. **Procedure**: The function iterates over each key in the object. For each key, it calculates the difference between the current array length and the target length. It then creates a new array filled with the value returned by the provided function for that key, with a length equal to the calculated difference. Depending on the specified direction, this new array is concatenated to either the beginning or the end of the original array, updating the array in the object."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_002_ctx8k/blocks.json",
+      "instanceId": "ts_002_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to extend the length of arrays within an object to a specified length by adding additional elements either to the beginning or the end of each array.\n2. **Input**: The function takes four parameters: an object where each property is an array, a target length for the arrays, a function that determines the value to be added based on the array's key, and a direction indicating whether to add the new elements to the 'right' (end) or 'left' (beginning) of the array.\n3. **Output**: There is no direct output as the function modifies the arrays in the input object in place.\n4. **Procedure**: The function iterates over each key in the object. For each key, it calculates the difference between the current array length and the target length. It then creates a new array filled with the value returned by the provided function for that key, with a length equal to the calculated difference. Depending on the specified direction, this new array is concatenated to either the beginning or the end of the original array, updating the array in the object."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_002_ctx16k/blocks.json",
+      "instanceId": "ts_002_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to extend the length of arrays within an object to a specified length by adding additional elements either to the beginning or the end of each array.\n2. **Input**: The function takes four parameters: an object where each property is an array, a target length for the arrays, a function that determines the value to be added based on the array's key, and a direction indicating whether to add the new elements to the 'right' (end) or 'left' (beginning) of the array.\n3. **Output**: There is no direct output as the function modifies the arrays in the input object in place.\n4. **Procedure**: The function iterates over each key in the object. For each key, it calculates the difference between the current array length and the target length. It then creates a new array filled with the value returned by the provided function for that key, with a length equal to the calculated difference. Depending on the specified direction, this new array is concatenated to either the beginning or the end of the original array, updating the array in the object."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_003_ctx2k/blocks.json",
+      "instanceId": "ts_003_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To convert a variety of image formats into a standardized format suitable for further processing in machine learning tasks.\n2. **Input**: A single image or an array of images, where each image can be a string URL, a path, or a raw image object.\n3. **Output**: A promise that resolves to an array of processed raw image objects.\n4. **Procedure**: The function first ensures the input is in array form. It then processes each item in the array by converting it into a raw image object, handling different input formats like URLs or paths. This conversion is done concurrently for all items in the array."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_003_ctx4k/blocks.json",
+      "instanceId": "ts_003_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To convert a variety of image formats into a standardized format suitable for further processing in machine learning tasks.\n2. **Input**: A single image or an array of images, where each image can be a string URL, a path, or a raw image object.\n3. **Output**: A promise that resolves to an array of processed raw image objects.\n4. **Procedure**: The function first ensures the input is in array form. It then processes each item in the array by converting it into a raw image object, handling different input formats like URLs or paths. This conversion is done concurrently for all items in the array."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_003_ctx8k/blocks.json",
+      "instanceId": "ts_003_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To convert a variety of image formats into a standardized format suitable for further processing in machine learning tasks.\n2. **Input**: A single image or an array of images, where each image can be a string URL, a path, or a raw image object.\n3. **Output**: A promise that resolves to an array of processed raw image objects.\n4. **Procedure**: The function first ensures the input is in array form. It then processes each item in the array by converting it into a raw image object, handling different input formats like URLs or paths. This conversion is done concurrently for all items in the array."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_003_ctx16k/blocks.json",
+      "instanceId": "ts_003_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To convert a variety of image formats into a standardized format suitable for further processing in machine learning tasks.\n2. **Input**: A single image or an array of images, where each image can be a string URL, a path, or a raw image object.\n3. **Output**: A promise that resolves to an array of processed raw image objects.\n4. **Procedure**: The function first ensures the input is in array form. It then processes each item in the array by converting it into a raw image object, handling different input formats like URLs or paths. This conversion is done concurrently for all items in the array."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_004_ctx2k/blocks.json",
+      "instanceId": "ts_004_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To fetch a JSON file from a specified directory and file name, decode it, and parse it into a JavaScript object.\n2. **Input**: \n   - A path to the directory containing the JSON file.\n   - The name of the JSON file.\n   - A boolean indicating whether to throw an error if the file is not found (defaults to true).\n   - An optional object containing additional parameters.\n3. **Output**: A promise that resolves to the parsed JavaScript object from the JSON file, or an empty object if the file is not found and not throwing an error.\n4. **Procedure**: \n   - The function first retrieves the file as a byte array using another function.\n   - If the file is not found and the error is non-fatal, it returns an empty object.\n   - The byte array is then decoded into a string using UTF-8 encoding.\n   - Finally, the string is parsed into a JavaScript object using JSON parsing."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_004_ctx4k/blocks.json",
+      "instanceId": "ts_004_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To fetch a JSON file from a specified directory and file name, decode it, and parse it into a JavaScript object.\n2. **Input**: \n   - A path to the directory containing the JSON file.\n   - The name of the JSON file.\n   - A boolean indicating whether to throw an error if the file is not found (defaults to true).\n   - An optional object containing additional parameters.\n3. **Output**: A promise that resolves to the parsed JavaScript object from the JSON file, or an empty object if the file is not found and not throwing an error.\n4. **Procedure**: \n   - The function first retrieves the file as a byte array using another function.\n   - If the file is not found and the error is non-fatal, it returns an empty object.\n   - The byte array is then decoded into a string using UTF-8 encoding.\n   - Finally, the string is parsed into a JavaScript object using JSON parsing."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_004_ctx8k/blocks.json",
+      "instanceId": "ts_004_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To fetch a JSON file from a specified directory and file name, decode it, and parse it into a JavaScript object.\n2. **Input**: \n   - A path to the directory containing the JSON file.\n   - The name of the JSON file.\n   - A boolean indicating whether to throw an error if the file is not found (defaults to true).\n   - An optional object containing additional parameters.\n3. **Output**: A promise that resolves to the parsed JavaScript object from the JSON file, or an empty object if the file is not found and not throwing an error.\n4. **Procedure**: \n   - The function first retrieves the file as a byte array using another function.\n   - If the file is not found and the error is non-fatal, it returns an empty object.\n   - The byte array is then decoded into a string using UTF-8 encoding.\n   - Finally, the string is parsed into a JavaScript object using JSON parsing."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_004_ctx16k/blocks.json",
+      "instanceId": "ts_004_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To fetch a JSON file from a specified directory and file name, decode it, and parse it into a JavaScript object.\n2. **Input**: \n   - A path to the directory containing the JSON file.\n   - The name of the JSON file.\n   - A boolean indicating whether to throw an error if the file is not found (defaults to true).\n   - An optional object containing additional parameters.\n3. **Output**: A promise that resolves to the parsed JavaScript object from the JSON file, or an empty object if the file is not found and not throwing an error.\n4. **Procedure**: \n   - The function first retrieves the file as a byte array using another function.\n   - If the file is not found and the error is non-fatal, it returns an empty object.\n   - The byte array is then decoded into a string using UTF-8 encoding.\n   - Finally, the string is parsed into a JavaScript object using JSON parsing."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_005_ctx2k/blocks.json",
+      "instanceId": "ts_005_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to generate a specific type of window function commonly used in signal processing to taper the edges of a signal. This helps to minimize the side effects in the Fourier transform that occur due to the discontinuities at the boundaries of a finite signal.\n2. **Input**: It accepts a single integer that specifies the length of the window.\n3. **Output**: It returns an array of floating-point numbers representing the window values.\n4. **Procedure**: The function calculates the window values using a mathematical formula that involves the cosine function. Each element of the window is computed based on its index, using a specific scaling and shifting of the cosine function to ensure that the first and last values of the window taper smoothly to zero."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_005_ctx4k/blocks.json",
+      "instanceId": "ts_005_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to generate a specific type of window function commonly used in signal processing to taper the edges of a signal. This helps to minimize the side effects in the Fourier transform that occur due to the discontinuities at the boundaries of a finite signal.\n2. **Input**: It accepts a single integer that specifies the length of the window.\n3. **Output**: It returns an array of floating-point numbers representing the window values.\n4. **Procedure**: The function calculates the window values using a mathematical formula that involves the cosine function. Each element of the window is computed based on its index, using a specific scaling and shifting of the cosine function to ensure that the first and last values of the window taper smoothly to zero."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_005_ctx8k/blocks.json",
+      "instanceId": "ts_005_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to generate a specific type of window function commonly used in signal processing to taper the edges of a signal. This helps to minimize the side effects in the Fourier transform that occur due to the discontinuities at the boundaries of a finite signal.\n2. **Input**: It accepts a single integer that specifies the length of the window.\n3. **Output**: It returns an array of floating-point numbers representing the window values.\n4. **Procedure**: The function calculates the window values using a mathematical formula that involves the cosine function. Each element of the window is computed based on its index, using a specific scaling and shifting of the cosine function to ensure that the first and last values of the window taper smoothly to zero."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/ts_005_ctx16k/blocks.json",
+      "instanceId": "ts_005_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to generate a specific type of window function commonly used in signal processing to taper the edges of a signal. This helps to minimize the side effects in the Fourier transform that occur due to the discontinuities at the boundaries of a finite signal.\n2. **Input**: It accepts a single integer that specifies the length of the window.\n3. **Output**: It returns an array of floating-point numbers representing the window values.\n4. **Procedure**: The function calculates the window values using a mathematical formula that involves the cosine function. Each element of the window is computed based on its index, using a specific scaling and shifting of the cosine function to ensure that the first and last values of the window taper smoothly to zero."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_001_ctx2k/blocks.json",
+      "instanceId": "rs_001_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to identify and extract a sequence of digit characters from a given byte stream.\n2. **Input**: The function takes a byte array as input.\n3. **Output**: It returns a tuple containing the remaining byte array after the digit sequence and the extracted sequence of digit characters as a byte array.\n4. **Procedure**: The function processes the input byte array to locate and capture a contiguous sequence of digit characters. It stops parsing when a non-digit character is encountered or the input ends."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_001_ctx4k/blocks.json",
+      "instanceId": "rs_001_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to identify and extract a sequence of digit characters from a given byte stream.\n2. **Input**: The function takes a byte array as input.\n3. **Output**: It returns a tuple containing the remaining byte array after the digit sequence and the extracted sequence of digit characters as a byte array.\n4. **Procedure**: The function processes the input byte array to locate and capture a contiguous sequence of digit characters. It stops parsing when a non-digit character is encountered or the input ends."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_001_ctx8k/blocks.json",
+      "instanceId": "rs_001_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to identify and extract a sequence of digit characters from a given byte stream.\n2. **Input**: The function takes a byte array as input.\n3. **Output**: It returns a tuple containing the remaining byte array after the digit sequence and the extracted sequence of digit characters as a byte array.\n4. **Procedure**: The function processes the input byte array to locate and capture a contiguous sequence of digit characters. It stops parsing when a non-digit character is encountered or the input ends."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_001_ctx16k/blocks.json",
+      "instanceId": "rs_001_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to identify and extract a sequence of digit characters from a given byte stream.\n2. **Input**: The function takes a byte array as input.\n3. **Output**: It returns a tuple containing the remaining byte array after the digit sequence and the extracted sequence of digit characters as a byte array.\n4. **Procedure**: The function processes the input byte array to locate and capture a contiguous sequence of digit characters. It stops parsing when a non-digit character is encountered or the input ends."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_002_ctx2k/blocks.json",
+      "instanceId": "rs_002_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function tests the parsing of 2-byte integers from byte arrays to ensure correct interpretation of both positive and negative values, as well as handling incomplete data.\n2. **Input**: The function takes arrays of bytes representing 16-bit integers in big-endian format.\n3. **Output**: The function returns a tuple containing the remaining unparsed bytes and the parsed 16-bit integer, or an error if the input is incomplete.\n4. **Procedure**: The function checks several cases including the parsing of zero, the maximum positive value, the minimum negative value, and scenarios where the input byte array is incomplete (either completely empty or missing bytes)."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_002_ctx4k/blocks.json",
+      "instanceId": "rs_002_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function tests the parsing of 2-byte integers from byte arrays to ensure correct interpretation of both positive and negative values, as well as handling incomplete data.\n2. **Input**: The function takes arrays of bytes representing 16-bit integers in big-endian format.\n3. **Output**: The function returns a tuple containing the remaining unparsed bytes and the parsed 16-bit integer, or an error if the input is incomplete.\n4. **Procedure**: The function checks several cases including the parsing of zero, the maximum positive value, the minimum negative value, and scenarios where the input byte array is incomplete (either completely empty or missing bytes)."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_002_ctx8k/blocks.json",
+      "instanceId": "rs_002_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function tests the parsing of 2-byte integers from byte arrays to ensure correct interpretation of both positive and negative values, as well as handling incomplete data.\n2. **Input**: The function takes arrays of bytes representing 16-bit integers in big-endian format.\n3. **Output**: The function returns a tuple containing the remaining unparsed bytes and the parsed 16-bit integer, or an error if the input is incomplete.\n4. **Procedure**: The function checks several cases including the parsing of zero, the maximum positive value, the minimum negative value, and scenarios where the input byte array is incomplete (either completely empty or missing bytes)."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_002_ctx16k/blocks.json",
+      "instanceId": "rs_002_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function tests the parsing of 2-byte integers from byte arrays to ensure correct interpretation of both positive and negative values, as well as handling incomplete data.\n2. **Input**: The function takes arrays of bytes representing 16-bit integers in big-endian format.\n3. **Output**: The function returns a tuple containing the remaining unparsed bytes and the parsed 16-bit integer, or an error if the input is incomplete.\n4. **Procedure**: The function checks several cases including the parsing of zero, the maximum positive value, the minimum negative value, and scenarios where the input byte array is incomplete (either completely empty or missing bytes)."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_003_ctx2k/blocks.json",
+      "instanceId": "rs_003_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to repeatedly apply a given parser to an input until the parser fails, counting the number of successful applications. It requires at least one successful parse to avoid returning an error.\n2. **Input**: The function takes a parser function as input, which is applied to a sequence or stream.\n3. **Output**: It returns either the count of successful parses as an unsigned integer if at least one parse is successful, or an error if the first application of the parser fails.\n4. **Procedure**: The function initializes a counter and repeatedly applies the provided parser to the input. If the parser succeeds, the input is updated, and the counter is incremented. If the parser fails on the first attempt, an error is returned. The process stops when the parser fails after at least one successful application, returning the count of successful applications."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_003_ctx4k/blocks.json",
+      "instanceId": "rs_003_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to repeatedly apply a given parser to an input until the parser fails, counting the number of successful applications. It requires at least one successful parse to avoid returning an error.\n2. **Input**: The function takes a parser function as input, which is applied to a sequence or stream.\n3. **Output**: It returns either the count of successful parses as an unsigned integer if at least one parse is successful, or an error if the first application of the parser fails.\n4. **Procedure**: The function initializes a counter and repeatedly applies the provided parser to the input. If the parser succeeds, the input is updated, and the counter is incremented. If the parser fails on the first attempt, an error is returned. The process stops when the parser fails after at least one successful application, returning the count of successful applications."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_003_ctx8k/blocks.json",
+      "instanceId": "rs_003_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to repeatedly apply a given parser to an input until the parser fails, counting the number of successful applications. It requires at least one successful parse to avoid returning an error.\n2. **Input**: The function takes a parser function as input, which is applied to a sequence or stream.\n3. **Output**: It returns either the count of successful parses as an unsigned integer if at least one parse is successful, or an error if the first application of the parser fails.\n4. **Procedure**: The function initializes a counter and repeatedly applies the provided parser to the input. If the parser succeeds, the input is updated, and the counter is incremented. If the parser fails on the first attempt, an error is returned. The process stops when the parser fails after at least one successful application, returning the count of successful applications."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_003_ctx16k/blocks.json",
+      "instanceId": "rs_003_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to repeatedly apply a given parser to an input until the parser fails, counting the number of successful applications. It requires at least one successful parse to avoid returning an error.\n2. **Input**: The function takes a parser function as input, which is applied to a sequence or stream.\n3. **Output**: It returns either the count of successful parses as an unsigned integer if at least one parse is successful, or an error if the first application of the parser fails.\n4. **Procedure**: The function initializes a counter and repeatedly applies the provided parser to the input. If the parser succeeds, the input is updated, and the counter is incremented. If the parser fails on the first attempt, an error is returned. The process stops when the parser fails after at least one successful application, returning the count of successful applications."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_004_ctx2k/blocks.json",
+      "instanceId": "rs_004_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To verify the correctness of calculating the starting index of various sub-slices relative to their original slice.\n2. **Input**: A byte slice derived from a string and its sub-slices.\n3. **Output**: The function does not return any output but asserts the correctness of the index calculations.\n4. **Procedure**: The test initializes a byte slice from a string and creates several sub-slices from it. It then checks if the computed starting indices of these sub-slices relative to the original slice are as expected using assertions."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_004_ctx4k/blocks.json",
+      "instanceId": "rs_004_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To verify the correctness of calculating the starting index of various sub-slices relative to their original slice.\n2. **Input**: A byte slice derived from a string and its sub-slices.\n3. **Output**: The function does not return any output but asserts the correctness of the index calculations.\n4. **Procedure**: The test initializes a byte slice from a string and creates several sub-slices from it. It then checks if the computed starting indices of these sub-slices relative to the original slice are as expected using assertions."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_004_ctx8k/blocks.json",
+      "instanceId": "rs_004_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To verify the correctness of calculating the starting index of various sub-slices relative to their original slice.\n2. **Input**: A byte slice derived from a string and its sub-slices.\n3. **Output**: The function does not return any output but asserts the correctness of the index calculations.\n4. **Procedure**: The test initializes a byte slice from a string and creates several sub-slices from it. It then checks if the computed starting indices of these sub-slices relative to the original slice are as expected using assertions."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_004_ctx16k/blocks.json",
+      "instanceId": "rs_004_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: To verify the correctness of calculating the starting index of various sub-slices relative to their original slice.\n2. **Input**: A byte slice derived from a string and its sub-slices.\n3. **Output**: The function does not return any output but asserts the correctness of the index calculations.\n4. **Procedure**: The test initializes a byte slice from a string and creates several sub-slices from it. It then checks if the computed starting indices of these sub-slices relative to the original slice are as expected using assertions."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_005_ctx2k/blocks.json",
+      "instanceId": "rs_005_ctx2k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to repeatedly apply a given parser and accumulate the results using a specified function, ensuring that the parser is applied at least once.\n2. **Input**: It takes three parameters: a parser that defines how to parse each segment, an initializer function that provides the initial value for the accumulator, and a function that combines the accumulated result with the output of each successful parse.\n3. **Output**: Returns either the accumulated result of all successful parses or an error if the first parse attempt fails or if the parser accepts empty inputs, which could lead to an infinite loop.\n4. **Procedure**: The function initializes an accumulator with the provided initial value. It then enters a loop where it repeatedly applies the parser to the input. For each successful parse, it updates the accumulator using the combining function. The loop continues until the parser fails to parse the input, at which point it returns the accumulated result or an error if no successful parse has occurred."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_005_ctx4k/blocks.json",
+      "instanceId": "rs_005_ctx4k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to repeatedly apply a given parser and accumulate the results using a specified function, ensuring that the parser is applied at least once.\n2. **Input**: It takes three parameters: a parser that defines how to parse each segment, an initializer function that provides the initial value for the accumulator, and a function that combines the accumulated result with the output of each successful parse.\n3. **Output**: Returns either the accumulated result of all successful parses or an error if the first parse attempt fails or if the parser accepts empty inputs, which could lead to an infinite loop.\n4. **Procedure**: The function initializes an accumulator with the provided initial value. It then enters a loop where it repeatedly applies the parser to the input. For each successful parse, it updates the accumulator using the combining function. The loop continues until the parser fails to parse the input, at which point it returns the accumulated result or an error if no successful parse has occurred."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_005_ctx8k/blocks.json",
+      "instanceId": "rs_005_ctx8k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to repeatedly apply a given parser and accumulate the results using a specified function, ensuring that the parser is applied at least once.\n2. **Input**: It takes three parameters: a parser that defines how to parse each segment, an initializer function that provides the initial value for the accumulator, and a function that combines the accumulated result with the output of each successful parse.\n3. **Output**: Returns either the accumulated result of all successful parses or an error if the first parse attempt fails or if the parser accepts empty inputs, which could lead to an infinite loop.\n4. **Procedure**: The function initializes an accumulator with the provided initial value. It then enters a loop where it repeatedly applies the parser to the input. For each successful parse, it updates the accumulator using the combining function. The loop continues until the parser fails to parse the input, at which point it returns the accumulated result or an error if no successful parse has occurred."
+          }
+        }
+      ]
+    },
+    {
+      "contextBlocks": "context/rs_005_ctx16k/blocks.json",
+      "instanceId": "rs_005_ctx16k",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "1. **Purpose**: The function is designed to repeatedly apply a given parser and accumulate the results using a specified function, ensuring that the parser is applied at least once.\n2. **Input**: It takes three parameters: a parser that defines how to parse each segment, an initializer function that provides the initial value for the accumulator, and a function that combines the accumulated result with the output of each successful parse.\n3. **Output**: Returns either the accumulated result of all successful parses or an error if the first parse attempt fails or if the parser accepts empty inputs, which could lead to an infinite loop.\n4. **Procedure**: The function initializes an accumulator with the provided initial value. It then enters a loop where it repeatedly applies the parser to the input. For each successful parse, it updates the accumulator using the combining function. The loop continues until the parser fails to parse the input, at which point it returns the accumulated result or an error if no successful parse has occurred."
+          }
+        }
+      ]
+    }
+  ],
+  "version": "2026-05-23"
+}

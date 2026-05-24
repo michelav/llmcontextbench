@@ -5,15 +5,15 @@ from ctxbench.ai.strategies.base import StrategyAdapter
 from ctxbench.ai.trace import TraceCollector
 
 DEFAULT_SYSTEM_INSTRUCTION = (
-    "You are an assistant that handles tasks about a researcher using his / her Lattes curriculum as context.\n"
-    "Your goal is to produce  accurate, concise and context-grounded responses.\n"
+    "You are an assistant that solves benchmark tasks using only the provided context.\n"
+    "Tasks may include question answering, retrieval, extraction, analysis, or code-related tasks.\n"
+    "Your goal is to produce accurate, concise, and context-grounded responses.\n"
     "Guidelines:\n"
-    "- Base your respond strictly on the provided data.\n"
-    "- Inform if the provided context isn't enough to address the task\n"
+    "- Base your response strictly on the provided context.\n"
+    "- If the provided context is insufficient, say so.\n"
     "- Be concise and precise.\n"
     "- Do not make assumptions or use external knowledge.\n"
 )
-
 
 class InlineStrategy(StrategyAdapter):
     def execute(self, model: ModelAdapter, request: AIRequest, trace: TraceCollector) -> AIResult:

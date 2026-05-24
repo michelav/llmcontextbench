@@ -1,0 +1,15 @@
+{
+  "baseId": "java_001",
+  "endByte": 42020,
+  "endLine": 946,
+  "instanceId": "java_001_ctx16k",
+  "language": "java",
+  "needleName": "addTypeAdaptersForDate",
+  "normalizedLanguage": "java",
+  "path": "gson/src/main/java/com/google/gson/GsonBuilder.java",
+  "repo": "google/gson",
+  "sequence": 1,
+  "startByte": 40543,
+  "startLine": 911,
+  "targetFunction": "private static void addTypeAdaptersForDate(\n      String datePattern, int dateStyle, int timeStyle, List<TypeAdapterFactory> factories) {\n    TypeAdapterFactory dateAdapterFactory;\n    boolean sqlTypesSupported = SqlTypesSupport.SUPPORTS_SQL_TYPES;\n    TypeAdapterFactory sqlTimestampAdapterFactory = null;\n    TypeAdapterFactory sqlDateAdapterFactory = null;\n\n    if (datePattern != null && !datePattern.trim().isEmpty()) {\n      dateAdapterFactory = DefaultDateTypeAdapter.DateType.DATE.createAdapterFactory(datePattern);\n\n      if (sqlTypesSupported) {\n        sqlTimestampAdapterFactory =\n            SqlTypesSupport.TIMESTAMP_DATE_TYPE.createAdapterFactory(datePattern);\n        sqlDateAdapterFactory = SqlTypesSupport.DATE_DATE_TYPE.createAdapterFactory(datePattern);\n      }\n    } else if (dateStyle != DateFormat.DEFAULT || timeStyle != DateFormat.DEFAULT) {\n      dateAdapterFactory =\n          DefaultDateTypeAdapter.DateType.DATE.createAdapterFactory(dateStyle, timeStyle);\n\n      if (sqlTypesSupported) {\n        sqlTimestampAdapterFactory =\n            SqlTypesSupport.TIMESTAMP_DATE_TYPE.createAdapterFactory(dateStyle, timeStyle);\n        sqlDateAdapterFactory =\n            SqlTypesSupport.DATE_DATE_TYPE.createAdapterFactory(dateStyle, timeStyle);\n      }\n    } else {\n      return;\n    }\n\n    factories.add(dateAdapterFactory);\n    if (sqlTypesSupported) {\n      factories.add(sqlTimestampAdapterFactory);\n      factories.add(sqlDateAdapterFactory);\n    }\n  }"
+}

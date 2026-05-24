@@ -1,0 +1,101 @@
+{
+  "context_builder": "repoqa-native",
+  "context_type": "repoqa_structured_code_context",
+  "files": [
+    {
+      "language": "java",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "gson/src/main/java/com/google/gson/GsonBuilder.java",
+      "symbols": [
+        {
+          "children": [],
+          "code": "private static void addTypeAdaptersForDate(\n      String datePattern, int dateStyle, int timeStyle, List<TypeAdapterFactory> factories) {\n    TypeAdapterFactory dateAdapterFactory;\n    boolean sqlTypesSupported = SqlTypesSupport.SUPPORTS_SQL_TYPES;\n    TypeAdapterFactory sqlTimestampAdapterFactory = null;\n    TypeAdapterFactory sqlDateAdapterFactory = null;\n\n    if (datePattern != null && !datePattern.trim().isEmpty()) {\n      dateAdapterFactory = DefaultDateTypeAdapter.DateType.DATE.createAdapterFactory(datePattern);\n\n      if (sqlTypesSupported) {\n        sqlTimestampAdapterFactory =\n            SqlTypesSupport.TIMESTAMP_DATE_TYPE.createAdapterFactory(datePattern);\n        sqlDateAdapterFactory = SqlTypesSupport.DATE_DATE_TYPE.createAdapterFactory(datePattern);\n      }\n    } else if (dateStyle != DateFormat.DEFAULT || timeStyle != DateFormat.DEFAULT) {\n      dateAdapterFactory =\n          DefaultDateTypeAdapter.DateType.DATE.createAdapterFactory(dateStyle, timeStyle);\n\n      if (sqlTypesSupported) {\n        sqlTimestampAdapterFactory =\n            SqlTypesSupport.TIMESTAMP_DATE_TYPE.createAdapterFactory(dateStyle, timeStyle);\n        sqlDateAdapterFactory =\n            SqlTypesSupport.DATE_DATE_TYPE.createAdapterFactory(dateStyle, timeStyle);\n      }\n    } else {\n      return;\n    }\n\n    factories.add(dateAdapterFactory);\n    if (sqlTypesSupported) {\n      factories.add(sqlTimestampAdapterFactory);\n      factories.add(sqlDateAdapterFactory);\n    }\n  }",
+          "documentation": null,
+          "end_line": 946,
+          "kind": "method",
+          "name": "addTypeAdaptersForDate",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "addTypeAdaptersForDate",
+          "signature": "private static void addTypeAdaptersForDate(\n      String datePattern, int dateStyle, int timeStyle, List<TypeAdapterFactory> factories) {\n    TypeAdapterFactory dateAdapterFactory;\n    boolean sqlTypesSupported = SqlTypesSupport.SUPPORTS_SQL_TYPES;\n    TypeAdapterFactory sqlTimestampAdapterFactory = null;\n    TypeAdapterFactory sqlDateAdapterFactory = null;\n\n    if (datePattern != null && !datePattern.trim().isEmpty()) {\n      dateAdapterFactory = DefaultDateTypeAdapter.DateType.DATE.createAdapterFactory(datePattern);\n\n      if (sqlTypesSupported) {\n        sqlTimestampAdapterFactory =\n            SqlTypesSupport.TIMESTAMP_DATE_TYPE.createAdapterFactory(datePattern);\n        sqlDateAdapterFactory = SqlTypesSupport.DATE_DATE_TYPE.createAdapterFactory(datePattern);\n      }\n    } else if (dateStyle != DateFormat.DEFAULT || timeStyle != DateFormat.DEFAULT) {\n      dateAdapterFactory =\n          DefaultDateTypeAdapter.DateType.DATE.createAdapterFactory(dateStyle, timeStyle);\n\n      if (sqlTypesSupported) {\n        sqlTimestampAdapterFactory =\n            SqlTypesSupport.TIMESTAMP_DATE_TYPE.createAdapterFactory(dateStyle, timeStyle);\n        sqlDateAdapterFactory =\n            SqlTypesSupport.DATE_DATE_TYPE.createAdapterFactory(dateStyle, timeStyle);\n      }\n    } else {\n      return;\n    }\n\n    factories.add(dateAdapterFactory);\n    if (sqlTypesSupported) {\n      factories.add(sqlTimestampAdapterFactory);\n      factories.add(sqlDateAdapterFactory);\n    }\n  }",
+          "start_line": 912,
+          "symbol_id": "gson/src/main/java/com/google/gson/GsonBuilder.java#method:addTypeAdaptersForDate:912"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "java",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "gson/src/main/java/com/google/gson/stream/JsonScope.java",
+      "symbols": [
+        {
+          "children": [],
+          "code": "final class JsonScope {\n  private JsonScope() {}\n\n  /** An array with no elements requires no separator before the next element. */\n  static final int EMPTY_ARRAY = 1;\n\n  /** An array with at least one value requires a separator before the next element. */\n  static final int NONEMPTY_ARRAY = 2;\n\n  /** An object with no name/value pairs requires no separator before the next element. */\n  static final int EMPTY_OBJECT = 3;\n\n  /** An object whose most recent element is a key. The next element must be a value. */\n  static final int DANGLING_NAME = 4;\n\n  /** An object with at least one name/value pair requires a separator before the next element. */\n  static final int NONEMPTY_OBJECT = 5;\n\n  /** No top-level value has been started yet. */\n  static final int EMPTY_DOCUMENT = 6;\n\n  /** A top-level value has already been started. */\n  static final int NONEMPTY_DOCUMENT = 7;\n\n  /** A document that's been closed and cannot be accessed. */\n  static final int CLOSED = 8;\n}",
+          "documentation": "Lexical scoping elements within a JSON reader or writer.\n\n@author Jesse Wilson\n@since 1.6",
+          "end_line": 51,
+          "kind": "class",
+          "name": "JsonScope",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "JsonScope",
+          "signature": "final class JsonScope",
+          "start_line": 25,
+          "symbol_id": "gson/src/main/java/com/google/gson/stream/JsonScope.java#class:JsonScope:25"
+        },
+        {
+          "children": [],
+          "code": "private JsonScope() {}",
+          "documentation": null,
+          "end_line": 26,
+          "kind": "constructor",
+          "name": "JsonScope",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "JsonScope",
+          "signature": "private JsonScope() {}",
+          "start_line": 26,
+          "symbol_id": "gson/src/main/java/com/google/gson/stream/JsonScope.java#constructor:JsonScope:26"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "java",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "gson/src/main/java/com/google/gson/stream/JsonWriter.java",
+      "symbols": [
+        {
+          "children": [],
+          "code": "public JsonWriter(Writer out) {\n    this.out = Objects.requireNonNull(out, \"out == null\");\n    setFormattingStyle(FormattingStyle.COMPACT);\n  }",
+          "documentation": "Creates a new instance that writes a JSON-encoded stream to {@code out}. For best performance,\nensure {@link Writer} is buffered; wrapping in {@link java.io.BufferedWriter BufferedWriter} if\nnecessary.",
+          "end_line": 235,
+          "kind": "constructor",
+          "name": "JsonWriter",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "JsonWriter",
+          "signature": "public JsonWriter(Writer out) {\n    this.out = Objects.requireNonNull(out, \"out == null\");\n    setFormattingStyle(FormattingStyle.COMPACT);\n  }",
+          "start_line": 232,
+          "symbol_id": "gson/src/main/java/com/google/gson/stream/JsonWriter.java#constructor:JsonWriter:232"
+        }
+      ],
+      "unparsed_code": null
+    }
+  ],
+  "metadata": {
+    "actual_code_context_tokens": 3909,
+    "base_id": "java_001",
+    "instance_id": "java_001_ctx4k",
+    "language": "java",
+    "normalized_language": "java",
+    "position_ratio": 0.05,
+    "requested_context_tokens": 4096,
+    "sequence": 1
+  },
+  "repository": "google/gson",
+  "workspace_id": "java_001_ctx4k"
+}

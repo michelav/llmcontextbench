@@ -1,0 +1,214 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:    if self.end == 0 {
+      Range::default()
+    } else {
+      0..self.end - 1
+    }
+  }
+}
+
+impl NomRange<usize> for RangeToInclusive<usize> {
+  type Saturating = Range<usize>;
+  type Bounded = Range<usize>;
+
+  fn bounds(&self) -> (Bound<usize>, Bound<usize>) {
+    (Bound::Unbounded, Bound::Included(self.end))
+  }
+
+  fn contains(&self, item: &usize) -> bool {
+    RangeBounds::contains(self, item)
+  }
+
+  fn is_inverted(&self) -> bool {
+    false
+  }
+
+  fn saturating_iter(&self) -> Self::Saturating {
+    0..self.end
+  }
+
+  fn bounded_iter(&self) -> Self::Bounded {
+    0..self.end
+  }
+}
+
+impl NomRange<usize> for RangeFull {
+  type Saturating = SaturatingIterator;
+  type Bounded = Range<usize>;
+
+  fn bounds(&self) -> (Bound<usize>, Bound<usize>) {
+    (Bound::Unbounded, Bound::Unbounded)
+  }
+
+  fn contains(&self, item: &usize) -> bool {
+    RangeBounds::contains(self, item)
+  }
+
+  fn is_inverted(&self) -> bool {
+    false
+  }
+
+  fn saturating_iter(&self) -> Self::Saturating {
+    SaturatingIterator { count: 0 }
+  }
+
+  fn bounded_iter(&self) -> Self::Bounded {
+    0..core::usize::MAX
+  }
+}
+
+impl NomRange<usize> for usize {
+  type Saturating = Range<usize>;
+  type Bounded = Range<usize>;
+
+  fn bounds(&self) -> (Bound<usize>, Bound<usize>) {
+    (Bound::Included(*self), Bound::Included(*self))
+  }
+
+  fn contains(&self, item: &usize) -> bool {
+    self == item
+  }
+
+  fn is_inverted(&self) -> bool {
+    false
+  }
+
+  fn saturating_iter(&self) -> Self::Saturating {
+    0..*self
+  }
+
+  fn bounded_iter(&self) -> Self::Bounded {
+    0..*self
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  
+fn test_offset_u8() {
+    let s = b"abcd123";
+    let a = &s[..];
+    let b = &a[2..];
+    let c = &a[..4];
+    let d = &a[3..5];
+    assert_eq!(a.offset(b), 2);
+    assert_eq!(a.offset(c), 0);
+    assert_eq!(a.offset(d), 3);
+  }
+
+  #[test]
+  fn test_offset_str() {
+    let a = "abcřèÂßÇd123";
+    let b = &a[7..];
+    let c = &a[..5];
+    let d = &a[5..9];
+    assert_eq!(a.offset(b), 7);
+    assert_eq!(a.offset(c), 0);
+    assert_eq!(a.offset(d), 5);
+  }
+
+  #[test]
+  fn test_slice_index() {
+    let a = "abcřèÂßÇd123";
+    assert_eq!(a.slice_index(0), Ok(0));
+    assert_eq!(a.slice_index(2), Ok(2));
+  }
+
+  #[test]
+  fn test_slice_index_utf8() {
+    let a = "a¡€💢€¡a";
+
+    for (c, len) in a.chars().zip([1, 2, 3, 4, 3, 2, 1]) {
+      assert_eq!(c.len(), len);
+    }
+
+    assert_eq!(a.slice_index(0), Ok(0));
+    assert_eq!(a.slice_index(1), Ok(1));
+    assert_eq!(a.slice_index(2), Ok(3));
+    assert_eq!(a.slice_index(3), Ok(6));
+    assert_eq!(a.slice_index(4), Ok(10));
+    assert_eq!(a.slice_index(5), Ok(13));
+    assert_eq!(a.slice_index(6), Ok(15));
+    assert_eq!(a.slice_index(7), Ok(16));
+
+    assert!(a.slice_index(8).is_err());
+  }
+}
+
+// Path: src/bytes/complete.rs
+//! Parsers recognizing bytes streams, complete input version
+
+use core::marker::PhantomData;
+
+use crate::error::ParseError;
+use crate::internal::{IResult, Parser};
+use crate::traits::{Compare, FindSubstring, FindToken, InputLength, ToUsize};
+use crate::Complete;
+use crate::Emit;
+use crate::Input;
+use crate::OutputM;
+
+/// Recognizes a pattern
+///
+/// The input data will be compared to the tag combinator's argument and will return the part of
+/// the input that matches the argument
+///
+/// It will return `Err(Err::Error((_, ErrorKind::Tag)))` if the input doesn't match the pattern
+/// # Example
+/// ```rust
+/// # use nom::{Err, error::{Error, ErrorKind}, Needed, IResult};
+/// use nom::bytes::complete::tag;
+///
+/// fn parser(s: &str) -> IResult<&str, &str> {
+///   tag("Hello")(s)
+/// }
+///
+/// assert_eq!(parser("Hello, World!"), Ok((", World!", "Hello")));
+/// assert_eq!(parser("Something"), Err(Err::Error(Error::new("Something", ErrorKind::Tag))));
+/// assert_eq!(parser(""), Err(Err::Error(Error::new("", ErrorKind::Tag))));
+/// ```
+pub fn tag<T, I, Error: ParseError<I>>(tag: T) -> impl Fn(I) -> IResult<I, I, Error>
+where
+  I: Input + Compare<T>,
+  T: InputLength + Clone,
+{
+  move |i: I| {
+    let mut parser = super::Tag {
+      tag: tag.clone(),
+      e: PhantomData,
+    };
+
+    parser.process::<OutputM<Emit, Emit, Complete>>(i)
+  }
+}
+
+/// Recognizes a case insensitive pattern.
+///
+/// The input data will be compared to the tag combinator's argument and will return the part of
+/// the input that matches the argument with no regard to case.
+///
+/// It will return `Err(Err::Error((_, ErrorKind::Tag)))` if the input doesn't match the pattern.
+/// # Example
+/// ```rust
+/// # use nom::{Err, error::{Error, ErrorKind}, Needed, IResult};
+/// use nom::bytes::complete::tag_no_case;
+///
+/// fn parser(s: &str) -> IResult<&str, &str> {
+///   tag_no_case("hello")(s)
+/// }
+///
+/// assert_eq!(parser("Hello, World!"), Ok((", World!", "Hello")));
+/// assert_eq!(parser("hello, World!"), Ok((", World!", "hello")));
+/// assert_eq!(parser("HeLlO, World!"), Ok((", World!", "HeLlO")));
+/// assert_eq!(parser("Something"), Err(Err::Error(Error::new("Something", ErrorKind::Tag))));
+/// assert_eq!(parser(""), Err(Err::Error(Error::new("", ErrorKind::Tag))));
+/// ```
+...
+
+Function Description:1. **Purpose**: To verify the correctness of calculating the starting index of various sub-slices relative to their original slice.
+2. **Input**: A byte slice derived from a string and its sub-slices.
+3. **Output**: The function does not return any output but asserts the correctness of the index calculations.
+4. **Procedure**: The test initializes a byte slice from a string and creates several sub-slices from it. It then checks if the computed starting indices of these sub-slices relative to the original slice are as expected using assertions.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

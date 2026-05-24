@@ -1,0 +1,21 @@
+[project]
+name = "ctxbench-repoqa-tools"
+version = "0.1.0"
+description = "Isolated RepoQA tooling environment for CTXBench dataset generation and scoring."
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "repoqa @ git+https://github.com/evalplus/repoqa.git@ae876deb1365dbf5a15b0533723c8ed123eee586",
+  "tempdir==0.7.1",
+  "appdirs==1.4.4",
+  "wget==3.2",
+  "fire==0.7.1",
+  "nltk==3.9.2",
+  "rich==14.2.0",
+  "numpy==2.3.5",
+  "tree_sitter<=0.21.3",
+  "tree_sitter_languages==1.10.2",
+  "transformers==4.57.3",
+]
+
+[tool.uv]
+package = false

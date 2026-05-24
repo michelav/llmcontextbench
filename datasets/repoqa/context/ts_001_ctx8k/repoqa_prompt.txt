@@ -1,0 +1,775 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```: *   reshape([1, 2, 3, 4            ], [2, 2   ]); // Type: number[][]    Value: [[1, 2], [3, 4]]
+ *   reshape([1, 2, 3, 4, 5, 6, 7, 8], [2, 2, 2]); // Type: number[][][]  Value: [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+ *   reshape([1, 2, 3, 4, 5, 6, 7, 8], [4, 2   ]); // Type: number[][]    Value: [[1, 2], [3, 4], [5, 6], [7, 8]]
+ * @param {T[]|DataArray} data The input array to reshape.
+ * @param {DIM} dimensions The target shape/dimensions.
+ * @template T
+ * @template {[number]|number[]} DIM
+ * @returns {NestArray<T, DIM["length"]>} The reshaped array.
+ */
+
+function reshape(data, dimensions) {
+
+    const totalElements = data.length;
+    const dimensionSize = dimensions.reduce((a, b) => a * b);
+
+    if (totalElements !== dimensionSize) {
+        throw Error(`cannot reshape array of size ${totalElements} into shape (${dimensions})`);
+    }
+
+    /** @type {any} */
+    let reshapedArray = data;
+
+    for (let i = dimensions.length - 1; i >= 0; i--) {
+        reshapedArray = reshapedArray.reduce((acc, val) => {
+            let lastArray = acc[acc.length - 1];
+
+            if (lastArray.length < dimensions[i]) {
+                lastArray.push(val);
+            } else {
+                acc.push([val]);
+            }
+
+            return acc;
+        }, [[]]);
+    }
+
+    return reshapedArray[0];
+}
+
+/**
+ * Permutes a tensor according to the provided axes.
+ * @param {any} tensor The input tensor to permute.
+ * @param {Array} axes The axes to permute the tensor along.
+ * @returns {Tensor} The permuted tensor.
+ */
+export function permute(tensor, axes) {
+    const [permutedData, shape] = permute_data(tensor.data, tensor.dims, axes);
+    return new Tensor(tensor.type, permutedData, shape);
+}
+
+
+/**
+ * Interpolates an Tensor to the given size.
+ * @param {Tensor} input The input tensor to interpolate. Data must be channel-first (i.e., [c, h, w])
+ * @param {number[]} size The output size of the image
+ * @param {string} mode The interpolation mode
+ * @param {boolean} align_corners Whether to align corners.
+ * @returns {Tensor} The interpolated tensor.
+ */
+export function interpolate(input, [out_height, out_width], mode = 'bilinear', align_corners = false) {
+
+    // Input image dimensions
+    const in_channels = input.dims.at(-3) ?? 1;
+    const in_height = input.dims.at(-2);
+    const in_width = input.dims.at(-1);
+
+    let output = interpolate_data(
+        /** @type {import('./maths.js').TypedArray}*/(input.data),
+        [in_channels, in_height, in_width],
+        [out_height, out_width],
+        mode,
+        align_corners
+    );
+    return new Tensor(input.type, output, [in_channels, out_height, out_width]);
+}
+
+/**
+ * Perform mean pooling of the last hidden state followed by a normalization step.
+ * @param {Tensor} last_hidden_state Tensor of shape [batchSize, seqLength, embedDim]
+ * @param {Tensor} attention_mask Tensor of shape [batchSize, seqLength]
+ * @returns {Tensor} Returns a new Tensor of shape [batchSize, embedDim].
+ */
+export function mean_pooling(last_hidden_state, attention_mask) {
+    // last_hidden_state: [batchSize, seqLength, embedDim]
+    // attention_mask:    [batchSize, seqLength]
+
+    let shape = [last_hidden_state.dims[0], last_hidden_state.dims[2]];
+    // @ts-ignore
+    let returnedData = new last_hidden_state.data.constructor(shape[0] * shape[1]);
+    let [batchSize, seqLength, embedDim] = last_hidden_state.dims;
+
+    let outIndex = 0;
+    for (let i = 0; i < batchSize; ++i) {
+        let offset = i * embedDim * seqLength;
+
+        for (let k = 0; k < embedDim; ++k) {
+            let sum = 0;
+            let count = 0;
+
+            let attnMaskOffset = i * seqLength;
+            let offset2 = offset + k;
+            // Pool over all words in sequence
+            for (let j = 0; j < seqLength; ++j) {
+                // index into attention mask
+                let attn = Number(attention_mask.data[attnMaskOffset + j]);
+
+                count += attn;
+                sum += last_hidden_state.data[offset2 + j * embedDim] * attn;
+            }
+
+            let avg = sum / count;
+            returnedData[outIndex++] = avg;
+        }
+    }
+
+    return new Tensor(
+        last_hidden_state.type,
+        returnedData,
+        shape
+    )
+}
+
+/**
+ * Apply Layer Normalization for last certain number of dimensions.
+ * @param {Tensor} input The input tensor
+ * @param {number[]} normalized_shape input shape from an expected input of size
+ * @param {Object} options The options for the layer normalization
+ * @param {number} [options.eps=1e-5] A value added to the denominator for numerical stability.
+ * @returns {Tensor} The normalized tensor.
+ */
+export function layer_norm(input, normalized_shape, {
+    eps = 1e-5,
+} = {}) {
+    if (input.dims.length !== 2) {
+        throw new Error('`layer_norm` currently only supports 2D input.');
+    }
+
+    const [batchSize, featureDim] = input.dims;
+
+    if (normalized_shape.length !== 1 && normalized_shape[0] !== featureDim) {
+        throw new Error('`normalized_shape` must be a 1D array with shape `[input.dims[1]]`.');
+    }
+
+    const [std, mean] = std_mean(input, 1, 0, true);
+
+    // @ts-ignore
+    const returnedData = new input.data.constructor(input.data.length);
+
+    for (let i = 0; i < batchSize; ++i) {
+        const offset = i * featureDim;
+        for (let j = 0; j < featureDim; ++j) {
+            const offset2 = offset + j;
+            returnedData[offset2] = (input.data[offset2] - mean.data[i]) / (std.data[i] + eps);
+        }
+    }
+    return new Tensor(input.type, returnedData, input.dims);
+}
+
+/**
+ * Helper function to calculate new dimensions when performing a squeeze operation.
+ * @param {number[]} dims The dimensions of the tensor.
+ * @param {number|number[]|null} dim The dimension(s) to squeeze.
+ * @returns The new dimensions.
+ * @private
+ */
+function calc_squeeze_dims(dims, dim) {
+    dims = dims.slice();
+    if (dim === null) {
+        dims = dims.filter((d) => d !== 1);
+    } else if (typeof dim === 'number') {
+        if (dims[dim] === 1) {
+            dims.splice(dim, 1);
+        }
+    } else if (Array.isArray(dim)) {
+        dims = dims.filter((x, i) => {
+            return x !== 1 || !dim.includes(i);
+        });
+    }
+    return dims;
+}
+
+/**
+ * Helper function to calculate new dimensions when performing an unsqueeze operation.
+ * @param {number[]} dims The dimensions of the tensor.
+ * @param {number} dim The dimension to unsqueeze.
+ * @returns The new dimensions.
+ * @private
+ */
+function calc_unsqueeze_dims(dims, dim) {
+    // Dimension out of range (e.g., "expected to be in range of [-4, 3], but got 4")
+    // + 1 since we allow inserting at the end (i.e. dim = -1)
+    dim = safeIndex(dim, dims.length + 1);
+    dims = dims.slice();
+    // Insert 1 into specified dimension
+    dims.splice(dim, 0, 1);
+    return dims;
+}
+
+/**
+ * Safely calculate the index for an array of a given size, allowing negative indexing.
+ * @param {number} index The index that will be used.
+ * @param {number} size The size of the array.
+ * @param {number} [dimension=null] The dimension that the index is for (optional).
+ * @returns {number} The index, guaranteed to be non-negative and less than `arrayLength`.
+ * 
+ * @throws {Error} If the index is out of range.
+ * @private
+ */
+function safeIndex(index, size, dimension = null) {
+    if (index < -size || index >= size) {
+        throw new Error(`IndexError: index ${index} is out of bounds for dimension${dimension === null ? '' : ' ' + dimension} with size ${size}`);
+    }
+
+    if (index < 0) {
+        // Negative indexing, ensuring positive index
+        index = ((index % size) + size) % size;
+    }
+    return index;
+}
+
+/**
+ * Concatenates an array of tensors along a specified dimension.
+ * @param {Tensor[]} tensors The array of tensors to concatenate.
+ * @param {number} dim The dimension to concatenate along.
+ * @returns {Tensor} The concatenated tensor.
+ */
+export function cat(tensors, dim = 0) {
+    dim = safeIndex(dim, tensors[0].dims.length);
+
+    // TODO do validation of shapes
+
+    const resultDims = tensors[0].dims.slice();
+    resultDims[dim] = tensors.reduce((a, b) => a + b.dims[dim], 0);
+
+    // Create a new array to store the accumulated values
+    const resultSize = resultDims.reduce((a, b) => a * b, 1);
+    // @ts-ignore
+    const result = new tensors[0].data.constructor(resultSize);
+
+    // Create output tensor of same type as first
+    const resultType = tensors[0].type;
+
+    if (dim === 0) {
+        // Handle special case for performance reasons
+
+        let offset = 0;
+        for (let t of tensors) {
+            result.set(t.data, offset);
+            offset += t.data.length;
+        }
+
+    } else {
+
+        let currentDim = 0;
+
+        for (let t = 0; t < tensors.length; ++t) {
+            let tensor = tensors[t];
+
+            // Iterate over the data array
+            for (let i = 0; i < tensor.data.length; ++i) {
+                // Calculate the index in the resulting array
+                let resultIndex = 0;
+
+                for (let j = tensor.dims.length - 1, num = i, resultMultiplier = 1; j >= 0; --j) {
+                    const size = tensor.dims[j];
+                    let index = num % size;
+                    if (j === dim) {
+                        index += currentDim;
+                    }
+                    resultIndex += index * resultMultiplier;
+                    resultMultiplier *= resultDims[j];
+                    num = Math.floor(num / size);
+                }
+                // Accumulate the value at the current index
+                result[resultIndex] = tensor.data[i];
+            }
+
+            currentDim += tensor.dims[dim];
+        }
+    }
+    return new Tensor(resultType, result, resultDims);
+}
+
+/**
+ * Stack an array of tensors along a specified dimension.
+ * @param {Tensor[]} tensors The array of tensors to stack.
+ * @param {number} dim The dimension to stack along.
+ * @returns {Tensor} The stacked tensor.
+ */
+export function stack(tensors, dim = 0) {
+    // TODO do validation of shapes
+    // NOTE: stack expects each tensor to be equal size
+    return cat(tensors.map(t => t.unsqueeze(dim)), dim);
+}
+
+
+/**
+ * Calculates the standard deviation and mean over the dimensions specified by dim. dim can be a single dimension or `null` to reduce over all dimensions.
+ * @param {Tensor} input the input tenso
+ * @param {number|null} dim the dimension to reduce. If None, all dimensions are reduced.
+ * @param {number} correction difference between the sample size and sample degrees of freedom. Defaults to Bessel's correction, correction=1.
+ * @param {boolean} keepdim whether the output tensor has dim retained or not.
+ * @returns {Tensor[]} A tuple of (std, mean) tensors.
+ */
+export function std_mean(input, dim = null, correction = 1, keepdim = false) {
+
+    if (dim === null) {
+        // None to reduce over all dimensions.
+        // @ts-ignore
+        const sum = input.data.reduce((a, b) => a + b, 0);
+        const mean = sum / input.data.length;
+        // @ts-ignore
+        const std = Math.sqrt(input.data.reduce((a, b) => a + (b - mean) ** 2, 0) / (input.data.length - correction));
+
+        const meanTensor = new Tensor(input.type, [mean], [/* scalar */]);
+        const stdTensor = new Tensor(input.type, [std], [/* scalar */]);
+
+        return [stdTensor, meanTensor];
+    }
+
+    // Negative indexing
+    dim = safeIndex(dim, input.dims.length);
+
+    const meanTensor = mean(input, dim, keepdim);
+
+    // Calculate the shape of the resulting array after summation
+    const resultDims = input.dims.slice(); // Copy the original dimensions
+    resultDims[dim] = 1; // Remove the specified axis
+
+    // Create a new array to store the accumulated values
+    // @ts-ignore
+    const result = new input.data.constructor(input.data.length / input.dims[dim]);
+
+    // Iterate over the data array
+    for (let i = 0; i < input.data.length; ++i) {
+
+        // Calculate the index in the resulting array
+        let resultIndex = 0;
+
+        for (let j = input.dims.length - 1, num = i, resultMultiplier = 1; j >= 0; --j) {
+            const size = input.dims[j];
+            if (j !== dim) {
+                const index = num % size;
+                resultIndex += index * resultMultiplier;
+                resultMultiplier *= resultDims[j];
+            }
+            num = Math.floor(num / size);
+        }
+
+        // Accumulate the value at the current index
+        result[resultIndex] += (input.data[i] - meanTensor.data[resultIndex]) ** 2;
+    }
+
+    for (let i = 0; i < result.length; ++i) {
+        result[i] = Math.sqrt(result[i] / (input.dims[dim] - correction));
+    }
+
+    if (!keepdim) {
+        resultDims.splice(dim, 1);
+    }
+
+    const stdTensor = new Tensor(input.type, result, resultDims);
+
+    return [stdTensor, meanTensor];
+}
+
+
+/**
+ * Returns the mean value of each row of the input tensor in the given dimension dim.
+ * @param {Tensor} input the input tensor.
+ * @param {number|null} dim the dimension to reduce.
+ * @param {boolean} keepdim whether the output tensor has dim retained or not.
+ * @returns A new tensor with means taken along the specified dimension.
+ */
+export function mean(input, dim = null, keepdim = false) {
+
+    if (dim === null) {
+        // None to reduce over all dimensions.
+        // @ts-ignore
+        let val = input.data.reduce((a, b) => a + b, 0);
+        return new Tensor(input.type, [val / input.data.length], [/* scalar */]);
+    }
+
+    // Negative indexing
+    dim = safeIndex(dim, input.dims.length);
+
+    // Calculate the shape of the resulting array after summation
+    const resultDims = input.dims.slice(); // Copy the original dimensions
+    resultDims[dim] = 1; // Remove the specified axis
+
+    // Create a new array to store the accumulated values
+    // @ts-ignore
+    const result = new input.data.constructor(input.data.length / input.dims[dim]);
+
+    // Iterate over the data array
+    for (let i = 0; i < input.data.length; ++i) {
+
+        // Calculate the index in the resulting array
+        let resultIndex = 0;
+
+        for (let j = input.dims.length - 1, num = i, resultMultiplier = 1; j >= 0; --j) {
+            const size = input.dims[j];
+            if (j !== dim) {
+                const index = num % size;
+                resultIndex += index * resultMultiplier;
+                resultMultiplier *= resultDims[j];
+            }
+            num = Math.floor(num / size);
+        }
+
+        // Accumulate the value at the current index
+        result[resultIndex] += input.data[i];
+    }
+
+    if (input.dims[dim] !== 1) {
+        for (let i = 0; i < result.length; ++i) {
+            result[i] = result[i] / input.dims[dim];
+        }
+    }
+
+    if (!keepdim) {
+        resultDims.splice(dim, 1);
+    }
+
+    return new Tensor(input.type, result, resultDims);
+}
+
+
+/**
+ *
+ * Measures similarity between two temporal sequences (e.g., input audio and output tokens
+ * to generate token-level timestamps).
+ * @param {Tensor} matrix 
+ * @returns {number[][]}
+ */
+export function dynamicTimeWarping(matrix) {
+    const [output_length, input_length] = matrix.dims;
+
+    const outputShape = [output_length + 1, input_length + 1];
+
+    const cost = new Tensor(
+        'float32',
+        new Float32Array(outputShape[0] * outputShape[1]).fill(Infinity),
+        outputShape
+    );
+
+    const trace = new Tensor(
+        'float32',
+        new Float32Array(outputShape[0] * outputShape[1]).fill(-1),
+        outputShape
+    )
+
+    // same as `cost[0][0] = 0`;
+    cost[0].data[0] = 0;
+
+    for (let j = 1; j < input_length + 1; ++j) {
+        for (let i = 1; i < output_length + 1; ++i) {
+
+            const c0 = cost[i - 1][j - 1].item();
+            const c1 = cost[i - 1][j].item();
+            const c2 = cost[i][j - 1].item();
+
+            let c, t;
+            if (c0 < c1 && c0 < c2) {
+                c = c0;
+                t = 0;
+            } else if (c1 < c0 && c1 < c2) {
+                c = c1;
+                t = 1;
+            } else {
+                c = c2;
+                t = 2;
+            }
+
+            cost[i].data[j] = matrix[i - 1][j - 1].item() + c;
+            trace[i].data[j] = t;
+        }
+    }
+
+    // backtrace
+    let i = output_length;
+    let j = input_length;
+
+    // @ts-ignore
+    trace.data.fill(2, 0, outputShape[1]) // trace[0, :] = 2
+    for (let i = 0; i < outputShape[0]; ++i) { // trace[:, 0] = 1
+        trace[i].data[0] = 1;
+    }
+
+    let text_indices = [];
+    let time_indices = [];
+
+    while (i > 0 || j > 0) {
+        text_indices.push(i - 1);
+        time_indices.push(j - 1);
+
+        const t = trace[i][j].item();
+        switch (t) {
+            case 0:
+                --i; --j;
+                break;
+            case 1:
+                --i;
+                break;
+            case 2:
+                --j;
+                break;
+            default:
+                throw new Error(
+                    `Internal error in dynamic time warping. Unexpected trace[${i}, ${j}]. Please file a bug report.`
+                )
+        }
+    }
+
+    text_indices.reverse();
+    time_indices.reverse();
+
+    return [text_indices, time_indices];
+
+}
+
+function dimsToStride(dims) {
+    const stride = new Array(dims.length);
+    for (let i = dims.length - 1, s2 = 1; i >= 0; --i) {
+        stride[i] = s2;
+        s2 *= dims[i];
+    }
+    return stride;
+}
+
+/**
+ * Returns a tensor filled with the scalar value 1, with the shape defined by the variable argument size.
+ * @param {number[]} size A sequence of integers defining the shape of the output tensor.
+ */
+export function ones(size) {
+    const numElements = size.reduce((a, b) => a * b, 1);
+    return new Tensor(
+        'int64',
+        new BigInt64Array(numElements).fill(1n),
+        size
+    )
+}
+
+/**
+ * Returns a tensor filled with the scalar value 1, with the same size as input.
+ * @param {Tensor} tensor The size of input will determine size of the output tensor.
+ * @returns The ones tensor.
+ */
+export function ones_like(tensor) {
+    return ones(tensor.dims);
+}
+
+/**
+ * Quantizes the embeddings tensor to binary or unsigned binary precision.
+ * @param {Tensor} tensor The tensor to quantize.
+ * @param {'binary'|'ubinary'} precision The precision to use for quantization.
+ * @returns {Tensor} The quantized tensor.
+ */
+export function quantize_embeddings(tensor, precision) {
+    if (tensor.dims.length !== 2) {
+        throw new Error("The tensor must have 2 dimensions");
+    }
+    if (tensor.dims.at(-1) % 8 !== 0) {
+        throw new Error("The last dimension of the tensor must be a multiple of 8");
+    }
+    if (!['binary', 'ubinary'].includes(precision)) {
+        throw new Error("The precision must be either 'binary' or 'ubinary'");
+    }
+
+    const signed = precision === 'binary';
+    const dtype = signed ? 'int8' : 'uint8';
+
+    // Create a typed array to store the packed bits
+    const cls = signed ? Int8Array : Uint8Array;
+    const inputData = tensor.data;
+    const outputData = new cls(inputData.length / 8);
+
+    // Iterate over each number in the array
+    for (let i = 0; i < inputData.length; ++i) {
+        // Determine if the number is greater than 0
+        const bit = inputData[i] > 0 ? 1 : 0;
+
+        // Calculate the index in the typed array and the position within the byte
+        const arrayIndex = Math.floor(i / 8);
+        const bitPosition = i % 8;
+
+        // Pack the bit into the typed array
+        outputData[arrayIndex] |= bit << (7 - bitPosition);
+        if (signed && bitPosition === 0) {
+            outputData[arrayIndex] -= 128;
+        }
+    };
+
+    return new Tensor(dtype, outputData, [tensor.dims[0], tensor.dims[1] / 8]);
+}
+
+// Path: src/utils/image.js
+
+/**
+ * @file Helper module for image processing. 
+ * 
+ * These functions and classes are only used internally, 
+ * meaning an end-user shouldn't need to access anything here.
+ * 
+ * @module utils/image
+ */
+
+import { getFile } from './hub.js';
+import { env } from '../env.js';
+import { Tensor } from './tensor.js';
+
+// Will be empty (or not used) if running in browser or web-worker
+import sharp from 'sharp';
+
+const BROWSER_ENV = typeof self !== 'undefined';
+const WEBWORKER_ENV = BROWSER_ENV && self.constructor.name === 'DedicatedWorkerGlobalScope';
+
+let createCanvasFunction;
+let ImageDataClass;
+let loadImageFunction;
+if (BROWSER_ENV) {
+    // Running in browser or web-worker
+    createCanvasFunction = (/** @type {number} */ width, /** @type {number} */ height) => {
+        if (!self.OffscreenCanvas) {
+            throw new Error('OffscreenCanvas not supported by this browser.');
+        }
+        return new self.OffscreenCanvas(width, height)
+    };
+    loadImageFunction = self.createImageBitmap;
+    ImageDataClass = self.ImageData;
+
+} else if (sharp) {
+    // Running in Node.js, electron, or other non-browser environment
+
+    loadImageFunction = async (/**@type {sharp.Sharp}*/img) => {
+        const metadata = await img.metadata();
+        const rawChannels = metadata.channels;
+
+        let { data, info } = await img.raw().toBuffer({ resolveWithObject: true });
+
+        const newImage = new RawImage(new Uint8ClampedArray(data), info.width, info.height, info.channels);
+        if (rawChannels !== undefined && rawChannels !== info.channels) {
+            // Make sure the new image has the same number of channels as the input image.
+            // This is necessary for grayscale images.
+            newImage.convert(rawChannels);
+        }
+        return newImage;
+    }
+
+} else {
+    throw new Error('Unable to load image processing library.');
+}
+
+
+// Defined here: https://github.com/python-pillow/Pillow/blob/a405e8406b83f8bfb8916e93971edc7407b8b1ff/src/libImaging/Imaging.h#L262-L268
+const RESAMPLING_MAPPING = {
+    0: 'nearest',
+    1: 'lanczos',
+    2: 'bilinear',
+    3: 'bicubic',
+    4: 'box',
+    5: 'hamming',
+}
+
+/**
+ * Mapping from file extensions to MIME types.
+ */
+const CONTENT_TYPE_MAP = new Map([
+    ['png', 'image/png'],
+    ['jpg', 'image/jpeg'],
+    ['jpeg', 'image/jpeg'],
+    ['gif', 'image/gif'],
+]);
+
+export class RawImage {
+
+    /**
+     * Create a new `RawImage` object.
+     * @param {Uint8ClampedArray|Uint8Array} data The pixel data.
+     * @param {number} width The width of the image.
+     * @param {number} height The height of the image.
+     * @param {1|2|3|4} channels The number of channels.
+     */
+    constructor(data, width, height, channels) {
+        this.data = data;
+        this.width = width;
+        this.height = height;
+        this.channels = channels;
+    }
+
+    /** 
+     * Returns the size of the image (width, height).
+     * @returns {[number, number]} The size of the image (width, height).
+     */
+    get size() {
+        return [this.width, this.height];
+    }
+
+    /**
+     * Helper method for reading an image from a variety of input types.
+     * @param {RawImage|string|URL} input 
+     * @returns The image object.
+     * 
+     * **Example:** Read image from a URL.
+     * ```javascript
+     * let image = await RawImage.read('https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/football-match.jpg');
+     * // RawImage {
+     * //   "data": Uint8ClampedArray [ 25, 25, 25, 19, 19, 19, ... ],
+     * //   "width": 800,
+     * //   "height": 533,
+     * //   "channels": 3
+     * // }
+     * ```
+     */
+    static async read(input) {
+        if (input instanceof RawImage) {
+            return input;
+        } else if (typeof input === 'string' || input instanceof URL) {
+            return await this.fromURL(input);
+        } else {
+            throw new Error(`Unsupported input type: ${typeof input}`);
+        }
+    }
+
+
+    /**
+     * Read an image from a URL or file path.
+     * @param {string|URL} url The URL or file path to read the image from.
+     * @returns {Promise<RawImage>} The image object.
+     */
+    static async fromURL(url) {
+        let response = await getFile(url);
+        if (response.status !== 200) {
+            throw new Error(`Unable to read image from "${url}" (${response.status} ${response.statusText})`);
+        }
+        let blob = await response.blob();
+        return this.fromBlob(blob);
+    }
+
+    /**
+     * Helper method to create a new Image from a blob.
+     * @param {Blob} blob The blob to read the image from.
+     * @returns {Promise<RawImage>} The image object.
+     */
+    static async fromBlob(blob) {
+        if (BROWSER_ENV) {
+            // Running in environment with canvas
+            let img = await loadImageFunction(blob);
+
+            const ctx = createCanvasFunction(img.width, img.height).getContext('2d');
+
+            // Draw image to context
+            ctx.drawImage(img, 0, 0);
+
+            return new this(ctx.getImageData(0, 0, img.width, img.height).data, img.width, img.height, 4);
+
+        } else {
+            // Use sharp.js to read (and possible resize) the image.
+            let img = sharp(await blob.arrayBuffer());
+
+            return await loadImageFunction(img);
+        }
+    }
+
+    /**
+     * Helper method to create a new Image from a tensor
+     * @param {Tensor} tensor 
+     */
+...
+
+Function Description:1. **Purpose**: The function is designed to transform a one-dimensional array into a multi-dimensional array based on specified dimensions.
+2. **Input**: The function accepts two parameters: a one-dimensional array containing data elements, and an array of integers representing the desired dimensions of the output array.
+3. **Output**: It returns a nested array structured according to the provided dimensions. The depth of the nested array corresponds to the number of dimensions specified.
+4. **Procedure**: The function first calculates the total number of elements in the input array and the product of the specified dimensions to ensure they match. If they do not match, an error is thrown. It then iteratively groups elements of the input array into nested arrays based on the dimensions specified, starting from the innermost dimension and working outwards.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

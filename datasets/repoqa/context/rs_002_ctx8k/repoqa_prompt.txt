@@ -1,0 +1,504 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:  T: Input + crate::traits::ParseTo<f32> + Compare<&'static str>,
+  <T as Input>::Item: AsChar + Clone,
+  T: AsBytes,
+  T: for<'a> Compare<&'a [u8]>,
+{
+  /*
+  let (i, (sign, integer, fraction, exponent)) = recognize_float_parts(input)?;
+
+  let mut float: f32 = minimal_lexical::parse_float(
+    integer.as_bytes().iter(),
+    fraction.as_bytes().iter(),
+    exponent,
+  );
+  if !sign {
+    float = -float;
+  }
+
+  Ok((i, float))
+  */
+  let (i, s) = recognize_float_or_exceptions(input)?;
+  match s.parse_to() {
+    Some(f) => Ok((i, f)),
+    None => Err(crate::Err::Error(E::from_error_kind(
+      i,
+      crate::error::ErrorKind::Float,
+    ))),
+  }
+}
+
+/// Recognizes floating point number in text format and returns a f64.
+///
+/// *Streaming version*: Will return `Err(nom::Err::Incomplete(_))` if there is not enough data.
+///
+/// ```rust
+/// # use nom::{Err, error::ErrorKind, Needed};
+/// # use nom::Needed::Size;
+/// use nom::number::complete::double;
+///
+/// let parser = |s| {
+///   double(s)
+/// };
+///
+/// assert_eq!(parser("11e-1"), Ok(("", 1.1)));
+/// assert_eq!(parser("123E-02"), Ok(("", 1.23)));
+/// assert_eq!(parser("123K-01"), Ok(("K-01", 123.0)));
+/// assert_eq!(parser("abc"), Err(Err::Error(("abc", ErrorKind::Float))));
+/// ```
+pub fn double<T, E: ParseError<T>>(input: T) -> IResult<T, f64, E>
+where
+  T: Clone + Offset,
+  T: Input + crate::traits::ParseTo<f64> + Compare<&'static str>,
+  <T as Input>::Item: AsChar + Clone,
+  T: AsBytes,
+  T: for<'a> Compare<&'a [u8]>,
+{
+  /*
+  let (i, (sign, integer, fraction, exponent)) = recognize_float_parts(input)?;
+
+  let mut float: f64 = minimal_lexical::parse_float(
+    integer.as_bytes().iter(),
+    fraction.as_bytes().iter(),
+    exponent,
+  );
+  if !sign {
+    float = -float;
+  }
+
+  Ok((i, float))
+  */
+  let (i, s) = recognize_float_or_exceptions(input)?;
+  match s.parse_to() {
+    Some(f) => Ok((i, f)),
+    None => Err(crate::Err::Error(E::from_error_kind(
+      i,
+      crate::error::ErrorKind::Float,
+    ))),
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::error::ErrorKind;
+  use crate::internal::{Err, Needed};
+  use proptest::prelude::*;
+
+  macro_rules! assert_parse(
+    ($left: expr, $right: expr) => {
+      let res: $crate::IResult<_, _, (_, ErrorKind)> = $left;
+      assert_eq!(res, $right);
+    };
+  );
+
+  #[test]
+  fn i8_tests() {
+    assert_parse!(be_i8(&[0x00][..]), Ok((&b""[..], 0)));
+    assert_parse!(be_i8(&[0x7f][..]), Ok((&b""[..], 127)));
+    assert_parse!(be_i8(&[0xff][..]), Ok((&b""[..], -1)));
+    assert_parse!(be_i8(&[0x80][..]), Ok((&b""[..], -128)));
+    assert_parse!(be_i8(&[][..]), Err(Err::Incomplete(Needed::new(1))));
+  }
+
+  #[test]
+  
+fn i16_tests() {
+    assert_parse!(be_i16(&[0x00, 0x00][..]), Ok((&b""[..], 0)));
+    assert_parse!(be_i16(&[0x7f, 0xff][..]), Ok((&b""[..], 32_767_i16)));
+    assert_parse!(be_i16(&[0xff, 0xff][..]), Ok((&b""[..], -1)));
+    assert_parse!(be_i16(&[0x80, 0x00][..]), Ok((&b""[..], -32_768_i16)));
+    assert_parse!(be_i16(&[][..]), Err(Err::Incomplete(Needed::new(2))));
+    assert_parse!(be_i16(&[0x00][..]), Err(Err::Incomplete(Needed::new(1))));
+  }
+
+  #[test]
+  fn u24_tests() {
+    assert_parse!(be_u24(&[0x00, 0x00, 0x00][..]), Ok((&b""[..], 0)));
+    assert_parse!(be_u24(&[0x00, 0xFF, 0xFF][..]), Ok((&b""[..], 65_535_u32)));
+    assert_parse!(
+      be_u24(&[0x12, 0x34, 0x56][..]),
+      Ok((&b""[..], 1_193_046_u32))
+    );
+    assert_parse!(be_u24(&[][..]), Err(Err::Incomplete(Needed::new(3))));
+    assert_parse!(be_u24(&[0x00][..]), Err(Err::Incomplete(Needed::new(2))));
+    assert_parse!(
+      be_u24(&[0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(1)))
+    );
+  }
+
+  #[test]
+  fn i24_tests() {
+    assert_parse!(be_i24(&[0xFF, 0xFF, 0xFF][..]), Ok((&b""[..], -1_i32)));
+    assert_parse!(be_i24(&[0xFF, 0x00, 0x00][..]), Ok((&b""[..], -65_536_i32)));
+    assert_parse!(
+      be_i24(&[0xED, 0xCB, 0xAA][..]),
+      Ok((&b""[..], -1_193_046_i32))
+    );
+    assert_parse!(be_i24(&[][..]), Err(Err::Incomplete(Needed::new(3))));
+    assert_parse!(be_i24(&[0x00][..]), Err(Err::Incomplete(Needed::new(2))));
+    assert_parse!(
+      be_i24(&[0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(1)))
+    );
+  }
+
+  #[test]
+  fn i32_tests() {
+    assert_parse!(be_i32(&[0x00, 0x00, 0x00, 0x00][..]), Ok((&b""[..], 0)));
+    assert_parse!(
+      be_i32(&[0x7f, 0xff, 0xff, 0xff][..]),
+      Ok((&b""[..], 2_147_483_647_i32))
+    );
+    assert_parse!(be_i32(&[0xff, 0xff, 0xff, 0xff][..]), Ok((&b""[..], -1)));
+    assert_parse!(
+      be_i32(&[0x80, 0x00, 0x00, 0x00][..]),
+      Ok((&b""[..], -2_147_483_648_i32))
+    );
+    assert_parse!(be_i32(&[][..]), Err(Err::Incomplete(Needed::new(4))));
+    assert_parse!(be_i32(&[0x00][..]), Err(Err::Incomplete(Needed::new(3))));
+    assert_parse!(
+      be_i32(&[0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(2)))
+    );
+    assert_parse!(
+      be_i32(&[0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(1)))
+    );
+  }
+
+  #[test]
+  fn i64_tests() {
+    assert_parse!(
+      be_i64(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Ok((&b""[..], 0))
+    );
+    assert_parse!(
+      be_i64(&[0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff][..]),
+      Ok((&b""[..], 9_223_372_036_854_775_807_i64))
+    );
+    assert_parse!(
+      be_i64(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff][..]),
+      Ok((&b""[..], -1))
+    );
+    assert_parse!(
+      be_i64(&[0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Ok((&b""[..], -9_223_372_036_854_775_808_i64))
+    );
+    assert_parse!(be_i64(&[][..]), Err(Err::Incomplete(Needed::new(8))));
+    assert_parse!(be_i64(&[0x00][..]), Err(Err::Incomplete(Needed::new(7))));
+    assert_parse!(
+      be_i64(&[0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(6)))
+    );
+    assert_parse!(
+      be_i64(&[0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(5)))
+    );
+    assert_parse!(
+      be_i64(&[0x00, 0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(4)))
+    );
+    assert_parse!(
+      be_i64(&[0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(3)))
+    );
+    assert_parse!(
+      be_i64(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(2)))
+    );
+    assert_parse!(
+      be_i64(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(1)))
+    );
+  }
+
+  #[test]
+  fn i128_tests() {
+    assert_parse!(
+      be_i128(
+        &[
+          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          0x00
+        ][..]
+      ),
+      Ok((&b""[..], 0))
+    );
+    assert_parse!(
+      be_i128(
+        &[
+          0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff
+        ][..]
+      ),
+      Ok((
+        &b""[..],
+        170_141_183_460_469_231_731_687_303_715_884_105_727_i128
+      ))
+    );
+    assert_parse!(
+      be_i128(
+        &[
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff
+        ][..]
+      ),
+      Ok((&b""[..], -1))
+    );
+    assert_parse!(
+      be_i128(
+        &[
+          0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          0x00
+        ][..]
+      ),
+      Ok((
+        &b""[..],
+        -170_141_183_460_469_231_731_687_303_715_884_105_728_i128
+      ))
+    );
+    assert_parse!(be_i128(&[][..]), Err(Err::Incomplete(Needed::new(16))));
+    assert_parse!(be_i128(&[0x00][..]), Err(Err::Incomplete(Needed::new(15))));
+    assert_parse!(
+      be_i128(&[0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(14)))
+    );
+    assert_parse!(
+      be_i128(&[0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(13)))
+    );
+    assert_parse!(
+      be_i128(&[0x00, 0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(12)))
+    );
+    assert_parse!(
+      be_i128(&[0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(11)))
+    );
+    assert_parse!(
+      be_i128(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(10)))
+    );
+    assert_parse!(
+      be_i128(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(9)))
+    );
+    assert_parse!(
+      be_i128(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(8)))
+    );
+    assert_parse!(
+      be_i128(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(7)))
+    );
+    assert_parse!(
+      be_i128(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(6)))
+    );
+    assert_parse!(
+      be_i128(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(5)))
+    );
+    assert_parse!(
+      be_i128(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(4)))
+    );
+    assert_parse!(
+      be_i128(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Err(Err::Incomplete(Needed::new(3)))
+    );
+    assert_parse!(
+      be_i128(
+        &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]
+      ),
+      Err(Err::Incomplete(Needed::new(2)))
+    );
+    assert_parse!(
+      be_i128(
+        &[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
+          [..]
+      ),
+      Err(Err::Incomplete(Needed::new(1)))
+    );
+  }
+
+  #[test]
+  fn le_i8_tests() {
+    assert_parse!(le_i8(&[0x00][..]), Ok((&b""[..], 0)));
+    assert_parse!(le_i8(&[0x7f][..]), Ok((&b""[..], 127)));
+    assert_parse!(le_i8(&[0xff][..]), Ok((&b""[..], -1)));
+    assert_parse!(le_i8(&[0x80][..]), Ok((&b""[..], -128)));
+  }
+
+  #[test]
+  fn le_i16_tests() {
+    assert_parse!(le_i16(&[0x00, 0x00][..]), Ok((&b""[..], 0)));
+    assert_parse!(le_i16(&[0xff, 0x7f][..]), Ok((&b""[..], 32_767_i16)));
+    assert_parse!(le_i16(&[0xff, 0xff][..]), Ok((&b""[..], -1)));
+    assert_parse!(le_i16(&[0x00, 0x80][..]), Ok((&b""[..], -32_768_i16)));
+  }
+
+  #[test]
+  fn le_u24_tests() {
+    assert_parse!(le_u24(&[0x00, 0x00, 0x00][..]), Ok((&b""[..], 0)));
+    assert_parse!(le_u24(&[0xFF, 0xFF, 0x00][..]), Ok((&b""[..], 65_535_u32)));
+    assert_parse!(
+      le_u24(&[0x56, 0x34, 0x12][..]),
+      Ok((&b""[..], 1_193_046_u32))
+    );
+  }
+
+  #[test]
+  fn le_i24_tests() {
+    assert_parse!(le_i24(&[0xFF, 0xFF, 0xFF][..]), Ok((&b""[..], -1_i32)));
+    assert_parse!(le_i24(&[0x00, 0x00, 0xFF][..]), Ok((&b""[..], -65_536_i32)));
+    assert_parse!(
+      le_i24(&[0xAA, 0xCB, 0xED][..]),
+      Ok((&b""[..], -1_193_046_i32))
+    );
+  }
+
+  #[test]
+  fn le_i32_tests() {
+    assert_parse!(le_i32(&[0x00, 0x00, 0x00, 0x00][..]), Ok((&b""[..], 0)));
+    assert_parse!(
+      le_i32(&[0xff, 0xff, 0xff, 0x7f][..]),
+      Ok((&b""[..], 2_147_483_647_i32))
+    );
+    assert_parse!(le_i32(&[0xff, 0xff, 0xff, 0xff][..]), Ok((&b""[..], -1)));
+    assert_parse!(
+      le_i32(&[0x00, 0x00, 0x00, 0x80][..]),
+      Ok((&b""[..], -2_147_483_648_i32))
+    );
+  }
+
+  #[test]
+  fn le_i64_tests() {
+    assert_parse!(
+      le_i64(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Ok((&b""[..], 0))
+    );
+    assert_parse!(
+      le_i64(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0x7f][..]),
+      Ok((&b""[..], 9_223_372_036_854_775_807_i64))
+    );
+    assert_parse!(
+      le_i64(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff][..]),
+      Ok((&b""[..], -1))
+    );
+    assert_parse!(
+      le_i64(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80][..]),
+      Ok((&b""[..], -9_223_372_036_854_775_808_i64))
+    );
+  }
+
+  #[test]
+  fn le_i128_tests() {
+    assert_parse!(
+      le_i128(
+        &[
+          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          0x00
+        ][..]
+      ),
+      Ok((&b""[..], 0))
+    );
+    assert_parse!(
+      le_i128(
+        &[
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0x7f
+        ][..]
+      ),
+      Ok((
+        &b""[..],
+        170_141_183_460_469_231_731_687_303_715_884_105_727_i128
+      ))
+    );
+    assert_parse!(
+      le_i128(
+        &[
+          0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+          0xff
+        ][..]
+      ),
+      Ok((&b""[..], -1))
+    );
+    assert_parse!(
+      le_i128(
+        &[
+          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          0x80
+        ][..]
+      ),
+      Ok((
+        &b""[..],
+        -170_141_183_460_469_231_731_687_303_715_884_105_728_i128
+      ))
+    );
+  }
+
+  #[test]
+  fn be_f32_tests() {
+    assert_parse!(be_f32(&[0x00, 0x00, 0x00, 0x00][..]), Ok((&b""[..], 0_f32)));
+    assert_parse!(
+      be_f32(&[0x4d, 0x31, 0x1f, 0xd8][..]),
+      Ok((&b""[..], 185_728_392_f32))
+    );
+  }
+
+  #[test]
+  fn be_f64_tests() {
+    assert_parse!(
+      be_f64(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Ok((&b""[..], 0_f64))
+    );
+    assert_parse!(
+      be_f64(&[0x41, 0xa6, 0x23, 0xfb, 0x10, 0x00, 0x00, 0x00][..]),
+      Ok((&b""[..], 185_728_392_f64))
+    );
+  }
+
+  #[test]
+  fn le_f32_tests() {
+    assert_parse!(le_f32(&[0x00, 0x00, 0x00, 0x00][..]), Ok((&b""[..], 0_f32)));
+    assert_parse!(
+      le_f32(&[0xd8, 0x1f, 0x31, 0x4d][..]),
+      Ok((&b""[..], 185_728_392_f32))
+    );
+  }
+
+  #[test]
+  fn le_f64_tests() {
+    assert_parse!(
+      le_f64(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),
+      Ok((&b""[..], 0_f64))
+    );
+    assert_parse!(
+      le_f64(&[0x00, 0x00, 0x00, 0x10, 0xfb, 0x23, 0xa6, 0x41][..]),
+      Ok((&b""[..], 185_728_392_f64))
+    );
+  }
+
+  #[test]
+  fn hex_u32_tests() {
+    assert_parse!(
+      hex_u32(&b";"[..]),
+      Err(Err::Error(error_position!(&b";"[..], ErrorKind::IsA)))
+    );
+    assert_parse!(hex_u32(&b"ff;"[..]), Ok((&b";"[..], 255)));
+    assert_parse!(hex_u32(&b"1be2;"[..]), Ok((&b";"[..], 7138)));
+    assert_parse!(hex_u32(&b"c5a31be2;"[..]), Ok((&b";"[..], 3_315_801_058)));
+    assert_parse!(hex_u32(&b"C5A31be2;"[..]), Ok((&b";"[..], 3_315_801_058)));
+    assert_parse!(hex_u32(&b"00c5a31be2;"[..]), Ok((&b"e2;"[..], 12_952_347)));
+    assert_parse!(
+      hex_u32(&b"c5a31be201;"[..]),
+      Ok((&b"01;"[..], 3_315_801_058))
+    );
+...
+
+Function Description:1. **Purpose**: The function tests the parsing of 2-byte integers from byte arrays to ensure correct interpretation of both positive and negative values, as well as handling incomplete data.
+2. **Input**: The function takes arrays of bytes representing 16-bit integers in big-endian format.
+3. **Output**: The function returns a tuple containing the remaining unparsed bytes and the parsed 16-bit integer, or an error if the input is incomplete.
+4. **Procedure**: The function checks several cases including the parsing of zero, the maximum positive value, the minimum negative value, and scenarios where the input byte array is incomplete (either completely empty or missing bytes).
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

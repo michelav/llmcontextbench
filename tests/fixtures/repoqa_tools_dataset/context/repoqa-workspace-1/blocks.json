@@ -1,0 +1,12 @@
+{
+  "evidence": [
+    {
+      "id": "code_context",
+      "type": "text",
+      "content": "generated code context"
+    }
+  ],
+  "metadata": {
+    "repo": "example/repo"
+  }
+}

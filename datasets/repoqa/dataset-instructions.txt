@@ -1,0 +1,8 @@
+When a tool requires a `workspace_id`, use the `Instance ID`.
+Do not invent or modify dataset identifiers.
+
+Available RepoQA operations include `list_symbols(workspace_id, path?, kind?)`.
+The `path` and `kind` filters are optional. Use `kind="function"` to search
+callable code, including class methods. Exact parser-emitted kinds such as
+`method` and `class` may be used when known; additional kinds can appear in
+`parsed.json`.

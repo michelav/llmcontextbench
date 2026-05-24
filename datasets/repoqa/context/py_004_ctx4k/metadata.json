@@ -1,0 +1,21 @@
+{
+  "base_id": "py_004",
+  "code_context_ntokens": 4018,
+  "description": "1. **Purpose**: The function is designed to apply a transformation to a line of code based on specified rules and conditions, and then evaluate the transformed line to ensure it meets certain criteria. If the initial transformation does not meet the criteria, a secondary transformation is attempted with additional constraints.\n2. **Input**: The function accepts a line of code, a transformation function, a mode specifying formatting rules, a collection of features that may influence the transformation, and optionally a string representation of the line.\n3. **Output**: It returns a list of transformed lines of code. If the transformation is unsuccessful or unnecessary, the original line or its direct transformation is returned.\n4. **Procedure**: \n   - Convert the input line to a string if not provided.\n   - Apply the transformation function to the line.\n   - Check if the transformed line is unchanged; if so, raise an exception.\n   - Validate the transformed line against a set of criteria including line length and structural integrity.\n   - If the initial transformation does not meet all criteria, clone the original line and attempt a secondary transformation with an additional feature.\n   - Return the result of the transformation that best meets the criteria.",
+  "end_byte": 67151,
+  "end_line": 1735,
+  "instance_id": "py_004_ctx4k",
+  "language": "python",
+  "needle_name": "run_transformer",
+  "needle_token_end": 1674,
+  "needle_token_start": 1130,
+  "normalized_language": "python",
+  "path": "src/black/linegen.py",
+  "position_ratio": 0.35,
+  "repo": "psf/black",
+  "repoqa_description": "Function Description:1. **Purpose**: The function is designed to apply a transformation to a line of code based on specified rules and conditions, and then evaluate the transformed line to ensure it meets certain criteria. If the initial transformation does not meet the criteria, a secondary transformation is attempted with additional constraints.\n2. **Input**: The function accepts a line of code, a transformation function, a mode specifying formatting rules, a collection of features that may influence the transformation, and optionally a string representation of the line.\n3. **Output**: It returns a list of transformed lines of code. If the transformation is unsuccessful or unnecessary, the original line or its direct transformation is returned.\n4. **Procedure**: \n   - Convert the input line to a string if not provided.\n   - Apply the transformation function to the line.\n   - Check if the transformed line is unchanged; if so, raise an exception.\n   - Validate the transformed line against a set of criteria including line length and structural integrity.\n   - If the initial transformation does not meet all criteria, clone the original line and attempt a secondary transformation with an additional feature.\n   - Return the result of the transformation that best meets the criteria.",
+  "requested_context_tokens": 4096,
+  "sequence": 4,
+  "start_byte": 65385,
+  "start_line": 1691
+}

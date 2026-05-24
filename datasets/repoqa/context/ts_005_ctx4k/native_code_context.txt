@@ -1,0 +1,312 @@
+// Path: src/utils/image.js
+
+/**
+ * @file Helper module for image processing. 
+ * 
+ * These functions and classes are only used internally, 
+ * meaning an end-user shouldn't need to access anything here.
+ * 
+ * @module utils/image
+ */
+
+import { getFile } from './hub.js';
+import { env } from '../env.js';
+import { Tensor } from './tensor.js';
+
+// Will be empty (or not used) if running in browser or web-worker
+import sharp from 'sharp';
+
+const BROWSER_ENV = typeof self !== 'undefined';
+const WEBWORKER_ENV = BROWSER_ENV && self.constructor.name === 'DedicatedWorkerGlobalScope';
+
+let createCanvasFunction;
+let ImageDataClass;
+let loadImageFunction;
+if (BROWSER_ENV) {
+    // Running in browser or web-worker
+    createCanvasFunction = (/** @type {number} */ width, /** @type {number} */ height) => {
+        if (!self.OffscreenCanvas) {
+            throw new Error('OffscreenCanvas not supported by this browser.');
+        }
+        return new self.OffscreenCanvas(width, height)
+    };
+    loadImageFunction = self.createImageBitmap;
+    ImageDataClass = self.ImageData;
+
+} else if (sharp) {
+    // Running in Node.js, electron, or other non-browser environment
+
+    loadImageFunction = async (/**@type {sharp.Sharp}*/img) => {
+        const metadata = await img.metadata();
+        const rawChannels = metadata.channels;
+
+        let { data, info } = await img.raw().toBuffer({ resolveWithObject: true });
+
+        const newImage = new RawImage(new Uint8ClampedArray(data), info.width, info.height, info.channels);
+        if (rawChannels !== undefined && rawChannels !== info.channels) {
+            // Make sure the new image has the same number of channels as the input image.
+            // This is necessary for grayscale images.
+            newImage.convert(rawChannels);
+        }
+        return newImage;
+    }
+
+} else {
+    throw new Error('Unable to load image processing library.');
+}
+
+
+// Defined here: https://github.com/python-pillow/Pillow/blob/a405e8406b83f8bfb8916e93971edc7407b8b1ff/src/libImaging/Imaging.h#L262-L268
+const RESAMPLING_MAPPING = {
+    0: 'nearest',
+    1: 'lanczos',
+    2: 'bilinear',
+    3: 'bicubic',
+    4: 'box',
+    5: 'hamming',
+}
+
+/**
+ * Mapping from file extensions to MIME types.
+ */
+const CONTENT_TYPE_MAP = new Map([
+...
+// Path: src/utils/audio.js
+/**
+ * @file Helper module for audio processing. 
+ * 
+ * These functions and classes are only used internally, 
+ * meaning an end-user shouldn't need to access anything here.
+ * 
+ * @module utils/audio
+ */
+
+import {
+    getFile,
+} from './hub.js';
+import { FFT, max } from './maths.js';
+import {
+    calculateReflectOffset,
+} from './core.js';
+
+
+/**
+ * Helper function to read audio from a path/URL.
+ * @param {string|URL} url The path/URL to load the audio from.
+ * @param {number} sampling_rate The sampling rate to use when decoding the audio.
+ * @returns {Promise<Float32Array>} The decoded audio as a `Float32Array`.
+ */
+export async function read_audio(url, sampling_rate) {
+    if (typeof AudioContext === 'undefined') {
+        // Running in node or an environment without AudioContext
+        throw Error(
+            "Unable to load audio from path/URL since `AudioContext` is not available in your environment. " +
+            "Instead, audio data should be passed directly to the pipeline/processor. " +
+            "For more information and some example code, see https://huggingface.co/docs/transformers.js/guides/node-audio-processing."
+        )
+    }
+
+    const response = await (await getFile(url)).arrayBuffer();
+    const audioCTX = new AudioContext({ sampleRate: sampling_rate });
+    if (typeof sampling_rate === 'undefined') {
+        console.warn(`No sampling rate provided, using default of ${audioCTX.sampleRate}Hz.`)
+    }
+    const decoded = await audioCTX.decodeAudioData(response);
+
+    /** @type {Float32Array} */
+    let audio;
+
+    // We now replicate HuggingFace's `ffmpeg_read` method:
+    if (decoded.numberOfChannels === 2) {
+        // When downmixing a stereo audio file to mono using the -ac 1 option in FFmpeg,
+        // the audio signal is summed across both channels to create a single mono channel.
+        // However, if the audio is at full scale (i.e. the highest possible volume level),
+        // the summing of the two channels can cause the audio signal to clip or distort.
+
+        // To prevent this clipping, FFmpeg applies a scaling factor of 1/sqrt(2) (~ 0.707)
+        // to the audio signal before summing the two channels. This scaling factor ensures
+        // that the combined audio signal will not exceed the maximum possible level, even
+        // if both channels are at full scale.
+
+        // After applying this scaling factor, the audio signal from both channels is summed
+        // to create a single mono channel. It's worth noting that this scaling factor is
+        // only applied when downmixing stereo audio to mono using the -ac 1 option in FFmpeg.
+        // If you're using a different downmixing method, or if you're not downmixing the
+        // audio at all, this scaling factor may not be needed.
+        const SCALING_FACTOR = Math.sqrt(2);
+
+        const left = decoded.getChannelData(0);
+        const right = decoded.getChannelData(1);
+
+        audio = new Float32Array(left.length);
+        for (let i = 0; i < decoded.length; ++i) {
+            audio[i] = SCALING_FACTOR * (left[i] + right[i]) / 2;
+        }
+
+    } else {
+        // If the audio is not stereo, we can just use the first channel:
+        audio = decoded.getChannelData(0);
+    }
+
+    return audio;
+}
+
+/**
+ * Generates a Hanning window of length M.
+ *
+ * @param {number} M The length of the Hanning window to generate.
+ * @returns {Float64Array} The generated Hanning window.
+ */
+export 
+function hanning(M) {
+    if (M < 1) {
+        return new Float64Array();
+    }
+    if (M === 1) {
+        return new Float64Array([1]);
+    }
+    const denom = M - 1;
+    const factor = Math.PI / denom;
+    const cos_vals = new Float64Array(M);
+    for (let i = 0; i < M; ++i) {
+        const n = 2 * i - denom;
+        cos_vals[i] = 0.5 + 0.5 * Math.cos(factor * n);
+    }
+    return cos_vals;
+}
+
+const HERTZ_TO_MEL_MAPPING = {
+    "htk": (/** @type {number} */ freq) => 2595.0 * Math.log10(1.0 + (freq / 700.0)),
+    "kaldi": (/** @type {number} */ freq) => 1127.0 * Math.log(1.0 + (freq / 700.0)),
+    "slaney": (/** @type {number} */ freq, min_log_hertz = 1000.0, min_log_mel = 15.0, logstep = 27.0 / Math.log(6.4)) =>
+        freq >= min_log_hertz
+            ? min_log_mel + Math.log(freq / min_log_hertz) * logstep
+            : 3.0 * freq / 200.0,
+}
+
+/**
+ * @template {Float32Array|Float64Array|number} T 
+ * @param {T} freq 
+ * @param {string} [mel_scale]
+ * @returns {T}
+ */
+function hertz_to_mel(freq, mel_scale = "htk") {
+    const fn = HERTZ_TO_MEL_MAPPING[mel_scale];
+    if (!fn) {
+        throw new Error('mel_scale should be one of "htk", "slaney" or "kaldi".');
+    }
+
+    return typeof freq === 'number' ? fn(freq) : freq.map(x => fn(x));
+}
+
+const MEL_TO_HERTZ_MAPPING = {
+    "htk": (/** @type {number} */ mels) => 700.0 * (10.0 ** (mels / 2595.0) - 1.0),
+    "kaldi": (/** @type {number} */ mels) => 700.0 * (Math.exp(mels / 1127.0) - 1.0),
+    "slaney": (/** @type {number} */ mels, min_log_hertz = 1000.0, min_log_mel = 15.0, logstep = Math.log(6.4) / 27.0) => mels >= min_log_mel
+        ? min_log_hertz * Math.exp(logstep * (mels - min_log_mel))
+        : 200.0 * mels / 3.0,
+}
+
+/**
+ * @template {Float32Array|Float64Array|number} T 
+ * @param {T} mels 
+ * @param {string} [mel_scale]
+ * @returns {T}
+ */
+function mel_to_hertz(mels, mel_scale = "htk") {
+    const fn = MEL_TO_HERTZ_MAPPING[mel_scale];
+    if (!fn) {
+        throw new Error('mel_scale should be one of "htk", "slaney" or "kaldi".');
+    }
+
+    return typeof mels === 'number' ? fn(mels) : mels.map(x => fn(x));
+}
+
+/**
+* Creates a triangular filter bank.
+*
+* Adapted from torchaudio and librosa.
+*
+* @param {Float64Array} fft_freqs Discrete frequencies of the FFT bins in Hz, of shape `(num_frequency_bins,)`.
+* @param {Float64Array} filter_freqs Center frequencies of the triangular filters to create, in Hz, of shape `(num_mel_filters,)`.
+* @returns {number[][]} of shape `(num_frequency_bins, num_mel_filters)`.
+*/
+function _create_triangular_filter_bank(fft_freqs, filter_freqs) {
+    const filter_diff = Float64Array.from(
+        { length: filter_freqs.length - 1 },
+        (_, i) => filter_freqs[i + 1] - filter_freqs[i]
+    );
+
+    const slopes = Array.from({
+        length: fft_freqs.length
+    }, () => new Array(filter_freqs.length));
+
+    for (let j = 0; j < fft_freqs.length; ++j) {
+        const slope = slopes[j];
+        for (let i = 0; i < filter_freqs.length; ++i) {
+            slope[i] = filter_freqs[i] - fft_freqs[j];
+        }
+    }
+
+    const numFreqs = filter_freqs.length - 2;
+    const ret = Array.from({ length: numFreqs }, () => new Array(fft_freqs.length));
+
+    for (let j = 0; j < fft_freqs.length; ++j) { // 201
+        const slope = slopes[j];
+        for (let i = 0; i < numFreqs; ++i) { // 80
+            const down = -slope[i] / filter_diff[i];
+            const up = slope[i + 2] / filter_diff[i + 1];
+            ret[i][j] = Math.max(0, Math.min(down, up));
+        }
+    }
+    return ret;
+}
+
+/**
+ * Return evenly spaced numbers over a specified interval.
+ * @param {number} start The starting value of the sequence.
+ * @param {number} end The end value of the sequence.
+ * @param {number} num Number of samples to generate.
+ * @returns `num` evenly spaced samples, calculated over the interval `[start, stop]`.
+ */
+function linspace(start, end, num) {
+    const step = (end - start) / (num - 1);
+    return Float64Array.from({ length: num }, (_, i) => start + step * i);
+}
+
+/**
+ * Creates a frequency bin conversion matrix used to obtain a mel spectrogram. This is called a *mel filter bank*, and
+ * various implementation exist, which differ in the number of filters, the shape of the filters, the way the filters
+ * are spaced, the bandwidth of the filters, and the manner in which the spectrum is warped. The goal of these
+ * features is to approximate the non-linear human perception of the variation in pitch with respect to the frequency.
+ * @param {number} num_frequency_bins Number of frequencies used to compute the spectrogram (should be the same as in `stft`).
+ * @param {number} num_mel_filters Number of mel filters to generate.
+ * @param {number} min_frequency Lowest frequency of interest in Hz.
+ * @param {number} max_frequency Highest frequency of interest in Hz. This should not exceed `sampling_rate / 2`.
+ * @param {number} sampling_rate Sample rate of the audio waveform.
+ * @param {string} [norm] If `"slaney"`, divide the triangular mel weights by the width of the mel band (area normalization).
+ * @param {string} [mel_scale] The mel frequency scale to use, `"htk"` or `"slaney"`.
+ * @param {boolean} [triangularize_in_mel_space] If this option is enabled, the triangular filter is applied in mel space rather than frequency space.
+ * This should be set to `true` in order to get the same results as `torchaudio` when computing mel filters.
+ * @returns {number[][]} Triangular filter bank matrix, which is a 2D array of shape (`num_frequency_bins`, `num_mel_filters`).
+ * This is a projection matrix to go from a spectrogram to a mel spectrogram.
+ */
+export function mel_filter_bank(
+    num_frequency_bins,
+    num_mel_filters,
+    min_frequency,
+    max_frequency,
+    sampling_rate,
+    norm = null,
+    mel_scale = "htk",
+    triangularize_in_mel_space = false,
+) {
+    if (norm !== null && norm !== "slaney") {
+        throw new Error('norm must be one of null or "slaney"');
+    }
+
+    const mel_min = hertz_to_mel(min_frequency, mel_scale);
+    const mel_max = hertz_to_mel(max_frequency, mel_scale);
+    const mel_freqs = linspace(mel_min, mel_max, num_mel_filters + 2);
+
+...

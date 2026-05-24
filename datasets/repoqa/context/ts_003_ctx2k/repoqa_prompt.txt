@@ -1,0 +1,208 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:    AutoModelForTokenClassification,
+    AutoModelForQuestionAnswering,
+    AutoModelForMaskedLM,
+    AutoModelForSeq2SeqLM,
+    AutoModelForSpeechSeq2Seq,
+    AutoModelForTextToWaveform,
+    AutoModelForTextToSpectrogram,
+    AutoModelForCTC,
+    AutoModelForCausalLM,
+    AutoModelForVision2Seq,
+    AutoModelForImageClassification,
+    AutoModelForImageSegmentation,
+    AutoModelForSemanticSegmentation,
+    AutoModelForObjectDetection,
+    AutoModelForZeroShotObjectDetection,
+    AutoModelForDocumentQuestionAnswering,
+    AutoModelForImageToImage,
+    AutoModelForDepthEstimation,
+    AutoModelForImageFeatureExtraction,
+    PreTrainedModel,
+} from './models.js';
+import {
+    AutoProcessor,
+    Processor
+} from './processors.js';
+
+
+import {
+    Callable,
+    dispatchCallback,
+    pop,
+    product,
+} from './utils/core.js';
+import {
+    softmax,
+    max,
+    getTopItems,
+    round,
+} from './utils/maths.js';
+import {
+    read_audio
+} from './utils/audio.js';
+import {
+    Tensor,
+    mean_pooling,
+    interpolate,
+    quantize_embeddings,
+} from './utils/tensor.js';
+import { RawImage } from './utils/image.js';
+
+
+/**
+ * @typedef {string | RawImage | URL} ImageInput
+ * @typedef {ImageInput|ImageInput[]} ImagePipelineInputs
+ */
+
+/**
+ * Prepare images for further tasks.
+ * @param {ImagePipelineInputs} images images to prepare.
+ * @returns {Promise<RawImage[]>} returns processed images.
+ * @private
+ */
+
+async function prepareImages(images) {
+    if (!Array.isArray(images)) {
+        images = [images];
+    }
+
+    // Possibly convert any non-images to images
+    return await Promise.all(images.map(x => RawImage.read(x)));
+}
+
+/**
+ * @typedef {string | URL | Float32Array | Float64Array} AudioInput
+ * @typedef {AudioInput|AudioInput[]} AudioPipelineInputs
+ */
+
+/**
+ * Prepare audios for further tasks.
+ * @param {AudioPipelineInputs} audios audios to prepare.
+ * @param {number} sampling_rate sampling rate of the audios.
+ * @returns {Promise<Float32Array[]>} The preprocessed audio data.
+ * @private
+ */
+async function prepareAudios(audios, sampling_rate) {
+    if (!Array.isArray(audios)) {
+        audios = [audios];
+    }
+
+    return await Promise.all(audios.map(x => {
+        if (typeof x === 'string' || x instanceof URL) {
+            return read_audio(x, sampling_rate);
+        } else if (x instanceof Float64Array) {
+            return new Float32Array(x);
+        }
+        return x;
+    }));
+}
+
+/**
+ * @typedef {Object} BoundingBox
+ * @property {number} xmin The minimum x coordinate of the bounding box.
+ * @property {number} ymin The minimum y coordinate of the bounding box.
+ * @property {number} xmax The maximum x coordinate of the bounding box.
+ * @property {number} ymax The maximum y coordinate of the bounding box.
+ */
+
+/**
+ * Helper function to convert list [xmin, xmax, ymin, ymax] into object { "xmin": xmin, ... }
+ * @param {number[]} box The bounding box as a list.
+ * @param {boolean} asInteger Whether to cast to integers.
+ * @returns {BoundingBox} The bounding box as an object.
+ * @private
+ */
+function get_bounding_box(box, asInteger) {
+    if (asInteger) {
+        box = box.map(x => x | 0);
+    }
+    const [xmin, ymin, xmax, ymax] = box;
+
+    return { xmin, ymin, xmax, ymax };
+}
+
+
+/**
+ * @callback DisposeType Disposes the item.
+ * @returns {Promise<void>} A promise that resolves when the item has been disposed.
+ * 
+ * @typedef {Object} Disposable
+ * @property {DisposeType} dispose A promise that resolves when the pipeline has been disposed.
+ */
+
+/**
+ * The Pipeline class is the class from which all pipelines inherit.
+ * Refer to this class for methods shared across different pipelines.
+ * @extends Callable
+ */
+export class Pipeline extends Callable {
+    /**
+     * Create a new Pipeline.
+     * @param {Object} options An object containing the following properties:
+     * @param {string} [options.task] The task of the pipeline. Useful for specifying subtasks.
+     * @param {PreTrainedModel} [options.model] The model used by the pipeline.
+     * @param {PreTrainedTokenizer} [options.tokenizer=null] The tokenizer used by the pipeline (if any).
+     * @param {Processor} [options.processor=null] The processor used by the pipeline (if any).
+     */
+    constructor({ task, model, tokenizer = null, processor = null }) {
+        super();
+        this.task = task;
+        this.model = model;
+        this.tokenizer = tokenizer;
+        this.processor = processor;
+    }
+
+    /** @type {DisposeType} */
+    async dispose() {
+        await this.model.dispose();
+    }
+}
+
+/**
+ * @typedef {Object} ModelTokenizerConstructorArgs
+ * @property {string} task The task of the pipeline. Useful for specifying subtasks.
+ * @property {PreTrainedModel} model The model used by the pipeline.
+ * @property {PreTrainedTokenizer} tokenizer The tokenizer used by the pipeline.
+ * 
+ * @typedef {ModelTokenizerConstructorArgs} TextPipelineConstructorArgs An object used to instantiate a text-based pipeline.
+ */
+
+/**
+ * @typedef {Object} ModelProcessorConstructorArgs
+ * @property {string} task The task of the pipeline. Useful for specifying subtasks.
+ * @property {PreTrainedModel} model The model used by the pipeline.
+ * @property {Processor} processor The processor used by the pipeline.
+ * 
+ * @typedef {ModelProcessorConstructorArgs} AudioPipelineConstructorArgs An object used to instantiate an audio-based pipeline.
+ * @typedef {ModelProcessorConstructorArgs} ImagePipelineConstructorArgs An object used to instantiate an image-based pipeline.
+ */
+
+
+/**
+ * @typedef {Object} ModelTokenizerProcessorConstructorArgs
+ * @property {string} task The task of the pipeline. Useful for specifying subtasks.
+ * @property {PreTrainedModel} model The model used by the pipeline.
+ * @property {PreTrainedTokenizer} tokenizer The tokenizer used by the pipeline.
+ * @property {Processor} processor The processor used by the pipeline.
+ * 
+ * @typedef {ModelTokenizerProcessorConstructorArgs} TextAudioPipelineConstructorArgs An object used to instantiate a text- and audio-based pipeline.
+ * @typedef {ModelTokenizerProcessorConstructorArgs} TextImagePipelineConstructorArgs An object used to instantiate a text- and image-based pipeline.
+ */
+
+/**
+ * @typedef {Object} TextClassificationSingle
+ * @property {string} label The label predicted.
+ * @property {number} score The corresponding probability.
+ * @typedef {TextClassificationSingle[]} TextClassificationOutput
+ * 
+ * @typedef {Object} TextClassificationPipelineOptions Parameters specific to text classification pipelines.
+ * @property {number} [topk=1] The number of top predictions to be returned.
+ * 
+ * @callback TextClassificationPipelineCallback Classify the text(s) given as inputs.
+...
+
+Function Description:1. **Purpose**: To convert a variety of image formats into a standardized format suitable for further processing in machine learning tasks.
+2. **Input**: A single image or an array of images, where each image can be a string URL, a path, or a raw image object.
+3. **Output**: A promise that resolves to an array of processed raw image objects.
+4. **Procedure**: The function first ensures the input is in array form. It then processes each item in the array by converting it into a raw image object, handling different input formats like URLs or paths. This conversion is done concurrently for all items in the array.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

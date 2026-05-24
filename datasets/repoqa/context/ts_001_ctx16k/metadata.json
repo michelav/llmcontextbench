@@ -1,0 +1,21 @@
+{
+  "base_id": "ts_001",
+  "code_context_ntokens": 15976,
+  "description": "1. **Purpose**: The function is designed to transform a one-dimensional array into a multi-dimensional array based on specified dimensions.\n2. **Input**: The function accepts two parameters: a one-dimensional array containing data elements, and an array of integers representing the desired dimensions of the output array.\n3. **Output**: It returns a nested array structured according to the provided dimensions. The depth of the nested array corresponds to the number of dimensions specified.\n4. **Procedure**: The function first calculates the total number of elements in the input array and the product of the specified dimensions to ensure they match. If they do not match, an error is thrown. It then iteratively groups elements of the input array into nested arrays based on the dimensions specified, starting from the innermost dimension and working outwards.",
+  "end_byte": 21650,
+  "end_line": 682,
+  "instance_id": "ts_001_ctx16k",
+  "language": "typescript",
+  "needle_name": "reshape",
+  "needle_token_end": 901,
+  "needle_token_start": 675,
+  "normalized_language": "typescript",
+  "path": "src/utils/tensor.js",
+  "position_ratio": 0.05,
+  "repo": "xenova/transformers.js",
+  "repoqa_description": "Function Description:1. **Purpose**: The function is designed to transform a one-dimensional array into a multi-dimensional array based on specified dimensions.\n2. **Input**: The function accepts two parameters: a one-dimensional array containing data elements, and an array of integers representing the desired dimensions of the output array.\n3. **Output**: It returns a nested array structured according to the provided dimensions. The depth of the nested array corresponds to the number of dimensions specified.\n4. **Procedure**: The function first calculates the total number of elements in the input array and the product of the specified dimensions to ensure they match. If they do not match, an error is thrown. It then iteratively groups elements of the input array into nested arrays based on the dimensions specified, starting from the innermost dimension and working outwards.",
+  "requested_context_tokens": 16384,
+  "sequence": 1,
+  "start_byte": 20906,
+  "start_line": 654
+}

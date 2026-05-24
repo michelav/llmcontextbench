@@ -7,6 +7,7 @@ from ctxbench._compat import BaseModel, Field, ValidationError
 
 class TaskValidation(BaseModel):
     type: str
+    options: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
     def model_validate(cls, data: Any) -> "TaskValidation":
@@ -15,9 +16,21 @@ class TaskValidation(BaseModel):
         if not isinstance(data, dict):
             raise ValidationError("Task validation requires an object input.")
         validation_type = str(data.get("type", "")).strip()
-        if validation_type != "judge":
-            raise ValidationError("Task validation.type must be 'judge'.")
-        return cls(type=validation_type)
+        if validation_type not in {"judge", "repoqa-scorer"}:
+            raise ValidationError("Task validation.type must be 'judge' or 'repoqa-scorer'.")
+        config = {
+            str(key): value
+            for key, value in data.items()
+            if isinstance(key, str) and key != "type"
+        }
+        return cls(type=validation_type, options=config)
+
+    def validation_config(self) -> dict[str, Any]:
+        return dict(self.options)
+
+    def model_dump(self, mode: str = "python", **_: Any) -> dict[str, Any]:
+        del mode
+        return {"type": self.type, **dict(self.options)}
 
 
 class Task(BaseModel):
@@ -43,6 +56,11 @@ class Task(BaseModel):
             validation=TaskValidation.model_validate(data.get("validation", {})),
             contextBlocks=[str(item) for item in context_blocks if isinstance(item, str)],
         )
+
+    def model_dump(self, mode: str = "python", **kwargs: Any) -> dict[str, Any]:
+        payload = super().model_dump(mode=mode, **kwargs)
+        payload["validation"] = self.validation.model_dump(mode=mode)
+        return payload
 
 
 class TaskDataset(BaseModel):

@@ -68,6 +68,7 @@ class LattesDatasetAdapter(LocalDatasetPackage):
             statement=task.statement,
             tags=list(task.tags),
             validation_type=task.validation.type,
+            validation_config=task.validation.validation_config(),
             context_blocks=list(task.contextBlocks),
         )
 
@@ -143,3 +144,9 @@ class LattesDatasetAdapter(LocalDatasetPackage):
             if isinstance(version, str) and version.strip():
                 return version.strip()
         return "unknown"
+
+    def dataset_instructions(self) -> str | None:
+        path = Path(self._root) / "dataset-instructions.txt"
+        if not path.exists():
+            return None
+        return path.read_text(encoding="utf-8").strip() or None

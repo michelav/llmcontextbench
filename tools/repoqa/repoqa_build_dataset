@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+repoqa_python="$repo_root/tools/repoqa/repoqa_python"
+setup_hint="cd tools/repoqa && uv sync --locked"
+
+if [[ ! -x "$repoqa_python" ]]; then
+  {
+    echo "RepoQA Python wrapper is missing or not executable: $repoqa_python"
+  } >&2
+  exit 2
+fi
+
+if ! "$repoqa_python" -c 'import repoqa.search_needle_function; import repoqa.compute_score' >/dev/null 2>&1; then
+  {
+    echo "RepoQA imports failed."
+    echo "Expected imports: repoqa.search_needle_function and repoqa.compute_score"
+    echo "Create or refresh the default tool environment with:"
+    echo "  $setup_hint"
+    echo "Or set REPOQA_PYTHON to a Python executable from a local RepoQA environment."
+  } >&2
+  exit 2
+fi
+
+exec "$repoqa_python" "$repo_root/tools/repoqa/build_repoqa_dataset.py" "$@"

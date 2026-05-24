@@ -1,0 +1,347 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:  }
+
+  
+private static void addTypeAdaptersForDate(
+      String datePattern, int dateStyle, int timeStyle, List<TypeAdapterFactory> factories) {
+    TypeAdapterFactory dateAdapterFactory;
+    boolean sqlTypesSupported = SqlTypesSupport.SUPPORTS_SQL_TYPES;
+    TypeAdapterFactory sqlTimestampAdapterFactory = null;
+    TypeAdapterFactory sqlDateAdapterFactory = null;
+
+    if (datePattern != null && !datePattern.trim().isEmpty()) {
+      dateAdapterFactory = DefaultDateTypeAdapter.DateType.DATE.createAdapterFactory(datePattern);
+
+      if (sqlTypesSupported) {
+        sqlTimestampAdapterFactory =
+            SqlTypesSupport.TIMESTAMP_DATE_TYPE.createAdapterFactory(datePattern);
+        sqlDateAdapterFactory = SqlTypesSupport.DATE_DATE_TYPE.createAdapterFactory(datePattern);
+      }
+    } else if (dateStyle != DateFormat.DEFAULT || timeStyle != DateFormat.DEFAULT) {
+      dateAdapterFactory =
+          DefaultDateTypeAdapter.DateType.DATE.createAdapterFactory(dateStyle, timeStyle);
+
+      if (sqlTypesSupported) {
+        sqlTimestampAdapterFactory =
+            SqlTypesSupport.TIMESTAMP_DATE_TYPE.createAdapterFactory(dateStyle, timeStyle);
+        sqlDateAdapterFactory =
+            SqlTypesSupport.DATE_DATE_TYPE.createAdapterFactory(dateStyle, timeStyle);
+      }
+    } else {
+      return;
+    }
+
+    factories.add(dateAdapterFactory);
+    if (sqlTypesSupported) {
+      factories.add(sqlTimestampAdapterFactory);
+      factories.add(sqlDateAdapterFactory);
+    }
+  }
+}
+
+// Path: gson/src/main/java/com/google/gson/stream/JsonScope.java
+/*
+ * Copyright (C) 2010 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.gson.stream;
+
+/**
+ * Lexical scoping elements within a JSON reader or writer.
+ *
+ * @author Jesse Wilson
+ * @since 1.6
+ */
+final class JsonScope {
+  private JsonScope() {}
+
+  /** An array with no elements requires no separator before the next element. */
+  static final int EMPTY_ARRAY = 1;
+
+  /** An array with at least one value requires a separator before the next element. */
+  static final int NONEMPTY_ARRAY = 2;
+
+  /** An object with no name/value pairs requires no separator before the next element. */
+  static final int EMPTY_OBJECT = 3;
+
+  /** An object whose most recent element is a key. The next element must be a value. */
+  static final int DANGLING_NAME = 4;
+
+  /** An object with at least one name/value pair requires a separator before the next element. */
+  static final int NONEMPTY_OBJECT = 5;
+
+  /** No top-level value has been started yet. */
+  static final int EMPTY_DOCUMENT = 6;
+
+  /** A top-level value has already been started. */
+  static final int NONEMPTY_DOCUMENT = 7;
+
+  /** A document that's been closed and cannot be accessed. */
+  static final int CLOSED = 8;
+}
+
+// Path: gson/src/main/java/com/google/gson/stream/JsonWriter.java
+/*
+ * Copyright (C) 2010 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.gson.stream;
+
+import static com.google.gson.stream.JsonScope.DANGLING_NAME;
+import static com.google.gson.stream.JsonScope.EMPTY_ARRAY;
+import static com.google.gson.stream.JsonScope.EMPTY_DOCUMENT;
+import static com.google.gson.stream.JsonScope.EMPTY_OBJECT;
+import static com.google.gson.stream.JsonScope.NONEMPTY_ARRAY;
+import static com.google.gson.stream.JsonScope.NONEMPTY_DOCUMENT;
+import static com.google.gson.stream.JsonScope.NONEMPTY_OBJECT;
+
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import com.google.gson.FormattingStyle;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.Strictness;
+import java.io.Closeable;
+import java.io.Flushable;
+import java.io.IOException;
+import java.io.Writer;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.util.Arrays;
+import java.util.Objects;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.regex.Pattern;
+
+/**
+ * Writes a JSON (<a href="https://www.ietf.org/rfc/rfc8259.txt">RFC 8259</a>) encoded value to a
+ * stream, one token at a time. The stream includes both literal values (strings, numbers, booleans
+ * and nulls) as well as the begin and end delimiters of objects and arrays.
+ *
+ * <h2>Encoding JSON</h2>
+ *
+ * To encode your data as JSON, create a new {@code JsonWriter}. Call methods on the writer as you
+ * walk the structure's contents, nesting arrays and objects as necessary:
+ *
+ * <ul>
+ *   <li>To write <strong>arrays</strong>, first call {@link #beginArray()}. Write each of the
+ *       array's elements with the appropriate {@link #value} methods or by nesting other arrays and
+ *       objects. Finally close the array using {@link #endArray()}.
+ *   <li>To write <strong>objects</strong>, first call {@link #beginObject()}. Write each of the
+ *       object's properties by alternating calls to {@link #name} with the property's value. Write
+ *       property values with the appropriate {@link #value} method or by nesting other objects or
+ *       arrays. Finally close the object using {@link #endObject()}.
+ * </ul>
+ *
+ * <h2>Configuration</h2>
+ *
+ * The behavior of this writer can be customized with the following methods:
+ *
+ * <ul>
+ *   <li>{@link #setFormattingStyle(FormattingStyle)}, the default is {@link
+ *       FormattingStyle#COMPACT}
+ *   <li>{@link #setHtmlSafe(boolean)}, by default HTML characters are not escaped in the JSON
+ *       output
+ *   <li>{@link #setStrictness(Strictness)}, the default is {@link Strictness#LEGACY_STRICT}
+ *   <li>{@link #setSerializeNulls(boolean)}, by default {@code null} is serialized
+ * </ul>
+ *
+ * The default configuration of {@code JsonWriter} instances used internally by the {@link Gson}
+ * class differs, and can be adjusted with the various {@link GsonBuilder} methods.
+ *
+ * <h2>Example</h2>
+ *
+ * Suppose we'd like to encode a stream of messages such as the following:
+ *
+ * <pre>{@code
+ * [
+ *   {
+ *     "id": 912345678901,
+ *     "text": "How do I stream JSON in Java?",
+ *     "geo": null,
+ *     "user": {
+ *       "name": "json_newb",
+ *       "followers_count": 41
+ *      }
+ *   },
+ *   {
+ *     "id": 912345678902,
+ *     "text": "@json_newb just use JsonWriter!",
+ *     "geo": [50.454722, -104.606667],
+ *     "user": {
+ *       "name": "jesse",
+ *       "followers_count": 2
+ *     }
+ *   }
+ * ]
+ * }</pre>
+ *
+ * This code encodes the above structure:
+ *
+ * <pre>{@code
+ * public void writeJsonStream(OutputStream out, List<Message> messages) throws IOException {
+ *   JsonWriter writer = new JsonWriter(new OutputStreamWriter(out, "UTF-8"));
+ *   writer.setIndent("    ");
+ *   writeMessagesArray(writer, messages);
+ *   writer.close();
+ * }
+ *
+ * public void writeMessagesArray(JsonWriter writer, List<Message> messages) throws IOException {
+ *   writer.beginArray();
+ *   for (Message message : messages) {
+ *     writeMessage(writer, message);
+ *   }
+ *   writer.endArray();
+ * }
+ *
+ * public void writeMessage(JsonWriter writer, Message message) throws IOException {
+ *   writer.beginObject();
+ *   writer.name("id").value(message.getId());
+ *   writer.name("text").value(message.getText());
+ *   if (message.getGeo() != null) {
+ *     writer.name("geo");
+ *     writeDoublesArray(writer, message.getGeo());
+ *   } else {
+ *     writer.name("geo").nullValue();
+ *   }
+ *   writer.name("user");
+ *   writeUser(writer, message.getUser());
+ *   writer.endObject();
+ * }
+ *
+ * public void writeUser(JsonWriter writer, User user) throws IOException {
+ *   writer.beginObject();
+ *   writer.name("name").value(user.getName());
+ *   writer.name("followers_count").value(user.getFollowersCount());
+ *   writer.endObject();
+ * }
+ *
+ * public void writeDoublesArray(JsonWriter writer, List<Double> doubles) throws IOException {
+ *   writer.beginArray();
+ *   for (Double value : doubles) {
+ *     writer.value(value);
+ *   }
+ *   writer.endArray();
+ * }
+ * }</pre>
+ *
+ * <p>Each {@code JsonWriter} may be used to write a single JSON stream. Instances of this class are
+ * not thread safe. Calls that would result in a malformed JSON string will fail with an {@link
+ * IllegalStateException}.
+ *
+ * @author Jesse Wilson
+ * @since 1.6
+ */
+public class JsonWriter implements Closeable, Flushable {
+
+  // Syntax as defined by https://datatracker.ietf.org/doc/html/rfc8259#section-6
+  private static final Pattern VALID_JSON_NUMBER_PATTERN =
+      Pattern.compile("-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][-+]?[0-9]+)?");
+
+  /*
+   * From RFC 8259, "All Unicode characters may be placed within the
+   * quotation marks except for the characters that must be escaped:
+   * quotation mark, reverse solidus, and the control characters
+   * (U+0000 through U+001F)."
+   *
+   * We also escape '\u2028' and '\u2029', which JavaScript interprets as
+   * newline characters. This prevents eval() from failing with a syntax
+   * error. http://code.google.com/p/google-gson/issues/detail?id=341
+   */
+  private static final String[] REPLACEMENT_CHARS;
+  private static final String[] HTML_SAFE_REPLACEMENT_CHARS;
+
+  static {
+    REPLACEMENT_CHARS = new String[128];
+    for (int i = 0; i <= 0x1f; i++) {
+      REPLACEMENT_CHARS[i] = String.format("\\u%04x", i);
+    }
+    REPLACEMENT_CHARS['"'] = "\\\"";
+    REPLACEMENT_CHARS['\\'] = "\\\\";
+    REPLACEMENT_CHARS['\t'] = "\\t";
+    REPLACEMENT_CHARS['\b'] = "\\b";
+    REPLACEMENT_CHARS['\n'] = "\\n";
+    REPLACEMENT_CHARS['\r'] = "\\r";
+    REPLACEMENT_CHARS['\f'] = "\\f";
+    HTML_SAFE_REPLACEMENT_CHARS = REPLACEMENT_CHARS.clone();
+    HTML_SAFE_REPLACEMENT_CHARS['<'] = "\\u003c";
+    HTML_SAFE_REPLACEMENT_CHARS['>'] = "\\u003e";
+    HTML_SAFE_REPLACEMENT_CHARS['&'] = "\\u0026";
+    HTML_SAFE_REPLACEMENT_CHARS['='] = "\\u003d";
+    HTML_SAFE_REPLACEMENT_CHARS['\''] = "\\u0027";
+  }
+
+  /** The JSON output destination */
+  private final Writer out;
+
+  private int[] stack = new int[32];
+  private int stackSize = 0;
+
+  {
+    push(EMPTY_DOCUMENT);
+  }
+
+  private FormattingStyle formattingStyle;
+  // These fields cache data derived from the formatting style, to avoid having to
+  // re-evaluate it every time something is written
+  private String formattedColon;
+  private String formattedComma;
+  private boolean usesEmptyNewlineAndIndent;
+
+  private Strictness strictness = Strictness.LEGACY_STRICT;
+
+  private boolean htmlSafe;
+
+  private String deferredName;
+
+  private boolean serializeNulls = true;
+
+  /**
+   * Creates a new instance that writes a JSON-encoded stream to {@code out}. For best performance,
+   * ensure {@link Writer} is buffered; wrapping in {@link java.io.BufferedWriter BufferedWriter} if
+   * necessary.
+   */
+  public JsonWriter(Writer out) {
+    this.out = Objects.requireNonNull(out, "out == null");
+    setFormattingStyle(FormattingStyle.COMPACT);
+  }
+
+  /**
+   * Sets the indentation string to be repeated for each level of indentation in the encoded
+   * document. If {@code indent.isEmpty()} the encoded document will be compact. Otherwise the
+   * encoded document will be more human-readable.
+   *
+   * <p>This is a convenience method which overwrites any previously {@linkplain
+   * #setFormattingStyle(FormattingStyle) set formatting style} with either {@link
+   * FormattingStyle#COMPACT} if the given indent string is empty, or {@link FormattingStyle#PRETTY}
+   * with the given indent if not empty.
+   *
+...
+
+Function Description:1. **Purpose**: To configure serialization and deserialization adapters for date-related types based on specified patterns or styles.
+2. **Input**: A string pattern for dates, two integers representing date and time styles, and a list to which the adapters will be added.
+3. **Output**: There is no direct output as it modifies the list of factories by adding new type adapters.
+4. **Procedure**: The function checks if a non-empty date pattern is provided and creates date adapters accordingly. If no pattern is provided but styles are specified, it creates adapters based on these styles. It also checks for SQL types support and adds corresponding SQL date adapters if supported. These adapters are then added to the provided list of factories.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

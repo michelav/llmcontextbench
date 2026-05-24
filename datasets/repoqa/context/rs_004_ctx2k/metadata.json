@@ -1,0 +1,21 @@
+{
+  "base_id": "rs_004",
+  "code_context_ntokens": 1975,
+  "description": "1. **Purpose**: To verify the correctness of calculating the starting index of various sub-slices relative to their original slice.\n2. **Input**: A byte slice derived from a string and its sub-slices.\n3. **Output**: The function does not return any output but asserts the correctness of the index calculations.\n4. **Procedure**: The test initializes a byte slice from a string and creates several sub-slices from it. It then checks if the computed starting indices of these sub-slices relative to the original slice are as expected using assertions.",
+  "end_byte": 40444,
+  "end_line": 1659,
+  "instance_id": "rs_004_ctx2k",
+  "language": "rust",
+  "needle_name": "test_offset_u8",
+  "needle_token_end": 747,
+  "needle_token_start": 633,
+  "normalized_language": "rust",
+  "path": "src/traits.rs",
+  "position_ratio": 0.35,
+  "repo": "rust-bakery/nom",
+  "repoqa_description": "Function Description:1. **Purpose**: To verify the correctness of calculating the starting index of various sub-slices relative to their original slice.\n2. **Input**: A byte slice derived from a string and its sub-slices.\n3. **Output**: The function does not return any output but asserts the correctness of the index calculations.\n4. **Procedure**: The test initializes a byte slice from a string and creates several sub-slices from it. It then checks if the computed starting indices of these sub-slices relative to the original slice are as expected using assertions.",
+  "requested_context_tokens": 2048,
+  "sequence": 4,
+  "start_byte": 40215,
+  "start_line": 1649
+}

@@ -1,0 +1,21 @@
+{
+  "base_id": "ts_002",
+  "code_context_ntokens": 16146,
+  "description": "1. **Purpose**: The function is designed to extend the length of arrays within an object to a specified length by adding additional elements either to the beginning or the end of each array.\n2. **Input**: The function takes four parameters: an object where each property is an array, a target length for the arrays, a function that determines the value to be added based on the array's key, and a direction indicating whether to add the new elements to the 'right' (end) or 'left' (beginning) of the array.\n3. **Output**: There is no direct output as the function modifies the arrays in the input object in place.\n4. **Procedure**: The function iterates over each key in the object. For each key, it calculates the difference between the current array length and the target length. It then creates a new array filled with the value returned by the provided function for that key, with a length equal to the calculated difference. Depending on the specified direction, this new array is concatenated to either the beginning or the end of the original array, updating the array in the object.",
+  "end_byte": 82593,
+  "end_line": 2414,
+  "instance_id": "ts_002_ctx16k",
+  "language": "typescript",
+  "needle_name": "padHelper",
+  "needle_token_end": 2457,
+  "needle_token_start": 2339,
+  "normalized_language": "typescript",
+  "path": "src/tokenizers.js",
+  "position_ratio": 0.15,
+  "repo": "xenova/transformers.js",
+  "repoqa_description": "Function Description:1. **Purpose**: The function is designed to extend the length of arrays within an object to a specified length by adding additional elements either to the beginning or the end of each array.\n2. **Input**: The function takes four parameters: an object where each property is an array, a target length for the arrays, a function that determines the value to be added based on the array's key, and a direction indicating whether to add the new elements to the 'right' (end) or 'left' (beginning) of the array.\n3. **Output**: There is no direct output as the function modifies the arrays in the input object in place.\n4. **Procedure**: The function iterates over each key in the object. For each key, it calculates the difference between the current array length and the target length. It then creates a new array filled with the value returned by the provided function for that key, with a length equal to the calculated difference. Depending on the specified direction, this new array is concatenated to either the beginning or the end of the original array, updating the array in the object.",
+  "requested_context_tokens": 16384,
+  "sequence": 2,
+  "start_byte": 82223,
+  "start_line": 2403
+}

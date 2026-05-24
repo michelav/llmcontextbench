@@ -1,0 +1,15 @@
+{
+  "baseId": "py_001",
+  "endByte": 21391,
+  "endLine": 639,
+  "instanceId": "py_001_ctx2k",
+  "language": "python",
+  "needleName": "_merge_string_group",
+  "normalizedLanguage": "python",
+  "path": "src/black/trans.py",
+  "repo": "psf/black",
+  "sequence": 1,
+  "startByte": 19425,
+  "startLine": 585,
+  "targetFunction": "def _merge_string_group(\n        self, line: Line, string_indices: List[int]\n    ) -> TResult[Line]:\n        \"\"\"\n        Merges string groups (i.e. set of adjacent strings).\n\n        Each index from `string_indices` designates one string group's first\n        leaf in `line.leaves`.\n\n        Returns:\n            Ok(new_line), if ALL of the validation checks found in\n            _validate_msg(...) pass.\n                OR\n            Err(CannotTransform), otherwise.\n        \"\"\"\n        LL = line.leaves\n\n        is_valid_index = is_valid_index_factory(LL)\n\n        # A dict of {string_idx: tuple[num_of_strings, string_leaf]}.\n        merged_string_idx_dict: Dict[int, Tuple[int, Leaf]] = {}\n        for string_idx in string_indices:\n            vresult = self._validate_msg(line, string_idx)\n            if isinstance(vresult, Err):\n                continue\n            merged_string_idx_dict[string_idx] = self._merge_one_string_group(\n                LL, string_idx, is_valid_index\n            )\n\n        if not merged_string_idx_dict:\n            return TErr(\"No string group is merged\")\n\n        # Build the final line ('new_line') that this method will later return.\n        new_line = line.clone()\n        previous_merged_string_idx = -1\n        previous_merged_num_of_strings = -1\n        for i, leaf in enumerate(LL):\n            if i in merged_string_idx_dict:\n                previous_merged_string_idx = i\n                previous_merged_num_of_strings, string_leaf = merged_string_idx_dict[i]\n                new_line.append(string_leaf)\n\n            if (\n                previous_merged_string_idx\n                <= i\n                < previous_merged_string_idx + previous_merged_num_of_strings\n            ):\n                for comment_leaf in line.comments_after(LL[i]):\n                    new_line.append(comment_leaf, preformatted=True)\n                continue\n\n            append_leaves(new_line, line, [leaf])\n\n        return Ok(new_line)"
+}

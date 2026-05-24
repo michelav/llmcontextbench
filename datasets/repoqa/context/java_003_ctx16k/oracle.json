@@ -1,0 +1,15 @@
+{
+  "baseId": "java_003",
+  "endByte": 19532,
+  "endLine": 410,
+  "instanceId": "java_003_ctx16k",
+  "language": "java",
+  "needleName": "newBuilder",
+  "normalizedLanguage": "java",
+  "path": "gson/src/main/java/com/google/gson/Gson.java",
+  "repo": "google/gson",
+  "sequence": 3,
+  "startByte": 19461,
+  "startLine": 407,
+  "targetFunction": "public GsonBuilder newBuilder() {\n    return new GsonBuilder(this);\n  }"
+}

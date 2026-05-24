@@ -1,0 +1,784 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:    let mut count = 0;
+
+    match self
+      .parser
+      .process::<OutputM<Check, Check, OM::Incomplete>>(input.clone())
+    {
+      Err(Err::Error(_)) => Err(Err::Error(OM::Error::bind(move || {
+        <F as Parser<I>>::Error::from_error_kind(input, ErrorKind::Many1Count)
+      }))),
+      Err(Err::Failure(e)) => Err(Err::Failure(e)),
+      Err(Err::Incomplete(i)) => Err(Err::Incomplete(i)),
+      Ok((mut input, _)) => {
+        count += 1;
+
+        loop {
+          let input_ = input.clone();
+          let len = input.input_len();
+          match self
+            .parser
+            .process::<OutputM<Check, Check, OM::Incomplete>>(input_)
+          {
+            Ok((i, _)) => {
+              // infinite loop check: the parser must always consume
+              if i.input_len() == len {
+                return Err(Err::Error(OM::Error::bind(|| {
+                  <F as Parser<I>>::Error::from_error_kind(input, ErrorKind::Many1Count)
+                })));
+              }
+
+              input = i;
+              count += 1;
+            }
+
+            Err(Err::Error(_)) => return Ok((input, OM::Output::bind(|| count))),
+            Err(Err::Failure(e)) => return Err(Err::Failure(e)),
+            Err(Err::Incomplete(i)) => return Err(Err::Incomplete(i)),
+          }
+        }
+      }
+    }
+  }
+}
+
+/// Runs the embedded parser `count` times, gathering the results in a `Vec`
+///
+/// # Arguments
+/// * `f` The parser to apply.
+/// * `count` How often to apply the parser.
+/// ```rust
+/// # use nom::{Err, error::{Error, ErrorKind}, Needed, IResult, Parser};
+/// use nom::multi::count;
+/// use nom::bytes::complete::tag;
+///
+/// fn parser(s: &str) -> IResult<&str, Vec<&str>> {
+///   count(tag("abc"), 2).parse(s)
+/// }
+///
+/// assert_eq!(parser("abcabc"), Ok(("", vec!["abc", "abc"])));
+/// assert_eq!(parser("abc123"), Err(Err::Error(Error::new("123", ErrorKind::Tag))));
+/// assert_eq!(parser("123123"), Err(Err::Error(Error::new("123123", ErrorKind::Tag))));
+/// assert_eq!(parser(""), Err(Err::Error(Error::new("", ErrorKind::Tag))));
+/// assert_eq!(parser("abcabcabc"), Ok(("abc", vec!["abc", "abc"])));
+/// ```
+#[cfg(feature = "alloc")]
+#[cfg_attr(feature = "docsrs", doc(cfg(feature = "alloc")))]
+pub fn count<I, F>(
+  parser: F,
+  count: usize,
+) -> impl Parser<I, Output = Vec<<F as Parser<I>>::Output>, Error = <F as Parser<I>>::Error>
+where
+  I: Clone,
+  F: Parser<I>,
+{
+  Count { parser, count }
+}
+
+#[cfg(feature = "alloc")]
+/// Parser implementation for the [count] combinator
+pub struct Count<F> {
+  parser: F,
+  count: usize,
+}
+
+#[cfg(feature = "alloc")]
+impl<I, F> Parser<I> for Count<F>
+where
+  I: Clone,
+  F: Parser<I>,
+{
+  type Output = Vec<<F as Parser<I>>::Output>;
+  type Error = <F as Parser<I>>::Error;
+
+  fn process<OM: OutputMode>(&mut self, i: I) -> crate::PResult<OM, I, Self::Output, Self::Error> {
+    let mut input = i.clone();
+    let max_initial_capacity = MAX_INITIAL_CAPACITY_BYTES
+      / crate::lib::std::mem::size_of::<<F as Parser<I>>::Output>().max(1);
+    let mut res = OM::Output::bind(|| {
+      crate::lib::std::vec::Vec::with_capacity(self.count.min(max_initial_capacity))
+    });
+
+    for _ in 0..self.count {
+      let input_ = input.clone();
+      match self.parser.process::<OM>(input_) {
+        Ok((i, o)) => {
+          res = OM::Output::combine(res, o, |mut res, o| {
+            res.push(o);
+            res
+          });
+          input = i;
+        }
+        Err(Err::Error(e)) => {
+          return Err(Err::Error(OM::Error::map(e, |e| {
+            <F as Parser<I>>::Error::append(i, ErrorKind::Count, e)
+          })));
+        }
+        Err(e) => {
+          return Err(e);
+        }
+      }
+    }
+
+    Ok((input, res))
+  }
+}
+
+/// Runs the embedded parser repeatedly, filling the given slice with results.
+///
+/// This parser fails if the input runs out before the given slice is full.
+///
+/// # Arguments
+/// * `f` The parser to apply.
+/// * `buf` The slice to fill
+/// ```rust
+/// # use nom::{Err, error::{Error, ErrorKind}, Needed, IResult, Parser};
+/// use nom::multi::fill;
+/// use nom::bytes::complete::tag;
+///
+/// fn parser(s: &str) -> IResult<&str, [&str; 2]> {
+///   let mut buf = ["", ""];
+///   let (rest, ()) = fill(tag("abc"), &mut buf).parse(s)?;
+///   Ok((rest, buf))
+/// }
+///
+/// assert_eq!(parser("abcabc"), Ok(("", ["abc", "abc"])));
+/// assert_eq!(parser("abc123"), Err(Err::Error(Error::new("123", ErrorKind::Tag))));
+/// assert_eq!(parser("123123"), Err(Err::Error(Error::new("123123", ErrorKind::Tag))));
+/// assert_eq!(parser(""), Err(Err::Error(Error::new("", ErrorKind::Tag))));
+/// assert_eq!(parser("abcabcabc"), Ok(("abc", ["abc", "abc"])));
+/// ```
+pub fn fill<'a, I, E, F>(
+  parser: F,
+  buf: &'a mut [<F as Parser<I>>::Output],
+) -> impl Parser<I, Output = (), Error = E> + 'a
+where
+  I: Clone,
+  F: Parser<I, Error = E> + 'a,
+  E: ParseError<I>,
+{
+  Fill { parser, buf }
+}
+
+/// Parser implementation for the [fill] combinator
+pub struct Fill<'a, F, O> {
+  parser: F,
+  buf: &'a mut [O],
+}
+
+impl<'a, I, F, O> Parser<I> for Fill<'a, F, O>
+where
+  I: Clone,
+  F: Parser<I, Output = O>,
+{
+  type Output = ();
+  type Error = <F as Parser<I>>::Error;
+
+  fn process<OM: OutputMode>(&mut self, i: I) -> crate::PResult<OM, I, Self::Output, Self::Error> {
+    let mut input = i.clone();
+
+    for elem in self.buf.iter_mut() {
+      let input_ = input.clone();
+      match self.parser.process::<OM>(input_) {
+        Ok((i, o)) => {
+          OM::Output::map(o, |o| *elem = o);
+          input = i;
+        }
+        Err(Err::Error(e)) => {
+          return Err(Err::Error(OM::Error::map(e, |e| {
+            <F as Parser<I>>::Error::append(i, ErrorKind::Count, e)
+          })));
+        }
+        Err(e) => {
+          return Err(e);
+        }
+      }
+    }
+
+    Ok((input, OM::Output::bind(|| ())))
+  }
+}
+
+/// Repeats the embedded parser, calling `g` to gather the results.
+///
+/// This stops on [`Err::Error`]. To instead chain an error up, see
+/// [`cut`][crate::combinator::cut].
+///
+/// # Arguments
+/// * `f` The parser to apply.
+/// * `init` A function returning the initial value.
+/// * `g` The function that combines a result of `f` with
+///       the current accumulator.
+///
+/// *Note*: if the parser passed in accepts empty inputs (like `alpha0` or `digit0`), `many0` will
+/// return an error, to prevent going into an infinite loop
+///
+/// ```rust
+/// # use nom::{Err, error::ErrorKind, Needed, IResult, Parser};
+/// use nom::multi::fold_many0;
+/// use nom::bytes::complete::tag;
+///
+/// fn parser(s: &str) -> IResult<&str, Vec<&str>> {
+///   fold_many0(
+///     tag("abc"),
+///     Vec::new,
+///     |mut acc: Vec<_>, item| {
+///       acc.push(item);
+///       acc
+///     }
+///   ).parse(s)
+/// }
+///
+/// assert_eq!(parser("abcabc"), Ok(("", vec!["abc", "abc"])));
+/// assert_eq!(parser("abc123"), Ok(("123", vec!["abc"])));
+/// assert_eq!(parser("123123"), Ok(("123123", vec![])));
+/// assert_eq!(parser(""), Ok(("", vec![])));
+/// ```
+pub fn fold_many0<I, E, F, G, H, R>(
+  parser: F,
+  init: H,
+  g: G,
+) -> impl Parser<I, Output = R, Error = E>
+where
+  I: Clone + InputLength,
+  F: Parser<I, Error = E>,
+  G: FnMut(R, <F as Parser<I>>::Output) -> R,
+  H: FnMut() -> R,
+  E: ParseError<I>,
+{
+  FoldMany0 {
+    parser,
+    g,
+    init,
+    r: PhantomData,
+  }
+}
+
+/// Parser implementation for the [fold_many0] combinator
+pub struct FoldMany0<F, G, Init, R> {
+  parser: F,
+  g: G,
+  init: Init,
+  r: PhantomData<R>,
+}
+
+impl<I, F, G, Init, R> Parser<I> for FoldMany0<F, G, Init, R>
+where
+  I: Clone + InputLength,
+  F: Parser<I>,
+  G: FnMut(R, <F as Parser<I>>::Output) -> R,
+  Init: FnMut() -> R,
+{
+  type Output = R;
+  type Error = <F as Parser<I>>::Error;
+
+  fn process<OM: OutputMode>(&mut self, i: I) -> crate::PResult<OM, I, Self::Output, Self::Error> {
+    let mut res = OM::Output::bind(|| (self.init)());
+    let mut input = i;
+
+    loop {
+      let i_ = input.clone();
+      let len = input.input_len();
+      match self.parser.process::<OM>(i_) {
+        Ok((i, o)) => {
+          // infinite loop check: the parser must always consume
+          if i.input_len() == len {
+            return Err(Err::Error(OM::Error::bind(|| {
+              <F as Parser<I>>::Error::from_error_kind(input, ErrorKind::Many0)
+            })));
+          }
+
+          res = OM::Output::combine(res, o, |res, o| (self.g)(res, o));
+          input = i;
+        }
+        Err(Err::Error(_)) => {
+          return Ok((input, res));
+        }
+        Err(e) => {
+          return Err(e);
+        }
+      }
+    }
+  }
+}
+
+/// Repeats the embedded parser, calling `g` to gather the results.
+///
+/// This stops on [`Err::Error`] if there is at least one result. To instead chain an error up,
+/// see [`cut`][crate::combinator::cut].
+///
+/// # Arguments
+/// * `f` The parser to apply.
+/// * `init` A function returning the initial value.
+/// * `g` The function that combines a result of `f` with
+///       the current accumulator.
+///
+/// *Note*: If the parser passed to `many1` accepts empty inputs
+/// (like `alpha0` or `digit0`), `many1` will return an error,
+/// to prevent going into an infinite loop.
+///
+/// ```rust
+/// # use nom::{Err, error::{Error, ErrorKind}, Needed, IResult, Parser};
+/// use nom::multi::fold_many1;
+/// use nom::bytes::complete::tag;
+///
+/// fn parser(s: &str) -> IResult<&str, Vec<&str>> {
+///   fold_many1(
+///     tag("abc"),
+///     Vec::new,
+///     |mut acc: Vec<_>, item| {
+///       acc.push(item);
+///       acc
+///     }
+///   ).parse(s)
+/// }
+///
+/// assert_eq!(parser("abcabc"), Ok(("", vec!["abc", "abc"])));
+/// assert_eq!(parser("abc123"), Ok(("123", vec!["abc"])));
+/// assert_eq!(parser("123123"), Err(Err::Error(Error::new("123123", ErrorKind::Many1))));
+/// assert_eq!(parser(""), Err(Err::Error(Error::new("", ErrorKind::Many1))));
+/// ```
+
+pub fn fold_many1<I, E, F, G, H, R>(
+  parser: F,
+  init: H,
+  g: G,
+) -> impl Parser<I, Output = R, Error = E>
+where
+  I: Clone + InputLength,
+  F: Parser<I, Error = E>,
+  G: FnMut(R, <F as Parser<I>>::Output) -> R,
+  H: FnMut() -> R,
+  E: ParseError<I>,
+{
+  FoldMany1 {
+    parser,
+    g,
+    init,
+    r: PhantomData,
+  }
+}
+
+/// Parser implementation for the [fold_many1] combinator
+pub struct FoldMany1<F, G, Init, R> {
+  parser: F,
+  g: G,
+  init: Init,
+  r: PhantomData<R>,
+}
+
+impl<I, F, G, Init, R> Parser<I> for FoldMany1<F, G, Init, R>
+where
+  I: Clone + InputLength,
+  F: Parser<I>,
+  G: FnMut(R, <F as Parser<I>>::Output) -> R,
+  Init: FnMut() -> R,
+{
+  type Output = R;
+  type Error = <F as Parser<I>>::Error;
+
+  fn process<OM: OutputMode>(&mut self, i: I) -> crate::PResult<OM, I, Self::Output, Self::Error> {
+    let mut res = OM::Output::bind(|| (self.init)());
+    let input = i.clone();
+
+    match self.parser.process::<OM>(input) {
+      Err(Err::Error(_)) => Err(Err::Error(OM::Error::bind(|| {
+        <F as Parser<I>>::Error::from_error_kind(i, ErrorKind::Many1)
+      }))),
+      Err(e) => Err(e),
+      Ok((i1, o1)) => {
+        res = OM::Output::combine(res, o1, |res, o| (self.g)(res, o));
+
+        let mut input = i1;
+        loop {
+          let i_ = input.clone();
+          let len = input.input_len();
+          match self.parser.process::<OM>(i_) {
+            Ok((i, o)) => {
+              // infinite loop check: the parser must always consume
+              if i.input_len() == len {
+                return Err(Err::Error(OM::Error::bind(|| {
+                  <F as Parser<I>>::Error::from_error_kind(input, ErrorKind::Many1)
+                })));
+              }
+
+              res = OM::Output::combine(res, o, |res, o| (self.g)(res, o));
+              input = i;
+            }
+            Err(Err::Error(_)) => {
+              return Ok((input, res));
+            }
+            Err(e) => {
+              return Err(e);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/// Repeats the embedded parser `m..=n` times, calling `g` to gather the results
+///
+/// This stops before `n` when the parser returns [`Err::Error`]. To instead chain an error up, see
+/// [`cut`][crate::combinator::cut].
+///
+/// # Arguments
+/// * `m` The minimum number of iterations.
+/// * `n` The maximum number of iterations.
+/// * `f` The parser to apply.
+/// * `init` A function returning the initial value.
+/// * `g` The function that combines a result of `f` with
+///       the current accumulator.
+///
+/// *Note*: If the parser passed to `many1` accepts empty inputs
+/// (like `alpha0` or `digit0`), `many1` will return an error,
+/// to prevent going into an infinite loop.
+///
+/// ```rust
+/// # use nom::{Err, error::ErrorKind, Needed, IResult, Parser};
+/// use nom::multi::fold_many_m_n;
+/// use nom::bytes::complete::tag;
+///
+/// fn parser(s: &str) -> IResult<&str, Vec<&str>> {
+///   fold_many_m_n(
+///     0,
+///     2,
+///     tag("abc"),
+///     Vec::new,
+///     |mut acc: Vec<_>, item| {
+///       acc.push(item);
+///       acc
+///     }
+///   ).parse(s)
+/// }
+///
+/// assert_eq!(parser("abcabc"), Ok(("", vec!["abc", "abc"])));
+/// assert_eq!(parser("abc123"), Ok(("123", vec!["abc"])));
+/// assert_eq!(parser("123123"), Ok(("123123", vec![])));
+/// assert_eq!(parser(""), Ok(("", vec![])));
+/// assert_eq!(parser("abcabcabc"), Ok(("abc", vec!["abc", "abc"])));
+/// ```
+pub fn fold_many_m_n<I, E, F, G, H, R>(
+  min: usize,
+  max: usize,
+  parser: F,
+  init: H,
+  g: G,
+) -> impl Parser<I, Output = R, Error = E>
+where
+  I: Clone + InputLength,
+  F: Parser<I, Error = E>,
+  G: FnMut(R, <F as Parser<I>>::Output) -> R,
+  H: FnMut() -> R,
+  E: ParseError<I>,
+{
+  FoldManyMN {
+    parser,
+    g,
+    init,
+    min,
+    max,
+    r: PhantomData,
+  }
+}
+
+/// Parser implementation for the [fold_many_m_n] combinator
+pub struct FoldManyMN<F, G, Init, R> {
+  parser: F,
+  g: G,
+  init: Init,
+  r: PhantomData<R>,
+  min: usize,
+  max: usize,
+}
+
+impl<I, F, G, Init, R> Parser<I> for FoldManyMN<F, G, Init, R>
+where
+  I: Clone + InputLength,
+  F: Parser<I>,
+  G: FnMut(R, <F as Parser<I>>::Output) -> R,
+  Init: FnMut() -> R,
+{
+  type Output = R;
+  type Error = <F as Parser<I>>::Error;
+
+  fn process<OM: OutputMode>(
+    &mut self,
+    mut input: I,
+  ) -> crate::PResult<OM, I, Self::Output, Self::Error> {
+    if self.min > self.max {
+      return Err(Err::Error(OM::Error::bind(|| {
+        <F as Parser<I>>::Error::from_error_kind(input, ErrorKind::ManyMN)
+      })));
+    }
+
+    let mut res = OM::Output::bind(|| (self.init)());
+    for count in 0..self.max {
+      let len = input.input_len();
+      match self.parser.process::<OM>(input.clone()) {
+        Ok((tail, value)) => {
+          // infinite loop check: the parser must always consume
+          if tail.input_len() == len {
+            return Err(Err::Error(OM::Error::bind(|| {
+              <F as Parser<I>>::Error::from_error_kind(tail, ErrorKind::ManyMN)
+            })));
+          }
+
+          res = OM::Output::combine(res, value, |res, o| (self.g)(res, o));
+          input = tail;
+        }
+        Err(Err::Error(err)) => {
+          if count < self.min {
+            return Err(Err::Error(OM::Error::map(err, |err| {
+              <F as Parser<I>>::Error::append(input, ErrorKind::ManyMN, err)
+            })));
+          } else {
+            break;
+          }
+        }
+        Err(e) => return Err(e),
+      }
+    }
+
+    Ok((input, res))
+  }
+}
+
+/// Gets a number from the parser and returns a
+/// subslice of the input of that size.
+/// If the parser returns `Incomplete`,
+/// `length_data` will return an error.
+/// # Arguments
+/// * `f` The parser to apply.
+/// ```rust
+/// # use nom::{Err, error::ErrorKind, Needed, IResult, Parser};
+/// use nom::number::complete::be_u16;
+/// use nom::multi::length_data;
+/// use nom::bytes::complete::tag;
+///
+/// fn parser(s: &[u8]) -> IResult<&[u8], &[u8]> {
+///   length_data(be_u16).parse(s)
+/// }
+///
+/// assert_eq!(parser(b"\x00\x03abcefg"), Ok((&b"efg"[..], &b"abc"[..])));
+/// assert_eq!(parser(b"\x00\x03a"), Err(Err::Incomplete(Needed::new(2))));
+/// ```
+pub fn length_data<I, E, F>(f: F) -> impl Parser<I, Output = I, Error = E>
+where
+  I: Input,
+  <F as Parser<I>>::Output: ToUsize,
+  F: Parser<I, Error = E>,
+  E: ParseError<I>,
+{
+  f.flat_map(|size| take(size))
+}
+
+/// Gets a number from the first parser,
+/// takes a subslice of the input of that size,
+/// then applies the second parser on that subslice.
+/// If the second parser returns `Incomplete`,
+/// `length_value` will return an error.
+/// # Arguments
+/// * `f` The parser to apply.
+/// * `g` The parser to apply on the subslice.
+/// ```rust
+/// # use nom::{Err, error::{Error, ErrorKind}, Needed, IResult, Parser};
+/// use nom::number::complete::be_u16;
+/// use nom::multi::length_value;
+/// use nom::bytes::complete::tag;
+///
+/// fn parser(s: &[u8]) -> IResult<&[u8], &[u8]> {
+///   length_value(be_u16, tag("abc")).parse(s)
+/// }
+///
+/// assert_eq!(parser(b"\x00\x03abcefg"), Ok((&b"efg"[..], &b"abc"[..])));
+/// assert_eq!(parser(b"\x00\x03123123"), Err(Err::Error(Error::new(&b"123"[..], ErrorKind::Tag))));
+/// assert_eq!(parser(b"\x00\x03a"), Err(Err::Incomplete(Needed::new(2))));
+/// ```
+pub fn length_value<I, E, F, G>(
+  f: F,
+  g: G,
+) -> impl Parser<I, Output = <G as Parser<I>>::Output, Error = E>
+where
+  I: Clone + Input,
+  <F as Parser<I>>::Output: ToUsize,
+  F: Parser<I, Error = E>,
+  G: Parser<I, Error = E>,
+  E: ParseError<I>,
+{
+  /*f.flat_map(|size| {
+    println!("got size: {size}");
+    take(size)
+  })
+  .and_then(g)*/
+  LengthValue {
+    length: f,
+    parser: g,
+    e: PhantomData,
+  }
+}
+
+/// Parser implementation for the [length_value] combinator
+pub struct LengthValue<F, G, E> {
+  length: F,
+  parser: G,
+  e: PhantomData<E>,
+}
+
+impl<I, F, G, E> Parser<I> for LengthValue<F, G, E>
+where
+  I: Clone + Input,
+  F: Parser<I, Error = E>,
+  G: Parser<I, Error = E>,
+  <F as Parser<I>>::Output: ToUsize,
+  E: ParseError<I>,
+{
+  type Output = <G as Parser<I>>::Output;
+  type Error = E;
+
+  fn process<OM: OutputMode>(
+    &mut self,
+    input: I,
+  ) -> crate::PResult<OM, I, Self::Output, Self::Error> {
+    let (i, length) = self
+      .length
+      .process::<OutputM<Emit, OM::Error, OM::Incomplete>>(input)?;
+
+    let length: usize = length.to_usize();
+
+    if let Some(needed) = length
+      .checked_sub(i.input_len())
+      .and_then(NonZeroUsize::new)
+    {
+      Err(Err::Incomplete(Needed::Size(needed)))
+    } else {
+      let (rest, i) = i.take_split(length);
+      match self.parser.process::<OM>(i.clone()) {
+        Err(Err::Incomplete(_)) => Err(Err::Error(OM::Error::bind(|| {
+          E::from_error_kind(i, ErrorKind::Complete)
+        }))),
+        Err(e) => Err(e),
+        Ok((_, o)) => Ok((rest, o)),
+      }
+    }
+  }
+}
+
+/// Gets a number from the first parser,
+/// then applies the second parser that many times.
+/// # Arguments
+/// * `f` The parser to apply to obtain the count.
+/// * `g` The parser to apply repeatedly.
+/// ```rust
+/// # use nom::{Err, error::{Error, ErrorKind}, Needed, IResult, Parser};
+/// use nom::number::complete::u8;
+/// use nom::multi::length_count;
+/// use nom::bytes::complete::tag;
+/// use nom::combinator::map;
+///
+/// fn parser(s: &[u8]) -> IResult<&[u8], Vec<&[u8]>> {
+///   length_count(map(u8, |i| {
+///      println!("got number: {}", i);
+///      i
+///   }), tag("abc")).parse(s)
+/// }
+///
+/// assert_eq!(parser(&b"\x02abcabcabc"[..]), Ok(((&b"abc"[..], vec![&b"abc"[..], &b"abc"[..]]))));
+/// assert_eq!(parser(b"\x03123123123"), Err(Err::Error(Error::new(&b"123123123"[..], ErrorKind::Tag))));
+/// ```
+#[cfg(feature = "alloc")]
+pub fn length_count<I, E, F, G>(
+  f: F,
+  g: G,
+) -> impl Parser<I, Output = Vec<<G as Parser<I>>::Output>, Error = E>
+where
+  I: Clone,
+  <F as Parser<I>>::Output: ToUsize,
+  F: Parser<I, Error = E>,
+  G: Parser<I, Error = E>,
+  E: ParseError<I>,
+{
+  LengthCount {
+    length: f,
+    parser: g,
+    e: PhantomData,
+  }
+}
+
+#[cfg(feature = "alloc")]
+/// Parser implementation for the [length_count] combinator
+pub struct LengthCount<F, G, E> {
+  length: F,
+  parser: G,
+  e: PhantomData<E>,
+}
+
+#[cfg(feature = "alloc")]
+impl<I, F, G, E> Parser<I> for LengthCount<F, G, E>
+where
+  I: Clone,
+  F: Parser<I, Error = E>,
+  G: Parser<I, Error = E>,
+  <F as Parser<I>>::Output: ToUsize,
+  E: ParseError<I>,
+{
+  type Output = Vec<<G as Parser<I>>::Output>;
+  type Error = E;
+
+  fn process<OM: OutputMode>(
+    &mut self,
+    input: I,
+  ) -> crate::PResult<OM, I, Self::Output, Self::Error> {
+    match self
+      .length
+      .process::<OutputM<Emit, OM::Error, OM::Incomplete>>(input)
+    {
+      Err(e) => Err(e),
+      Ok((i, count)) => {
+        let count = count.to_usize();
+        let mut input = i.clone();
+        let max_initial_capacity = MAX_INITIAL_CAPACITY_BYTES
+          / crate::lib::std::mem::size_of::<<F as Parser<I>>::Output>().max(1);
+        let mut res = OM::Output::bind(|| {
+          crate::lib::std::vec::Vec::with_capacity(count.min(max_initial_capacity))
+        });
+
+        for _ in 0..count {
+          let input_ = input.clone();
+          match self.parser.process::<OM>(input_) {
+            Ok((i, o)) => {
+              res = OM::Output::combine(res, o, |mut res, o| {
+                res.push(o);
+                res
+              });
+              input = i;
+            }
+            Err(Err::Error(e)) => {
+              return Err(Err::Error(OM::Error::map(e, |e| {
+                <F as Parser<I>>::Error::append(i, ErrorKind::Count, e)
+              })));
+            }
+            Err(e) => {
+              return Err(e);
+            }
+          }
+        }
+
+        Ok((input, res))
+      }
+    }
+  }
+}
+
+/// Repeats the embedded parser and collects the results in a type implementing `Extend + Default`.
+/// Fails if the amount of time the embedded parser is run is not
+/// within the specified range.
+/// # Arguments
+/// * `range` Constrains the number of iterations.
+...
+
+Function Description:1. **Purpose**: The function is designed to repeatedly apply a given parser and accumulate the results using a specified function, ensuring that the parser is applied at least once.
+2. **Input**: It takes three parameters: a parser that defines how to parse each segment, an initializer function that provides the initial value for the accumulator, and a function that combines the accumulated result with the output of each successful parse.
+3. **Output**: Returns either the accumulated result of all successful parses or an error if the first parse attempt fails or if the parser accepts empty inputs, which could lead to an infinite loop.
+4. **Procedure**: The function initializes an accumulator with the provided initial value. It then enters a loop where it repeatedly applies the parser to the input. For each successful parse, it updates the accumulator using the combining function. The loop continues until the parser fails to parse the input, at which point it returns the accumulated result or an error if no successful parse has occurred.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

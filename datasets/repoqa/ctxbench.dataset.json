@@ -1,0 +1,36 @@
+{
+  "datasetVersion": "2026-05-23",
+  "description": "RepoQA Search Needle Function dataset packaged for CTXBench.",
+  "domain": "software-repository",
+  "generation": {
+    "baseNeedles": 20,
+    "cleanComments": "none",
+    "contextBuilder": "repoqa-native",
+    "contextTokenBudgets": [
+      2048,
+      4096,
+      8192,
+      16384
+    ],
+    "idScheme": "<language>_<sequence>_ctx<size>",
+    "instances": 80
+  },
+  "id": "ctxbench/repoqa",
+  "layout": {
+    "contextRoot": "context/",
+    "datasetInstructions": "dataset-instructions.txt",
+    "taskInstances": "tasks.instance.json",
+    "tasks": "tasks.json"
+  },
+  "manifestSchemaVersion": 1,
+  "name": "CTXBench RepoQA Experimental",
+  "origin": {
+    "rawFile": "raw/repoqa-2026-05-23.json.gz",
+    "source": "evalplus/repoqa"
+  },
+  "validation": {
+    "ignoreComments": false,
+    "threshold": 0.8,
+    "type": "repoqa-scorer"
+  }
+}

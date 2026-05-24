@@ -1,0 +1,15 @@
+{
+  "baseId": "py_003",
+  "endByte": 11420,
+  "endLine": 425,
+  "instanceId": "py_003_ctx16k",
+  "language": "python",
+  "needleName": "make_simple_prefix",
+  "normalizedLanguage": "python",
+  "path": "src/black/nodes.py",
+  "repo": "psf/black",
+  "sequence": 3,
+  "startByte": 11171,
+  "startLine": 420,
+  "targetFunction": "def make_simple_prefix(nl_count: int, form_feed: bool, empty_line: str = \"\\n\") -> str:\n    \"\"\"Generate a normalized prefix string.\"\"\"\n    if form_feed:\n        return (empty_line * (nl_count - 1)) + \"\\f\" + empty_line\n    return empty_line * nl_count"
+}

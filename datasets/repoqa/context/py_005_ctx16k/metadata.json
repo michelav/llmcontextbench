@@ -1,0 +1,21 @@
+{
+  "base_id": "py_005",
+  "code_context_ntokens": 16062,
+  "description": "1. **Purpose**: Determines if a specified syntax element is part of a type annotation in the source code.\n2. **Input**: A syntax element from the parsed source code.\n3. **Output**: A boolean value indicating whether the given syntax element is involved in a type annotation.\n4. **Procedure**: The function checks the type of annotation associated with the syntax element by tracing its position in the syntax tree and examining its relationship with surrounding elements. If the element is identified as part of either a return type or parameter type annotation, the function returns true; otherwise, it returns false.",
+  "end_byte": 28120,
+  "end_line": 979,
+  "instance_id": "py_005_ctx16k",
+  "language": "python",
+  "needle_name": "is_part_of_annotation",
+  "needle_token_end": 7209,
+  "needle_token_start": 7162,
+  "normalized_language": "python",
+  "path": "src/black/nodes.py",
+  "position_ratio": 0.45,
+  "repo": "psf/black",
+  "repoqa_description": "Function Description:1. **Purpose**: Determines if a specified syntax element is part of a type annotation in the source code.\n2. **Input**: A syntax element from the parsed source code.\n3. **Output**: A boolean value indicating whether the given syntax element is involved in a type annotation.\n4. **Procedure**: The function checks the type of annotation associated with the syntax element by tracing its position in the syntax tree and examining its relationship with surrounding elements. If the element is identified as part of either a return type or parameter type annotation, the function returns true; otherwise, it returns false.",
+  "requested_context_tokens": 16384,
+  "sequence": 5,
+  "start_byte": 27959,
+  "start_line": 976
+}

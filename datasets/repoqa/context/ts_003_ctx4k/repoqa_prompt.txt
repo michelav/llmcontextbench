@@ -1,0 +1,365 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:// Path: src/tokenizers.js
+
+/**
+ * @file Tokenizers are used to prepare textual inputs for a model.
+ * 
+ * **Example:** Create an `AutoTokenizer` and use it to tokenize a sentence.
+ * This will automatically detect the tokenizer type based on the tokenizer class defined in `tokenizer.json`.
+ * ```javascript
+ * import { AutoTokenizer } from '@xenova/transformers';
+ * 
+ * const tokenizer = await AutoTokenizer.from_pretrained('Xenova/bert-base-uncased');
+ * const { input_ids } = await tokenizer('I love transformers!');
+ * // Tensor {
+ * //   data: BigInt64Array(6) [101n, 1045n, 2293n, 19081n, 999n, 102n],
+ * //   dims: [1, 6],
+ * //   type: 'int64',
+ * //   size: 6,
+ * // }
+ * ```
+ * 
+ * @module tokenizers
+ */
+
+import {
+    Callable,
+    reverseDictionary,
+    escapeRegExp,
+...
+// Path: src/pipelines.js
+/**
+ * @file Pipelines provide a high-level, easy to use, API for running machine learning models.
+ * 
+ * **Example:** Instantiate pipeline using the `pipeline` function.
+ * ```javascript
+ * import { pipeline } from '@xenova/transformers';
+ * 
+ * const classifier = await pipeline('sentiment-analysis');
+ * const output = await classifier('I love transformers!');
+ * // [{'label': 'POSITIVE', 'score': 0.999817686}]
+ * ```
+ * 
+ * @module pipelines
+ */
+
+import {
+    AutoTokenizer,
+    PreTrainedTokenizer,
+} from './tokenizers.js';
+import {
+    AutoModel,
+    AutoModelForSequenceClassification,
+    AutoModelForAudioClassification,
+    AutoModelForTokenClassification,
+    AutoModelForQuestionAnswering,
+    AutoModelForMaskedLM,
+    AutoModelForSeq2SeqLM,
+    AutoModelForSpeechSeq2Seq,
+    AutoModelForTextToWaveform,
+    AutoModelForTextToSpectrogram,
+    AutoModelForCTC,
+    AutoModelForCausalLM,
+    AutoModelForVision2Seq,
+    AutoModelForImageClassification,
+    AutoModelForImageSegmentation,
+    AutoModelForSemanticSegmentation,
+    AutoModelForObjectDetection,
+    AutoModelForZeroShotObjectDetection,
+    AutoModelForDocumentQuestionAnswering,
+    AutoModelForImageToImage,
+    AutoModelForDepthEstimation,
+    AutoModelForImageFeatureExtraction,
+    PreTrainedModel,
+} from './models.js';
+import {
+    AutoProcessor,
+    Processor
+} from './processors.js';
+
+
+import {
+    Callable,
+    dispatchCallback,
+    pop,
+    product,
+} from './utils/core.js';
+import {
+    softmax,
+    max,
+    getTopItems,
+    round,
+} from './utils/maths.js';
+import {
+    read_audio
+} from './utils/audio.js';
+import {
+    Tensor,
+    mean_pooling,
+    interpolate,
+    quantize_embeddings,
+} from './utils/tensor.js';
+import { RawImage } from './utils/image.js';
+
+
+/**
+ * @typedef {string | RawImage | URL} ImageInput
+ * @typedef {ImageInput|ImageInput[]} ImagePipelineInputs
+ */
+
+/**
+ * Prepare images for further tasks.
+ * @param {ImagePipelineInputs} images images to prepare.
+ * @returns {Promise<RawImage[]>} returns processed images.
+ * @private
+ */
+
+async function prepareImages(images) {
+    if (!Array.isArray(images)) {
+        images = [images];
+    }
+
+    // Possibly convert any non-images to images
+    return await Promise.all(images.map(x => RawImage.read(x)));
+}
+
+/**
+ * @typedef {string | URL | Float32Array | Float64Array} AudioInput
+ * @typedef {AudioInput|AudioInput[]} AudioPipelineInputs
+ */
+
+/**
+ * Prepare audios for further tasks.
+ * @param {AudioPipelineInputs} audios audios to prepare.
+ * @param {number} sampling_rate sampling rate of the audios.
+ * @returns {Promise<Float32Array[]>} The preprocessed audio data.
+ * @private
+ */
+async function prepareAudios(audios, sampling_rate) {
+    if (!Array.isArray(audios)) {
+        audios = [audios];
+    }
+
+    return await Promise.all(audios.map(x => {
+        if (typeof x === 'string' || x instanceof URL) {
+            return read_audio(x, sampling_rate);
+        } else if (x instanceof Float64Array) {
+            return new Float32Array(x);
+        }
+        return x;
+    }));
+}
+
+/**
+ * @typedef {Object} BoundingBox
+ * @property {number} xmin The minimum x coordinate of the bounding box.
+ * @property {number} ymin The minimum y coordinate of the bounding box.
+ * @property {number} xmax The maximum x coordinate of the bounding box.
+ * @property {number} ymax The maximum y coordinate of the bounding box.
+ */
+
+/**
+ * Helper function to convert list [xmin, xmax, ymin, ymax] into object { "xmin": xmin, ... }
+ * @param {number[]} box The bounding box as a list.
+ * @param {boolean} asInteger Whether to cast to integers.
+ * @returns {BoundingBox} The bounding box as an object.
+ * @private
+ */
+function get_bounding_box(box, asInteger) {
+    if (asInteger) {
+        box = box.map(x => x | 0);
+    }
+    const [xmin, ymin, xmax, ymax] = box;
+
+    return { xmin, ymin, xmax, ymax };
+}
+
+
+/**
+ * @callback DisposeType Disposes the item.
+ * @returns {Promise<void>} A promise that resolves when the item has been disposed.
+ * 
+ * @typedef {Object} Disposable
+ * @property {DisposeType} dispose A promise that resolves when the pipeline has been disposed.
+ */
+
+/**
+ * The Pipeline class is the class from which all pipelines inherit.
+ * Refer to this class for methods shared across different pipelines.
+ * @extends Callable
+ */
+export class Pipeline extends Callable {
+    /**
+     * Create a new Pipeline.
+     * @param {Object} options An object containing the following properties:
+     * @param {string} [options.task] The task of the pipeline. Useful for specifying subtasks.
+     * @param {PreTrainedModel} [options.model] The model used by the pipeline.
+     * @param {PreTrainedTokenizer} [options.tokenizer=null] The tokenizer used by the pipeline (if any).
+     * @param {Processor} [options.processor=null] The processor used by the pipeline (if any).
+     */
+    constructor({ task, model, tokenizer = null, processor = null }) {
+        super();
+        this.task = task;
+        this.model = model;
+        this.tokenizer = tokenizer;
+        this.processor = processor;
+    }
+
+    /** @type {DisposeType} */
+    async dispose() {
+        await this.model.dispose();
+    }
+}
+
+/**
+ * @typedef {Object} ModelTokenizerConstructorArgs
+ * @property {string} task The task of the pipeline. Useful for specifying subtasks.
+ * @property {PreTrainedModel} model The model used by the pipeline.
+ * @property {PreTrainedTokenizer} tokenizer The tokenizer used by the pipeline.
+ * 
+ * @typedef {ModelTokenizerConstructorArgs} TextPipelineConstructorArgs An object used to instantiate a text-based pipeline.
+ */
+
+/**
+ * @typedef {Object} ModelProcessorConstructorArgs
+ * @property {string} task The task of the pipeline. Useful for specifying subtasks.
+ * @property {PreTrainedModel} model The model used by the pipeline.
+ * @property {Processor} processor The processor used by the pipeline.
+ * 
+ * @typedef {ModelProcessorConstructorArgs} AudioPipelineConstructorArgs An object used to instantiate an audio-based pipeline.
+ * @typedef {ModelProcessorConstructorArgs} ImagePipelineConstructorArgs An object used to instantiate an image-based pipeline.
+ */
+
+
+/**
+ * @typedef {Object} ModelTokenizerProcessorConstructorArgs
+ * @property {string} task The task of the pipeline. Useful for specifying subtasks.
+ * @property {PreTrainedModel} model The model used by the pipeline.
+ * @property {PreTrainedTokenizer} tokenizer The tokenizer used by the pipeline.
+ * @property {Processor} processor The processor used by the pipeline.
+ * 
+ * @typedef {ModelTokenizerProcessorConstructorArgs} TextAudioPipelineConstructorArgs An object used to instantiate a text- and audio-based pipeline.
+ * @typedef {ModelTokenizerProcessorConstructorArgs} TextImagePipelineConstructorArgs An object used to instantiate a text- and image-based pipeline.
+ */
+
+/**
+ * @typedef {Object} TextClassificationSingle
+ * @property {string} label The label predicted.
+ * @property {number} score The corresponding probability.
+ * @typedef {TextClassificationSingle[]} TextClassificationOutput
+ * 
+ * @typedef {Object} TextClassificationPipelineOptions Parameters specific to text classification pipelines.
+ * @property {number} [topk=1] The number of top predictions to be returned.
+ * 
+ * @callback TextClassificationPipelineCallback Classify the text(s) given as inputs.
+ * @param {string|string[]} texts The input text(s) to be classified.
+ * @param {TextClassificationPipelineOptions} [options] The options to use for text classification.
+ * @returns {Promise<TextClassificationOutput|TextClassificationOutput[]>} An array or object containing the predicted labels and scores.
+ * 
+ * @typedef {TextPipelineConstructorArgs & TextClassificationPipelineCallback & Disposable} TextClassificationPipelineType
+ */
+
+/**
+ * Text classification pipeline using any `ModelForSequenceClassification`.
+ *
+ * **Example:** Sentiment-analysis w/ `Xenova/distilbert-base-uncased-finetuned-sst-2-english`.
+ * ```javascript
+ * const classifier = await pipeline('sentiment-analysis', 'Xenova/distilbert-base-uncased-finetuned-sst-2-english');
+ * const output = await classifier('I love transformers!');
+ * // [{ label: 'POSITIVE', score: 0.999788761138916 }]
+ * ```
+ * 
+ * **Example:** Multilingual sentiment-analysis w/ `Xenova/bert-base-multilingual-uncased-sentiment` (and return top 5 classes).
+ * ```javascript
+ * const classifier = await pipeline('sentiment-analysis', 'Xenova/bert-base-multilingual-uncased-sentiment');
+ * const output = await classifier('Le meilleur film de tous les temps.', { topk: 5 });
+ * // [
+ * //   { label: '5 stars', score: 0.9610759615898132 },
+ * //   { label: '4 stars', score: 0.03323351591825485 },
+ * //   { label: '3 stars', score: 0.0036155181005597115 },
+ * //   { label: '1 star', score: 0.0011325967498123646 },
+ * //   { label: '2 stars', score: 0.0009423971059732139 }
+ * // ]
+ * ```
+ * 
+ * **Example:** Toxic comment classification w/ `Xenova/toxic-bert` (and return all classes).
+ * ```javascript
+ * const classifier = await pipeline('text-classification', 'Xenova/toxic-bert');
+ * const output = await classifier('I hate you!', { topk: null });
+ * // [
+ * //   { label: 'toxic', score: 0.9593140482902527 },
+ * //   { label: 'insult', score: 0.16187334060668945 },
+ * //   { label: 'obscene', score: 0.03452680632472038 },
+ * //   { label: 'identity_hate', score: 0.0223250575363636 },
+ * //   { label: 'threat', score: 0.019197041168808937 },
+ * //   { label: 'severe_toxic', score: 0.005651099607348442 }
+ * // ]
+ * ```
+ */
+export class TextClassificationPipeline extends (/** @type {new (options: TextPipelineConstructorArgs) => TextClassificationPipelineType} */ (Pipeline)) {
+
+    /**
+     * Create a new TextClassificationPipeline.
+     * @param {TextPipelineConstructorArgs} options An object used to instantiate the pipeline.
+     */
+    constructor(options) {
+        super(options);
+    }
+
+    /** @type {TextClassificationPipelineCallback} */
+    async _call(texts, {
+        topk = 1
+    } = {}) {
+
+        // Run tokenization
+        const model_inputs = this.tokenizer(texts, {
+            padding: true,
+            truncation: true,
+        });
+
+        // Run model
+        const outputs = await this.model(model_inputs)
+
+        // TODO: Use softmax tensor function
+        const function_to_apply =
+            this.model.config.problem_type === 'multi_label_classification'
+                ? batch => batch.sigmoid().data
+                : batch => softmax(batch.data); // single_label_classification (default)
+
+        const id2label = this.model.config.id2label;
+
+        const toReturn = [];
+        for (const batch of outputs.logits) {
+            const output = function_to_apply(batch);
+            const scores = getTopItems(output, topk);
+
+            const vals = scores.map(x => ({
+                label: id2label[x[0]],
+                score: x[1],
+            }));
+            if (topk === 1) {
+                toReturn.push(...vals);
+            } else {
+                toReturn.push(vals);
+            }
+        }
+
+        return Array.isArray(texts) || topk === 1 ? /** @type {TextClassificationOutput} */ (toReturn) : /** @type {TextClassificationOutput[]} */ (toReturn)[0];
+    }
+}
+
+/**
+ * @typedef {Object} TokenClassificationSingle
+ * @property {string} word The token/word classified. This is obtained by decoding the selected tokens.
+ * @property {number} score The corresponding probability for `entity`.
+ * @property {string} entity The entity predicted for that token/word.
+ * @property {number} index The index of the corresponding token in the sentence.
+ * @property {number} [start] The index of the start of the corresponding entity in the sentence.
+ * @property {number} [end] The index of the end of the corresponding entity in the sentence.
+ * @typedef {TokenClassificationSingle[]} TokenClassificationOutput
+...
+
+Function Description:1. **Purpose**: To convert a variety of image formats into a standardized format suitable for further processing in machine learning tasks.
+2. **Input**: A single image or an array of images, where each image can be a string URL, a path, or a raw image object.
+3. **Output**: A promise that resolves to an array of processed raw image objects.
+4. **Procedure**: The function first ensures the input is in array form. It then processes each item in the array by converting it into a raw image object, handling different input formats like URLs or paths. This conversion is done concurrently for all items in the array.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

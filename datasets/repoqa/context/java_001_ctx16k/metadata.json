@@ -1,0 +1,21 @@
+{
+  "base_id": "java_001",
+  "code_context_ntokens": 15904,
+  "description": "1. **Purpose**: To configure serialization and deserialization adapters for date-related types based on specified patterns or styles.\n2. **Input**: A string pattern for dates, two integers representing date and time styles, and a list to which the adapters will be added.\n3. **Output**: There is no direct output as it modifies the list of factories by adding new type adapters.\n4. **Procedure**: The function checks if a non-empty date pattern is provided and creates date adapters accordingly. If no pattern is provided but styles are specified, it creates adapters based on these styles. It also checks for SQL types support and adds corresponding SQL date adapters if supported. These adapters are then added to the provided list of factories.",
+  "end_byte": 42020,
+  "end_line": 946,
+  "instance_id": "java_001_ctx16k",
+  "language": "java",
+  "needle_name": "addTypeAdaptersForDate",
+  "needle_token_end": 986,
+  "needle_token_start": 598,
+  "normalized_language": "java",
+  "path": "gson/src/main/java/com/google/gson/GsonBuilder.java",
+  "position_ratio": 0.05,
+  "repo": "google/gson",
+  "repoqa_description": "Function Description:1. **Purpose**: To configure serialization and deserialization adapters for date-related types based on specified patterns or styles.\n2. **Input**: A string pattern for dates, two integers representing date and time styles, and a list to which the adapters will be added.\n3. **Output**: There is no direct output as it modifies the list of factories by adding new type adapters.\n4. **Procedure**: The function checks if a non-empty date pattern is provided and creates date adapters accordingly. If no pattern is provided but styles are specified, it creates adapters based on these styles. It also checks for SQL types support and adds corresponding SQL date adapters if supported. These adapters are then added to the provided list of factories.",
+  "requested_context_tokens": 16384,
+  "sequence": 1,
+  "start_byte": 40543,
+  "start_line": 911
+}

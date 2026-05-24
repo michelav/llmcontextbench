@@ -1,0 +1,15 @@
+{
+  "baseId": "rs_001",
+  "endByte": 8135,
+  "endLine": 323,
+  "instanceId": "rs_001_ctx16k",
+  "language": "rust",
+  "needleName": "yd",
+  "normalizedLanguage": "rust",
+  "path": "src/bytes/tests.rs",
+  "repo": "rust-bakery/nom",
+  "sequence": 1,
+  "startByte": 8059,
+  "startLine": 320,
+  "targetFunction": "fn yd(i: &[u8]) -> IResult<&[u8], &[u8]> {\n    recognize(digit).parse(i)\n  }"
+}

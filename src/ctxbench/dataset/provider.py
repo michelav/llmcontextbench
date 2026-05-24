@@ -99,6 +99,7 @@ class LocalDatasetPackage:
             statement=task.statement,
             tags=list(task.tags),
             validation_type=task.validation.type,
+            validation_config=task.validation.validation_config(),
             context_blocks=list(task.contextBlocks),
             metadata={"source": "tasks.json"},
         )
@@ -213,6 +214,9 @@ class LocalDatasetPackage:
             "tasks": len(self._tasks.tasks),
             "instances": len(self._task_instances.instances),
         }
+
+    def dataset_instructions(self) -> str | None:
+        return None
 
     def capability_report(self) -> DatasetCapabilityReport:
         return DatasetCapabilityReport(

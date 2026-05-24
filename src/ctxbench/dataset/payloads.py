@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 
 @dataclass
@@ -28,6 +28,7 @@ class TaskPayload:
     statement: str
     tags: list[str] = field(default_factory=list)
     validation_type: str = "judge"
+    validation_config: dict[str, Any] = field(default_factory=dict)
     context_blocks: list[str] = field(default_factory=list)
     metadata: dict[str, object] = field(default_factory=dict)
 

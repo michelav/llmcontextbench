@@ -15,20 +15,27 @@ from ctxbench.dataset.package import DatasetPackage
 from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.util.clock import utc_now_iso
 
-
 def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
     adapter = _resolve_adapter(runspec)
     context = ""
     dataset_tool_provider: object | None = None
+    dataset_mcp_server: object | None = None
     if runspec.strategy == "inline":
         context_payload = adapter.get_context(runspec.instanceId, runspec.taskId, runspec.format)
         context = _context_to_text(context_payload.content)
-    elif runspec.strategy in {"local_function", "local_mcp", "remote_mcp"}:
+    elif runspec.strategy == "local_function":
         dataset_tool_provider = adapter.tool_provider()
         if dataset_tool_provider is None:
             raise CapabilityUnavailableError(
                 f"Strategy '{runspec.strategy}' requires a dataset tool provider."
             )
+    elif runspec.strategy == "local_mcp":
+        dataset_mcp_server = _resolve_mcp_server(adapter)
+        if dataset_mcp_server is None:
+            raise CapabilityUnavailableError("Strategy 'local_mcp' requires a dataset MCP server.")
+    elif runspec.strategy == "remote_mcp":
+        if not isinstance(runspec.params.get("mcp_server"), dict):
+            raise CapabilityUnavailableError("Strategy 'remote_mcp' requires params['mcp_server'].")
     request_params = dict(runspec.params)
     if runspec.strategy == "inline" and runspec.provider.lower().startswith("openai"):
         request_params.setdefault(
@@ -55,8 +62,9 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
         "context_representation": runspec.format,
         "context_obtained": runspec.strategy == "inline",
     }
-    if runspec.strategy == "remote_mcp":
-        request_metadata["dataset_tool_provider"] = dataset_tool_provider
+    dataset_instructions = getattr(adapter, "dataset_instructions", lambda: None)()
+    if dataset_instructions:
+        request_metadata["dataset_instructions"] = dataset_instructions
     request = AIRequest(
         question=runspec.taskStatement,
         context=context,
@@ -73,7 +81,11 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
     active_engine = engine
     owned_engine: Engine | None = None
     if runspec.strategy in {"local_function", "local_mcp"}:
-        tool_runtime_factories = _build_tool_runtime_factories(runspec, dataset_tool_provider)
+        tool_runtime_factories = _build_tool_runtime_factories(
+            runspec,
+            dataset_tool_provider=dataset_tool_provider,
+            dataset_mcp_server=dataset_mcp_server,
+        )
         owned_engine = engine.copy_with_tool_runtime_factories(tool_runtime_factories)
         active_engine = owned_engine
     try:
@@ -118,6 +130,7 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
         taskTemplate=runspec.taskTemplate,
         taskTags=list(runspec.taskTags),
         validationType=runspec.validationType,
+        validationConfig=dict(runspec.validationConfig),
         contextBlocks=list(runspec.contextBlocks),
         parameters=dict(runspec.parameters),
         instanceId=runspec.instanceId,
@@ -161,17 +174,32 @@ def _context_to_text(content: object) -> str:
     return json.dumps(content)
 
 
-def _build_tool_runtime_factories(runspec: TrialSpec, service: object) -> dict[str, object]:
+def _build_tool_runtime_factories(
+    runspec: TrialSpec,
+    *,
+    dataset_tool_provider: object | None,
+    dataset_mcp_server: object | None,
+) -> dict[str, object]:
     tool_runtime_factories: dict[str, object] = {}
     if runspec.strategy == "local_function":
-        tool_runtime_factories["local_function"] = lambda: LocalFunctionRuntime(service)
+        if dataset_tool_provider is None:
+            raise CapabilityUnavailableError("Strategy 'local_function' requires a dataset tool provider.")
+        tool_runtime_factories["local_function"] = lambda: LocalFunctionRuntime(dataset_tool_provider)
     if runspec.strategy == "local_mcp":
-        server = service if hasattr(service, "app") else None
-        if server is not None:
-            tool_runtime_factories["local_mcp"] = lambda: MCPRuntime.for_local_server(server)
-        else:
-            tool_runtime_factories["local_mcp"] = lambda: LocalFunctionRuntime(service)
+        if dataset_mcp_server is None:
+            raise CapabilityUnavailableError("Strategy 'local_mcp' requires a dataset MCP server.")
+        tool_runtime_factories["local_mcp"] = lambda: MCPRuntime.for_local_server(dataset_mcp_server)
     return tool_runtime_factories
+
+
+def _resolve_mcp_server(adapter: DatasetPackage) -> object | None:
+    mcp_server = getattr(adapter, "mcp_server", None)
+    if not callable(mcp_server):
+        return None
+    server = mcp_server()
+    if server is None or not hasattr(server, "app"):
+        return None
+    return server
 
 
 def _build_metrics_summary(*, ai_trace: dict[str, object], strategy: str) -> dict[str, int | None]:

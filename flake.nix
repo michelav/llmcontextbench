@@ -105,8 +105,10 @@
             export PATH="${venv}/bin:${ctxbenchPkg}/bin:$PATH"
 
             # opcional: ajuda plugins que procuram uma pasta .venv no projeto
-            if [ ! -e .venv ]; then
+            if [ -L .venv ] || [ ! -e .venv ]; then
               ln -sfn "${venv}" .venv
+            else
+              echo "warning: .venv exists and is not a symlink; not replacing it"
             fi
 
             echo "ctxbench dev shell ready (from uv.lock)."

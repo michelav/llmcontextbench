@@ -1,0 +1,194 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:function reshape(data, dimensions) {
+
+    const totalElements = data.length;
+    const dimensionSize = dimensions.reduce((a, b) => a * b);
+
+    if (totalElements !== dimensionSize) {
+        throw Error(`cannot reshape array of size ${totalElements} into shape (${dimensions})`);
+    }
+
+    /** @type {any} */
+    let reshapedArray = data;
+
+    for (let i = dimensions.length - 1; i >= 0; i--) {
+        reshapedArray = reshapedArray.reduce((acc, val) => {
+            let lastArray = acc[acc.length - 1];
+
+            if (lastArray.length < dimensions[i]) {
+                lastArray.push(val);
+            } else {
+                acc.push([val]);
+            }
+
+            return acc;
+        }, [[]]);
+    }
+
+    return reshapedArray[0];
+}
+
+/**
+ * Permutes a tensor according to the provided axes.
+ * @param {any} tensor The input tensor to permute.
+ * @param {Array} axes The axes to permute the tensor along.
+ * @returns {Tensor} The permuted tensor.
+ */
+export function permute(tensor, axes) {
+    const [permutedData, shape] = permute_data(tensor.data, tensor.dims, axes);
+    return new Tensor(tensor.type, permutedData, shape);
+}
+
+
+/**
+ * Interpolates an Tensor to the given size.
+ * @param {Tensor} input The input tensor to interpolate. Data must be channel-first (i.e., [c, h, w])
+ * @param {number[]} size The output size of the image
+ * @param {string} mode The interpolation mode
+ * @param {boolean} align_corners Whether to align corners.
+ * @returns {Tensor} The interpolated tensor.
+ */
+export function interpolate(input, [out_height, out_width], mode = 'bilinear', align_corners = false) {
+
+    // Input image dimensions
+    const in_channels = input.dims.at(-3) ?? 1;
+    const in_height = input.dims.at(-2);
+    const in_width = input.dims.at(-1);
+
+    let output = interpolate_data(
+        /** @type {import('./maths.js').TypedArray}*/(input.data),
+        [in_channels, in_height, in_width],
+        [out_height, out_width],
+        mode,
+        align_corners
+    );
+    return new Tensor(input.type, output, [in_channels, out_height, out_width]);
+}
+
+/**
+ * Perform mean pooling of the last hidden state followed by a normalization step.
+ * @param {Tensor} last_hidden_state Tensor of shape [batchSize, seqLength, embedDim]
+ * @param {Tensor} attention_mask Tensor of shape [batchSize, seqLength]
+ * @returns {Tensor} Returns a new Tensor of shape [batchSize, embedDim].
+ */
+export function mean_pooling(last_hidden_state, attention_mask) {
+    // last_hidden_state: [batchSize, seqLength, embedDim]
+    // attention_mask:    [batchSize, seqLength]
+
+    let shape = [last_hidden_state.dims[0], last_hidden_state.dims[2]];
+    // @ts-ignore
+    let returnedData = new last_hidden_state.data.constructor(shape[0] * shape[1]);
+    let [batchSize, seqLength, embedDim] = last_hidden_state.dims;
+
+    let outIndex = 0;
+    for (let i = 0; i < batchSize; ++i) {
+        let offset = i * embedDim * seqLength;
+
+        for (let k = 0; k < embedDim; ++k) {
+            let sum = 0;
+            let count = 0;
+
+            let attnMaskOffset = i * seqLength;
+            let offset2 = offset + k;
+            // Pool over all words in sequence
+            for (let j = 0; j < seqLength; ++j) {
+                // index into attention mask
+                let attn = Number(attention_mask.data[attnMaskOffset + j]);
+
+                count += attn;
+                sum += last_hidden_state.data[offset2 + j * embedDim] * attn;
+            }
+
+            let avg = sum / count;
+            returnedData[outIndex++] = avg;
+        }
+    }
+
+    return new Tensor(
+        last_hidden_state.type,
+        returnedData,
+        shape
+    )
+}
+
+/**
+ * Apply Layer Normalization for last certain number of dimensions.
+ * @param {Tensor} input The input tensor
+ * @param {number[]} normalized_shape input shape from an expected input of size
+ * @param {Object} options The options for the layer normalization
+ * @param {number} [options.eps=1e-5] A value added to the denominator for numerical stability.
+ * @returns {Tensor} The normalized tensor.
+ */
+export function layer_norm(input, normalized_shape, {
+    eps = 1e-5,
+} = {}) {
+    if (input.dims.length !== 2) {
+        throw new Error('`layer_norm` currently only supports 2D input.');
+    }
+
+    const [batchSize, featureDim] = input.dims;
+
+    if (normalized_shape.length !== 1 && normalized_shape[0] !== featureDim) {
+        throw new Error('`normalized_shape` must be a 1D array with shape `[input.dims[1]]`.');
+    }
+
+    const [std, mean] = std_mean(input, 1, 0, true);
+
+    // @ts-ignore
+    const returnedData = new input.data.constructor(input.data.length);
+
+    for (let i = 0; i < batchSize; ++i) {
+        const offset = i * featureDim;
+        for (let j = 0; j < featureDim; ++j) {
+            const offset2 = offset + j;
+            returnedData[offset2] = (input.data[offset2] - mean.data[i]) / (std.data[i] + eps);
+        }
+    }
+    return new Tensor(input.type, returnedData, input.dims);
+}
+
+/**
+ * Helper function to calculate new dimensions when performing a squeeze operation.
+ * @param {number[]} dims The dimensions of the tensor.
+ * @param {number|number[]|null} dim The dimension(s) to squeeze.
+ * @returns The new dimensions.
+ * @private
+ */
+function calc_squeeze_dims(dims, dim) {
+    dims = dims.slice();
+    if (dim === null) {
+        dims = dims.filter((d) => d !== 1);
+    } else if (typeof dim === 'number') {
+        if (dims[dim] === 1) {
+            dims.splice(dim, 1);
+        }
+    } else if (Array.isArray(dim)) {
+        dims = dims.filter((x, i) => {
+            return x !== 1 || !dim.includes(i);
+        });
+    }
+    return dims;
+}
+
+/**
+ * Helper function to calculate new dimensions when performing an unsqueeze operation.
+ * @param {number[]} dims The dimensions of the tensor.
+ * @param {number} dim The dimension to unsqueeze.
+ * @returns The new dimensions.
+ * @private
+ */
+function calc_unsqueeze_dims(dims, dim) {
+    // Dimension out of range (e.g., "expected to be in range of [-4, 3], but got 4")
+    // + 1 since we allow inserting at the end (i.e. dim = -1)
+    dim = safeIndex(dim, dims.length + 1);
+    dims = dims.slice();
+    // Insert 1 into specified dimension
+    dims.splice(dim, 0, 1);
+    return dims;
+}
+...
+
+Function Description:1. **Purpose**: The function is designed to transform a one-dimensional array into a multi-dimensional array based on specified dimensions.
+2. **Input**: The function accepts two parameters: a one-dimensional array containing data elements, and an array of integers representing the desired dimensions of the output array.
+3. **Output**: It returns a nested array structured according to the provided dimensions. The depth of the nested array corresponds to the number of dimensions specified.
+4. **Procedure**: The function first calculates the total number of elements in the input array and the product of the specified dimensions to ensure they match. If they do not match, an error is thrown. It then iteratively groups elements of the input array into nested arrays based on the dimensions specified, starting from the innermost dimension and working outwards.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

@@ -1,0 +1,15 @@
+{
+  "baseId": "py_005",
+  "endByte": 28120,
+  "endLine": 979,
+  "instanceId": "py_005_ctx16k",
+  "language": "python",
+  "needleName": "is_part_of_annotation",
+  "normalizedLanguage": "python",
+  "path": "src/black/nodes.py",
+  "repo": "psf/black",
+  "sequence": 5,
+  "startByte": 27959,
+  "startLine": 976,
+  "targetFunction": "def is_part_of_annotation(leaf: Leaf) -> bool:\n    \"\"\"Returns whether this leaf is part of a type annotation.\"\"\"\n    return get_annotation_type(leaf) is not None"
+}

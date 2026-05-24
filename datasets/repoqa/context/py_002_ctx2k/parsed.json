@@ -1,0 +1,112 @@
+{
+  "context_builder": "repoqa-native",
+  "context_type": "repoqa_structured_code_context",
+  "files": [
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "src/black/ranges.py",
+      "symbols": [
+        {
+          "children": [],
+          "code": "def convert_unchanged_lines(src_node: Node, lines: Collection[Tuple[int, int]]) -> None:\n    \"\"\"Converts unchanged lines to STANDALONE_COMMENT.\n\n    The idea is similar to how `# fmt: on/off` is implemented. It also converts the\n    nodes between those markers as a single `STANDALONE_COMMENT` leaf node with\n    the unformatted code as its value. `STANDALONE_COMMENT` is a \"fake\" token\n    that will be formatted as-is with its prefix normalized.\n\n    Here we perform two passes:\n\n    1. Visit the top-level statements, and convert them to a single\n       `STANDALONE_COMMENT` when unchanged. This speeds up formatting when some\n       of the top-level statements aren't changed.\n    2. Convert unchanged \"unwrapped lines\" to `STANDALONE_COMMENT` nodes line by\n       line. \"unwrapped lines\" are divided by the `NEWLINE` token. e.g. a\n       multi-line statement is *one* \"unwrapped line\" that ends with `NEWLINE`,\n       even though this statement itself can span multiple lines, and the\n       tokenizer only sees the last '\\n' as the `NEWLINE` token.\n\n    NOTE: During pass (2), comment prefixes and indentations are ALWAYS\n    normalized even when the lines aren't changed. This is fixable by moving\n    more formatting to pass (1). However, it's hard to get it correct when\n    incorrect indentations are used. So we defer this to future optimizations.\n    \"\"\"\n    lines_set: Set[int] = set()\n    for start, end in lines:\n        lines_set.update(range(start, end + 1))\n    visitor = _TopLevelStatementsVisitor(lines_set)\n    _ = list(visitor.visit(src_node))  # Consume all results.\n    _convert_unchanged_line_by_line(src_node, lines_set)",
+          "documentation": "Converts unchanged lines to STANDALONE_COMMENT.\n\n    The idea is similar to how `# fmt: on/off` is implemented. It also converts the\n    nodes between those markers as a single `STANDALONE_COMMENT` leaf node with\n    the unformatted code as its value. `STANDALONE_COMMENT` is a \"fake\" token\n    that will be formatted as-is with its prefix normalized.\n\n    Here we perform two passes:\n\n    1. Visit the top-level statements, and convert them to a single\n       `STANDALONE_COMMENT` when unchanged. This speeds up formatting when some\n       of the top-level statements aren't changed.\n    2. Convert unchanged \"unwrapped lines\" to `STANDALONE_COMMENT` nodes line by\n       line. \"unwrapped lines\" are divided by the `NEWLINE` token. e.g. a\n       multi-line statement is *one* \"unwrapped line\" that ends with `NEWLINE`,\n       even though this statement itself can span multiple lines, and the\n       tokenizer only sees the last '\n' as the `NEWLINE` token.\n\n    NOTE: During pass (2), comment prefixes and indentations are ALWAYS\n    normalized even when the lines aren't changed. This is fixable by moving\n    more formatting to pass (1). However, it's hard to get it correct when\n    incorrect indentations are used. So we defer this to future optimizations.",
+          "end_line": 157,
+          "kind": "function",
+          "name": "convert_unchanged_lines",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "convert_unchanged_lines",
+          "signature": "def convert_unchanged_lines(src_node: Node, lines: Collection[Tuple[int, int]]) -> None",
+          "start_line": 128,
+          "symbol_id": "src/black/ranges.py#function:convert_unchanged_lines:128"
+        },
+        {
+          "children": [],
+          "code": "def _contains_standalone_comment(node: LN) -> bool:\n    if isinstance(node, Leaf):\n        return node.type == STANDALONE_COMMENT\n    else:\n        for child in node.children:\n            if _contains_standalone_comment(child):\n                return True\n        return False",
+          "documentation": null,
+          "end_line": 167,
+          "kind": "function",
+          "name": "_contains_standalone_comment",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "_contains_standalone_comment",
+          "signature": "def _contains_standalone_comment(node: LN) -> bool",
+          "start_line": 160,
+          "symbol_id": "src/black/ranges.py#function:_contains_standalone_comment:160"
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "code": "def __init__(self, lines_set: Set[int]):\n        self._lines_set = lines_set",
+              "documentation": null,
+              "end_line": 181,
+              "kind": "method",
+              "name": "__init__",
+              "parent_id": "src/black/ranges.py#class:_TopLevelStatementsVisitor:170",
+              "parent_name": "_TopLevelStatementsVisitor",
+              "qualified_name": "_TopLevelStatementsVisitor.__init__",
+              "signature": "def __init__(self, lines_set: Set[int])",
+              "start_line": 180,
+              "symbol_id": "src/black/ranges.py#method:_TopLevelStatementsVisitor.__init__:180"
+            },
+            {
+              "children": [],
+              "code": "def visit_simple_stmt(self, node: Node) -> Iterator[None]:\n        # This is only called for top-level statements, since `visit_suite`\n        # won't visit its children nodes.\n        yield from []\n        newline_leaf = last_leaf(node)\n        if not newline_leaf:\n            return\n        assert (\n            newline_leaf.type == NEWLINE\n        ), f\"Unexpectedly found leaf.type={newline_leaf.type}\"\n        # We need to find the furthest ancestor with the NEWLINE as the last\n        # leaf, since a `suite` can simply be a `simple_stmt` when it puts\n        # its body on the same line. Example: `if cond: pass`.\n        ancestor = furthest_ancestor_with_last_leaf(newline_leaf)\n        if not _get_line_range(ancestor).intersection(self._lines_set):\n            _convert_node_to_standalone_comment(ancestor)",
+              "documentation": null,
+              "end_line": 198,
+              "kind": "method",
+              "name": "visit_simple_stmt",
+              "parent_id": "src/black/ranges.py#class:_TopLevelStatementsVisitor:170",
+              "parent_name": "_TopLevelStatementsVisitor",
+              "qualified_name": "_TopLevelStatementsVisitor.visit_simple_stmt",
+              "signature": "def visit_simple_stmt(self, node: Node) -> Iterator[None]",
+              "start_line": 183,
+              "symbol_id": "src/black/ranges.py#method:_TopLevelStatementsVisitor.visit_simple_stmt:183"
+            },
+            {
+              "children": [],
+              "code": "def visit_suite(self, node: Node) -> Iterator[None]:\n        yield from []\n        # If there is a STANDALONE_COMMENT node, it means parts of the node tree\n        # have fmt on/off/skip markers. Those STANDALONE_COMMENT nodes can't\n        # be simply converted by calling str(node). So we just don't convert\n        # here.\n        if _contains_standalone_comment(node):\n            return\n        # Find the semantic parent of this suite. For `async_stmt` and\n        # `async_funcdef`, the ASYNC token is defined on a separate level by the\n        # grammar.\n        semantic_parent = node.parent\n        if semantic_parent is not None:\n            if (\n                semantic_parent.prev_sibling is not None\n                and semantic_parent.prev_sibling.type == ASYNC\n            ):\n                semantic_parent = semantic_parent.parent\n        if semantic_parent is not None and not _get_line_range(\n            semantic_parent\n        ).intersection(self._lines_set):\n            _convert_node_to_standalone_comment(semantic_parent)",
+              "documentation": null,
+              "end_line": 221,
+              "kind": "method",
+              "name": "visit_suite",
+              "parent_id": "src/black/ranges.py#class:_TopLevelStatementsVisitor:170",
+              "parent_name": "_TopLevelStatementsVisitor",
+              "qualified_name": "_TopLevelStatementsVisitor.visit_suite",
+              "signature": "def visit_suite(self, node: Node) -> Iterator[None]",
+              "start_line": 200,
+              "symbol_id": "src/black/ranges.py#method:_TopLevelStatementsVisitor.visit_suite:200"
+            }
+          ],
+          "code": "class _TopLevelStatementsVisitor(Visitor[None]):\n    \"\"\"\n    A node visitor that converts unchanged top-level statements to\n    STANDALONE_COMMENT.\n\n    This is used in addition to _convert_unchanged_line_by_line, to\n    speed up formatting when there are unchanged top-level\n    classes/functions/statements.\n    \"\"\"\n\n    def __init__(self, lines_set: Set[int]):\n        self._lines_set = lines_set\n\n    def visit_simple_stmt(self, node: Node) -> Iterator[None]:\n        # This is only called for top-level statements, since `visit_suite`\n        # won't visit its children nodes.\n        yield from []\n        newline_leaf = last_leaf(node)\n        if not newline_leaf:\n            return\n        assert (\n            newline_leaf.type == NEWLINE\n        ), f\"Unexpectedly found leaf.type={newline_leaf.type}\"\n        # We need to find the furthest ancestor with the NEWLINE as the last\n        # leaf, since a `suite` can simply be a `simple_stmt` when it puts\n        # its body on the same line. Example: `if cond: pass`.\n        ancestor = furthest_ancestor_with_last_leaf(newline_leaf)\n        if not _get_line_range(ancestor).intersection(self._lines_set):\n            _convert_node_to_standalone_comment(ancestor)\n\n    def visit_suite(self, node: Node) -> Iterator[None]:\n        yield from []\n        # If there is a STANDALONE_COMMENT node, it means parts of the node tree\n        # have fmt on/off/skip markers. Those STANDALONE_COMMENT nodes can't\n        # be simply converted by calling str(node). So we just don't convert\n        # here.\n        if _contains_standalone_comment(node):\n            return\n        # Find the semantic parent of this suite. For `async_stmt` and\n        # `async_funcdef`, the ASYNC token is defined on a separate level by the\n        # grammar.\n        semantic_parent = node.parent\n        if semantic_parent is not None:\n            if (\n                semantic_parent.prev_sibling is not None\n                and semantic_parent.prev_sibling.type == ASYNC\n            ):\n                semantic_parent = semantic_parent.parent\n        if semantic_parent is not None and not _get_line_range(\n            semantic_parent\n        ).intersection(self._lines_set):\n            _convert_node_to_standalone_comment(semantic_parent)",
+          "documentation": "A node visitor that converts unchanged top-level statements to\nSTANDALONE_COMMENT.\n\nThis is used in addition to _convert_unchanged_line_by_line, to\nspeed up formatting when there are unchanged top-level\nclasses/functions/statements.",
+          "end_line": 221,
+          "kind": "class",
+          "name": "_TopLevelStatementsVisitor",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "_TopLevelStatementsVisitor",
+          "signature": "class _TopLevelStatementsVisitor(Visitor[None])",
+          "start_line": 170,
+          "symbol_id": "src/black/ranges.py#class:_TopLevelStatementsVisitor:170"
+        }
+      ],
+      "unparsed_code": null
+    }
+  ],
+  "metadata": {
+    "actual_code_context_tokens": 2026,
+    "base_id": "py_002",
+    "instance_id": "py_002_ctx2k",
+    "language": "python",
+    "normalized_language": "python",
+    "position_ratio": 0.15,
+    "requested_context_tokens": 2048,
+    "sequence": 2
+  },
+  "repository": "psf/black",
+  "workspace_id": "py_002_ctx2k"
+}
