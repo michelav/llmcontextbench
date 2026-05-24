@@ -11,6 +11,8 @@ from ctxbench.dataset.package import DatasetMetadata
 from ctxbench.dataset.payloads import ContextPayload, EvidencePayload, TaskPayload
 from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.dataset.validation import validate_package
+from ctxbench.adapters.repoqa.mcp_server import build_repoqa_mcp_server
+from ctxbench.adapters.repoqa.tools import RepoQAToolService
 from ctxbench.util.fs import load_json
 
 
@@ -65,14 +67,22 @@ class RepoQADatasetAdapter(LocalDatasetPackage):
     def fixtures(self) -> object:
         return self._root
 
+    def tool_provider(self) -> object | None:
+        return RepoQAToolService(contexts_dir=self.dataset_paths.contexts)
+
+    def mcp_server(self) -> object:
+        return build_repoqa_mcp_server(contexts_dir=self.dataset_paths.contexts)
+
     def dataset_instructions(
         self,
     ) -> str | None:
-        path = Path(self._root) / "dataset-instructions.txt"
-        if not path.exists() or path.is_dir():
-            return None
-        content = path.read_text(encoding="utf-8").strip()
-        return content or None
+        for filename in ("dataset-instructions.txt", "dataset-instructions.md"):
+            path = Path(self._root) / filename
+            if path.exists() and not path.is_dir():
+                content = path.read_text(encoding="utf-8").strip()
+                if content:
+                    return content
+        return None
 
     @override
     def get_task(self, task_id: str) -> TaskPayload:
