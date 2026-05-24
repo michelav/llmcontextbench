@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+import pytest
 
 from ctxbench.ai.runtime import MCPRuntime
 from ctxbench.adapters.repoqa.mcp_server import RepoQAMCPServer
@@ -51,7 +54,64 @@ def test_provider_lists_files_symbols_and_reads_visible_file() -> None:
     assert [item["name"] for item in function_symbols[0]["children"]] == ["greet"]
     assert helper["code"].startswith("def helper")
     assert visible_file["content"].startswith("class Greeter")
+    assert "code" not in visible_file
     assert "THIS FALLBACK MUST NOT BE USED" not in visible_file["content"]
+
+
+@pytest.mark.parametrize(
+    "marker",
+    [
+        "# Path: src/example.py",
+        "// File: src/example.py",
+        "-- File: src/example.py",
+        "/* File: src/example.py */",
+        "<!-- Path: src/example.py -->",
+    ],
+)
+def test_provider_read_file_supports_visible_file_marker_styles(tmp_path: Path, marker: str) -> None:
+    workspace = tmp_path / "context" / "repoqa-workspace-marker"
+    workspace.mkdir(parents=True)
+    (workspace / "parsed.json").write_text(
+        json.dumps(
+            {
+                "repository": "example/repo",
+                "files": [
+                    {
+                        "repository": "example/repo",
+                        "path": "src/example.py",
+                        "language": "python",
+                        "symbols": [],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (workspace / "metadata.json").write_text(json.dumps({"repository": "example/repo"}), encoding="utf-8")
+    (workspace / "code_context.txt").write_text(
+        "\n".join(
+            [
+                "# Repository: example/repo",
+                "// Repo: example/repo",
+                marker,
+                "",
+                "def visible():",
+                "    return 'from code_context'",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (workspace / "oracle.json").write_text(json.dumps({"answer": "must not be read"}), encoding="utf-8")
+    (workspace / "native_task.json").write_text(json.dumps({"name": "must not be read"}), encoding="utf-8")
+
+    result = RepoQAProvider(contexts_dir=tmp_path / "context").read_file(
+        "repoqa-workspace-marker",
+        "src/example.py",
+    )
+
+    assert result["content"] == "def visible():\n    return 'from code_context'\n"
+    assert "code" not in result
 
 
 def test_provider_symbol_kind_function_includes_methods() -> None:

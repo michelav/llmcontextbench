@@ -10,7 +10,28 @@ from typing import Any
 from ctxbench.util.fs import load_json
 
 
-FILE_MARKER_PATTERN = re.compile(r"^# (?:File|Path): (?P<path>.+?)\s*$")
+FILE_MARKER_PATTERN = re.compile(
+    r"""
+    ^\s*
+    (?:
+        \#\s*
+        |//\s*
+        |--\s*
+        |/\*\s*
+        |<!--\s*
+    )
+    (?P<label>File|Path|Repository|Repo)
+    \s*:\s*
+    (?P<value>.*?)
+    \s*
+    (?:
+        \*/\s*
+        |-->\s*
+    )?
+    $
+    """,
+    re.IGNORECASE | re.VERBOSE,
+)
 
 
 class RepoQAProvider:
@@ -315,9 +336,12 @@ def _parse_visible_files(text: str) -> dict[str, str]:
     for line in text.splitlines():
         match = FILE_MARKER_PATTERN.match(line)
         if match:
+            label = match.group("label").lower()
+            if label in {"repository", "repo"}:
+                continue
             if current_path is not None:
                 files[current_path] = _trim_blank_edges(current_lines)
-            current_path = match.group("path").strip()
+            current_path = match.group("value").strip()
             current_lines = []
             continue
         if current_path is not None:

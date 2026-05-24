@@ -218,6 +218,7 @@ class FakeDatasetAdapter:
         evidence: object | None = None,
         oracle: object = ORACLE_UNAVAILABLE,
         tool_provider: object | None = None,
+        mcp_server: object | None = None,
         unsupported_context: bool = False,
     ) -> None:
         self.context_content = context_content
@@ -226,11 +227,13 @@ class FakeDatasetAdapter:
         }
         self.oracle = oracle
         self._tool_provider = tool_provider
+        self._mcp_server = mcp_server
         self.unsupported_context = unsupported_context
         self.context_calls: list[tuple[str, str, str]] = []
         self.evidence_calls: list[tuple[str | None, str]] = []
         self.oracle_calls: list[tuple[str | None, str]] = []
         self.tool_provider_calls = 0
+        self.mcp_server_calls = 0
 
     def metadata(self) -> DatasetMetadata:
         return DatasetMetadata(
@@ -289,6 +292,10 @@ class FakeDatasetAdapter:
     def tool_provider(self) -> object | None:
         self.tool_provider_calls += 1
         return self._tool_provider
+
+    def mcp_server(self) -> object | None:
+        self.mcp_server_calls += 1
+        return self._mcp_server
 
 
 class FakeRegistry:
@@ -427,11 +434,71 @@ def test_execute_runspec_inline_unsupported_representation_propagates(monkeypatc
         execute_runspec(_runspec_for_executor(dataset), Engine())
 
 
-@pytest.mark.parametrize("strategy_name", ["local_function", "local_mcp", "remote_mcp"])
-def test_execute_runspec_tool_strategies_use_tool_provider_without_context(monkeypatch, tmp_path, strategy_name):
+def test_execute_runspec_local_function_uses_tool_provider_runtime(monkeypatch, tmp_path):
     dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
     service = FakeLattesRuntime()
     adapter = FakeDatasetAdapter(tool_provider=service)
+    monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
+    constructed: list[object] = []
+
+    class SpyLocalFunctionRuntime(FakeLattesRuntime):
+        def __init__(self, provider: object) -> None:
+            super().__init__()
+            constructed.append(provider)
+
+    monkeypatch.setattr(executor_module, "LocalFunctionRuntime", SpyLocalFunctionRuntime)
+    engine = Engine()
+    model = RecordingModel()
+    engine._models["recording"] = model
+
+    result = execute_runspec(_runspec_for_executor(dataset, strategy="local_function"), engine)
+
+    assert result.status == "success"
+    assert adapter.context_calls == []
+    assert adapter.tool_provider_calls == 1
+    assert adapter.mcp_server_calls == 0
+    assert constructed == [service]
+    assert model.last_request is not None
+    assert model.last_request.metadata["context_obtained"] is False
+
+
+def test_execute_runspec_local_mcp_uses_dataset_mcp_server(monkeypatch, tmp_path):
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+
+    class FakeMCPServer:
+        app = object()
+
+    server = FakeMCPServer()
+    adapter = FakeDatasetAdapter(tool_provider=FakeLattesRuntime(), mcp_server=server)
+    monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
+    constructed: list[object] = []
+
+    def fake_for_local_server(mcp_server: object) -> FakeLattesRuntime:
+        constructed.append(mcp_server)
+        return FakeLattesRuntime()
+
+    monkeypatch.setattr(executor_module.MCPRuntime, "for_local_server", staticmethod(fake_for_local_server))
+    engine = Engine()
+    model = RecordingModel()
+    engine._models["recording"] = model
+
+    result = execute_runspec(_runspec_for_executor(dataset, strategy="local_mcp"), engine)
+
+    assert result.status == "success"
+    assert adapter.context_calls == []
+    assert adapter.tool_provider_calls == 0
+    assert adapter.mcp_server_calls == 1
+    assert constructed == [server]
+    assert model.last_request is not None
+    assert model.last_request.metadata["context_obtained"] is False
+    events = result.trace.aiTrace.get("events", [])
+    assert any(event["name"] == "strategy.local_mcp.execute" for event in events)
+    assert not any(event["name"] == "strategy.local_function.execute" for event in events)
+
+
+def test_execute_runspec_remote_mcp_does_not_call_tool_provider(monkeypatch, tmp_path):
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter(tool_provider=FakeLattesRuntime())
     monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
     engine = Engine()
     model = RecordingModel()
@@ -440,7 +507,7 @@ def test_execute_runspec_tool_strategies_use_tool_provider_without_context(monke
     result = execute_runspec(
         _runspec_for_executor(
             dataset,
-            strategy=strategy_name,
+            strategy="remote_mcp",
             params={"mcp_server": {"server_url": "https://example.test/mcp"}},
         ),
         engine,
@@ -448,23 +515,47 @@ def test_execute_runspec_tool_strategies_use_tool_provider_without_context(monke
 
     assert result.status == "success"
     assert adapter.context_calls == []
-    assert adapter.tool_provider_calls == 1
+    assert adapter.tool_provider_calls == 0
+    assert adapter.mcp_server_calls == 0
     assert model.last_request is not None
     assert model.last_request.metadata["context_obtained"] is False
-    if strategy_name == "remote_mcp":
-        assert model.last_request.metadata["dataset_tool_provider"] is service
-        events = result.trace.aiTrace.get("events", [])
-        assert any(event["name"] == "strategy.remote_mcp.execute" for event in events)
-        assert not any(event["name"] == "strategy.local_mcp.execute" for event in events)
+    assert "dataset_tool_provider" not in model.last_request.metadata
+    events = result.trace.aiTrace.get("events", [])
+    assert any(event["name"] == "strategy.remote_mcp.execute" for event in events)
+    assert not any(event["name"] == "strategy.local_mcp.execute" for event in events)
 
 
-def test_execute_runspec_tool_strategy_missing_provider_raises(monkeypatch, tmp_path):
+def test_execute_runspec_local_function_missing_provider_raises(monkeypatch, tmp_path):
     dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
     adapter = FakeDatasetAdapter(tool_provider=None)
     monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
 
     with pytest.raises(CapabilityUnavailableError):
         execute_runspec(_runspec_for_executor(dataset, strategy="local_function"), Engine())
+
+
+def test_execute_runspec_local_mcp_missing_server_raises(monkeypatch, tmp_path):
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter(tool_provider=FakeLattesRuntime(), mcp_server=None)
+    monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
+
+    with pytest.raises(CapabilityUnavailableError, match="dataset MCP server"):
+        execute_runspec(_runspec_for_executor(dataset, strategy="local_mcp"), Engine())
+
+    assert adapter.tool_provider_calls == 0
+    assert adapter.mcp_server_calls == 1
+
+
+def test_execute_runspec_remote_mcp_missing_config_raises_without_tool_provider(monkeypatch, tmp_path):
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    adapter = FakeDatasetAdapter(tool_provider=FakeLattesRuntime())
+    monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
+
+    with pytest.raises(CapabilityUnavailableError, match=r"params\['mcp_server'\]"):
+        execute_runspec(_runspec_for_executor(dataset, strategy="remote_mcp"), Engine())
+
+    assert adapter.tool_provider_calls == 0
+    assert adapter.mcp_server_calls == 0
 
 
 def test_engine_inline_execution_records_prompt_trace_and_usage():
