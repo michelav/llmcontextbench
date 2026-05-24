@@ -68,6 +68,7 @@ class LattesDatasetAdapter(LocalDatasetPackage):
             statement=task.statement,
             tags=list(task.tags),
             validation_type=task.validation.type,
+            validation_config=task.validation.validation_config(),
             context_blocks=list(task.contextBlocks),
         )
 

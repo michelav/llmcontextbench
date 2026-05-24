@@ -1,6 +1,7 @@
 import argparse
 import json
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 import sys
@@ -1012,6 +1013,213 @@ def test_submit_evaluation_batch_writes_target_manifest_fields(tmp_path):
     assert set(first_request) == {"customId", "trialId", "taskId", "instanceId"}
     assert first_request["trialId"]
     assert first_request["taskId"] in {"q_year", "q_summary"}
+
+
+def test_eval_repoqa_scorer_does_not_require_judges(tmp_path):
+    root = tmp_path / "run"
+    root.mkdir()
+    (root / "manifest.json").write_text(
+        json.dumps({"trace": {"writeFiles": False}, "evaluation": {"enabled": True}}),
+        encoding="utf-8",
+    )
+    response = {
+        "trialId": "repoqa-1",
+        "experimentId": "exp-repoqa",
+        "dataset": {
+            "id": "ctxbench/repoqa",
+            "version": "local",
+            "origin": str(root / "dataset"),
+            "materializedPath": str(root / "dataset"),
+        },
+        "taskId": "q_repoqa",
+        "taskStatement": "Find the target function.",
+        "instanceId": "inst-1",
+        "provider": "mock",
+        "modelId": "mock",
+        "model": "mock",
+        "strategy": "inline",
+        "format": "code",
+        "repeatIndex": 1,
+        "status": "success",
+        "response": "",
+        "timing": {
+            "startedAt": "2026-01-01T00:00:00Z",
+            "finishedAt": "2026-01-01T00:00:01Z",
+            "durationMs": 1000,
+        },
+        "usage": {},
+        "metricsSummary": {},
+        "validationType": "repoqa-scorer",
+        "validationConfig": {"threshold": 0.75, "ignoreComments": True},
+        "metadata": {
+            "canonicalId": "repoqa-1",
+            "taskId": "q_repoqa",
+            "instanceId": "inst-1",
+            "provider": "mock",
+            "modelId": "mock",
+            "modelName": "mock",
+            "strategy": "inline",
+            "format": "code",
+            "repeatIndex": 1,
+            "validationType": "repoqa-scorer",
+            "validationConfig": {"threshold": 0.75, "ignoreComments": True},
+        },
+    }
+    (root / "responses.jsonl").write_text(json.dumps(response) + "\n", encoding="utf-8")
+
+    assert main(["eval", str(root / "responses.jsonl")]) == 0
+
+    rows = _jsonl_rows(root / "evals.jsonl")
+    assert rows[0]["evaluationMethod"] == "repoqa-scorer"
+    assert rows[0]["details"]["repoqa"]["threshold"] == 0.75
+    assert rows[0]["details"]["repoqa"]["ignoreComments"] is True
+    assert not (root / "judge_votes.jsonl").exists()
+    assert (root / "evals-summary.json").exists()
+
+
+def test_eval_repoqa_scorer_scores_non_empty_response_without_judges(tmp_path, monkeypatch):
+    import ctxbench.adapters.repoqa.evaluation as repoqa_eval
+
+    root = tmp_path / "run"
+    dataset_root = root / "dataset"
+    instance_dir = dataset_root / "context" / "inst-1"
+    raw_dir = dataset_root / "raw"
+    root.mkdir()
+    instance_dir.mkdir(parents=True)
+    raw_dir.mkdir()
+    (root / "manifest.json").write_text(
+        json.dumps({"trace": {"writeFiles": False}, "evaluation": {"enabled": True}}),
+        encoding="utf-8",
+    )
+    (instance_dir / "native_task.json").write_text(
+        json.dumps({"language": "python", "repo": "owner/repo", "name": "target_func"}),
+        encoding="utf-8",
+    )
+    (raw_dir / "repoqa.json").write_text(
+        json.dumps({"python": [{"repo": "owner/repo", "content": {}, "needles": []}]}),
+        encoding="utf-8",
+    )
+    runner = tmp_path / "repoqa_python"
+    helper = tmp_path / "score_response.py"
+    runner.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    helper.write_text("# helper\n", encoding="utf-8")
+
+    response = {
+        "trialId": "repoqa-1",
+        "experimentId": "exp-repoqa",
+        "dataset": {
+            "id": "ctxbench/repoqa",
+            "version": "local",
+            "origin": str(dataset_root),
+            "materializedPath": str(dataset_root),
+        },
+        "taskId": "q_repoqa",
+        "taskStatement": "Find the target function.",
+        "instanceId": "inst-1",
+        "provider": "mock",
+        "modelId": "mock",
+        "model": "mock",
+        "strategy": "inline",
+        "format": "code",
+        "repeatIndex": 1,
+        "status": "success",
+        "response": "def target_func(): pass",
+        "timing": {
+            "startedAt": "2026-01-01T00:00:00Z",
+            "finishedAt": "2026-01-01T00:00:01Z",
+            "durationMs": 1000,
+        },
+        "usage": {},
+        "metricsSummary": {},
+        "validationType": "repoqa-scorer",
+        "validationConfig": {"threshold": 0.75, "ignoreComments": True},
+        "metadata": {
+            "canonicalId": "repoqa-1",
+            "taskId": "q_repoqa",
+            "instanceId": "inst-1",
+            "provider": "mock",
+            "modelId": "mock",
+            "modelName": "mock",
+            "strategy": "inline",
+            "format": "code",
+            "repeatIndex": 1,
+            "validationType": "repoqa-scorer",
+            "validationConfig": {"threshold": 0.75, "ignoreComments": True},
+        },
+    }
+    (root / "responses.jsonl").write_text(json.dumps(response) + "\n", encoding="utf-8")
+
+    def fake_run(args, *, input, text, capture_output, check):
+        request = json.loads(input)
+        assert args == [str(runner), str(helper)]
+        assert request["native_task"]["name"] == "target_func"
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout=json.dumps(
+                {
+                    "verdict": "best_match",
+                    "bestTarget": "target_func",
+                    "bestSimilarScore": 0.86,
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(repoqa_eval, "_load_direct_needle_evaluator", lambda: None)
+    monkeypatch.setattr(repoqa_eval, "_repoqa_runner_path", lambda: runner)
+    monkeypatch.setattr(repoqa_eval, "_repoqa_helper_path", lambda: helper)
+    monkeypatch.setattr(repoqa_eval.subprocess, "run", fake_run)
+
+    assert main(["eval", str(root / "responses.jsonl")]) == 0
+
+    rows = _jsonl_rows(root / "evals.jsonl")
+    assert rows[0]["evaluationMethod"] == "repoqa-scorer"
+    assert rows[0]["details"]["repoqa"]["bestTarget"] == "target_func"
+    assert rows[0]["details"]["repoqa"]["bestSimilarScore"] == 0.86
+    assert rows[0]["details"]["repoqa"]["passed"] is True
+    assert not (root / "judge_votes.jsonl").exists()
+
+
+def test_eval_rejects_batch_for_repoqa_scorer(tmp_path):
+    root = tmp_path / "run"
+    root.mkdir()
+    (root / "manifest.json").write_text(json.dumps({"evaluation": {"enabled": True}}), encoding="utf-8")
+    response = {
+        "trialId": "repoqa-1",
+        "experimentId": "exp-repoqa",
+        "dataset": {"id": "ctxbench/repoqa", "version": "local", "origin": str(root)},
+        "taskId": "q_repoqa",
+        "taskStatement": "Find the target function.",
+        "instanceId": "inst-1",
+        "provider": "mock",
+        "modelId": "mock",
+        "model": "mock",
+        "strategy": "inline",
+        "format": "code",
+        "repeatIndex": 1,
+        "status": "success",
+        "response": "",
+        "timing": {
+            "startedAt": "2026-01-01T00:00:00Z",
+            "finishedAt": "2026-01-01T00:00:01Z",
+            "durationMs": 1000,
+        },
+        "validationType": "repoqa-scorer",
+        "metadata": {
+            "canonicalId": "repoqa-1",
+            "taskId": "q_repoqa",
+            "instanceId": "inst-1",
+            "provider": "mock",
+            "strategy": "inline",
+            "format": "code",
+            "repeatIndex": 1,
+            "validationType": "repoqa-scorer",
+        },
+    }
+    (root / "responses.jsonl").write_text(json.dumps(response) + "\n", encoding="utf-8")
+
+    assert main(["eval", str(root / "responses.jsonl"), "--batch"]) == 1
 
 
 def test_eval_batch_retrieves_openai_error_results(tmp_path):

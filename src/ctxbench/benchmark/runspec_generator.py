@@ -146,6 +146,7 @@ def generate_runspecs(
                                     "artifacts": experiment.artifacts,
                                     "taskTags": list(task.tags),
                                     "validationType": task.validation_type,
+                                    "validationConfig": dict(task.validation_config),
                                     "contextBlocks": list(task.context_blocks),
                                     "parameters": parameters,
                                 }
@@ -166,6 +167,7 @@ def generate_runspecs(
                 taskTemplate=item["taskTemplate"],
                 taskTags=item["taskTags"],
                 validationType=item["validationType"],
+                validationConfig=item["validationConfig"],
                 contextBlocks=item["contextBlocks"],
                 parameters=item["parameters"],
                 instanceId=item["instanceId"],
@@ -192,6 +194,7 @@ def generate_runspecs(
                     repeatIndex=item["repeatIndex"],
                     taskTags=item["taskTags"],
                     validationType=item["validationType"],
+                    validationConfig=item["validationConfig"],
                     parameters=item["parameters"],
                 ),
             )

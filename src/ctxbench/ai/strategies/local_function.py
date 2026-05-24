@@ -40,6 +40,8 @@ class LocalFunctionStrategy(StrategyAdapter):
                 if isinstance(dataset_instructions, str) and dataset_instructions.strip()
                 else ""
             )
+            if not instructions_block and isinstance(request.metadata.get("lattes_id"), str):
+                instructions_block = f"Researcher Lattes ID: {request.metadata['lattes_id']}\n\n"
             prompt = (
                 f"{instructions_block}"
                 f"# Task:\n{request.question}\n\n"

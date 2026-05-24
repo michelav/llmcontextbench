@@ -488,6 +488,7 @@ class TrialMetadata(BaseModel):
     repeatIndex: int
     taskTags: list[str] = Field(default_factory=list)
     validationType: str | None = None
+    validationConfig: dict[str, Any] = Field(default_factory=dict)
     parameters: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
@@ -516,6 +517,7 @@ class TrialSpec(BaseModel):
     taskTemplate: str | None = None
     taskTags: list[str] = Field(default_factory=list)
     validationType: str | None = None
+    validationConfig: dict[str, Any] = Field(default_factory=dict)
     contextBlocks: list[str] = Field(default_factory=list)
     parameters: dict[str, Any] = Field(default_factory=dict)
     instanceId: str
@@ -567,12 +569,14 @@ class TrialSpec(BaseModel):
                 "strategy": payload.get("strategy", ""),
                 "format": payload.get("format", ""),
                 "repeatIndex": payload.get("repeatIndex", 1),
+                "validationConfig": payload.get("validationConfig", {}),
                 "parameters": payload.get("parameters", {}),
             }
         validated_metadata = TrialMetadata.model_validate(payload["metadata"])
         payload["metadata"] = validated_metadata
         payload.setdefault("taskTags", validated_metadata.taskTags)
         payload.setdefault("validationType", validated_metadata.validationType)
+        payload.setdefault("validationConfig", validated_metadata.validationConfig)
         payload.setdefault("parameters", validated_metadata.parameters)
         payload.setdefault("modelId", validated_metadata.modelId or payload.get("modelName"))
         payload = _coerce_dataset_provenance(payload)
@@ -600,6 +604,7 @@ class TrialSpec(BaseModel):
             "artifacts": self.artifacts.model_dump(mode="json"),
             "taskTags": list(self.taskTags),
             "validationType": self.validationType,
+            "validationConfig": dict(self.validationConfig),
             "contextBlocks": list(self.contextBlocks),
             "parameters": dict(self.parameters),
             "metadata": {
@@ -614,6 +619,7 @@ class TrialSpec(BaseModel):
                 "repeatIndex": self.metadata.repeatIndex,
                 "taskTags": list(self.metadata.taskTags),
                 "validationType": self.metadata.validationType,
+                "validationConfig": dict(self.metadata.validationConfig),
                 "parameters": dict(self.metadata.parameters),
             },
         }
@@ -657,6 +663,7 @@ class TrialResult(BaseModel):
     taskTemplate: str | None = None
     taskTags: list[str] = Field(default_factory=list)
     validationType: str | None = None
+    validationConfig: dict[str, Any] = Field(default_factory=dict)
     contextBlocks: list[str] = Field(default_factory=list)
     parameters: dict[str, Any] = Field(default_factory=dict)
     instanceId: str
@@ -714,12 +721,14 @@ class TrialResult(BaseModel):
                 "strategy": payload.get("strategy", ""),
                 "format": payload.get("format", ""),
                 "repeatIndex": payload.get("repeatIndex", 1),
+                "validationConfig": payload.get("validationConfig", {}),
                 "parameters": payload.get("parameters", {}),
             }
         validated_metadata = TrialMetadata.model_validate(payload["metadata"])
         payload["metadata"] = validated_metadata
         payload.setdefault("taskTags", validated_metadata.taskTags)
         payload.setdefault("validationType", validated_metadata.validationType)
+        payload.setdefault("validationConfig", validated_metadata.validationConfig)
         payload.setdefault("parameters", validated_metadata.parameters)
         payload.setdefault("modelId", validated_metadata.modelId or payload.get("modelName"))
         payload = _coerce_dataset_provenance(payload)
@@ -750,6 +759,7 @@ class TrialResult(BaseModel):
             "traceRef": trace_ref,
             "taskTags": list(self.taskTags),
             "validationType": self.validationType,
+            "validationConfig": dict(self.validationConfig),
             "contextBlocks": list(self.contextBlocks),
             "parameters": dict(self.parameters),
             "metadata": {
@@ -764,6 +774,7 @@ class TrialResult(BaseModel):
                 "repeatIndex": self.metadata.repeatIndex,
                 "taskTags": list(self.metadata.taskTags),
                 "validationType": self.metadata.validationType,
+                "validationConfig": dict(self.metadata.validationConfig),
                 "parameters": dict(self.metadata.parameters),
             },
         }
@@ -836,6 +847,8 @@ class EvaluationItemResult(BaseModel):
         judge_error_count = sum(1 for j in judges if isinstance(j, dict) and j.get("error"))
         if self.status == "skipped":
             eval_status = "skipped"
+        elif self.evaluationMethod == "repoqa-scorer":
+            eval_status = "evaluated"
         elif judge_success_count == 0:
             eval_status = "error"
         elif judge_error_count > 0:
@@ -847,7 +860,7 @@ class EvaluationItemResult(BaseModel):
             if self.evaluationInputTokens is not None or self.evaluationOutputTokens is not None
             else None
         )
-        return {
+        payload = {
             "trialId": self.trialId,
             "experimentId": self.experimentId,
             "dataset": self.dataset.model_dump(mode="json"),
@@ -865,6 +878,9 @@ class EvaluationItemResult(BaseModel):
             "evaluationDurationMs": self.evaluationDurationMs,
             "contextBlocks": self.contextBlocks if self.contextBlocks else None,
         }
+        if self.evaluationMethod == "repoqa-scorer":
+            payload["details"] = details
+        return payload
 
     def to_judge_votes(self, *, trace_ref: str | None = None) -> list[dict[str, Any]]:
         details = self.details if isinstance(self.details, dict) else {}

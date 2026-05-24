@@ -57,7 +57,9 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
     if runspec.strategy == "remote_mcp":
         request_metadata["dataset_tool_provider"] = dataset_tool_provider
 
-    request_metadata["dataset_instructions"] = adapter.dataset_instructions()
+    dataset_instructions = getattr(adapter, "dataset_instructions", lambda: None)()
+    if dataset_instructions:
+        request_metadata["dataset_instructions"] = dataset_instructions
     request = AIRequest(
         question=runspec.taskStatement,
         context=context,
@@ -119,6 +121,7 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
         taskTemplate=runspec.taskTemplate,
         taskTags=list(runspec.taskTags),
         validationType=runspec.validationType,
+        validationConfig=dict(runspec.validationConfig),
         contextBlocks=list(runspec.contextBlocks),
         parameters=dict(runspec.parameters),
         instanceId=runspec.instanceId,
