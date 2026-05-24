@@ -22,10 +22,8 @@ TASK_STATEMENT = (
     "by triple backticks. Function description: {description}"
 )
 
-DATASET_INSTRUCTIONS = """Retrieve the exact described function from the provided code context.
-Return the function in a fenced code block.
-Do not use external knowledge.
-Do not invent code that is not present in the context.
+DATASET_INSTRUCTIONS = """When a tool requires a `workspace_id`, use the `Instance ID`.
+Do not invent or modify dataset identifiers.
 """
 
 LANGUAGE_ALIASES = {
@@ -40,6 +38,15 @@ LANGUAGE_ALIASES = {
     "golang": "go",
     "rs": "rust",
     "rust": "rust",
+}
+
+LANGUAGE_SHORT_NAMES = {
+    "python": "py",
+    "java": "java",
+    "javascript": "js",
+    "typescript": "ts",
+    "go": "go",
+    "rust": "rs",
 }
 
 TREE_SITTER_SYMBOL_NODE_TYPES = {
@@ -90,6 +97,8 @@ TREE_SITTER_SYMBOL_NODE_TYPES = {
 class BaseNeedle:
     language: str
     normalized_language: str
+    sequence: int
+    base_id: str
     repo_name: str
     repo_raw: dict[str, Any]
     needle_raw: dict[str, Any]
@@ -104,6 +113,7 @@ class PreparedInstance:
     requested_context_tokens: int
     language: str
     normalized_language: str
+    sequence: int
     repo: str
     path: str
     needle_name: str
@@ -280,6 +290,11 @@ def normalize_language_name(language: str) -> str:
     return LANGUAGE_ALIASES.get(key, key)
 
 
+def short_language_name(language: str) -> str:
+    normalized = normalize_language_name(language)
+    return LANGUAGE_SHORT_NAMES.get(normalized, slug(normalized)[:8] or "lang")
+
+
 def normalize_requested_languages(raw_languages: list[str]) -> set[str] | None:
     if not raw_languages:
         return None
@@ -372,10 +387,14 @@ def select_base_needles(
                 if needle_path not in content or not isinstance(content[needle_path], str):
                     continue
 
+                sequence = selected_per_language[normalized_language] + 1
+                base_id = make_base_id(language=normalized_language, sequence=sequence)
                 selected.append(
                     BaseNeedle(
                         language=str(raw_language),
                         normalized_language=normalized_language,
+                        sequence=sequence,
+                        base_id=base_id,
                         repo_name=repo_name,
                         repo_raw=repo_raw,
                         needle_raw=needle_raw,
@@ -509,20 +528,20 @@ def prepare_single_native_instance(
         end_byte=as_optional_int(needle.get("end_byte")),
     )
 
-    base_id = make_base_id(language=base.normalized_language, repo=base.repo_name, needle_name=needle_name)
-    instance_id = make_instance_id(base_id=base_id, context_tokens=context_tokens)
+    instance_id = make_instance_id(base_id=base.base_id, context_tokens=context_tokens)
 
     native_task["ctxbench_instance_id"] = instance_id
-    native_task["ctxbench_base_id"] = base_id
+    native_task["ctxbench_base_id"] = base.base_id
     native_task["ctxbench_requested_context_tokens"] = context_tokens
     native_task["ctxbench_topological_paths"] = list(topological_paths)
 
     return PreparedInstance(
         instance_id=instance_id,
-        base_id=base_id,
+        base_id=base.base_id,
         requested_context_tokens=context_tokens,
         language=base.language,
         normalized_language=base.normalized_language,
+        sequence=base.sequence,
         repo=base.repo_name,
         path=needle_path,
         needle_name=needle_name,
@@ -626,6 +645,7 @@ def write_manifest(
                 "cleanComments": clean_comments,
                 "baseNeedles": base_count,
                 "instances": instance_count,
+                "idScheme": "<language>_<sequence>_ctx<size>",
             },
             "validation": {
                 "type": DEFAULT_VALIDATION_TYPE,
@@ -635,6 +655,7 @@ def write_manifest(
             "layout": {
                 "tasks": "tasks.json",
                 "taskInstances": "tasks.instance.json",
+                "datasetInstructions": "dataset-instructions.txt",
                 "contextRoot": "context/",
             },
         },
@@ -642,7 +663,7 @@ def write_manifest(
 
 
 def write_dataset_instructions(output_root: Path) -> None:
-    (output_root / "dataset-instructions.md").write_text(DATASET_INSTRUCTIONS, encoding="utf-8")
+    (output_root / "dataset-instructions.txt").write_text(DATASET_INSTRUCTIONS, encoding="utf-8")
 
 
 def write_tasks_json(
@@ -751,11 +772,13 @@ def write_context_artifacts(*, output_root: Path, prepared: list[PreparedInstanc
                 },
             ],
             "metadata": {
+                "instance_id": item.instance_id,
+                "base_id": item.base_id,
+                "sequence": item.sequence,
                 "language": item.language,
                 "normalized_language": item.normalized_language,
                 "repo": item.repo,
                 "path": item.path,
-                "base_id": item.base_id,
                 "requested_context_tokens": item.requested_context_tokens,
                 "actual_code_context_tokens": item.code_context_ntokens,
                 "position_ratio": item.position_ratio,
@@ -765,6 +788,9 @@ def write_context_artifacts(*, output_root: Path, prepared: list[PreparedInstanc
 
         # Hidden ground truth/evaluation artifact.
         oracle = {
+            "instanceId": item.instance_id,
+            "baseId": item.base_id,
+            "sequence": item.sequence,
             "language": item.language,
             "normalizedLanguage": item.normalized_language,
             "repo": item.repo,
@@ -804,11 +830,14 @@ def build_parsed_context(item: PreparedInstance) -> dict[str, Any]:
         "context_type": "repoqa_structured_code_context",
         "context_builder": "repoqa-native",
         "repository": item.repo,
+        "workspace_id": item.instance_id,
         "files": files,
         "metadata": {
+            "instance_id": item.instance_id,
+            "base_id": item.base_id,
+            "sequence": item.sequence,
             "language": item.language,
             "normalized_language": item.normalized_language,
-            "base_id": item.base_id,
             "requested_context_tokens": item.requested_context_tokens,
             "actual_code_context_tokens": item.code_context_ntokens,
             "position_ratio": item.position_ratio,
@@ -919,6 +948,7 @@ def python_class_symbol(*, path: str, node: ast.ClassDef, lines: list[str], pare
         "parent_name": parent_name,
         "kind": "class",
         "name": symbol_name,
+        "qualified_name": qualified_name(symbol_name, parent_name),
         "signature": strip_required_text(extract_python_header(node=node, lines=lines)),
         "documentation": strip_optional_text(ast.get_docstring(node, clean=True)),
         "code": strip_structured_text(source_for_node(node=node, lines=lines)),
@@ -947,6 +977,7 @@ def python_function_symbol(
         "parent_name": parent_name,
         "kind": kind,
         "name": symbol_name,
+        "qualified_name": qualified_name(symbol_name, parent_name),
         "signature": strip_required_text(extract_python_header(node=node, lines=lines)),
         "documentation": strip_optional_text(ast.get_docstring(node, clean=True)),
         "code": strip_structured_text(source_for_node(node=node, lines=lines)),
@@ -1011,6 +1042,7 @@ def extract_tree_sitter_symbols(*, language: str, path: str, source: str, source
                 "parent_name": None,
                 "kind": kind,
                 "name": name,
+                "qualified_name": name,
                 "signature": strip_required_text(signature_for_tree_sitter_code(code_text=code_text, kind=kind)),
                 "documentation": strip_optional_text(documentation_before_node(code=source, start_line=start_line)),
                 "code": strip_structured_text(code_text),
@@ -1182,15 +1214,16 @@ def strip_structured_text(value: str) -> str:
     return value.strip()
 
 
+def qualified_name(name: str | None, parent_name: str | None) -> str | None:
+    if not name:
+        return None
+    return f"{parent_name}.{name}" if parent_name else name
+
+
 def make_symbol_id(*, path: str, name: str | None, kind: str, start_line: int | None, parent_name: str | None) -> str:
-    parts = [path, "::"]
-    if parent_name:
-        parts.append(f"{parent_name}.")
-    parts.append(name or "anonymous")
-    parts.append(f"#{kind}")
-    if start_line is not None:
-        parts.append(f":{start_line}")
-    return "".join(parts)
+    qname = qualified_name(name, parent_name) or "anonymous"
+    suffix = f":{start_line}" if start_line is not None else ""
+    return f"{path}#{kind}:{qname}{suffix}"
 
 
 def write_instances_index(*, output_root: Path, prepared: list[PreparedInstance]) -> None:
@@ -1200,10 +1233,12 @@ def write_instances_index(*, output_root: Path, prepared: list[PreparedInstance]
             {
                 "instanceId": item.instance_id,
                 "baseId": item.base_id,
+                "sequence": item.sequence,
                 "language": item.language,
                 "normalizedLanguage": item.normalized_language,
                 "repo": item.repo,
                 "path": item.path,
+                "needleName": item.needle_name,
                 "requestedContextTokens": item.requested_context_tokens,
                 "actualCodeContextTokens": item.code_context_ntokens,
                 "positionRatio": item.position_ratio,
@@ -1213,13 +1248,18 @@ def write_instances_index(*, output_root: Path, prepared: list[PreparedInstance]
     write_json(output_root / "instances.index.json", rows)
 
 
-def make_base_id(*, language: str, repo: str, needle_name: str) -> str:
-    return "__".join([slug(language), slug(repo), slug(needle_name)])
+def make_base_id(*, language: str, sequence: int) -> str:
+    return f"{short_language_name(language)}_{sequence:03d}"
 
 
 def make_instance_id(*, base_id: str, context_tokens: int) -> str:
-    context_label = f"ctx{context_tokens // 1024}k" if context_tokens >= 1024 else f"ctx{context_tokens}"
-    return f"{base_id}__{context_label}"
+    return f"{base_id}_{context_label(context_tokens)}"
+
+
+def context_label(context_tokens: int) -> str:
+    if context_tokens >= 1024 and context_tokens % 1024 == 0:
+        return f"ctx{context_tokens // 1024}k"
+    return f"ctx{context_tokens}"
 
 
 def slug(value: str) -> str:
