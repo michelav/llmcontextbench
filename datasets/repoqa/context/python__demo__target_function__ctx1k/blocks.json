@@ -1,9 +1,0 @@
-{
-  "function_description": "Return the normalized sum of two numbers.",
-  "code_context": "# Path: demo.py\n\ndef helper(x):\n    return x * 2\n\n\ndef target_function(a, b):\n    total = a + b\n    return total / 2\n\n\ndef unrelated(value):\n    return str(value)\n",
-  "metadata": {
-    "language": "python",
-    "repo": "demo",
-    "path": "demo.py"
-  }
-}

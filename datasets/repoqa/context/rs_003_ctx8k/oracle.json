@@ -1,0 +1,15 @@
+{
+  "baseId": "rs_003",
+  "endByte": 23822,
+  "endLine": 791,
+  "instanceId": "rs_003_ctx8k",
+  "language": "rust",
+  "needleName": "many1_count",
+  "normalizedLanguage": "rust",
+  "path": "src/multi/mod.rs",
+  "repo": "rust-bakery/nom",
+  "sequence": 3,
+  "startByte": 23632,
+  "startLine": 783,
+  "targetFunction": "pub fn many1_count<I, E, F>(parser: F) -> impl Parser<I, Output = usize, Error = E>\nwhere\n  I: Clone + InputLength,\n  F: Parser<I, Error = E>,\n  E: ParseError<I>,\n{\n  Many1Count { parser }\n}"
+}

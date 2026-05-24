@@ -1,0 +1,21 @@
+{
+  "base_id": "py_003",
+  "code_context_ntokens": 3984,
+  "description": "1. **Purpose**: The function generates a string used to format text with new lines and optionally a form feed character, typically used to control spacing in formatted output.\n2. **Input**: The function takes three parameters: an integer representing the number of new lines, a boolean indicating whether a form feed character should be included, and an optional string representing the line break character (defaulting to a newline).\n3. **Output**: It returns a string composed of the specified number of newline characters, and if requested, includes a form feed character followed by an additional newline.\n4. **Procedure**: The function first checks if the form feed should be included. If true, it concatenates the specified number of newline characters minus one with a form feed character and another newline. If false, it simply returns a string of newline characters multiplied by the specified integer.",
+  "end_byte": 11420,
+  "end_line": 425,
+  "instance_id": "py_003_ctx4k",
+  "language": "python",
+  "needle_name": "make_simple_prefix",
+  "needle_token_end": 1029,
+  "needle_token_start": 944,
+  "normalized_language": "python",
+  "path": "src/black/nodes.py",
+  "position_ratio": 0.25,
+  "repo": "psf/black",
+  "repoqa_description": "Function Description:1. **Purpose**: The function generates a string used to format text with new lines and optionally a form feed character, typically used to control spacing in formatted output.\n2. **Input**: The function takes three parameters: an integer representing the number of new lines, a boolean indicating whether a form feed character should be included, and an optional string representing the line break character (defaulting to a newline).\n3. **Output**: It returns a string composed of the specified number of newline characters, and if requested, includes a form feed character followed by an additional newline.\n4. **Procedure**: The function first checks if the form feed should be included. If true, it concatenates the specified number of newline characters minus one with a form feed character and another newline. If false, it simply returns a string of newline characters multiplied by the specified integer.",
+  "requested_context_tokens": 4096,
+  "sequence": 3,
+  "start_byte": 11171,
+  "start_line": 420
+}

@@ -1,0 +1,15 @@
+{
+  "baseId": "java_005",
+  "endByte": 1734,
+  "endLine": 55,
+  "instanceId": "java_005_ctx2k",
+  "language": "java",
+  "needleName": "nonNull",
+  "normalizedLanguage": "java",
+  "path": "gson/src/main/java/com/google/gson/internal/NonNullElementWrapperList.java",
+  "repo": "google/gson",
+  "sequence": 5,
+  "startByte": 1581,
+  "startLine": 49,
+  "targetFunction": "private E nonNull(E element) {\n    if (element == null) {\n      throw new NullPointerException(\"Element must be non-null\");\n    }\n    return element;\n  }"
+}

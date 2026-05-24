@@ -1,0 +1,161 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:    recognize(alpha).parse(i)
+  }
+  let ra = ya(&b"abc;"[..]);
+  assert_eq!(ra, Ok((semicolon, &b"abc"[..])));
+
+  fn yd(i: &[u8]) -> I
+Result<&[u8], &[u8]> {
+    recognize(digit).parse(i)
+  }
+  let rd = yd(&b"123;"[..]);
+  assert_eq!(rd, Ok((semicolon, &b"123"[..])));
+
+  fn yhd(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    recognize(hex_digit).parse(i)
+  }
+  let rhd = yhd(&b"123abcDEF;"[..]);
+  assert_eq!(rhd, Ok((semicolon, &b"123abcDEF"[..])));
+
+  fn yod(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    recognize(oct_digit).parse(i)
+  }
+  let rod = yod(&b"1234567;"[..]);
+  assert_eq!(rod, Ok((semicolon, &b"1234567"[..])));
+
+  fn ybd(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    recognize(bin_digit).parse(i)
+  }
+  let rbd = ybd(&b"101010;"[..]);
+  assert_eq!(rbd, Ok((semicolon, &b"101010"[..])));
+
+  fn yan(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    recognize(alphanumeric).parse(i)
+  }
+  let ran = yan(&b"123abc;"[..]);
+  assert_eq!(ran, Ok((semicolon, &b"123abc"[..])));
+
+  fn ys(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    recognize(space).parse(i)
+  }
+  let rs = ys(&b" \t;"[..]);
+  assert_eq!(rs, Ok((semicolon, &b" \t"[..])));
+
+  fn yms(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    recognize(multispace).parse(i)
+  }
+  let rms = yms(&b" \t\r\n;"[..]);
+  assert_eq!(rms, Ok((semicolon, &b" \t\r\n"[..])));
+}
+
+#[test]
+fn take_while() {
+  use crate::bytes::streaming::take_while;
+
+  fn f(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    take_while(is_alphabetic)(i)
+  }
+  let a = b"";
+  let b = b"abcd";
+  let c = b"abcd123";
+  let d = b"123";
+
+  assert_eq!(f(&a[..]), Err(Err::Incomplete(Needed::new(1))));
+  assert_eq!(f(&b[..]), Err(Err::Incomplete(Needed::new(1))));
+  assert_eq!(f(&c[..]), Ok((&d[..], &b[..])));
+  assert_eq!(f(&d[..]), Ok((&d[..], &a[..])));
+}
+
+#[test]
+fn take_while1() {
+  use crate::bytes::streaming::take_while1;
+
+  fn f(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    take_while1(is_alphabetic)(i)
+  }
+  let a = b"";
+  let b = b"abcd";
+  let c = b"abcd123";
+  let d = b"123";
+
+  assert_eq!(f(&a[..]), Err(Err::Incomplete(Needed::new(1))));
+  assert_eq!(f(&b[..]), Err(Err::Incomplete(Needed::new(1))));
+  assert_eq!(f(&c[..]), Ok((&b"123"[..], &b[..])));
+  assert_eq!(
+    f(&d[..]),
+    Err(Err::Error(error_position!(&d[..], ErrorKind::TakeWhile1)))
+  );
+}
+
+#[test]
+fn take_while_m_n() {
+  use crate::bytes::streaming::take_while_m_n;
+
+  fn x(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    take_while_m_n(2, 4, is_alphabetic)(i)
+  }
+  let a = b"";
+  let b = b"a";
+  let c = b"abc";
+  let d = b"abc123";
+  let e = b"abcde";
+  let f = b"123";
+
+  assert_eq!(x(&a[..]), Err(Err::Incomplete(Needed::new(2))));
+  assert_eq!(x(&b[..]), Err(Err::Incomplete(Needed::new(1))));
+  assert_eq!(x(&c[..]), Err(Err::Incomplete(Needed::new(1))));
+  assert_eq!(x(&d[..]), Ok((&b"123"[..], &b"abc"[..])));
+  assert_eq!(x(&e[..]), Ok((&b"e"[..], &b"abcd"[..])));
+  assert_eq!(
+    x(&f[..]),
+    Err(Err::Error(error_position!(&f[..], ErrorKind::TakeWhileMN)))
+  );
+}
+
+#[test]
+fn take_till() {
+  use crate::bytes::streaming::take_till;
+
+  fn f(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    take_till(is_alphabetic)(i)
+  }
+  let a = b"";
+  let b = b"abcd";
+  let c = b"123abcd";
+  let d = b"123";
+
+  assert_eq!(f(&a[..]), Err(Err::Incomplete(Needed::new(1))));
+  assert_eq!(f(&b[..]), Ok((&b"abcd"[..], &b""[..])));
+  assert_eq!(f(&c[..]), Ok((&b"abcd"[..], &b"123"[..])));
+  assert_eq!(f(&d[..]), Err(Err::Incomplete(Needed::new(1))));
+}
+
+#[test]
+fn take_till1() {
+  use crate::bytes::streaming::take_till1;
+
+  fn f(i: &[u8]) -> IResult<&[u8], &[u8]> {
+    take_till1(is_alphabetic)(i)
+  }
+  let a = b"";
+  let b = b"abcd";
+  let c = b"123abcd";
+  let d = b"123";
+
+  assert_eq!(f(&a[..]), Err(Err::Incomplete(Needed::new(1))));
+  assert_eq!(
+    f(&b[..]),
+    Err(Err::Error(error_position!(&b[..], ErrorKind::TakeTill1)))
+  );
+  assert_eq!(f(&c[..]), Ok((&b"abcd"[..], &b"123"[..])));
+  assert_eq!(f(&d[..]), Err(Err::Incomplete(Needed::new(1))));
+}
+
+#[test]
+fn take_while_utf8() {
+...
+
+Function Description:1. **Purpose**: The function is designed to identify and extract a sequence of digit characters from a given byte stream.
+2. **Input**: The function takes a byte array as input.
+3. **Output**: It returns a tuple containing the remaining byte array after the digit sequence and the extracted sequence of digit characters as a byte array.
+4. **Procedure**: The function processes the input byte array to locate and capture a contiguous sequence of digit characters. It stops parsing when a non-digit character is encountered or the input ends.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

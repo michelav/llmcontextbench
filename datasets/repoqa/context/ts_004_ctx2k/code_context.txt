@@ -1,0 +1,221 @@
+// Repository: xenova/transformers.js
+
+        buffer = new Uint8Array(await response.arrayBuffer());
+
+    } else if (
+        cacheHit // The item is being read from the cache
+        &&
+        typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent) // We are in Firefox
+    ) {
+        // Due to bug in Firefox, we cannot display progress when loading from cache.
+        // Fortunately, since this should be instantaneous, this should not impact users too much.
+        buffer = new Uint8Array(await response.arrayBuffer());
+
+        // For completeness, we still fire the final progress callback
+        dispatchCallback(options.progress_callback, {
+            ...progressInfo,
+            progress: 100,
+            loaded: buffer.length,
+            total: buffer.length,
+        })
+    } else {
+        buffer = await readResponse(response, data => {
+            dispatchCallback(options.progress_callback, {
+                ...progressInfo,
+                ...data,
+            })
+        })
+    }
+
+    if (
+        // Only cache web responses
+        // i.e., do not cache FileResponses (prevents duplication)
+        toCacheResponse && cacheKey
+        &&
+        // Check again whether request is in cache. If not, we add the response to the cache
+        (await cache.match(cacheKey) === undefined)
+    ) {
+        // NOTE: We use `new Response(buffer, ...)` instead of `response.clone()` to handle LFS files
+        await cache.put(cacheKey, new Response(buffer, {
+            headers: response.headers
+        }))
+            .catch(err => {
+                // Do not crash if unable to add to cache (e.g., QuotaExceededError).
+                // Rather, log a warning and proceed with execution.
+                console.warn(`Unable to add response to browser cache: ${err}.`);
+            });
+
+    }
+
+    dispatchCallback(options.progress_callback, {
+        status: 'done',
+        name: path_or_repo_id,
+        file: filename
+    });
+
+    return buffer;
+}
+
+/**
+ * Fetches a JSON file from a given path and file name.
+ *
+ * @param {string} modelPath The path to the directory containing the file.
+ * @param {string} fileName The name of the file to fetch.
+ * @param {boolean} [fatal=true] Whether to throw an error if the file is not found.
+ * @param {PretrainedOptions} [options] An object containing optional parameters.
+ * @returns {Promise<Object>} The JSON data parsed into a JavaScript object.
+ * @throws Will throw an error if the file is not found and `fatal` is true.
+ */
+export 
+async function getModelJSON(modelPath, fileName, fatal = true, options = {}) {
+    let buffer = await getModelFile(modelPath, fileName, fatal, options);
+    if (buffer === null) {
+        // Return empty object
+        return {}
+    }
+
+    let decoder = new TextDecoder('utf-8');
+    let jsonData = decoder.decode(buffer);
+
+    return JSON.parse(jsonData);
+}
+
+/**
+ * Read and track progress when reading a Response object
+ *
+ * @param {any} response The Response object to read
+ * @param {function} progress_callback The function to call with progress updates
+ * @returns {Promise<Uint8Array>} A Promise that resolves with the Uint8Array buffer
+ */
+async function readResponse(response, progress_callback) {
+
+    const contentLength = response.headers.get('Content-Length');
+    if (contentLength === null) {
+        console.warn('Unable to determine content-length from response headers. Will expand buffer when needed.')
+    }
+    let total = parseInt(contentLength ?? '0');
+    let buffer = new Uint8Array(total);
+    let loaded = 0;
+
+    const reader = response.body.getReader();
+    async function read() {
+        const { done, value } = await reader.read();
+        if (done) return;
+
+        let newLoaded = loaded + value.length;
+        if (newLoaded > total) {
+            total = newLoaded;
+
+            // Adding the new data will overflow buffer.
+            // In this case, we extend the buffer
+            let newBuffer = new Uint8Array(total);
+
+            // copy contents
+            newBuffer.set(buffer);
+
+            buffer = newBuffer;
+        }
+        buffer.set(value, loaded)
+        loaded = newLoaded;
+
+        const progress = (loaded / total) * 100;
+
+        // Call your function here
+        progress_callback({
+            progress: progress,
+            loaded: loaded,
+            total: total,
+        })
+
+        return read();
+    }
+
+    // Actually read
+    await read();
+
+    return buffer;
+}
+
+/**
+ * Joins multiple parts of a path into a single path, while handling leading and trailing slashes.
+ *
+ * @param {...string} parts Multiple parts of a path.
+ * @returns {string} A string representing the joined path.
+ */
+function pathJoin(...parts) {
+    // https://stackoverflow.com/a/55142565
+    parts = parts.map((part, index) => {
+        if (index) {
+            part = part.replace(new RegExp('^/'), '');
+        }
+        if (index !== parts.length - 1) {
+            part = part.replace(new RegExp('/$'), '');
+        }
+        return part;
+    })
+    return parts.join('/');
+}
+
+// Path: src/configs.js
+
+/**
+ * @file Helper module for using model configs. For more information, see the corresponding
+ * [Python documentation](https://huggingface.co/docs/transformers/main/en/model_doc/auto#transformers.AutoConfig).
+ * 
+ * **Example:** Load an `AutoConfig`.
+ * 
+ * ```javascript
+ * import { AutoConfig } from '@xenova/transformers';
+ * let config = await AutoConfig.from_pretrained('bert-base-uncased');
+ * console.log(config);
+ * // PretrainedConfig {
+ * //   "model_type": "bert",
+ * //   "is_encoder_decoder": false,
+ * //   "architectures": [
+ * //       "BertForMaskedLM"
+ * //   ],
+ * //   "vocab_size": 30522
+ * //   "num_attention_heads": 12,
+ * //   "num_hidden_layers": 12,
+ * //   "hidden_size": 768,
+ * //   "max_position_embeddings": 512,
+ * //   ...
+ * // }
+ * ```
+ * 
+ * @module configs
+ */
+
+import {
+    getModelJSON,
+} from './utils/hub.js';
+
+/**
+ * @typedef {import('./utils/hub.js').PretrainedOptions} PretrainedOptions
+ */
+
+
+/**
+ * Loads a config from the specified path.
+ * @param {string} pretrained_model_name_or_path The path to the config directory.
+ * @param {PretrainedOptions} options Additional options for loading the config.
+ * @returns {Promise<Array>} A promise that resolves with information about the loaded config.
+ */
+async function loadConfig(pretrained_model_name_or_path, options) {
+    let info = await getModelJSON(pretrained_model_name_or_path, 'config.json', true, options);
+    return info;
+}
+
+/**
+ * Base class for all configuration classes. For more information, see the corresponding
+ * [Python documentation](https://huggingface.co/docs/transformers/main/en/main_classes/configuration#transformers.PretrainedConfig).
+ */
+export class PretrainedConfig {
+    // NOTE: Typo in original
+
+    /**
+     * Create a new PreTrainedTokenizer instance.
+     * @param {Object} configJSON The JSON of the config.
+     */
+    constructor(configJSON) {
+...

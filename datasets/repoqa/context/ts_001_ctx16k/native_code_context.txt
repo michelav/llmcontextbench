@@ -1,0 +1,1533 @@
+        return this.clone().round_();
+    }
+
+    /**
+     * Performs Tensor dtype conversion.
+     * @param {DataType} type The desired data type.
+     * @returns {Tensor} The converted tensor.
+     */
+    to(type) {
+        // If the self Tensor already has the correct dtype, then self is returned.
+        if (this.type === type) return this;
+
+        // Otherwise, the returned tensor is a copy of self with the desired dtype.
+        if (!DataTypeMap.hasOwnProperty(type)) {
+            throw new Error(`Unsupported type: ${type}`);
+        }
+        // @ts-ignore
+        return new Tensor(type, DataTypeMap[type].from(this.data), this.dims);
+    }
+}
+
+/**
+ * This creates a nested array of a given type and depth (see examples).
+ * 
+ * @example
+ *   NestArray<string, 1>; // string[]
+ * @example
+ *   NestArray<number, 2>; // number[][]
+ * @example
+ *   NestArray<string, 3>; // string[][][] etc.
+ * @template T
+ * @template {number} Depth
+ * @template {never[]} [Acc=[]]
+ * @typedef {Acc['length'] extends Depth ? T : NestArray<T[], Depth, [...Acc, never]>} NestArray
+ */
+
+/**
+ * Reshapes a 1-dimensional array into an n-dimensional array, according to the provided dimensions.
+ *
+ * @example
+ *   reshape([10                    ], [1      ]); // Type: number[]      Value: [10]
+ *   reshape([1, 2, 3, 4            ], [2, 2   ]); // Type: number[][]    Value: [[1, 2], [3, 4]]
+ *   reshape([1, 2, 3, 4, 5, 6, 7, 8], [2, 2, 2]); // Type: number[][][]  Value: [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+ *   reshape([1, 2, 3, 4, 5, 6, 7, 8], [4, 2   ]); // Type: number[][]    Value: [[1, 2], [3, 4], [5, 6], [7, 8]]
+ * @param {T[]|DataArray} data The input array to reshape.
+ * @param {DIM} dimensions The target shape/dimensions.
+ * @template T
+ * @template {[number]|number[]} DIM
+ * @returns {NestArray<T, DIM["length"]>} The reshaped array.
+ */
+
+function reshape(data, dimensions) {
+
+    const totalElements = data.length;
+    const dimensionSize = dimensions.reduce((a, b) => a * b);
+
+    if (totalElements !== dimensionSize) {
+        throw Error(`cannot reshape array of size ${totalElements} into shape (${dimensions})`);
+    }
+
+    /** @type {any} */
+    let reshapedArray = data;
+
+    for (let i = dimensions.length - 1; i >= 0; i--) {
+        reshapedArray = reshapedArray.reduce((acc, val) => {
+            let lastArray = acc[acc.length - 1];
+
+            if (lastArray.length < dimensions[i]) {
+                lastArray.push(val);
+            } else {
+                acc.push([val]);
+            }
+
+            return acc;
+        }, [[]]);
+    }
+
+    return reshapedArray[0];
+}
+
+/**
+ * Permutes a tensor according to the provided axes.
+ * @param {any} tensor The input tensor to permute.
+ * @param {Array} axes The axes to permute the tensor along.
+ * @returns {Tensor} The permuted tensor.
+ */
+export function permute(tensor, axes) {
+    const [permutedData, shape] = permute_data(tensor.data, tensor.dims, axes);
+    return new Tensor(tensor.type, permutedData, shape);
+}
+
+
+/**
+ * Interpolates an Tensor to the given size.
+ * @param {Tensor} input The input tensor to interpolate. Data must be channel-first (i.e., [c, h, w])
+ * @param {number[]} size The output size of the image
+ * @param {string} mode The interpolation mode
+ * @param {boolean} align_corners Whether to align corners.
+ * @returns {Tensor} The interpolated tensor.
+ */
+export function interpolate(input, [out_height, out_width], mode = 'bilinear', align_corners = false) {
+
+    // Input image dimensions
+    const in_channels = input.dims.at(-3) ?? 1;
+    const in_height = input.dims.at(-2);
+    const in_width = input.dims.at(-1);
+
+    let output = interpolate_data(
+        /** @type {import('./maths.js').TypedArray}*/(input.data),
+        [in_channels, in_height, in_width],
+        [out_height, out_width],
+        mode,
+        align_corners
+    );
+    return new Tensor(input.type, output, [in_channels, out_height, out_width]);
+}
+
+/**
+ * Perform mean pooling of the last hidden state followed by a normalization step.
+ * @param {Tensor} last_hidden_state Tensor of shape [batchSize, seqLength, embedDim]
+ * @param {Tensor} attention_mask Tensor of shape [batchSize, seqLength]
+ * @returns {Tensor} Returns a new Tensor of shape [batchSize, embedDim].
+ */
+export function mean_pooling(last_hidden_state, attention_mask) {
+    // last_hidden_state: [batchSize, seqLength, embedDim]
+    // attention_mask:    [batchSize, seqLength]
+
+    let shape = [last_hidden_state.dims[0], last_hidden_state.dims[2]];
+    // @ts-ignore
+    let returnedData = new last_hidden_state.data.constructor(shape[0] * shape[1]);
+    let [batchSize, seqLength, embedDim] = last_hidden_state.dims;
+
+    let outIndex = 0;
+    for (let i = 0; i < batchSize; ++i) {
+        let offset = i * embedDim * seqLength;
+
+        for (let k = 0; k < embedDim; ++k) {
+            let sum = 0;
+            let count = 0;
+
+            let attnMaskOffset = i * seqLength;
+            let offset2 = offset + k;
+            // Pool over all words in sequence
+            for (let j = 0; j < seqLength; ++j) {
+                // index into attention mask
+                let attn = Number(attention_mask.data[attnMaskOffset + j]);
+
+                count += attn;
+                sum += last_hidden_state.data[offset2 + j * embedDim] * attn;
+            }
+
+            let avg = sum / count;
+            returnedData[outIndex++] = avg;
+        }
+    }
+
+    return new Tensor(
+        last_hidden_state.type,
+        returnedData,
+        shape
+    )
+}
+
+/**
+ * Apply Layer Normalization for last certain number of dimensions.
+ * @param {Tensor} input The input tensor
+ * @param {number[]} normalized_shape input shape from an expected input of size
+ * @param {Object} options The options for the layer normalization
+ * @param {number} [options.eps=1e-5] A value added to the denominator for numerical stability.
+ * @returns {Tensor} The normalized tensor.
+ */
+export function layer_norm(input, normalized_shape, {
+    eps = 1e-5,
+} = {}) {
+    if (input.dims.length !== 2) {
+        throw new Error('`layer_norm` currently only supports 2D input.');
+    }
+
+    const [batchSize, featureDim] = input.dims;
+
+    if (normalized_shape.length !== 1 && normalized_shape[0] !== featureDim) {
+        throw new Error('`normalized_shape` must be a 1D array with shape `[input.dims[1]]`.');
+    }
+
+    const [std, mean] = std_mean(input, 1, 0, true);
+
+    // @ts-ignore
+    const returnedData = new input.data.constructor(input.data.length);
+
+    for (let i = 0; i < batchSize; ++i) {
+        const offset = i * featureDim;
+        for (let j = 0; j < featureDim; ++j) {
+            const offset2 = offset + j;
+            returnedData[offset2] = (input.data[offset2] - mean.data[i]) / (std.data[i] + eps);
+        }
+    }
+    return new Tensor(input.type, returnedData, input.dims);
+}
+
+/**
+ * Helper function to calculate new dimensions when performing a squeeze operation.
+ * @param {number[]} dims The dimensions of the tensor.
+ * @param {number|number[]|null} dim The dimension(s) to squeeze.
+ * @returns The new dimensions.
+ * @private
+ */
+function calc_squeeze_dims(dims, dim) {
+    dims = dims.slice();
+    if (dim === null) {
+        dims = dims.filter((d) => d !== 1);
+    } else if (typeof dim === 'number') {
+        if (dims[dim] === 1) {
+            dims.splice(dim, 1);
+        }
+    } else if (Array.isArray(dim)) {
+        dims = dims.filter((x, i) => {
+            return x !== 1 || !dim.includes(i);
+        });
+    }
+    return dims;
+}
+
+/**
+ * Helper function to calculate new dimensions when performing an unsqueeze operation.
+ * @param {number[]} dims The dimensions of the tensor.
+ * @param {number} dim The dimension to unsqueeze.
+ * @returns The new dimensions.
+ * @private
+ */
+function calc_unsqueeze_dims(dims, dim) {
+    // Dimension out of range (e.g., "expected to be in range of [-4, 3], but got 4")
+    // + 1 since we allow inserting at the end (i.e. dim = -1)
+    dim = safeIndex(dim, dims.length + 1);
+    dims = dims.slice();
+    // Insert 1 into specified dimension
+    dims.splice(dim, 0, 1);
+    return dims;
+}
+
+/**
+ * Safely calculate the index for an array of a given size, allowing negative indexing.
+ * @param {number} index The index that will be used.
+ * @param {number} size The size of the array.
+ * @param {number} [dimension=null] The dimension that the index is for (optional).
+ * @returns {number} The index, guaranteed to be non-negative and less than `arrayLength`.
+ * 
+ * @throws {Error} If the index is out of range.
+ * @private
+ */
+function safeIndex(index, size, dimension = null) {
+    if (index < -size || index >= size) {
+        throw new Error(`IndexError: index ${index} is out of bounds for dimension${dimension === null ? '' : ' ' + dimension} with size ${size}`);
+    }
+
+    if (index < 0) {
+        // Negative indexing, ensuring positive index
+        index = ((index % size) + size) % size;
+    }
+    return index;
+}
+
+/**
+ * Concatenates an array of tensors along a specified dimension.
+ * @param {Tensor[]} tensors The array of tensors to concatenate.
+ * @param {number} dim The dimension to concatenate along.
+ * @returns {Tensor} The concatenated tensor.
+ */
+export function cat(tensors, dim = 0) {
+    dim = safeIndex(dim, tensors[0].dims.length);
+
+    // TODO do validation of shapes
+
+    const resultDims = tensors[0].dims.slice();
+    resultDims[dim] = tensors.reduce((a, b) => a + b.dims[dim], 0);
+
+    // Create a new array to store the accumulated values
+    const resultSize = resultDims.reduce((a, b) => a * b, 1);
+    // @ts-ignore
+    const result = new tensors[0].data.constructor(resultSize);
+
+    // Create output tensor of same type as first
+    const resultType = tensors[0].type;
+
+    if (dim === 0) {
+        // Handle special case for performance reasons
+
+        let offset = 0;
+        for (let t of tensors) {
+            result.set(t.data, offset);
+            offset += t.data.length;
+        }
+
+    } else {
+
+        let currentDim = 0;
+
+        for (let t = 0; t < tensors.length; ++t) {
+            let tensor = tensors[t];
+
+            // Iterate over the data array
+            for (let i = 0; i < tensor.data.length; ++i) {
+                // Calculate the index in the resulting array
+                let resultIndex = 0;
+
+                for (let j = tensor.dims.length - 1, num = i, resultMultiplier = 1; j >= 0; --j) {
+                    const size = tensor.dims[j];
+                    let index = num % size;
+                    if (j === dim) {
+                        index += currentDim;
+                    }
+                    resultIndex += index * resultMultiplier;
+                    resultMultiplier *= resultDims[j];
+                    num = Math.floor(num / size);
+                }
+                // Accumulate the value at the current index
+                result[resultIndex] = tensor.data[i];
+            }
+
+            currentDim += tensor.dims[dim];
+        }
+    }
+    return new Tensor(resultType, result, resultDims);
+}
+
+/**
+ * Stack an array of tensors along a specified dimension.
+ * @param {Tensor[]} tensors The array of tensors to stack.
+ * @param {number} dim The dimension to stack along.
+ * @returns {Tensor} The stacked tensor.
+ */
+export function stack(tensors, dim = 0) {
+    // TODO do validation of shapes
+    // NOTE: stack expects each tensor to be equal size
+    return cat(tensors.map(t => t.unsqueeze(dim)), dim);
+}
+
+
+/**
+ * Calculates the standard deviation and mean over the dimensions specified by dim. dim can be a single dimension or `null` to reduce over all dimensions.
+ * @param {Tensor} input the input tenso
+ * @param {number|null} dim the dimension to reduce. If None, all dimensions are reduced.
+ * @param {number} correction difference between the sample size and sample degrees of freedom. Defaults to Bessel's correction, correction=1.
+ * @param {boolean} keepdim whether the output tensor has dim retained or not.
+ * @returns {Tensor[]} A tuple of (std, mean) tensors.
+ */
+export function std_mean(input, dim = null, correction = 1, keepdim = false) {
+
+    if (dim === null) {
+        // None to reduce over all dimensions.
+        // @ts-ignore
+        const sum = input.data.reduce((a, b) => a + b, 0);
+        const mean = sum / input.data.length;
+        // @ts-ignore
+        const std = Math.sqrt(input.data.reduce((a, b) => a + (b - mean) ** 2, 0) / (input.data.length - correction));
+
+        const meanTensor = new Tensor(input.type, [mean], [/* scalar */]);
+        const stdTensor = new Tensor(input.type, [std], [/* scalar */]);
+
+        return [stdTensor, meanTensor];
+    }
+
+    // Negative indexing
+    dim = safeIndex(dim, input.dims.length);
+
+    const meanTensor = mean(input, dim, keepdim);
+
+    // Calculate the shape of the resulting array after summation
+    const resultDims = input.dims.slice(); // Copy the original dimensions
+    resultDims[dim] = 1; // Remove the specified axis
+
+    // Create a new array to store the accumulated values
+    // @ts-ignore
+    const result = new input.data.constructor(input.data.length / input.dims[dim]);
+
+    // Iterate over the data array
+    for (let i = 0; i < input.data.length; ++i) {
+
+        // Calculate the index in the resulting array
+        let resultIndex = 0;
+
+        for (let j = input.dims.length - 1, num = i, resultMultiplier = 1; j >= 0; --j) {
+            const size = input.dims[j];
+            if (j !== dim) {
+                const index = num % size;
+                resultIndex += index * resultMultiplier;
+                resultMultiplier *= resultDims[j];
+            }
+            num = Math.floor(num / size);
+        }
+
+        // Accumulate the value at the current index
+        result[resultIndex] += (input.data[i] - meanTensor.data[resultIndex]) ** 2;
+    }
+
+    for (let i = 0; i < result.length; ++i) {
+        result[i] = Math.sqrt(result[i] / (input.dims[dim] - correction));
+    }
+
+    if (!keepdim) {
+        resultDims.splice(dim, 1);
+    }
+
+    const stdTensor = new Tensor(input.type, result, resultDims);
+
+    return [stdTensor, meanTensor];
+}
+
+
+/**
+ * Returns the mean value of each row of the input tensor in the given dimension dim.
+ * @param {Tensor} input the input tensor.
+ * @param {number|null} dim the dimension to reduce.
+ * @param {boolean} keepdim whether the output tensor has dim retained or not.
+ * @returns A new tensor with means taken along the specified dimension.
+ */
+export function mean(input, dim = null, keepdim = false) {
+
+    if (dim === null) {
+        // None to reduce over all dimensions.
+        // @ts-ignore
+        let val = input.data.reduce((a, b) => a + b, 0);
+        return new Tensor(input.type, [val / input.data.length], [/* scalar */]);
+    }
+
+    // Negative indexing
+    dim = safeIndex(dim, input.dims.length);
+
+    // Calculate the shape of the resulting array after summation
+    const resultDims = input.dims.slice(); // Copy the original dimensions
+    resultDims[dim] = 1; // Remove the specified axis
+
+    // Create a new array to store the accumulated values
+    // @ts-ignore
+    const result = new input.data.constructor(input.data.length / input.dims[dim]);
+
+    // Iterate over the data array
+    for (let i = 0; i < input.data.length; ++i) {
+
+        // Calculate the index in the resulting array
+        let resultIndex = 0;
+
+        for (let j = input.dims.length - 1, num = i, resultMultiplier = 1; j >= 0; --j) {
+            const size = input.dims[j];
+            if (j !== dim) {
+                const index = num % size;
+                resultIndex += index * resultMultiplier;
+                resultMultiplier *= resultDims[j];
+            }
+            num = Math.floor(num / size);
+        }
+
+        // Accumulate the value at the current index
+        result[resultIndex] += input.data[i];
+    }
+
+    if (input.dims[dim] !== 1) {
+        for (let i = 0; i < result.length; ++i) {
+            result[i] = result[i] / input.dims[dim];
+        }
+    }
+
+    if (!keepdim) {
+        resultDims.splice(dim, 1);
+    }
+
+    return new Tensor(input.type, result, resultDims);
+}
+
+
+/**
+ *
+ * Measures similarity between two temporal sequences (e.g., input audio and output tokens
+ * to generate token-level timestamps).
+ * @param {Tensor} matrix 
+ * @returns {number[][]}
+ */
+export function dynamicTimeWarping(matrix) {
+    const [output_length, input_length] = matrix.dims;
+
+    const outputShape = [output_length + 1, input_length + 1];
+
+    const cost = new Tensor(
+        'float32',
+        new Float32Array(outputShape[0] * outputShape[1]).fill(Infinity),
+        outputShape
+    );
+
+    const trace = new Tensor(
+        'float32',
+        new Float32Array(outputShape[0] * outputShape[1]).fill(-1),
+        outputShape
+    )
+
+    // same as `cost[0][0] = 0`;
+    cost[0].data[0] = 0;
+
+    for (let j = 1; j < input_length + 1; ++j) {
+        for (let i = 1; i < output_length + 1; ++i) {
+
+            const c0 = cost[i - 1][j - 1].item();
+            const c1 = cost[i - 1][j].item();
+            const c2 = cost[i][j - 1].item();
+
+            let c, t;
+            if (c0 < c1 && c0 < c2) {
+                c = c0;
+                t = 0;
+            } else if (c1 < c0 && c1 < c2) {
+                c = c1;
+                t = 1;
+            } else {
+                c = c2;
+                t = 2;
+            }
+
+            cost[i].data[j] = matrix[i - 1][j - 1].item() + c;
+            trace[i].data[j] = t;
+        }
+    }
+
+    // backtrace
+    let i = output_length;
+    let j = input_length;
+
+    // @ts-ignore
+    trace.data.fill(2, 0, outputShape[1]) // trace[0, :] = 2
+    for (let i = 0; i < outputShape[0]; ++i) { // trace[:, 0] = 1
+        trace[i].data[0] = 1;
+    }
+
+    let text_indices = [];
+    let time_indices = [];
+
+    while (i > 0 || j > 0) {
+        text_indices.push(i - 1);
+        time_indices.push(j - 1);
+
+        const t = trace[i][j].item();
+        switch (t) {
+            case 0:
+                --i; --j;
+                break;
+            case 1:
+                --i;
+                break;
+            case 2:
+                --j;
+                break;
+            default:
+                throw new Error(
+                    `Internal error in dynamic time warping. Unexpected trace[${i}, ${j}]. Please file a bug report.`
+                )
+        }
+    }
+
+    text_indices.reverse();
+    time_indices.reverse();
+
+    return [text_indices, time_indices];
+
+}
+
+function dimsToStride(dims) {
+    const stride = new Array(dims.length);
+    for (let i = dims.length - 1, s2 = 1; i >= 0; --i) {
+        stride[i] = s2;
+        s2 *= dims[i];
+    }
+    return stride;
+}
+
+/**
+ * Returns a tensor filled with the scalar value 1, with the shape defined by the variable argument size.
+ * @param {number[]} size A sequence of integers defining the shape of the output tensor.
+ */
+export function ones(size) {
+    const numElements = size.reduce((a, b) => a * b, 1);
+    return new Tensor(
+        'int64',
+        new BigInt64Array(numElements).fill(1n),
+        size
+    )
+}
+
+/**
+ * Returns a tensor filled with the scalar value 1, with the same size as input.
+ * @param {Tensor} tensor The size of input will determine size of the output tensor.
+ * @returns The ones tensor.
+ */
+export function ones_like(tensor) {
+    return ones(tensor.dims);
+}
+
+/**
+ * Quantizes the embeddings tensor to binary or unsigned binary precision.
+ * @param {Tensor} tensor The tensor to quantize.
+ * @param {'binary'|'ubinary'} precision The precision to use for quantization.
+ * @returns {Tensor} The quantized tensor.
+ */
+export function quantize_embeddings(tensor, precision) {
+    if (tensor.dims.length !== 2) {
+        throw new Error("The tensor must have 2 dimensions");
+    }
+    if (tensor.dims.at(-1) % 8 !== 0) {
+        throw new Error("The last dimension of the tensor must be a multiple of 8");
+    }
+    if (!['binary', 'ubinary'].includes(precision)) {
+        throw new Error("The precision must be either 'binary' or 'ubinary'");
+    }
+
+    const signed = precision === 'binary';
+    const dtype = signed ? 'int8' : 'uint8';
+
+    // Create a typed array to store the packed bits
+    const cls = signed ? Int8Array : Uint8Array;
+    const inputData = tensor.data;
+    const outputData = new cls(inputData.length / 8);
+
+    // Iterate over each number in the array
+    for (let i = 0; i < inputData.length; ++i) {
+        // Determine if the number is greater than 0
+        const bit = inputData[i] > 0 ? 1 : 0;
+
+        // Calculate the index in the typed array and the position within the byte
+        const arrayIndex = Math.floor(i / 8);
+        const bitPosition = i % 8;
+
+        // Pack the bit into the typed array
+        outputData[arrayIndex] |= bit << (7 - bitPosition);
+        if (signed && bitPosition === 0) {
+            outputData[arrayIndex] -= 128;
+        }
+    };
+
+    return new Tensor(dtype, outputData, [tensor.dims[0], tensor.dims[1] / 8]);
+}
+
+// Path: src/utils/image.js
+
+/**
+ * @file Helper module for image processing. 
+ * 
+ * These functions and classes are only used internally, 
+ * meaning an end-user shouldn't need to access anything here.
+ * 
+ * @module utils/image
+ */
+
+import { getFile } from './hub.js';
+import { env } from '../env.js';
+import { Tensor } from './tensor.js';
+
+// Will be empty (or not used) if running in browser or web-worker
+import sharp from 'sharp';
+
+const BROWSER_ENV = typeof self !== 'undefined';
+const WEBWORKER_ENV = BROWSER_ENV && self.constructor.name === 'DedicatedWorkerGlobalScope';
+
+let createCanvasFunction;
+let ImageDataClass;
+let loadImageFunction;
+if (BROWSER_ENV) {
+    // Running in browser or web-worker
+    createCanvasFunction = (/** @type {number} */ width, /** @type {number} */ height) => {
+        if (!self.OffscreenCanvas) {
+            throw new Error('OffscreenCanvas not supported by this browser.');
+        }
+        return new self.OffscreenCanvas(width, height)
+    };
+    loadImageFunction = self.createImageBitmap;
+    ImageDataClass = self.ImageData;
+
+} else if (sharp) {
+    // Running in Node.js, electron, or other non-browser environment
+
+    loadImageFunction = async (/**@type {sharp.Sharp}*/img) => {
+        const metadata = await img.metadata();
+        const rawChannels = metadata.channels;
+
+        let { data, info } = await img.raw().toBuffer({ resolveWithObject: true });
+
+        const newImage = new RawImage(new Uint8ClampedArray(data), info.width, info.height, info.channels);
+        if (rawChannels !== undefined && rawChannels !== info.channels) {
+            // Make sure the new image has the same number of channels as the input image.
+            // This is necessary for grayscale images.
+            newImage.convert(rawChannels);
+        }
+        return newImage;
+    }
+
+} else {
+    throw new Error('Unable to load image processing library.');
+}
+
+
+// Defined here: https://github.com/python-pillow/Pillow/blob/a405e8406b83f8bfb8916e93971edc7407b8b1ff/src/libImaging/Imaging.h#L262-L268
+const RESAMPLING_MAPPING = {
+    0: 'nearest',
+    1: 'lanczos',
+    2: 'bilinear',
+    3: 'bicubic',
+    4: 'box',
+    5: 'hamming',
+}
+
+/**
+ * Mapping from file extensions to MIME types.
+ */
+const CONTENT_TYPE_MAP = new Map([
+    ['png', 'image/png'],
+    ['jpg', 'image/jpeg'],
+    ['jpeg', 'image/jpeg'],
+    ['gif', 'image/gif'],
+]);
+
+export class RawImage {
+
+    /**
+     * Create a new `RawImage` object.
+     * @param {Uint8ClampedArray|Uint8Array} data The pixel data.
+     * @param {number} width The width of the image.
+     * @param {number} height The height of the image.
+     * @param {1|2|3|4} channels The number of channels.
+     */
+    constructor(data, width, height, channels) {
+        this.data = data;
+        this.width = width;
+        this.height = height;
+        this.channels = channels;
+    }
+
+    /** 
+     * Returns the size of the image (width, height).
+     * @returns {[number, number]} The size of the image (width, height).
+     */
+    get size() {
+        return [this.width, this.height];
+    }
+
+    /**
+     * Helper method for reading an image from a variety of input types.
+     * @param {RawImage|string|URL} input 
+     * @returns The image object.
+     * 
+     * **Example:** Read image from a URL.
+     * ```javascript
+     * let image = await RawImage.read('https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/football-match.jpg');
+     * // RawImage {
+     * //   "data": Uint8ClampedArray [ 25, 25, 25, 19, 19, 19, ... ],
+     * //   "width": 800,
+     * //   "height": 533,
+     * //   "channels": 3
+     * // }
+     * ```
+     */
+    static async read(input) {
+        if (input instanceof RawImage) {
+            return input;
+        } else if (typeof input === 'string' || input instanceof URL) {
+            return await this.fromURL(input);
+        } else {
+            throw new Error(`Unsupported input type: ${typeof input}`);
+        }
+    }
+
+
+    /**
+     * Read an image from a URL or file path.
+     * @param {string|URL} url The URL or file path to read the image from.
+     * @returns {Promise<RawImage>} The image object.
+     */
+    static async fromURL(url) {
+        let response = await getFile(url);
+        if (response.status !== 200) {
+            throw new Error(`Unable to read image from "${url}" (${response.status} ${response.statusText})`);
+        }
+        let blob = await response.blob();
+        return this.fromBlob(blob);
+    }
+
+    /**
+     * Helper method to create a new Image from a blob.
+     * @param {Blob} blob The blob to read the image from.
+     * @returns {Promise<RawImage>} The image object.
+     */
+    static async fromBlob(blob) {
+        if (BROWSER_ENV) {
+            // Running in environment with canvas
+            let img = await loadImageFunction(blob);
+
+            const ctx = createCanvasFunction(img.width, img.height).getContext('2d');
+
+            // Draw image to context
+            ctx.drawImage(img, 0, 0);
+
+            return new this(ctx.getImageData(0, 0, img.width, img.height).data, img.width, img.height, 4);
+
+        } else {
+            // Use sharp.js to read (and possible resize) the image.
+            let img = sharp(await blob.arrayBuffer());
+
+            return await loadImageFunction(img);
+        }
+    }
+
+    /**
+     * Helper method to create a new Image from a tensor
+     * @param {Tensor} tensor 
+     */
+    static fromTensor(tensor, channel_format = 'CHW') {
+        if (tensor.dims.length !== 3) {
+            throw new Error(`Tensor should have 3 dimensions, but has ${tensor.dims.length} dimensions.`);
+        }
+
+        if (channel_format === 'CHW') {
+            tensor = tensor.transpose(1, 2, 0);
+        } else if (channel_format === 'HWC') {
+            // Do nothing
+        } else {
+            throw new Error(`Unsupported channel format: ${channel_format}`);
+        }
+        if (!(tensor.data instanceof Uint8ClampedArray || tensor.data instanceof Uint8Array)) {
+            throw new Error(`Unsupported tensor type: ${tensor.type}`);
+        }
+        switch (tensor.dims[2]) {
+            case 1:
+            case 2:
+            case 3:
+            case 4:
+                return new RawImage(tensor.data, tensor.dims[1], tensor.dims[0], tensor.dims[2]);
+            default:
+                throw new Error(`Unsupported number of channels: ${tensor.dims[2]}`);
+        }
+    }
+
+    /**
+     * Convert the image to grayscale format.
+     * @returns {RawImage} `this` to support chaining.
+     */
+    grayscale() {
+        if (this.channels === 1) {
+            return this;
+        }
+
+        let newData = new Uint8ClampedArray(this.width * this.height * 1);
+        switch (this.channels) {
+            case 3: // rgb to grayscale
+            case 4: // rgba to grayscale
+                for (let i = 0, offset = 0; i < this.data.length; i += this.channels) {
+                    const red = this.data[i];
+                    const green = this.data[i + 1];
+                    const blue = this.data[i + 2];
+
+                    newData[offset++] = Math.round(0.2989 * red + 0.5870 * green + 0.1140 * blue);
+                }
+                break;
+            default:
+                throw new Error(`Conversion failed due to unsupported number of channels: ${this.channels}`);
+        }
+        return this._update(newData, this.width, this.height, 1);
+    }
+
+    /**
+     * Convert the image to RGB format.
+     * @returns {RawImage} `this` to support chaining.
+     */
+    rgb() {
+        if (this.channels === 3) {
+            return this;
+        }
+
+        let newData = new Uint8ClampedArray(this.width * this.height * 3);
+
+        switch (this.channels) {
+            case 1: // grayscale to rgb
+                for (let i = 0, offset = 0; i < this.data.length; ++i) {
+                    newData[offset++] = this.data[i];
+                    newData[offset++] = this.data[i];
+                    newData[offset++] = this.data[i];
+                }
+                break;
+            case 4: // rgba to rgb
+                for (let i = 0, offset = 0; i < this.data.length; i += 4) {
+                    newData[offset++] = this.data[i];
+                    newData[offset++] = this.data[i + 1];
+                    newData[offset++] = this.data[i + 2];
+                }
+                break;
+            default:
+                throw new Error(`Conversion failed due to unsupported number of channels: ${this.channels}`);
+        }
+        return this._update(newData, this.width, this.height, 3);
+
+    }
+
+    /**
+     * Convert the image to RGBA format.
+     * @returns {RawImage} `this` to support chaining.
+     */
+    rgba() {
+        if (this.channels === 4) {
+            return this;
+        }
+
+        let newData = new Uint8ClampedArray(this.width * this.height * 4);
+
+        switch (this.channels) {
+            case 1: // grayscale to rgba
+                for (let i = 0, offset = 0; i < this.data.length; ++i) {
+                    newData[offset++] = this.data[i];
+                    newData[offset++] = this.data[i];
+                    newData[offset++] = this.data[i];
+                    newData[offset++] = 255;
+                }
+                break;
+            case 3: // rgb to rgba
+                for (let i = 0, offset = 0; i < this.data.length; i += 3) {
+                    newData[offset++] = this.data[i];
+                    newData[offset++] = this.data[i + 1];
+                    newData[offset++] = this.data[i + 2];
+                    newData[offset++] = 255;
+                }
+                break;
+            default:
+                throw new Error(`Conversion failed due to unsupported number of channels: ${this.channels}`);
+        }
+
+        return this._update(newData, this.width, this.height, 4);
+    }
+
+    /**
+     * Resize the image to the given dimensions. This method uses the canvas API to perform the resizing.
+     * @param {number} width The width of the new image.
+     * @param {number} height The height of the new image.
+     * @param {Object} options Additional options for resizing.
+     * @param {0|1|2|3|4|5|string} [options.resample] The resampling method to use.
+     * @returns {Promise<RawImage>} `this` to support chaining.
+     */
+    async resize(width, height, {
+        resample = 2,
+    } = {}) {
+
+        // Ensure resample method is a string
+        let resampleMethod = RESAMPLING_MAPPING[resample] ?? resample;
+
+        if (BROWSER_ENV) {
+            // TODO use `resample` in browser environment
+
+            // Store number of channels before resizing
+            let numChannels = this.channels;
+
+            // Create canvas object for this image
+            let canvas = this.toCanvas();
+
+            // Actually perform resizing using the canvas API
+            const ctx = createCanvasFunction(width, height).getContext('2d');
+
+            // Draw image to context, resizing in the process
+            ctx.drawImage(canvas, 0, 0, width, height);
+
+            // Create image from the resized data
+            let resizedImage = new RawImage(ctx.getImageData(0, 0, width, height).data, width, height, 4);
+
+            // Convert back so that image has the same number of channels as before
+            return resizedImage.convert(numChannels);
+
+        } else {
+            // Create sharp image from raw data, and resize
+            let img = this.toSharp();
+
+            switch (resampleMethod) {
+                case 'box':
+                case 'hamming':
+                    if (resampleMethod === 'box' || resampleMethod === 'hamming') {
+                        console.warn(`Resampling method ${resampleMethod} is not yet supported. Using bilinear instead.`);
+                        resampleMethod = 'bilinear';
+                    }
+
+                case 'nearest':
+                case 'bilinear':
+                case 'bicubic':
+                    // Perform resizing using affine transform. 
+                    // This matches how the python Pillow library does it.
+                    img = img.affine([width / this.width, 0, 0, height / this.height], {
+                        interpolator: resampleMethod
+                    });
+                    break;
+
+                case 'lanczos':
+                    // https://github.com/python-pillow/Pillow/discussions/5519
+                    // https://github.com/lovell/sharp/blob/main/docs/api-resize.md
+                    img = img.resize({
+                        width, height,
+                        fit: 'fill',
+                        kernel: 'lanczos3', // PIL Lanczos uses a kernel size of 3 
+                    });
+                    break;
+
+                default:
+                    throw new Error(`Resampling method ${resampleMethod} is not supported.`);
+            }
+
+            return await loadImageFunction(img);
+        }
+
+    }
+
+    async pad([left, right, top, bottom]) {
+        left = Math.max(left, 0);
+        right = Math.max(right, 0);
+        top = Math.max(top, 0);
+        bottom = Math.max(bottom, 0);
+
+        if (left === 0 && right === 0 && top === 0 && bottom === 0) {
+            // No padding needed
+            return this;
+        }
+
+        if (BROWSER_ENV) {
+            // Store number of channels before padding
+            let numChannels = this.channels;
+
+            // Create canvas object for this image
+            let canvas = this.toCanvas();
+
+            let newWidth = this.width + left + right;
+            let newHeight = this.height + top + bottom;
+
+            // Create a new canvas of the desired size.
+            const ctx = createCanvasFunction(newWidth, newHeight).getContext('2d');
+
+            // Draw image to context, padding in the process
+            ctx.drawImage(canvas,
+                0, 0, this.width, this.height,
+                left, top, newWidth, newHeight
+            );
+
+            // Create image from the padded data
+            let paddedImage = new RawImage(
+                ctx.getImageData(0, 0, newWidth, newHeight).data,
+                newWidth, newHeight, 4);
+
+            // Convert back so that image has the same number of channels as before
+            return paddedImage.convert(numChannels);
+
+        } else {
+            let img = this.toSharp().extend({ left, right, top, bottom });
+            return await loadImageFunction(img);
+        }
+    }
+
+    async crop([x_min, y_min, x_max, y_max]) {
+        // Ensure crop bounds are within the image
+        x_min = Math.max(x_min, 0);
+        y_min = Math.max(y_min, 0);
+        x_max = Math.min(x_max, this.width - 1);
+        y_max = Math.min(y_max, this.height - 1);
+
+        // Do nothing if the crop is the entire image
+        if (x_min === 0 && y_min === 0 && x_max === this.width - 1 && y_max === this.height - 1) {
+            return this;
+        }
+
+        const crop_width = x_max - x_min + 1;
+        const crop_height = y_max - y_min + 1;
+
+        if (BROWSER_ENV) {
+            // Store number of channels before resizing
+            const numChannels = this.channels;
+
+            // Create canvas object for this image
+            const canvas = this.toCanvas();
+
+            // Create a new canvas of the desired size. This is needed since if the 
+            // image is too small, we need to pad it with black pixels.
+            const ctx = createCanvasFunction(crop_width, crop_height).getContext('2d');
+
+            // Draw image to context, cropping in the process
+            ctx.drawImage(canvas,
+                x_min, y_min, crop_width, crop_height,
+                0, 0, crop_width, crop_height
+            );
+
+            // Create image from the resized data
+            const resizedImage = new RawImage(ctx.getImageData(0, 0, crop_width, crop_height).data, crop_width, crop_height, 4);
+
+            // Convert back so that image has the same number of channels as before
+            return resizedImage.convert(numChannels);
+
+        } else {
+            // Create sharp image from raw data
+            const img = this.toSharp().extract({
+                left: x_min,
+                top: y_min,
+                width: crop_width,
+                height: crop_height,
+            });
+
+            return await loadImageFunction(img);
+        }
+
+    }
+
+    async center_crop(crop_width, crop_height) {
+        // If the image is already the desired size, return it
+        if (this.width === crop_width && this.height === crop_height) {
+            return this;
+        }
+
+        // Determine bounds of the image in the new canvas
+        let width_offset = (this.width - crop_width) / 2;
+        let height_offset = (this.height - crop_height) / 2;
+
+
+        if (BROWSER_ENV) {
+            // Store number of channels before resizing
+            let numChannels = this.channels;
+
+            // Create canvas object for this image
+            let canvas = this.toCanvas();
+
+            // Create a new canvas of the desired size. This is needed since if the 
+            // image is too small, we need to pad it with black pixels.
+            const ctx = createCanvasFunction(crop_width, crop_height).getContext('2d');
+
+            let sourceX = 0;
+            let sourceY = 0;
+            let destX = 0;
+            let destY = 0;
+
+            if (width_offset >= 0) {
+                sourceX = width_offset;
+            } else {
+                destX = -width_offset;
+            }
+
+            if (height_offset >= 0) {
+                sourceY = height_offset;
+            } else {
+                destY = -height_offset;
+            }
+
+            // Draw image to context, cropping in the process
+            ctx.drawImage(canvas,
+                sourceX, sourceY, crop_width, crop_height,
+                destX, destY, crop_width, crop_height
+            );
+
+            // Create image from the resized data
+            let resizedImage = new RawImage(ctx.getImageData(0, 0, crop_width, crop_height).data, crop_width, crop_height, 4);
+
+            // Convert back so that image has the same number of channels as before
+            return resizedImage.convert(numChannels);
+
+        } else {
+            // Create sharp image from raw data
+            let img = this.toSharp();
+
+            if (width_offset >= 0 && height_offset >= 0) {
+                // Cropped image lies entirely within the original image
+                img = img.extract({
+                    left: Math.floor(width_offset),
+                    top: Math.floor(height_offset),
+                    width: crop_width,
+                    height: crop_height,
+                })
+            } else if (width_offset <= 0 && height_offset <= 0) {
+                // Cropped image lies entirely outside the original image,
+                // so we add padding
+                let top = Math.floor(-height_offset);
+                let left = Math.floor(-width_offset);
+                img = img.extend({
+                    top: top,
+                    left: left,
+
+                    // Ensures the resulting image has the desired dimensions
+                    right: crop_width - this.width - left,
+                    bottom: crop_height - this.height - top,
+                });
+            } else {
+                // Cropped image lies partially outside the original image.
+                // We first pad, then crop.
+
+                let y_padding = [0, 0];
+                let y_extract = 0;
+                if (height_offset < 0) {
+                    y_padding[0] = Math.floor(-height_offset);
+                    y_padding[1] = crop_height - this.height - y_padding[0];
+                } else {
+                    y_extract = Math.floor(height_offset);
+                }
+
+                let x_padding = [0, 0];
+                let x_extract = 0;
+                if (width_offset < 0) {
+                    x_padding[0] = Math.floor(-width_offset);
+                    x_padding[1] = crop_width - this.width - x_padding[0];
+                } else {
+                    x_extract = Math.floor(width_offset);
+                }
+
+                img = img.extend({
+                    top: y_padding[0],
+                    bottom: y_padding[1],
+                    left: x_padding[0],
+                    right: x_padding[1],
+                }).extract({
+                    left: x_extract,
+                    top: y_extract,
+                    width: crop_width,
+                    height: crop_height,
+                })
+            }
+
+            return await loadImageFunction(img);
+        }
+    }
+
+    async toBlob(type = 'image/png', quality = 1) {
+        if (!BROWSER_ENV) {
+            throw new Error('toBlob() is only supported in browser environments.')
+        }
+
+        const canvas = this.toCanvas();
+        return await canvas.convertToBlob({ type, quality });
+    }
+
+    toTensor(channel_format = 'CHW') {
+        let tensor = new Tensor(
+            'uint8',
+            new Uint8Array(this.data),
+            [this.height, this.width, this.channels]
+        );
+
+        if (channel_format === 'HWC') {
+            // Do nothing
+        } else if (channel_format === 'CHW') { // hwc -> chw
+            tensor = tensor.permute(2, 0, 1);
+        } else {
+            throw new Error(`Unsupported channel format: ${channel_format}`);
+        }
+        return tensor;
+    }
+
+    toCanvas() {
+        if (!BROWSER_ENV) {
+            throw new Error('toCanvas() is only supported in browser environments.')
+        }
+
+        // Clone, and convert data to RGBA before drawing to canvas.
+        // This is because the canvas API only supports RGBA
+        let cloned = this.clone().rgba();
+
+        // Create canvas object for the cloned image
+        let clonedCanvas = createCanvasFunction(cloned.width, cloned.height);
+
+        // Draw image to context
+        let data = new ImageDataClass(cloned.data, cloned.width, cloned.height);
+        clonedCanvas.getContext('2d').putImageData(data, 0, 0);
+
+        return clonedCanvas;
+    }
+
+    /**
+     * Helper method to update the image data.
+     * @param {Uint8ClampedArray} data The new image data.
+     * @param {number} width The new width of the image.
+     * @param {number} height The new height of the image.
+     * @param {1|2|3|4|null} [channels] The new number of channels of the image.
+     * @private
+     */
+    _update(data, width, height, channels = null) {
+        this.data = data;
+        this.width = width;
+        this.height = height;
+        if (channels !== null) {
+            this.channels = channels;
+        }
+        return this;
+    }
+
+    /**
+     * Clone the image
+     * @returns {RawImage} The cloned image
+     */
+    clone() {
+        return new RawImage(this.data.slice(), this.width, this.height, this.channels);
+    }
+
+    /**
+     * Helper method for converting image to have a certain number of channels
+     * @param {number} numChannels The number of channels. Must be 1, 3, or 4.
+     * @returns {RawImage} `this` to support chaining.
+     */
+    convert(numChannels) {
+        if (this.channels === numChannels) return this; // Already correct number of channels
+
+        switch (numChannels) {
+            case 1:
+                this.grayscale();
+                break;
+            case 3:
+                this.rgb();
+                break;
+            case 4:
+                this.rgba();
+                break;
+            default:
+                throw new Error(`Conversion failed due to unsupported number of channels: ${this.channels}`);
+        }
+        return this;
+    }
+
+    /**
+     * Save the image to the given path.
+     * @param {string} path The path to save the image to.
+     */
+    async save(path) {
+
+        if (BROWSER_ENV) {
+            if (WEBWORKER_ENV) {
+                throw new Error('Unable to save an image from a Web Worker.')
+            }
+
+            const extension = path.split('.').pop().toLowerCase();
+            const mime = CONTENT_TYPE_MAP.get(extension) ?? 'image/png';
+
+            // Convert image to Blob
+            const blob = await this.toBlob(mime);
+
+            // Convert the canvas content to a data URL
+            const dataURL = URL.createObjectURL(blob);
+
+            // Create an anchor element with the data URL as the href attribute
+            const downloadLink = document.createElement('a');
+            downloadLink.href = dataURL;
+
+            // Set the download attribute to specify the desired filename for the downloaded image
+            downloadLink.download = path;
+
+            // Trigger the download
+            downloadLink.click();
+
+            // Clean up: remove the anchor element from the DOM
+            downloadLink.remove();
+
+        } else if (!env.useFS) {
+            throw new Error('Unable to save the image because filesystem is disabled in this environment.')
+
+        } else {
+            const img = this.toSharp();
+            return await img.toFile(path);
+        }
+    }
+
+    toSharp() {
+        if (BROWSER_ENV) {
+            throw new Error('toSharp() is only supported in server-side environments.')
+        }
+
+        return sharp(this.data, {
+            raw: {
+                width: this.width,
+                height: this.height,
+                channels: this.channels
+            }
+        });
+    }
+}
+
+// Path: src/utils/audio.js
+/**
+ * @file Helper module for audio processing. 
+ * 
+ * These functions and classes are only used internally, 
+ * meaning an end-user shouldn't need to access anything here.
+ * 
+ * @module utils/audio
+ */
+
+import {
+    getFile,
+} from './hub.js';
+import { FFT, max } from './maths.js';
+import {
+    calculateReflectOffset,
+} from './core.js';
+
+
+/**
+ * Helper function to read audio from a path/URL.
+ * @param {string|URL} url The path/URL to load the audio from.
+ * @param {number} sampling_rate The sampling rate to use when decoding the audio.
+ * @returns {Promise<Float32Array>} The decoded audio as a `Float32Array`.
+ */
+export async function read_audio(url, sampling_rate) {
+    if (typeof AudioContext === 'undefined') {
+        // Running in node or an environment without AudioContext
+        throw Error(
+            "Unable to load audio from path/URL since `AudioContext` is not available in your environment. " +
+            "Instead, audio data should be passed directly to the pipeline/processor. " +
+            "For more information and some example code, see https://huggingface.co/docs/transformers.js/guides/node-audio-processing."
+        )
+    }
+
+    const response = await (await getFile(url)).arrayBuffer();
+    const audioCTX = new AudioContext({ sampleRate: sampling_rate });
+    if (typeof sampling_rate === 'undefined') {
+        console.warn(`No sampling rate provided, using default of ${audioCTX.sampleRate}Hz.`)
+    }
+    const decoded = await audioCTX.decodeAudioData(response);
+
+    /** @type {Float32Array} */
+    let audio;
+
+    // We now replicate HuggingFace's `ffmpeg_read` method:
+    if (decoded.numberOfChannels === 2) {
+        // When downmixing a stereo audio file to mono using the -ac 1 option in FFmpeg,
+        // the audio signal is summed across both channels to create a single mono channel.
+        // However, if the audio is at full scale (i.e. the highest possible volume level),
+        // the summing of the two channels can cause the audio signal to clip or distort.
+
+        // To prevent this clipping, FFmpeg applies a scaling factor of 1/sqrt(2) (~ 0.707)
+        // to the audio signal before summing the two channels. This scaling factor ensures
+        // that the combined audio signal will not exceed the maximum possible level, even
+        // if both channels are at full scale.
+
+        // After applying this scaling factor, the audio signal from both channels is summed
+        // to create a single mono channel. It's worth noting that this scaling factor is
+        // only applied when downmixing stereo audio to mono using the -ac 1 option in FFmpeg.
+        // If you're using a different downmixing method, or if you're not downmixing the
+        // audio at all, this scaling factor may not be needed.
+        const SCALING_FACTOR = Math.sqrt(2);
+
+        const left = decoded.getChannelData(0);
+        const right = decoded.getChannelData(1);
+
+        audio = new Float32Array(left.length);
+        for (let i = 0; i < decoded.length; ++i) {
+            audio[i] = SCALING_FACTOR * (left[i] + right[i]) / 2;
+        }
+
+    } else {
+        // If the audio is not stereo, we can just use the first channel:
+        audio = decoded.getChannelData(0);
+    }
+
+    return audio;
+}
+
+/**
+ * Generates a Hanning window of length M.
+ *
+ * @param {number} M The length of the Hanning window to generate.
+ * @returns {Float64Array} The generated Hanning window.
+ */
+export function hanning(M) {
+    if (M < 1) {
+        return new Float64Array();
+    }
+    if (M === 1) {
+        return new Float64Array([1]);
+    }
+    const denom = M - 1;
+    const factor = Math.PI / denom;
+    const cos_vals = new Float64Array(M);
+    for (let i = 0; i < M; ++i) {
+        const n = 2 * i - denom;
+        cos_vals[i] = 0.5 + 0.5 * Math.cos(factor * n);
+    }
+    return cos_vals;
+}
+
+const HERTZ_TO_MEL_MAPPING = {
+    "htk": (/** @type {number} */ freq) => 2595.0 * Math.log10(1.0 + (freq / 700.0)),
+    "kaldi": (/** @type {number} */ freq) => 1127.0 * Math.log(1.0 + (freq / 700.0)),
+    "slaney": (/** @type {number} */ freq, min_log_hertz = 1000.0, min_log_mel = 15.0, logstep = 27.0 / Math.log(6.4)) =>
+        freq >= min_log_hertz
+            ? min_log_mel + Math.log(freq / min_log_hertz) * logstep
+            : 3.0 * freq / 200.0,
+}
+
+/**
+ * @template {Float32Array|Float64Array|number} T 
+ * @param {T} freq 
+ * @param {string} [mel_scale]
+ * @returns {T}
+ */
+function hertz_to_mel(freq, mel_scale = "htk") {
+    const fn = HERTZ_TO_MEL_MAPPING[mel_scale];
+    if (!fn) {
+        throw new Error('mel_scale should be one of "htk", "slaney" or "kaldi".');
+    }
+
+    return typeof freq === 'number' ? fn(freq) : freq.map(x => fn(x));
+}
+
+const MEL_TO_HERTZ_MAPPING = {
+    "htk": (/** @type {number} */ mels) => 700.0 * (10.0 ** (mels / 2595.0) - 1.0),
+    "kaldi": (/** @type {number} */ mels) => 700.0 * (Math.exp(mels / 1127.0) - 1.0),
+    "slaney": (/** @type {number} */ mels, min_log_hertz = 1000.0, min_log_mel = 15.0, logstep = Math.log(6.4) / 27.0) => mels >= min_log_mel
+        ? min_log_hertz * Math.exp(logstep * (mels - min_log_mel))
+        : 200.0 * mels / 3.0,
+}
+
+/**
+ * @template {Float32Array|Float64Array|number} T 
+ * @param {T} mels 
+ * @param {string} [mel_scale]
+ * @returns {T}
+ */
+function mel_to_hertz(mels, mel_scale = "htk") {
+    const fn = MEL_TO_HERTZ_MAPPING[mel_scale];
+    if (!fn) {
+        throw new Error('mel_scale should be one of "htk", "slaney" or "kaldi".');
+    }
+
+    return typeof mels === 'number' ? fn(mels) : mels.map(x => fn(x));
+}
+
+/**
+* Creates a triangular filter bank.
+*
+* Adapted from torchaudio and librosa.
+*
+* @param {Float64Array} fft_freqs Discrete frequencies of the FFT bins in Hz, of shape `(num_frequency_bins,)`.
+* @param {Float64Array} filter_freqs Center frequencies of the triangular filters to create, in Hz, of shape `(num_mel_filters,)`.
+* @returns {number[][]} of shape `(num_frequency_bins, num_mel_filters)`.
+*/
+function _create_triangular_filter_bank(fft_freqs, filter_freqs) {
+    const filter_diff = Float64Array.from(
+        { length: filter_freqs.length - 1 },
+...

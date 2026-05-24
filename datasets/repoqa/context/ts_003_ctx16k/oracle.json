@@ -1,0 +1,15 @@
+{
+  "baseId": "ts_003",
+  "endByte": 2273,
+  "endLine": 93,
+  "instanceId": "ts_003_ctx16k",
+  "language": "typescript",
+  "needleName": "prepareImages",
+  "normalizedLanguage": "typescript",
+  "path": "src/pipelines.js",
+  "repo": "xenova/transformers.js",
+  "sequence": 3,
+  "startByte": 2051,
+  "startLine": 85,
+  "targetFunction": "async function prepareImages(images) {\n    if (!Array.isArray(images)) {\n        images = [images];\n    }\n\n    // Possibly convert any non-images to images\n    return await Promise.all(images.map(x => RawImage.read(x)));\n}"
+}

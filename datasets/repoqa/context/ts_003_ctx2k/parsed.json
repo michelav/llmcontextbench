@@ -1,0 +1,125 @@
+{
+  "context_builder": "repoqa-native",
+  "context_type": "repoqa_structured_code_context",
+  "files": [
+    {
+      "language": "typescript",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "src/pipelines.js",
+      "symbols": [
+        {
+          "children": [],
+          "code": "async function prepareImages(images) {\n    if (!Array.isArray(images)) {\n        images = [images];\n    }\n\n    // Possibly convert any non-images to images\n    return await Promise.all(images.map(x => RawImage.read(x)));\n}",
+          "documentation": "Prepare images for further tasks.\n@param {ImagePipelineInputs} images images to prepare.\n@returns {Promise<RawImage[]>} returns processed images.\n@private",
+          "end_line": 93,
+          "kind": "function",
+          "name": "prepareImages",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "prepareImages",
+          "signature": "async function prepareImages(images) {\n    if (!Array.isArray(images)) {\n        images = [images];\n    }\n\n    // Possibly convert any non-images to images\n    return await Promise.all(images.map(x => RawImage.read(x)));\n}",
+          "start_line": 86,
+          "symbol_id": "src/pipelines.js#function:prepareImages:86"
+        },
+        {
+          "children": [],
+          "code": "async function prepareAudios(audios, sampling_rate) {\n    if (!Array.isArray(audios)) {\n        audios = [audios];\n    }\n\n    return await Promise.all(audios.map(x => {\n        if (typeof x === 'string' || x instanceof URL) {\n            return read_audio(x, sampling_rate);\n        } else if (x instanceof Float64Array) {\n            return new Float32Array(x);\n        }\n        return x;\n    }));\n}",
+          "documentation": "Prepare audios for further tasks.\n@param {AudioPipelineInputs} audios audios to prepare.\n@param {number} sampling_rate sampling rate of the audios.\n@returns {Promise<Float32Array[]>} The preprocessed audio data.\n@private",
+          "end_line": 120,
+          "kind": "function",
+          "name": "prepareAudios",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "prepareAudios",
+          "signature": "async function prepareAudios(audios, sampling_rate) {\n    if (!Array.isArray(audios)) {\n        audios = [audios];\n    }\n\n    return await Promise.all(audios.map(x => {\n        if (typeof x === 'string' || x instanceof URL) {\n            return read_audio(x, sampling_rate);\n        } else if (x instanceof Float64Array) {\n            return new Float32Array(x);\n        }\n        return x;\n    }));\n}",
+          "start_line": 107,
+          "symbol_id": "src/pipelines.js#function:prepareAudios:107"
+        },
+        {
+          "children": [],
+          "code": "function get_bounding_box(box, asInteger) {\n    if (asInteger) {\n        box = box.map(x => x | 0);\n    }\n    const [xmin, ymin, xmax, ymax] = box;\n\n    return { xmin, ymin, xmax, ymax };\n}",
+          "documentation": "Helper function to convert list [xmin, xmax, ymin, ymax] into object { \"xmin\": xmin, ... }\n@param {number[]} box The bounding box as a list.\n@param {boolean} asInteger Whether to cast to integers.\n@returns {BoundingBox} The bounding box as an object.\n@private",
+          "end_line": 144,
+          "kind": "function",
+          "name": "get_bounding_box",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "get_bounding_box",
+          "signature": "function get_bounding_box(box, asInteger) {\n    if (asInteger) {\n        box = box.map(x => x | 0);\n    }\n    const [xmin, ymin, xmax, ymax] = box;\n\n    return { xmin, ymin, xmax, ymax };\n}",
+          "start_line": 137,
+          "symbol_id": "src/pipelines.js#function:get_bounding_box:137"
+        },
+        {
+          "children": [],
+          "code": "const [xmin, ymin, xmax, ymax] = box;",
+          "documentation": null,
+          "end_line": 141,
+          "kind": "declaration",
+          "name": null,
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": null,
+          "signature": "const [xmin, ymin, xmax, ymax] = box;",
+          "start_line": 141,
+          "symbol_id": "src/pipelines.js#declaration:anonymous:141"
+        },
+        {
+          "children": [],
+          "code": "class Pipeline extends Callable {\n    /**\n     * Create a new Pipeline.\n     * @param {Object} options An object containing the following properties:\n     * @param {string} [options.task] The task of the pipeline. Useful for specifying subtasks.\n     * @param {PreTrainedModel} [options.model] The model used by the pipeline.\n     * @param {PreTrainedTokenizer} [options.tokenizer=null] The tokenizer used by the pipeline (if any).\n     * @param {Processor} [options.processor=null] The processor used by the pipeline (if any).\n     */\n    constructor({ task, model, tokenizer = null, processor = null }) {\n        super();\n        this.task = task;\n        this.model = model;\n        this.tokenizer = tokenizer;\n        this.processor = processor;\n    }\n\n    /** @type {DisposeType} */\n    async dispose() {\n        await this.model.dispose();\n    }\n}",
+          "documentation": "The Pipeline class is the class from which all pipelines inherit.\nRefer to this class for methods shared across different pipelines.\n@extends Callable",
+          "end_line": 181,
+          "kind": "class",
+          "name": "Pipeline",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "Pipeline",
+          "signature": "class Pipeline extends Callable",
+          "start_line": 160,
+          "symbol_id": "src/pipelines.js#class:Pipeline:160"
+        },
+        {
+          "children": [],
+          "code": "constructor({ task, model, tokenizer = null, processor = null }) {\n        super();\n        this.task = task;\n        this.model = model;\n        this.tokenizer = tokenizer;\n        this.processor = processor;\n    }",
+          "documentation": "Create a new Pipeline.\n@param {Object} options An object containing the following properties:\n@param {string} [options.task] The task of the pipeline. Useful for specifying subtasks.\n@param {PreTrainedModel} [options.model] The model used by the pipeline.\n@param {PreTrainedTokenizer} [options.tokenizer=null] The tokenizer used by the pipeline (if any).\n@param {Processor} [options.processor=null] The processor used by the pipeline (if any).",
+          "end_line": 175,
+          "kind": "method",
+          "name": "constructor",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "constructor",
+          "signature": "constructor({ task, model, tokenizer = null, processor = null }) {\n        super();\n        this.task = task;\n        this.model = model;\n        this.tokenizer = tokenizer;\n        this.processor = processor;\n    }",
+          "start_line": 169,
+          "symbol_id": "src/pipelines.js#method:constructor:169"
+        },
+        {
+          "children": [],
+          "code": "async dispose() {\n        await this.model.dispose();\n    }",
+          "documentation": "@type {DisposeType}",
+          "end_line": 180,
+          "kind": "method",
+          "name": "dispose",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "dispose",
+          "signature": "async dispose() {\n        await this.model.dispose();\n    }",
+          "start_line": 178,
+          "symbol_id": "src/pipelines.js#method:dispose:178"
+        }
+      ],
+      "unparsed_code": null
+    }
+  ],
+  "metadata": {
+    "actual_code_context_tokens": 1939,
+    "base_id": "ts_003",
+    "instance_id": "ts_003_ctx2k",
+    "language": "typescript",
+    "normalized_language": "typescript",
+    "position_ratio": 0.25,
+    "requested_context_tokens": 2048,
+    "sequence": 3
+  },
+  "repository": "xenova/transformers.js",
+  "workspace_id": "ts_003_ctx2k"
+}

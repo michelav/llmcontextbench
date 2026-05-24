@@ -1,0 +1,125 @@
+{
+  "context_builder": "repoqa-native",
+  "context_type": "repoqa_structured_code_context",
+  "files": [
+    {
+      "language": "typescript",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "src/tokenizers.js",
+      "symbols": [
+        {
+          "children": [],
+          "code": "const SPECIAL_TOKEN_ATTRIBUTES = [\n    'bos_token',\n    'eos_token',\n    'unk_token',\n    'sep_token',\n    'pad_token',\n    'cls_token',\n    'mask_token',\n    // additional_special_tokens (TODO)\n]",
+          "documentation": null,
+          "end_line": 2392,
+          "kind": "declaration",
+          "name": "SPECIAL_TOKEN_ATTRIBUTES",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "SPECIAL_TOKEN_ATTRIBUTES",
+          "signature": "const SPECIAL_TOKEN_ATTRIBUTES = [\n    'bos_token',\n    'eos_token',\n    'unk_token',\n    'sep_token',\n    'pad_token',\n    'cls_token',\n    'mask_token',\n    // additional_special_tokens (TODO)\n]",
+          "start_line": 2383,
+          "symbol_id": "src/tokenizers.js#declaration:SPECIAL_TOKEN_ATTRIBUTES:2383"
+        },
+        {
+          "children": [],
+          "code": "const diff = length - item[key].length;",
+          "documentation": null,
+          "end_line": 2406,
+          "kind": "declaration",
+          "name": "diff",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "diff",
+          "signature": "const diff = length - item[key].length;",
+          "start_line": 2406,
+          "symbol_id": "src/tokenizers.js#declaration:diff:2406"
+        },
+        {
+          "children": [],
+          "code": "const value = value_fn(key);",
+          "documentation": null,
+          "end_line": 2407,
+          "kind": "declaration",
+          "name": "value",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "value",
+          "signature": "const value = value_fn(key);",
+          "start_line": 2407,
+          "symbol_id": "src/tokenizers.js#declaration:value:2407"
+        },
+        {
+          "children": [],
+          "code": "const padData = new Array(diff).fill(value);",
+          "documentation": null,
+          "end_line": 2409,
+          "kind": "declaration",
+          "name": "padData",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "padData",
+          "signature": "const padData = new Array(diff).fill(value);",
+          "start_line": 2409,
+          "symbol_id": "src/tokenizers.js#declaration:padData:2409"
+        },
+        {
+          "children": [],
+          "code": "function truncateHelper(item, length) {\n    // Setting .length to a lower value truncates the array in-place:\n    // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/length\n    for (const key of Object.keys(item)) {\n        item[key].length = length;\n    }\n}",
+          "documentation": "Helper function for truncating values of an object, which are each arrays.\nNOTE: No additional checks are made here for validity of arguments.\n@param {Record<string, any[]>} item The input object.\n@param {number} length The length to truncate to.\n@private",
+          "end_line": 2429,
+          "kind": "function",
+          "name": "truncateHelper",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "truncateHelper",
+          "signature": "function truncateHelper(item, length) {\n    // Setting .length to a lower value truncates the array in-place:\n    // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/length\n    for (const key of Object.keys(item)) {\n        item[key].length = length;\n    }\n}",
+          "start_line": 2423,
+          "symbol_id": "src/tokenizers.js#function:truncateHelper:2423"
+        },
+        {
+          "children": [],
+          "code": "const token = new AddedToken(addedToken);",
+          "documentation": null,
+          "end_line": 2467,
+          "kind": "declaration",
+          "name": "token",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "token",
+          "signature": "const token = new AddedToken(addedToken);",
+          "start_line": 2467,
+          "symbol_id": "src/tokenizers.js#declaration:token:2467"
+        },
+        {
+          "children": [],
+          "code": "const chat_template = Object.create(null);",
+          "documentation": "Chat templates are stored as lists of dicts with fixed key names,\nwe reconstruct that into a single dict while loading them.",
+          "end_line": 2531,
+          "kind": "declaration",
+          "name": "chat_template",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "chat_template",
+          "signature": "const chat_template = Object.create(null);",
+          "start_line": 2531,
+          "symbol_id": "src/tokenizers.js#declaration:chat_template:2531"
+        }
+      ],
+      "unparsed_code": null
+    }
+  ],
+  "metadata": {
+    "actual_code_context_tokens": 1983,
+    "base_id": "ts_002",
+    "instance_id": "ts_002_ctx2k",
+    "language": "typescript",
+    "normalized_language": "typescript",
+    "position_ratio": 0.15,
+    "requested_context_tokens": 2048,
+    "sequence": 2
+  },
+  "repository": "xenova/transformers.js",
+  "workspace_id": "ts_002_ctx2k"
+}

@@ -1,0 +1,27 @@
+{
+  "evidence": [
+    {
+      "content": "// Repository: rust-bakery/nom\n// File: src/number/streaming.rs\n\n    };\n  );\n\n  #[test]\n  fn i8_tests() {\n    assert_parse!(be_i8(&[0x00][..]), Ok((&b\"\"[..], 0)));\n    assert_parse!(be_i8(&[0x7f][..]), Ok((&b\"\"[..], 127)));\n    assert_parse!(be_i8(&[0xff][..]), Ok((&b\"\"[..], -1)));\n    assert_parse!(be_i8(&[0x80][..]), Ok((&b\"\"[..], -128)));\n    assert_parse!(be_i8(&[][..]), Err(Err::Incomplete(Needed::new(1))));\n  }\n\n  #[test]\n  \nfn i16_tests() {\n    assert_parse!(be_i16(&[0x00, 0x00][..]), Ok((&b\"\"[..], 0)));\n    assert_parse!(be_i16(&[0x7f, 0xff][..]), Ok((&b\"\"[..], 32_767_i16)));\n    assert_parse!(be_i16(&[0xff, 0xff][..]), Ok((&b\"\"[..], -1)));\n    assert_parse!(be_i16(&[0x80, 0x00][..]), Ok((&b\"\"[..], -32_768_i16)));\n    assert_parse!(be_i16(&[][..]), Err(Err::Incomplete(Needed::new(2))));\n    assert_parse!(be_i16(&[0x00][..]), Err(Err::Incomplete(Needed::new(1))));\n  }\n\n  #[test]\n  fn u24_tests() {\n    assert_parse!(be_u24(&[0x00, 0x00, 0x00][..]), Ok((&b\"\"[..], 0)));\n    assert_parse!(be_u24(&[0x00, 0xFF, 0xFF][..]), Ok((&b\"\"[..], 65_535_u32)));\n    assert_parse!(\n      be_u24(&[0x12, 0x34, 0x56][..]),\n      Ok((&b\"\"[..], 1_193_046_u32))\n    );\n    assert_parse!(be_u24(&[][..]), Err(Err::Incomplete(Needed::new(3))));\n    assert_parse!(be_u24(&[0x00][..]), Err(Err::Incomplete(Needed::new(2))));\n    assert_parse!(\n      be_u24(&[0x00, 0x00][..]),\n      Err(Err::Incomplete(Needed::new(1)))\n    );\n  }\n\n  #[test]\n  fn i24_tests() {\n    assert_parse!(be_i24(&[0xFF, 0xFF, 0xFF][..]), Ok((&b\"\"[..], -1_i32)));\n    assert_parse!(be_i24(&[0xFF, 0x00, 0x00][..]), Ok((&b\"\"[..], -65_536_i32)));\n    assert_parse!(\n      be_i24(&[0xED, 0xCB, 0xAA][..]),\n      Ok((&b\"\"[..], -1_193_046_i32))\n    );\n    assert_parse!(be_i24(&[][..]), Err(Err::Incomplete(Needed::new(3))));\n    assert_parse!(be_i24(&[0x00][..]), Err(Err::Incomplete(Needed::new(2))));\n    assert_parse!(\n      be_i24(&[0x00, 0x00][..]),\n      Err(Err::Incomplete(Needed::new(1)))\n    );\n  }\n\n  #[test]\n  fn i32_tests() {\n    assert_parse!(be_i32(&[0x00, 0x00, 0x00, 0x00][..]), Ok((&b\"\"[..], 0)));\n    assert_parse!(\n      be_i32(&[0x7f, 0xff, 0xff, 0xff][..]),\n      Ok((&b\"\"[..], 2_147_483_647_i32))\n    );\n    assert_parse!(be_i32(&[0xff, 0xff, 0xff, 0xff][..]), Ok((&b\"\"[..], -1)));\n    assert_parse!(\n      be_i32(&[0x80, 0x00, 0x00, 0x00][..]),\n      Ok((&b\"\"[..], -2_147_483_648_i32))\n    );\n    assert_parse!(be_i32(&[][..]), Err(Err::Incomplete(Needed::new(4))));\n    assert_parse!(be_i32(&[0x00][..]), Err(Err::Incomplete(Needed::new(3))));\n    assert_parse!(\n      be_i32(&[0x00, 0x00][..]),\n      Err(Err::Incomplete(Needed::new(2)))\n    );\n    assert_parse!(\n      be_i32(&[0x00, 0x00, 0x00][..]),\n      Err(Err::Incomplete(Needed::new(1)))\n    );\n  }\n\n  #[test]\n  fn i64_tests() {\n    assert_parse!(\n      be_i64(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),\n      Ok((&b\"\"[..], 0))\n    );\n    assert_parse!(\n      be_i64(&[0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff][..]),\n      Ok((&b\"\"[..], 9_223_372_036_854_775_807_i64))\n    );\n    assert_parse!(\n      be_i64(&[0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff][..]),\n      Ok((&b\"\"[..], -1))\n    );\n    assert_parse!(\n      be_i64(&[0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00][..]),\n      Ok((&b\"\"[..], -9_223_372_036_854_775_808_i64))\n    );\n    assert_parse!(be_i64(&[][..]), Err(Err::Incomplete(Needed::new(8))));\n    assert_parse!(be_i64(&[0x00][..]), Err(Err::Incomplete(Needed::new(7))));\n    assert_parse!(\n      be_i64(&[0x00, 0x00][..]),\n      Err(Err::Incomplete(Needed::new(6)))\n    );\n    assert_parse!(\n      be_i64(&[0x00, 0x00, 0x00][..]),\n      Err(Err::Incomplete(Needed::new(5)))\n    );\n    assert_parse!(\n      be_i64(&[0x00, 0x00, 0x00, 0x00][..]),\n      Err(Err::Incomplete(Needed::new(4)))\n    );\n    assert_parse!(\n...",
+      "id": "code_context",
+      "type": "text"
+    },
+    {
+      "id": "parsed_context",
+      "source": "parsed.json",
+      "type": "structured_code"
+    }
+  ],
+  "function_description": "1. **Purpose**: The function tests the parsing of 2-byte integers from byte arrays to ensure correct interpretation of both positive and negative values, as well as handling incomplete data.\n2. **Input**: The function takes arrays of bytes representing 16-bit integers in big-endian format.\n3. **Output**: The function returns a tuple containing the remaining unparsed bytes and the parsed 16-bit integer, or an error if the input is incomplete.\n4. **Procedure**: The function checks several cases including the parsing of zero, the maximum positive value, the minimum negative value, and scenarios where the input byte array is incomplete (either completely empty or missing bytes).",
+  "metadata": {
+    "actual_code_context_tokens": 2030,
+    "base_id": "rs_002",
+    "instance_id": "rs_002_ctx2k",
+    "language": "rust",
+    "normalized_language": "rust",
+    "path": "src/number/streaming.rs",
+    "position_ratio": 0.15,
+    "repo": "rust-bakery/nom",
+    "requested_context_tokens": 2048,
+    "sequence": 2
+  }
+}

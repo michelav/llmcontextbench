@@ -1,0 +1,15 @@
+{
+  "baseId": "ts_002",
+  "endByte": 82593,
+  "endLine": 2414,
+  "instanceId": "ts_002_ctx8k",
+  "language": "typescript",
+  "needleName": "padHelper",
+  "normalizedLanguage": "typescript",
+  "path": "src/tokenizers.js",
+  "repo": "xenova/transformers.js",
+  "sequence": 2,
+  "startByte": 82223,
+  "startLine": 2403,
+  "targetFunction": "function padHelper(item, length, value_fn, side) {\n    for (const key of Object.keys(item)) {\n        const diff = length - item[key].length;\n        const value = value_fn(key);\n\n        const padData = new Array(diff).fill(value);\n        item[key] = side === 'right'\n            ? mergeArrays(item[key], padData)\n            : mergeArrays(padData, item[key]);\n    }\n}"
+}

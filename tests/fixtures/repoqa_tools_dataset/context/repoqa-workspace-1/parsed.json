@@ -1,0 +1,51 @@
+{
+  "repository": "example/repo",
+  "files": [
+    {
+      "path": "src/example.py",
+      "language": "python",
+      "parse_status": "ok",
+      "symbols": [
+        {
+          "kind": "class",
+          "name": "Greeter",
+          "qualified_name": "Greeter",
+          "start_line": 1,
+          "end_line": 8,
+          "code": "class Greeter:\n    def greet(self, name):\n        return f\"Hello, {name}!\"\n",
+          "children": [
+            {
+              "kind": "function",
+              "name": "greet",
+              "start_line": 2,
+              "end_line": 3,
+              "code": "def greet(self, name):\n    return f\"Hello, {name}!\"\n",
+              "children": []
+            }
+          ]
+        },
+        {
+          "kind": "function",
+          "name": "helper",
+          "symbol_id": "existing-helper-id",
+          "qualified_name": "helper",
+          "start_line": 11,
+          "end_line": 12,
+          "code": "def helper(value):\n    return value.strip()\n",
+          "children": []
+        }
+      ],
+      "unparsed_code": "THIS FALLBACK MUST NOT BE USED WHEN code_context.txt IS AVAILABLE"
+    },
+    {
+      "path": "src/hidden.py",
+      "language": "python",
+      "parse_status": "fallback",
+      "symbols": [],
+      "unparsed_code": "print('visible fallback')\n"
+    }
+  ],
+  "metadata": {
+    "requested_context_tokens": 128
+  }
+}

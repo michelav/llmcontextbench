@@ -1,0 +1,480 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:...
+// Path: gson/src/main/java/com/google/gson/FieldAttributes.java
+/*
+ * Copyright (C) 2009 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.gson;
+
+import java.lang.annotation.Annotation;
+import java.lang.reflect.Field;
+import java.lang.reflect.Type;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.Objects;
+
+/**
+ * A data object that stores attributes of a field.
+ *
+ * <p>This class is immutable; therefore, it can be safely shared across threads.
+ *
+ * @author Inderjeet Singh
+ * @author Joel Leitch
+ * @since 1.4
+ */
+public final class FieldAttributes {
+  private final Field field;
+
+  /**
+   * Constructs a Field Attributes object from the {@code f}.
+   *
+   * @param f the field to pull attributes from
+   */
+  public FieldAttributes(Field f) {
+    this.field = Objects.requireNonNull(f);
+  }
+
+  /**
+   * Gets the declaring Class that contains this field
+   *
+   * @return the declaring class that contains this field
+   */
+  public Class<?> getDeclaringClass() {
+    return field.getDeclaringClass();
+  }
+
+  /**
+   * Gets the name of the field
+   *
+   * @return the name of the field
+   */
+  public String getName() {
+    return field.getName();
+  }
+
+  /**
+   * Returns the declared generic type of the field.
+   *
+   * <p>For example, assume the following class definition:
+   *
+   * <pre class="code">
+   * public class Foo {
+   *   private String bar;
+   *   private List&lt;String&gt; red;
+   * }
+   *
+   * Type listParameterizedType = new TypeToken&lt;List&lt;String&gt;&gt;() {}.getType();
+   * </pre>
+   *
+   * <p>This method would return {@code String.class} for the {@code bar} field and {@code
+   * listParameterizedType} for the {@code red} field.
+   *
+   * @return the specific type declared for this field
+   */
+  public Type getDeclaredType() {
+    return field.getGenericType();
+  }
+
+  /**
+   * Returns the {@code Class} object that was declared for this field.
+   *
+   * <p>For example, assume the following class definition:
+   *
+   * <pre class="code">
+   * public class Foo {
+   *   private String bar;
+   *   private List&lt;String&gt; red;
+   * }
+   * </pre>
+   *
+   * <p>This method would return {@code String.class} for the {@code bar} field and {@code
+   * List.class} for the {@code red} field.
+   *
+   * @return the specific class object that was declared for the field
+   */
+  public Class<?> getDeclaredClass() {
+    return field.getType();
+  }
+
+  /**
+   * Returns the {@code T} annotation object from this field if it exists; otherwise returns {@code
+   * null}.
+   *
+   * @param annotation the class of the annotation that will be retrieved
+   * @return the annotation instance if it is bound to the field; otherwise {@code null}
+   */
+  public <T extends Annotation> T getAnnotation(Class<T> annotation) {
+    return field.getAnnotation(annotation);
+  }
+
+  /**
+   * Returns the annotations that are present on this field.
+   *
+   * @return an array of all the annotations set on the field
+   * @since 1.4
+   */
+  public Collection<Annotation> getAnnotations() {
+    return Arrays.asList(field.getAnnotations());
+  }
+
+  /**
+   * Returns {@code true} if the field is defined with the {@code modifier}.
+   *
+   * <p>This method is meant to be called as:
+   *
+   * <pre class="code">
+   * boolean hasPublicModifier = fieldAttribute.hasModifier(java.lang.reflect.Modifier.PUBLIC);
+   * </pre>
+   *
+   * @see java.lang.reflect.Modifier
+   */
+  public boolean hasModifier(int modifier) {
+    return (field.getModifiers() & modifier) != 0;
+  }
+
+  @Override
+  public String toString() {
+    return field.toString();
+  }
+}
+
+// Path: gson/src/main/java/com/google/gson/internal/NonNullElementWrapperList.java
+/*
+ * Copyright (C) 2018 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.gson.internal;
+
+import java.util.AbstractList;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.Objects;
+import java.util.RandomAccess;
+
+/**
+ * {@link List} which wraps another {@code List} but prevents insertion of {@code null} elements.
+ * Methods which only perform checks with the element argument (e.g. {@link #contains(Object)}) do
+ * not throw exceptions for {@code null} arguments.
+ */
+public class NonNullElementWrapperList<E> extends AbstractList<E> implements RandomAccess {
+  // Explicitly specify ArrayList as type to guarantee that delegate implements RandomAccess
+  private final ArrayList<E> delegate;
+
+  @SuppressWarnings("NonApiType")
+  public NonNullElementWrapperList(ArrayList<E> delegate) {
+    this.delegate = Objects.requireNonNull(delegate);
+  }
+
+  @Override
+  public E get(int index) {
+    return delegate.get(index);
+  }
+
+  @Override
+  public int size() {
+    return delegate.size();
+  }
+
+  
+private E nonNull(E element) {
+    if (element == null) {
+      throw new NullPointerException("Element must be non-null");
+    }
+    return element;
+  }
+
+  @Override
+  public E set(int index, E element) {
+    return delegate.set(index, nonNull(element));
+  }
+
+  @Override
+  public void add(int index, E element) {
+    delegate.add(index, nonNull(element));
+  }
+
+  @Override
+  public E remove(int index) {
+    return delegate.remove(index);
+  }
+
+  /* The following methods are overridden because their default implementation is inefficient */
+
+  @Override
+  public void clear() {
+    delegate.clear();
+  }
+
+  @SuppressWarnings("UngroupedOverloads") // this is intentionally ungrouped, see comment above
+  @Override
+  public boolean remove(Object o) {
+    return delegate.remove(o);
+  }
+
+  @Override
+  public boolean removeAll(Collection<?> c) {
+    return delegate.removeAll(c);
+  }
+
+  @Override
+  public boolean retainAll(Collection<?> c) {
+    return delegate.retainAll(c);
+  }
+
+  @Override
+  public boolean contains(Object o) {
+    return delegate.contains(o);
+  }
+
+  @Override
+  public int indexOf(Object o) {
+    return delegate.indexOf(o);
+  }
+
+  @Override
+  public int lastIndexOf(Object o) {
+    return delegate.lastIndexOf(o);
+  }
+
+  @Override
+  public Object[] toArray() {
+    return delegate.toArray();
+  }
+
+  @Override
+  public <T> T[] toArray(T[] a) {
+    return delegate.toArray(a);
+  }
+
+  @Override
+  public boolean equals(Object o) {
+    return delegate.equals(o);
+  }
+
+  @Override
+  public int hashCode() {
+    return delegate.hashCode();
+  }
+
+  // TODO: Once Gson targets Java 8 also override List.sort
+}
+
+// Path: gson/src/main/java/com/google/gson/JsonArray.java
+/*
+ * Copyright (C) 2008 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.google.gson;
+
+import com.google.errorprone.annotations.CanIgnoreReturnValue;
+import com.google.gson.internal.NonNullElementWrapperList;
+import java.math.BigDecimal;
+import java.math.BigInteger;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+
+/**
+ * A class representing an array type in JSON. An array is a list of {@link JsonElement}s each of
+ * which can be of a different type. This is an ordered list, meaning that the order in which
+ * elements are added is preserved. This class does not support {@code null} values. If {@code null}
+ * is provided as element argument to any of the methods, it is converted to a {@link JsonNull}.
+ *
+ * <p>{@code JsonArray} only implements the {@link Iterable} interface but not the {@link List}
+ * interface. A {@code List} view of it can be obtained with {@link #asList()}.
+ *
+ * @author Inderjeet Singh
+ * @author Joel Leitch
+ */
+public final class JsonArray extends JsonElement implements Iterable<JsonElement> {
+  private final ArrayList<JsonElement> elements;
+
+  /** Creates an empty JsonArray. */
+  @SuppressWarnings("deprecation") // superclass constructor
+  public JsonArray() {
+    elements = new ArrayList<>();
+  }
+
+  /**
+   * Creates an empty JsonArray with the desired initial capacity.
+   *
+   * @param capacity initial capacity.
+   * @throws IllegalArgumentException if the {@code capacity} is negative
+   * @since 2.8.1
+   */
+  @SuppressWarnings("deprecation") // superclass constructor
+  public JsonArray(int capacity) {
+    elements = new ArrayList<>(capacity);
+  }
+
+  /**
+   * Creates a deep copy of this element and all its children.
+   *
+   * @since 2.8.2
+   */
+  @Override
+  public JsonArray deepCopy() {
+    if (!elements.isEmpty()) {
+      JsonArray result = new JsonArray(elements.size());
+      for (JsonElement element : elements) {
+        result.add(element.deepCopy());
+      }
+      return result;
+    }
+    return new JsonArray();
+  }
+
+  /**
+   * Adds the specified boolean to self.
+   *
+   * @param bool the boolean that needs to be added to the array.
+   * @since 2.4
+   */
+  public void add(Boolean bool) {
+    elements.add(bool == null ? JsonNull.INSTANCE : new JsonPrimitive(bool));
+  }
+
+  /**
+   * Adds the specified character to self.
+   *
+   * @param character the character that needs to be added to the array.
+   * @since 2.4
+   */
+  public void add(Character character) {
+    elements.add(character == null ? JsonNull.INSTANCE : new JsonPrimitive(character));
+  }
+
+  /**
+   * Adds the specified number to self.
+   *
+   * @param number the number that needs to be added to the array.
+   * @since 2.4
+   */
+  public void add(Number number) {
+    elements.add(number == null ? JsonNull.INSTANCE : new JsonPrimitive(number));
+  }
+
+  /**
+   * Adds the specified string to self.
+   *
+   * @param string the string that needs to be added to the array.
+   * @since 2.4
+   */
+  public void add(String string) {
+    elements.add(string == null ? JsonNull.INSTANCE : new JsonPrimitive(string));
+  }
+
+  /**
+   * Adds the specified element to self.
+   *
+   * @param element the element that needs to be added to the array.
+   */
+  public void add(JsonElement element) {
+    if (element == null) {
+      element = JsonNull.INSTANCE;
+    }
+    elements.add(element);
+  }
+
+  /**
+   * Adds all the elements of the specified array to self.
+   *
+   * @param array the array whose elements need to be added to the array.
+   */
+  public void addAll(JsonArray array) {
+    elements.addAll(array.elements);
+  }
+
+  /**
+   * Replaces the element at the specified position in this array with the specified element.
+   *
+   * @param index index of the element to replace
+   * @param element element to be stored at the specified position
+   * @return the element previously at the specified position
+   * @throws IndexOutOfBoundsException if the specified index is outside the array bounds
+   */
+  @CanIgnoreReturnValue
+  public JsonElement set(int index, JsonElement element) {
+    return elements.set(index, element == null ? JsonNull.INSTANCE : element);
+  }
+
+  /**
+   * Removes the first occurrence of the specified element from this array, if it is present. If the
+   * array does not contain the element, it is unchanged.
+   *
+   * @param element element to be removed from this array, if present
+   * @return true if this array contained the specified element, false otherwise
+   * @since 2.3
+   */
+  @CanIgnoreReturnValue
+  public boolean remove(JsonElement element) {
+    return elements.remove(element);
+  }
+
+  /**
+   * Removes the element at the specified position in this array. Shifts any subsequent elements to
+   * the left (subtracts one from their indices). Returns the element that was removed from the
+   * array.
+   *
+   * @param index index the index of the element to be removed
+   * @return the element previously at the specified position
+   * @throws IndexOutOfBoundsException if the specified index is outside the array bounds
+   * @since 2.3
+   */
+  @CanIgnoreReturnValue
+  public JsonElement remove(int index) {
+    return elements.remove(index);
+  }
+
+  /**
+   * Returns true if this array contains the specified element.
+   *
+   * @return true if this array contains the specified element.
+   * @param element whose presence in this array is to be tested
+   * @since 2.3
+   */
+  public boolean contains(JsonElement element) {
+...
+
+Function Description:1. **Purpose**: The function ensures that the provided element is not null, throwing an exception if it is.
+2. **Input**: A single element of a generic type.
+3. **Output**: The same element if it is not null; otherwise, it throws a `NullPointerException`.
+4. **Procedure**: The function checks if the input element is null. If it is, it throws a `NullPointerException` with a specific error message. If the element is not null, it simply returns the element.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

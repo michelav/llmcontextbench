@@ -1,0 +1,21 @@
+{
+  "base_id": "java_005",
+  "code_context_ntokens": 1944,
+  "description": "1. **Purpose**: The function ensures that the provided element is not null, throwing an exception if it is.\n2. **Input**: A single element of a generic type.\n3. **Output**: The same element if it is not null; otherwise, it throws a `NullPointerException`.\n4. **Procedure**: The function checks if the input element is null. If it is, it throws a `NullPointerException` with a specific error message. If the element is not null, it simply returns the element.",
+  "end_byte": 1734,
+  "end_line": 55,
+  "instance_id": "java_005_ctx2k",
+  "language": "java",
+  "needle_name": "nonNull",
+  "needle_token_end": 894,
+  "needle_token_start": 850,
+  "normalized_language": "java",
+  "path": "gson/src/main/java/com/google/gson/internal/NonNullElementWrapperList.java",
+  "position_ratio": 0.45,
+  "repo": "google/gson",
+  "repoqa_description": "Function Description:1. **Purpose**: The function ensures that the provided element is not null, throwing an exception if it is.\n2. **Input**: A single element of a generic type.\n3. **Output**: The same element if it is not null; otherwise, it throws a `NullPointerException`.\n4. **Procedure**: The function checks if the input element is null. If it is, it throws a `NullPointerException` with a specific error message. If the element is not null, it simply returns the element.",
+  "requested_context_tokens": 2048,
+  "sequence": 5,
+  "start_byte": 1581,
+  "start_line": 49
+}

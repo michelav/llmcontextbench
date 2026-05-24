@@ -1,0 +1,781 @@
+// Repository: xenova/transformers.js
+
+ * @param {boolean} [fatal=true] Whether to throw an error if the file is not found.
+ * @param {PretrainedOptions} [options] An object containing optional parameters.
+ * 
+ * @throws Will throw an error if the file is not found and `fatal` is true.
+ * @returns {Promise} A Promise that resolves with the file content as a buffer.
+ */
+export async function getModelFile(path_or_repo_id, filename, fatal = true, options = {}) {
+
+    if (!env.allowLocalModels) {
+        // User has disabled local models, so we just make sure other settings are correct.
+
+        if (options.local_files_only) {
+            throw Error("Invalid configuration detected: local models are disabled (`env.allowLocalModels=false`) but you have requested to only use local models (`local_files_only=true`).")
+        } else if (!env.allowRemoteModels) {
+            throw Error("Invalid configuration detected: both local and remote models are disabled. Fix by setting `env.allowLocalModels` or `env.allowRemoteModels` to `true`.")
+        }
+    }
+
+    // Initiate file retrieval
+    dispatchCallback(options.progress_callback, {
+        status: 'initiate',
+        name: path_or_repo_id,
+        file: filename
+    })
+
+    // First, check if the a caching backend is available
+    // If no caching mechanism available, will download the file every time
+    let cache;
+    if (!cache && env.useBrowserCache) {
+        if (typeof caches === 'undefined') {
+            throw Error('Browser cache is not available in this environment.')
+        }
+        try {
+            // In some cases, the browser cache may be visible, but not accessible due to security restrictions.
+            // For example, when running an application in an iframe, if a user attempts to load the page in
+            // incognito mode, the following error is thrown: `DOMException: Failed to execute 'open' on 'CacheStorage':
+            // An attempt was made to break through the security policy of the user agent.`
+            // So, instead of crashing, we just ignore the error and continue without using the cache.
+            cache = await caches.open('transformers-cache');
+        } catch (e) {
+            console.warn('An error occurred while opening the browser cache:', e);
+        }
+    }
+
+    if (!cache && env.useFSCache) {
+        // TODO throw error if not available
+
+        // If `cache_dir` is not specified, use the default cache directory
+        cache = new FileCache(options.cache_dir ?? env.cacheDir);
+    }
+
+    if (!cache && env.useCustomCache) {
+        // Allow the user to specify a custom cache system.
+        if (!env.customCache) {
+            throw Error('`env.useCustomCache=true`, but `env.customCache` is not defined.')
+        }
+
+        // Check that the required methods are defined:
+        if (!env.customCache.match || !env.customCache.put) {
+            throw new Error(
+                "`env.customCache` must be an object which implements the `match` and `put` functions of the Web Cache API. " +
+                "For more information, see https://developer.mozilla.org/en-US/docs/Web/API/Cache"
+            )
+        }
+        cache = env.customCache;
+    }
+
+    const revision = options.revision ?? 'main';
+
+    let requestURL = pathJoin(path_or_repo_id, filename);
+    let localPath = pathJoin(env.localModelPath, requestURL);
+
+    let remoteURL = pathJoin(
+        env.remoteHost,
+        env.remotePathTemplate
+            .replaceAll('{model}', path_or_repo_id)
+            .replaceAll('{revision}', encodeURIComponent(revision)),
+        filename
+    );
+
+    // Choose cache key for filesystem cache
+    // When using the main revision (default), we use the request URL as the cache key.
+    // If a specific revision is requested, we account for this in the cache key.
+    let fsCacheKey = revision === 'main' ? requestURL : pathJoin(path_or_repo_id, revision, filename);
+
+    /** @type {string} */
+    let cacheKey;
+    let proposedCacheKey = cache instanceof FileCache ? fsCacheKey : remoteURL;
+
+    // Whether to cache the final response in the end.
+    let toCacheResponse = false;
+
+    /** @type {Response|FileResponse|undefined} */
+    let response;
+
+    if (cache) {
+        // A caching system is available, so we try to get the file from it.
+        //  1. We first try to get from cache using the local path. In some environments (like deno),
+        //     non-URL cache keys are not allowed. In these cases, `response` will be undefined.
+        //  2. If no response is found, we try to get from cache using the remote URL or file system cache.
+        response = await tryCache(cache, localPath, proposedCacheKey);
+    }
+
+    const cacheHit = response !== undefined;
+
+    if (response === undefined) {
+        // Caching not available, or file is not cached, so we perform the request
+
+        if (env.allowLocalModels) {
+            // Accessing local models is enabled, so we try to get the file locally.
+            // If request is a valid HTTP URL, we skip the local file check. Otherwise, we try to get the file locally.
+            const isURL = isValidHttpUrl(requestURL);
+            if (!isURL) {
+                try {
+                    response = await getFile(localPath);
+                    cacheKey = localPath; // Update the cache key to be the local path
+                } catch (e) {
+                    // Something went wrong while trying to get the file locally.
+                    // NOTE: error handling is done in the next step (since `response` will be undefined)
+                    console.warn(`Unable to load from local path "${localPath}": "${e}"`);
+                }
+            } else if (options.local_files_only) {
+                throw new Error(`\`local_files_only=true\`, but attempted to load a remote file from: ${requestURL}.`);
+            } else if (!env.allowRemoteModels) {
+                throw new Error(`\`env.allowRemoteModels=false\`, but attempted to load a remote file from: ${requestURL}.`);
+            }
+        }
+
+        if (response === undefined || response.status === 404) {
+            // File not found locally. This means either:
+            // - The user has disabled local file access (`env.allowLocalModels=false`)
+            // - the path is a valid HTTP url (`response === undefined`)
+            // - the path is not a valid HTTP url and the file is not present on the file system or local server (`response.status === 404`)
+
+            if (options.local_files_only || !env.allowRemoteModels) {
+                // User requested local files only, but the file is not found locally.
+                if (fatal) {
+                    throw Error(`\`local_files_only=true\` or \`env.allowRemoteModels=false\` and file was not found locally at "${localPath}".`);
+                } else {
+                    // File not found, but this file is optional.
+                    // TODO in future, cache the response?
+                    return null;
+                }
+            }
+
+            // File not found locally, so we try to download it from the remote server
+            response = await getFile(remoteURL);
+
+            if (response.status !== 200) {
+                return handleError(response.status, remoteURL, fatal);
+            }
+
+            // Success! We use the proposed cache key from earlier
+            cacheKey = proposedCacheKey;
+        }
+
+        // Only cache the response if:
+        toCacheResponse =
+            cache                              // 1. A caching system is available
+            && typeof Response !== 'undefined' // 2. `Response` is defined (i.e., we are in a browser-like environment)
+            && response instanceof Response    // 3. result is a `Response` object (i.e., not a `FileResponse`)
+            && response.status === 200         // 4. request was successful (status code 200)
+    }
+
+    // Start downloading
+    dispatchCallback(options.progress_callback, {
+        status: 'download',
+        name: path_or_repo_id,
+        file: filename
+    })
+
+    const progressInfo = {
+        status: 'progress',
+        name: path_or_repo_id,
+        file: filename
+    }
+
+    /** @type {Uint8Array} */
+    let buffer;
+
+    if (!options.progress_callback) {
+        // If no progress callback is specified, we can use the `.arrayBuffer()`
+        // method to read the response.
+        buffer = new Uint8Array(await response.arrayBuffer());
+
+    } else if (
+        cacheHit // The item is being read from the cache
+        &&
+        typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent) // We are in Firefox
+    ) {
+        // Due to bug in Firefox, we cannot display progress when loading from cache.
+        // Fortunately, since this should be instantaneous, this should not impact users too much.
+        buffer = new Uint8Array(await response.arrayBuffer());
+
+        // For completeness, we still fire the final progress callback
+        dispatchCallback(options.progress_callback, {
+            ...progressInfo,
+            progress: 100,
+            loaded: buffer.length,
+            total: buffer.length,
+        })
+    } else {
+        buffer = await readResponse(response, data => {
+            dispatchCallback(options.progress_callback, {
+                ...progressInfo,
+                ...data,
+            })
+        })
+    }
+
+    if (
+        // Only cache web responses
+        // i.e., do not cache FileResponses (prevents duplication)
+        toCacheResponse && cacheKey
+        &&
+        // Check again whether request is in cache. If not, we add the response to the cache
+        (await cache.match(cacheKey) === undefined)
+    ) {
+        // NOTE: We use `new Response(buffer, ...)` instead of `response.clone()` to handle LFS files
+        await cache.put(cacheKey, new Response(buffer, {
+            headers: response.headers
+        }))
+            .catch(err => {
+                // Do not crash if unable to add to cache (e.g., QuotaExceededError).
+                // Rather, log a warning and proceed with execution.
+                console.warn(`Unable to add response to browser cache: ${err}.`);
+            });
+
+    }
+
+    dispatchCallback(options.progress_callback, {
+        status: 'done',
+        name: path_or_repo_id,
+        file: filename
+    });
+
+    return buffer;
+}
+
+/**
+ * Fetches a JSON file from a given path and file name.
+ *
+ * @param {string} modelPath The path to the directory containing the file.
+ * @param {string} fileName The name of the file to fetch.
+ * @param {boolean} [fatal=true] Whether to throw an error if the file is not found.
+ * @param {PretrainedOptions} [options] An object containing optional parameters.
+ * @returns {Promise<Object>} The JSON data parsed into a JavaScript object.
+ * @throws Will throw an error if the file is not found and `fatal` is true.
+ */
+export 
+async function getModelJSON(modelPath, fileName, fatal = true, options = {}) {
+    let buffer = await getModelFile(modelPath, fileName, fatal, options);
+    if (buffer === null) {
+        // Return empty object
+        return {}
+    }
+
+    let decoder = new TextDecoder('utf-8');
+    let jsonData = decoder.decode(buffer);
+
+    return JSON.parse(jsonData);
+}
+
+/**
+ * Read and track progress when reading a Response object
+ *
+ * @param {any} response The Response object to read
+ * @param {function} progress_callback The function to call with progress updates
+ * @returns {Promise<Uint8Array>} A Promise that resolves with the Uint8Array buffer
+ */
+async function readResponse(response, progress_callback) {
+
+    const contentLength = response.headers.get('Content-Length');
+    if (contentLength === null) {
+        console.warn('Unable to determine content-length from response headers. Will expand buffer when needed.')
+    }
+    let total = parseInt(contentLength ?? '0');
+    let buffer = new Uint8Array(total);
+    let loaded = 0;
+
+    const reader = response.body.getReader();
+    async function read() {
+        const { done, value } = await reader.read();
+        if (done) return;
+
+        let newLoaded = loaded + value.length;
+        if (newLoaded > total) {
+            total = newLoaded;
+
+            // Adding the new data will overflow buffer.
+            // In this case, we extend the buffer
+            let newBuffer = new Uint8Array(total);
+
+            // copy contents
+            newBuffer.set(buffer);
+
+            buffer = newBuffer;
+        }
+        buffer.set(value, loaded)
+        loaded = newLoaded;
+
+        const progress = (loaded / total) * 100;
+
+        // Call your function here
+        progress_callback({
+            progress: progress,
+            loaded: loaded,
+            total: total,
+        })
+
+        return read();
+    }
+
+    // Actually read
+    await read();
+
+    return buffer;
+}
+
+/**
+ * Joins multiple parts of a path into a single path, while handling leading and trailing slashes.
+ *
+ * @param {...string} parts Multiple parts of a path.
+ * @returns {string} A string representing the joined path.
+ */
+function pathJoin(...parts) {
+    // https://stackoverflow.com/a/55142565
+    parts = parts.map((part, index) => {
+        if (index) {
+            part = part.replace(new RegExp('^/'), '');
+        }
+        if (index !== parts.length - 1) {
+            part = part.replace(new RegExp('/$'), '');
+        }
+        return part;
+    })
+    return parts.join('/');
+}
+
+// Path: src/configs.js
+
+/**
+ * @file Helper module for using model configs. For more information, see the corresponding
+ * [Python documentation](https://huggingface.co/docs/transformers/main/en/model_doc/auto#transformers.AutoConfig).
+ * 
+ * **Example:** Load an `AutoConfig`.
+ * 
+ * ```javascript
+ * import { AutoConfig } from '@xenova/transformers';
+ * let config = await AutoConfig.from_pretrained('bert-base-uncased');
+ * console.log(config);
+ * // PretrainedConfig {
+ * //   "model_type": "bert",
+ * //   "is_encoder_decoder": false,
+ * //   "architectures": [
+ * //       "BertForMaskedLM"
+ * //   ],
+ * //   "vocab_size": 30522
+ * //   "num_attention_heads": 12,
+ * //   "num_hidden_layers": 12,
+ * //   "hidden_size": 768,
+ * //   "max_position_embeddings": 512,
+ * //   ...
+ * // }
+ * ```
+ * 
+ * @module configs
+ */
+
+import {
+    getModelJSON,
+} from './utils/hub.js';
+
+/**
+ * @typedef {import('./utils/hub.js').PretrainedOptions} PretrainedOptions
+ */
+
+
+/**
+ * Loads a config from the specified path.
+ * @param {string} pretrained_model_name_or_path The path to the config directory.
+ * @param {PretrainedOptions} options Additional options for loading the config.
+ * @returns {Promise<Array>} A promise that resolves with information about the loaded config.
+ */
+async function loadConfig(pretrained_model_name_or_path, options) {
+    let info = await getModelJSON(pretrained_model_name_or_path, 'config.json', true, options);
+    return info;
+}
+
+/**
+ * Base class for all configuration classes. For more information, see the corresponding
+ * [Python documentation](https://huggingface.co/docs/transformers/main/en/main_classes/configuration#transformers.PretrainedConfig).
+ */
+export class PretrainedConfig {
+    // NOTE: Typo in original
+
+    /**
+     * Create a new PreTrainedTokenizer instance.
+     * @param {Object} configJSON The JSON of the config.
+     */
+    constructor(configJSON) {
+        this.model_type = null;
+        this.is_encoder_decoder = false;
+
+        Object.assign(this, configJSON);
+    }
+
+    /**
+     * Loads a pre-trained config from the given `pretrained_model_name_or_path`. 
+     * 
+     * @param {string} pretrained_model_name_or_path The path to the pre-trained config.
+     * @param {PretrainedOptions} options Additional options for loading the config.
+     * @throws {Error} Throws an error if the config.json is not found in the `pretrained_model_name_or_path`.
+     * 
+     * @returns {Promise<PretrainedConfig>} A new instance of the `PretrainedConfig` class.
+     */
+    static async from_pretrained(pretrained_model_name_or_path, {
+        progress_callback = null,
+        config = null,
+        cache_dir = null,
+        local_files_only = false,
+        revision = 'main',
+    } = {}) {
+
+        let data = config ?? await loadConfig(pretrained_model_name_or_path, {
+            progress_callback,
+            config,
+            cache_dir,
+            local_files_only,
+            revision,
+        })
+        return new this(data);
+    }
+}
+
+/**
+ * Helper class which is used to instantiate pretrained configs with the `from_pretrained` function.
+ * 
+ * @example
+ * let config = await AutoConfig.from_pretrained('bert-base-uncased'); 
+ */
+export class AutoConfig {
+    /** @type {PretrainedConfig.from_pretrained} */
+    static async from_pretrained(...args) {
+        return PretrainedConfig.from_pretrained(...args);
+    }
+}
+
+// Path: src/utils/maths.js
+
+/**
+ * @file Helper module for mathematical processing. 
+ * 
+ * These functions and classes are only used internally, 
+ * meaning an end-user shouldn't need to access anything here.
+ * 
+ * @module utils/maths
+ */
+
+/**
+ * @typedef {Int8Array | Uint8Array | Uint8ClampedArray | Int16Array | Uint16Array | Int32Array | Uint32Array | Float32Array | Float64Array} TypedArray
+ * @typedef {BigInt64Array | BigUint64Array} BigTypedArray
+ * @typedef {TypedArray | BigTypedArray} AnyTypedArray
+ */
+
+/**
+ * @param {TypedArray} input
+ */
+export function interpolate_data(input, [in_channels, in_height, in_width], [out_height, out_width], mode = 'bilinear', align_corners = false) {
+    // TODO use mode and align_corners
+
+    // Output image dimensions
+    const x_scale = out_width / in_width;
+    const y_scale = out_height / in_height;
+
+    // Output image
+    // @ts-ignore
+    const out_img = new input.constructor(out_height * out_width * in_channels);
+
+    // Pre-calculate strides
+    const inStride = in_height * in_width;
+    const outStride = out_height * out_width;
+
+    for (let i = 0; i < out_height; ++i) {
+        for (let j = 0; j < out_width; ++j) {
+            // Calculate output offset
+            const outOffset = i * out_width + j;
+
+            // Calculate input pixel coordinates
+            const x = (j + 0.5) / x_scale - 0.5;
+            const y = (i + 0.5) / y_scale - 0.5;
+
+            // Calculate the four nearest input pixels
+            // We also check if the input pixel coordinates are within the image bounds
+            let x1 = Math.floor(x);
+            let y1 = Math.floor(y);
+            const x2 = Math.min(x1 + 1, in_width - 1);
+            const y2 = Math.min(y1 + 1, in_height - 1);
+
+            x1 = Math.max(x1, 0);
+            y1 = Math.max(y1, 0);
+
+
+            // Calculate the fractional distances between the input pixel and the four nearest pixels
+            const s = x - x1;
+            const t = y - y1;
+
+            // Perform bilinear interpolation
+            const w1 = (1 - s) * (1 - t);
+            const w2 = s * (1 - t);
+            const w3 = (1 - s) * t;
+            const w4 = s * t;
+
+            // Calculate the four nearest input pixel indices
+            const yStride = y1 * in_width;
+            const xStride = y2 * in_width;
+            const idx1 = yStride + x1;
+            const idx2 = yStride + x2;
+            const idx3 = xStride + x1;
+            const idx4 = xStride + x2;
+
+            for (let k = 0; k < in_channels; ++k) {
+                // Calculate channel offset
+                const cOffset = k * inStride;
+
+                out_img[k * outStride + outOffset] =
+                    w1 * input[cOffset + idx1] +
+                    w2 * input[cOffset + idx2] +
+                    w3 * input[cOffset + idx3] +
+                    w4 * input[cOffset + idx4];
+            }
+        }
+    }
+
+    return out_img;
+}
+
+
+/**
+ * Helper method to permute a `AnyTypedArray` directly
+ * @template {AnyTypedArray} T 
+ * @param {T} array 
+ * @param {number[]} dims 
+ * @param {number[]} axes 
+ * @returns {[T, number[]]} The permuted array and the new shape.
+ */
+export function permute_data(array, dims, axes) {
+    // Calculate the new shape of the permuted array
+    // and the stride of the original array
+    const shape = new Array(axes.length);
+    const stride = new Array(axes.length);
+
+    for (let i = axes.length - 1, s = 1; i >= 0; --i) {
+        stride[i] = s;
+        shape[i] = dims[axes[i]];
+        s *= shape[i];
+    }
+
+    // Precompute inverse mapping of stride
+    const invStride = axes.map((_, i) => stride[axes.indexOf(i)]);
+
+    // Create the permuted array with the new shape
+    // @ts-ignore
+    const permutedData = new array.constructor(array.length);
+
+    // Permute the original array to the new array
+    for (let i = 0; i < array.length; ++i) {
+        let newIndex = 0;
+        for (let j = dims.length - 1, k = i; j >= 0; --j) {
+            newIndex += (k % dims[j]) * invStride[j];
+            k = Math.floor(k / dims[j]);
+        }
+        permutedData[newIndex] = array[i];
+    }
+
+    return [permutedData, shape];
+}
+
+
+/**
+ * Compute the softmax of an array of numbers.
+ * @template {TypedArray|number[]} T
+ * @param {T} arr The array of numbers to compute the softmax of.
+ * @returns {T} The softmax array.
+ */
+export function softmax(arr) {
+    // Compute the maximum value in the array
+    const maxVal = max(arr)[0];
+
+    // Compute the exponentials of the array values
+    const exps = arr.map(x => Math.exp(x - maxVal));
+
+    // Compute the sum of the exponentials
+    // @ts-ignore
+    const sumExps = exps.reduce((acc, val) => acc + val, 0);
+
+    // Compute the softmax values
+    const softmaxArr = exps.map(x => x / sumExps);
+
+    return /** @type {T} */(softmaxArr);
+}
+
+/**
+ * Calculates the logarithm of the softmax function for the input array.
+ * @template {TypedArray|number[]} T
+ * @param {T} arr The input array to calculate the log_softmax function for.
+ * @returns {T} The resulting log_softmax array.
+ */
+export function log_softmax(arr) {
+    // Compute the softmax values
+    const softmaxArr = softmax(arr);
+
+    // Apply log formula to each element
+    const logSoftmaxArr = softmaxArr.map(x => Math.log(x));
+
+    return /** @type {T} */(logSoftmaxArr);
+}
+
+/**
+ * Calculates the dot product of two arrays.
+ * @param {number[]} arr1 The first array.
+ * @param {number[]} arr2 The second array.
+ * @returns {number} The dot product of arr1 and arr2.
+ */
+export function dot(arr1, arr2) {
+    let result = 0;
+    for (let i = 0; i < arr1.length; ++i) {
+        result += arr1[i] * arr2[i];
+    }
+    return result;
+}
+
+
+/**
+ * Get the top k items from an iterable, sorted by descending order
+ * @param {any[]|TypedArray} items The items to be sorted
+ * @param {number|null} [top_k=0] The number of top items to return (default: 0 = return all)
+ * @returns {[number, any][]} The top k items, sorted by descending order
+ */
+export function getTopItems(items, top_k = 0) {
+    // if top == 0, return all
+
+    items = Array.from(items)
+        .map((x, i) => [i, x])            // Get indices ([index, score])
+        .sort((a, b) => b[1] - a[1])      // Sort by log probabilities
+
+    if (top_k !== null && top_k > 0) {
+        items = items.slice(0, top_k);    // Get top k items
+    }
+
+    return items
+}
+
+/**
+ * Computes the cosine similarity between two arrays.
+ *
+ * @param {number[]} arr1 The first array.
+ * @param {number[]} arr2 The second array.
+ * @returns {number} The cosine similarity between the two arrays.
+ */
+export function cos_sim(arr1, arr2) {
+    // Calculate dot product of the two arrays
+    const dotProduct = dot(arr1, arr2);
+
+    // Calculate the magnitude of the first array
+    const magnitudeA = magnitude(arr1);
+
+    // Calculate the magnitude of the second array
+    const magnitudeB = magnitude(arr2);
+
+    // Calculate the cosine similarity
+    const cosineSimilarity = dotProduct / (magnitudeA * magnitudeB);
+
+    return cosineSimilarity;
+}
+
+/**
+ * Calculates the magnitude of a given array.
+ * @param {number[]} arr The array to calculate the magnitude of.
+ * @returns {number} The magnitude of the array.
+ */
+export function magnitude(arr) {
+    return Math.sqrt(arr.reduce((acc, val) => acc + val * val, 0));
+}
+
+
+/**
+ * Returns the value and index of the minimum element in an array.
+ * @param {number[]|TypedArray} arr array of numbers.
+ * @returns {number[]} the value and index of the minimum element, of the form: [valueOfMin, indexOfMin]
+ * @throws {Error} If array is empty.
+ */
+export function min(arr) {
+    if (arr.length === 0) throw Error('Array must not be empty');
+    let min = arr[0];
+    let indexOfMin = 0;
+    for (let i = 1; i < arr.length; ++i) {
+        if (arr[i] < min) {
+            min = arr[i];
+            indexOfMin = i;
+        }
+    }
+    return [min, indexOfMin];
+}
+
+
+/**
+ * Returns the value and index of the maximum element in an array.
+ * @param {number[]|AnyTypedArray} arr array of numbers.
+ * @returns {[number, number]} the value and index of the maximum element, of the form: [valueOfMax, indexOfMax]
+ * @throws {Error} If array is empty.
+ */
+export function max(arr) {
+    if (arr.length === 0) throw Error('Array must not be empty');
+    let max = arr[0];
+    let indexOfMax = 0;
+    for (let i = 1; i < arr.length; ++i) {
+        if (arr[i] > max) {
+            max = arr[i];
+            indexOfMax = i;
+        }
+    }
+    return [Number(max), indexOfMax];
+}
+
+function isPowerOfTwo(number) {
+    // Check if the number is greater than 0 and has only one bit set to 1
+    return (number > 0) && ((number & (number - 1)) === 0);
+}
+
+/**
+ * Implementation of Radix-4 FFT.
+ * 
+ * P2FFT class provides functionality for performing Fast Fourier Transform on arrays
+ * which are a power of two in length.
+ * Code adapted from https://www.npmjs.com/package/fft.js
+ */
+class P2FFT {
+    /**
+     * @param {number} size The size of the input array. Must be a power of two larger than 1.
+     * @throws {Error} FFT size must be a power of two larger than 1.
+     */
+    constructor(size) {
+        this.size = size | 0; // convert to a 32-bit signed integer
+        if (this.size <= 1 || !isPowerOfTwo(this.size))
+            throw new Error('FFT size must be a power of two larger than 1');
+
+        this._csize = size << 1;
+
+        this.table = new Float64Array(this.size * 2);
+        for (let i = 0; i < this.table.length; i += 2) {
+            const angle = Math.PI * i / this.size;
+            this.table[i] = Math.cos(angle);
+            this.table[i + 1] = -Math.sin(angle);
+        }
+
+        // Find size's power of two
+        let power = 0;
+        for (let t = 1; this.size > t; t <<= 1)
+            ++power;
+
+        // Calculate initial step's width:
+        //   * If we are full radix-4, it is 2x smaller to give inital len=8
+        //   * Otherwise it is the same as `power` to give len=4
+        this._width = power % 2 === 0 ? power - 1 : power;
+
+        // Pre-compute bit-reversal patterns
+        this._bitrev = new Int32Array(1 << this._width);
+        for (let j = 0; j < this._bitrev.length; ++j) {
+            this._bitrev[j] = 0;
+            for (let shift = 0; shift < this._width; shift += 2) {
+                const revShift = this._width - shift - 2;
+                this._bitrev[j] |= ((j >>> shift) & 3) << revShift;
+            }
+        }
+    }
+
+    /**
+...

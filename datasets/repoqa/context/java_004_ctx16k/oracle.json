@@ -1,0 +1,15 @@
+{
+  "baseId": "java_004",
+  "endByte": 5184,
+  "endLine": 150,
+  "instanceId": "java_004_ctx16k",
+  "language": "java",
+  "needleName": "getAsJsonNull",
+  "normalizedLanguage": "java",
+  "path": "gson/src/main/java/com/google/gson/JsonElement.java",
+  "repo": "google/gson",
+  "sequence": 4,
+  "startByte": 4928,
+  "startLine": 143,
+  "targetFunction": "@CanIgnoreReturnValue // When this method is used only to verify that the value is JsonNull\n  public JsonNull getAsJsonNull() {\n    if (isJsonNull()) {\n      return (JsonNull) this;\n    }\n    throw new IllegalStateException(\"Not a JSON Null: \" + this);\n  }"
+}

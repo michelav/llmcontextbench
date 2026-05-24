@@ -1,0 +1,18 @@
+{
+  "datasetId": "ctxbench/repoqa",
+  "version": "test",
+  "instances": [
+    {
+      "instanceId": "repoqa-workspace-1",
+      "contextBlocks": "context/repoqa-workspace-1/blocks.json",
+      "tasks": [
+        {
+          "id": "snf_retrieve_function",
+          "parameters": {
+            "description": "Return a friendly greeting."
+          }
+        }
+      ]
+    }
+  ]
+}

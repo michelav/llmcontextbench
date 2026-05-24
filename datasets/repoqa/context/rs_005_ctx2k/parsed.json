@@ -1,0 +1,97 @@
+{
+  "context_builder": "repoqa-native",
+  "context_type": "repoqa_structured_code_context",
+  "files": [
+    {
+      "language": "rust",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "src/multi/mod.rs",
+      "symbols": [
+        {
+          "children": [],
+          "code": "fn process<OM: OutputMode>(&mut self, i: I) -> crate::PResult<OM, I, Self::Output, Self::Error> {\n    let mut res = OM::Output::bind(|| (self.init)());\n    let mut input = i;\n\n    loop {\n      let i_ = input.clone();\n      let len = input.input_len();\n      match self.parser.process::<OM>(i_) {\n        Ok((i, o)) => {\n          // infinite loop check: the parser must always consume\n          if i.input_len() == len {\n            return Err(Err::Error(OM::Error::bind(|| {\n              <F as Parser<I>>::Error::from_error_kind(input, ErrorKind::Many0)\n            })));\n          }\n\n          res = OM::Output::combine(res, o, |res, o| (self.g)(res, o));\n          input = i;\n        }\n        Err(Err::Error(_)) => {\n          return Ok((input, res));\n        }\n        Err(e) => {\n          return Err(e);\n        }\n      }\n    }\n  }",
+          "documentation": null,
+          "end_line": 1110,
+          "kind": "function",
+          "name": "process",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "process",
+          "signature": "fn process<OM: OutputMode>(&mut self, i: I) -> crate::PResult<OM, I, Self::Output, Self::Error> {\n    let mut res = OM::Output::bind(|| (self.init)());\n    let mut input = i;\n\n    loop {\n      let i_ = input.clone();\n      let len = input.input_len();\n      match self.parser.process::<OM>(i_) {\n        Ok((i, o)) => {\n          // infinite loop check: the parser must always consume\n          if i.input_len() == len {\n            return Err(Err::Error(OM::Error::bind(|| {\n              <F as Parser<I>>::Error::from_error_kind(input, ErrorKind::Many0)\n            })));\n          }\n\n          res = OM::Output::combine(res, o, |res, o| (self.g)(res, o));\n          input = i;\n        }\n        Err(Err::Error(_)) => {\n          return Ok((input, res));\n        }\n        Err(e) => {\n          return Err(e);\n        }\n      }\n    }\n  }",
+          "start_line": 1083,
+          "symbol_id": "src/multi/mod.rs#function:process:1083"
+        },
+        {
+          "children": [],
+          "code": "pub fn fold_many1<I, E, F, G, H, R>(\n  parser: F,\n  init: H,\n  g: G,\n) -> impl Parser<I, Output = R, Error = E>\nwhere\n  I: Clone + InputLength,\n  F: Parser<I, Error = E>,\n  G: FnMut(R, <F as Parser<I>>::Output) -> R,\n  H: FnMut() -> R,\n  E: ParseError<I>,\n{\n  FoldMany1 {\n    parser,\n    g,\n    init,\n    r: PhantomData,\n  }\n}",
+          "documentation": "Repeats the embedded parser, calling `g` to gather the results.\n\nThis stops on [`Err::Error`] if there is at least one result. To instead chain an error up,\nsee [`cut`][crate::combinator::cut].\n\n# Arguments\n* `f` The parser to apply.\n* `init` A function returning the initial value.\n* `g` The function that combines a result of `f` with\nthe current accumulator.\n\n*Note*: If the parser passed to `many1` accepts empty inputs\n(like `alpha0` or `digit0`), `many1` will return an error,\nto prevent going into an infinite loop.\n\n```rust\n# use nom::{Err, error::{Error, ErrorKind}, Needed, IResult, Parser};\nuse nom::multi::fold_many1;\nuse nom::bytes::complete::tag;\n\nfn parser(s: &str) -> IResult<&str, Vec<&str>> {\nfold_many1(\ntag(\"abc\"),\nVec::new,\n|mut acc: Vec<_>, item| {\nacc.push(item);\nacc\n}\n).parse(s)\n}\n\nassert_eq!(parser(\"abcabc\"), Ok((\"\", vec![\"abc\", \"abc\"])));\nassert_eq!(parser(\"abc123\"), Ok((\"123\", vec![\"abc\"])));\nassert_eq!(parser(\"123123\"), Err(Err::Error(Error::new(\"123123\", ErrorKind::Many1))));\nassert_eq!(parser(\"\"), Err(Err::Error(Error::new(\"\", ErrorKind::Many1))));\n```",
+          "end_line": 1167,
+          "kind": "function",
+          "name": "fold_many1",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "fold_many1",
+          "signature": "pub fn fold_many1<I, E, F, G, H, R>(\n  parser: F,\n  init: H,\n  g: G,\n) -> impl Parser<I, Output = R, Error = E>\nwhere\n  I: Clone + InputLength,\n  F: Parser<I, Error = E>,\n  G: FnMut(R, <F as Parser<I>>::Output) -> R,\n  H: FnMut() -> R,\n  E: ParseError<I>,\n{\n  FoldMany1 {\n    parser,\n    g,\n    init,\n    r: PhantomData,\n  }\n}",
+          "start_line": 1149,
+          "symbol_id": "src/multi/mod.rs#function:fold_many1:1149"
+        },
+        {
+          "children": [],
+          "code": "pub struct FoldMany1<F, G, Init, R> {\n  parser: F,\n  g: G,\n  init: Init,\n  r: PhantomData<R>,\n}",
+          "documentation": "Parser implementation for the [fold_many1] combinator",
+          "end_line": 1175,
+          "kind": "struct",
+          "name": "FoldMany1",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "FoldMany1",
+          "signature": "pub struct FoldMany1<F, G, Init, R>",
+          "start_line": 1170,
+          "symbol_id": "src/multi/mod.rs#struct:FoldMany1:1170"
+        },
+        {
+          "children": [],
+          "code": "impl<I, F, G, Init, R> Parser<I> for FoldMany1<F, G, Init, R>\nwhere\n  I: Clone + InputLength,\n  F: Parser<I>,\n  G: FnMut(R, <F as Parser<I>>::Output) -> R,\n  Init: FnMut() -> R,\n{\n  type Output = R;\n  type Error = <F as Parser<I>>::Error;\n\n  fn process<OM: OutputMode>(&mut self, i: I) -> crate::PResult<OM, I, Self::Output, Self::Error> {\n    let mut res = OM::Output::bind(|| (self.init)());\n    let input = i.clone();\n\n    match self.parser.process::<OM>(input) {\n      Err(Err::Error(_)) => Err(Err::Error(OM::Error::bind(|| {\n        <F as Parser<I>>::Error::from_error_kind(i, ErrorKind::Many1)\n      }))),\n      Err(e) => Err(e),\n      Ok((i1, o1)) => {\n        res = OM::Output::combine(res, o1, |res, o| (self.g)(res, o));\n\n        let mut input = i1;\n        loop {\n          let i_ = input.clone();\n          let len = input.input_len();\n          match self.parser.process::<OM>(i_) {\n            Ok((i, o)) => {\n              // infinite loop check: the parser must always consume\n              if i.input_len() == len {\n                return Err(Err::Error(OM::Error::bind(|| {\n                  <F as Parser<I>>::Error::from_error_kind(input, ErrorKind::Many1)\n                })));\n              }\n\n              res = OM::Output::combine(res, o, |res, o| (self.g)(res, o));\n              input = i;\n            }\n            Err(Err::Error(_)) => {\n              return Ok((input, res));\n            }\n            Err(e) => {\n              return Err(e);\n            }\n          }\n        }\n      }\n    }\n  }\n}",
+          "documentation": null,
+          "end_line": 1226,
+          "kind": "impl",
+          "name": "process",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "process",
+          "signature": "impl<I, F, G, Init, R> Parser<I> for FoldMany1<F, G, Init, R>\nwhere\n  I: Clone + InputLength,\n  F: Parser<I>,\n  G: FnMut(R, <F as Parser<I>>::Output) -> R,\n  Init: FnMut() -> R,",
+          "start_line": 1177,
+          "symbol_id": "src/multi/mod.rs#impl:process:1177"
+        },
+        {
+          "children": [],
+          "code": "fn process<OM: OutputMode>(&mut self, i: I) -> crate::PResult<OM, I, Self::Output, Self::Error> {\n    let mut res = OM::Output::bind(|| (self.init)());\n    let input = i.clone();\n\n    match self.parser.process::<OM>(input) {\n      Err(Err::Error(_)) => Err(Err::Error(OM::Error::bind(|| {\n        <F as Parser<I>>::Error::from_error_kind(i, ErrorKind::Many1)\n      }))),\n      Err(e) => Err(e),\n      Ok((i1, o1)) => {\n        res = OM::Output::combine(res, o1, |res, o| (self.g)(res, o));\n\n        let mut input = i1;\n        loop {\n          let i_ = input.clone();\n          let len = input.input_len();\n          match self.parser.process::<OM>(i_) {\n            Ok((i, o)) => {\n              // infinite loop check: the parser must always consume\n              if i.input_len() == len {\n                return Err(Err::Error(OM::Error::bind(|| {\n                  <F as Parser<I>>::Error::from_error_kind(input, ErrorKind::Many1)\n                })));\n              }\n\n              res = OM::Output::combine(res, o, |res, o| (self.g)(res, o));\n              input = i;\n            }\n            Err(Err::Error(_)) => {\n              return Ok((input, res));\n            }\n            Err(e) => {\n              return Err(e);\n            }\n          }\n        }\n      }\n    }\n  }",
+          "documentation": null,
+          "end_line": 1225,
+          "kind": "function",
+          "name": "process",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "process",
+          "signature": "fn process<OM: OutputMode>(&mut self, i: I) -> crate::PResult<OM, I, Self::Output, Self::Error> {\n    let mut res = OM::Output::bind(|| (self.init)());\n    let input = i.clone();\n\n    match self.parser.process::<OM>(input) {\n      Err(Err::Error(_)) => Err(Err::Error(OM::Error::bind(|| {\n        <F as Parser<I>>::Error::from_error_kind(i, ErrorKind::Many1)\n      }))),\n      Err(e) => Err(e),\n      Ok((i1, o1)) => {\n        res = OM::Output::combine(res, o1, |res, o| (self.g)(res, o));\n\n        let mut input = i1;\n        loop {\n          let i_ = input.clone();\n          let len = input.input_len();\n          match self.parser.process::<OM>(i_) {\n            Ok((i, o)) => {\n              // infinite loop check: the parser must always consume\n              if i.input_len() == len {\n                return Err(Err::Error(OM::Error::bind(|| {\n                  <F as Parser<I>>::Error::from_error_kind(input, ErrorKind::Many1)\n                })));\n              }\n\n              res = OM::Output::combine(res, o, |res, o| (self.g)(res, o));\n              input = i;\n            }\n            Err(Err::Error(_)) => {\n              return Ok((input, res));\n            }\n            Err(e) => {\n              return Err(e);\n            }\n          }\n        }\n      }\n    }\n  }",
+          "start_line": 1187,
+          "symbol_id": "src/multi/mod.rs#function:process:1187"
+        }
+      ],
+      "unparsed_code": null
+    }
+  ],
+  "metadata": {
+    "actual_code_context_tokens": 1989,
+    "base_id": "rs_005",
+    "instance_id": "rs_005_ctx2k",
+    "language": "rust",
+    "normalized_language": "rust",
+    "position_ratio": 0.45,
+    "requested_context_tokens": 2048,
+    "sequence": 5
+  },
+  "repository": "rust-bakery/nom",
+  "workspace_id": "rs_005_ctx2k"
+}

@@ -1,0 +1,402 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:    return (
+        not child.prefix.strip()
+        and child.type == syms.atom
+        and len(child.children) == 3
+        and all(leaf == Leaf(token.DOT, ".") for leaf in child.children)
+    )
+
+
+def is_atom_with_invisible_parens(node: LN) -> bool:
+    """Given a `LN`, determines whether it's an atom `node` with invisible
+    parens. Useful in dedupe-ing and normalizing parens.
+    """
+    if isinstance(node, Leaf) or node.type != syms.atom:
+        return False
+
+    first, last = node.children[0], node.children[-1]
+    return (
+        isinstance(first, Leaf)
+        and first.type == token.LPAR
+        and first.value == ""
+        and isinstance(last, Leaf)
+        and last.type == token.RPAR
+        and last.value == ""
+    )
+
+
+def is_empty_par(leaf: Leaf) -> bool:
+    return is_empty_lpar(leaf) or is_empty_rpar(leaf)
+
+
+def is_empty_lpar(leaf: Leaf) -> bool:
+    return leaf.type == token.LPAR and leaf.value == ""
+
+
+def is_empty_rpar(leaf: Leaf) -> bool:
+    return leaf.type == token.RPAR and leaf.value == ""
+
+
+def is_import(leaf: Leaf) -> bool:
+    """Return True if the given leaf starts an import statement."""
+    p = leaf.parent
+    t = leaf.type
+    v = leaf.value
+    return bool(
+        t == token.NAME
+        and (
+            (v == "import" and p and p.type == syms.import_name)
+            or (v == "from" and p and p.type == syms.import_from)
+        )
+    )
+
+
+def is_with_or_async_with_stmt(leaf: Leaf) -> bool:
+    """Return True if the given leaf starts a with or async with statement."""
+    return bool(
+        leaf.type == token.NAME
+        and leaf.value == "with"
+        and leaf.parent
+        and leaf.parent.type == syms.with_stmt
+    ) or bool(
+        leaf.type == token.ASYNC
+        and leaf.next_sibling
+        and leaf.next_sibling.type == syms.with_stmt
+    )
+
+
+def is_async_stmt_or_funcdef(leaf: Leaf) -> bool:
+    """Return True if the given leaf starts an async def/for/with statement.
+
+    Note that `async def` can be either an `async_stmt` or `async_funcdef`,
+    the latter is used when it has decorators.
+    """
+    return bool(
+        leaf.type == token.ASYNC
+        and leaf.parent
+        and leaf.parent.type in {syms.async_stmt, syms.async_funcdef}
+    )
+
+
+def is_type_comment(leaf: Leaf) -> bool:
+    """Return True if the given leaf is a type comment. This function should only
+    be used for general type comments (excluding ignore annotations, which should
+    use `is_type_ignore_comment`). Note that general type comments are no longer
+    used in modern version of Python, this function may be deprecated in the future."""
+    t = leaf.type
+    v = leaf.value
+    return t in {token.COMMENT, STANDALONE_COMMENT} and v.startswith("# type:")
+
+
+def is_type_ignore_comment(leaf: Leaf) -> bool:
+    """Return True if the given leaf is a type comment with ignore annotation."""
+    t = leaf.type
+    v = leaf.value
+    return t in {token.COMMENT, STANDALONE_COMMENT} and is_type_ignore_comment_string(v)
+
+
+def is_type_ignore_comment_string(value: str) -> bool:
+    """Return True if the given string match with type comment with
+    ignore annotation."""
+    return value.startswith("# type: ignore")
+
+
+def wrap_in_parentheses(parent: Node, child: LN, *, visible: bool = True) -> None:
+    """Wrap `child` in parentheses.
+
+    This replaces `child` with an atom holding the parentheses and the old
+    child.  That requires moving the prefix.
+
+    If `visible` is False, the leaves will be valueless (and thus invisible).
+    """
+    lpar = Leaf(token.LPAR, "(" if visible else "")
+    rpar = Leaf(token.RPAR, ")" if visible else "")
+    prefix = child.prefix
+    child.prefix = ""
+    index = child.remove() or 0
+    new_child = Node(syms.atom, [lpar, child, rpar])
+    new_child.prefix = prefix
+    parent.insert_child(index, new_child)
+
+
+def unwrap_singleton_parenthesis(node: LN) -> Optional[LN]:
+    """Returns `wrapped` if `node` is of the shape ( wrapped ).
+
+    Parenthesis can be optional. Returns None otherwise"""
+    if len(node.children) != 3:
+        return None
+
+    lpar, wrapped, rpar = node.children
+    if not (lpar.type == token.LPAR and rpar.type == token.RPAR):
+        return None
+
+    return wrapped
+
+
+def ensure_visible(leaf: Leaf) -> None:
+    """Make sure parentheses are visible.
+
+    They could be invisible as part of some statements (see
+    :func:`normalize_invisible_parens` and :func:`visit_import_from`).
+    """
+    if leaf.type == token.LPAR:
+        leaf.value = "("
+    elif leaf.type == token.RPAR:
+        leaf.value = ")"
+
+
+def is_name_token(nl: NL) -> TypeGuard[Leaf]:
+    return nl.type == token.NAME
+
+
+def is_lpar_token(nl: NL) -> TypeGuard[Leaf]:
+    return nl.type == token.LPAR
+
+
+def is_rpar_token(nl: NL) -> TypeGuard[Leaf]:
+    return nl.type == token.RPAR
+
+
+def is_string_token(nl: NL) -> TypeGuard[Leaf]:
+    return nl.type == token.STRING
+
+
+def is_number_token(nl: NL) -> TypeGuard[Leaf]:
+    return nl.type == token.NUMBER
+
+
+def get_annotation_type(leaf: Leaf) -> Literal["return", "param", None]:
+    """Returns the type of annotation this leaf is part of, if any."""
+    ancestor = leaf.parent
+    while ancestor is not None:
+        if ancestor.prev_sibling and ancestor.prev_sibling.type == token.RARROW:
+            return "return"
+        if ancestor.parent and ancestor.parent.type == syms.tname:
+            return "param"
+        ancestor = ancestor.parent
+    return None
+
+
+
+def is_part_of_annotation(leaf: Leaf) -> bool:
+    """Returns whether this leaf is part of a type annotation."""
+    return get_annotation_type(leaf) is not None
+
+
+def first_leaf(node: LN) -> Optional[Leaf]:
+    """Returns the first leaf of the ancestor node."""
+    if isinstance(node, Leaf):
+        return node
+    elif not node.children:
+        return None
+    else:
+        return first_leaf(node.children[0])
+
+
+def last_leaf(node: LN) -> Optional[Leaf]:
+    """Returns the last leaf of the ancestor node."""
+    if isinstance(node, Leaf):
+        return node
+    elif not node.children:
+        return None
+    else:
+        return last_leaf(node.children[-1])
+
+
+def furthest_ancestor_with_last_leaf(leaf: Leaf) -> LN:
+    """Returns the furthest ancestor that has this leaf node as the last leaf."""
+    node: LN = leaf
+    while node.parent and node.parent.children and node is node.parent.children[-1]:
+        node = node.parent
+    return node
+
+# Path: src/black/comments.py
+import re
+from dataclasses import dataclass
+from functools import lru_cache
+from typing import Collection, Final, Iterator, List, Optional, Tuple, Union
+
+from black.mode import Mode, Preview
+from black.nodes import (
+    CLOSING_BRACKETS,
+    STANDALONE_COMMENT,
+    WHITESPACE,
+    container_of,
+    first_leaf_of,
+    make_simple_prefix,
+    preceding_leaf,
+    syms,
+)
+from blib2to3.pgen2 import token
+from blib2to3.pytree import Leaf, Node
+
+# types
+LN = Union[Leaf, Node]
+
+FMT_OFF: Final = {"# fmt: off", "# fmt:off", "# yapf: disable"}
+FMT_SKIP: Final = {"# fmt: skip", "# fmt:skip"}
+FMT_ON: Final = {"# fmt: on", "# fmt:on", "# yapf: enable"}
+
+COMMENT_EXCEPTIONS = " !:#'"
+_COMMENT_PREFIX = "# "
+_COMMENT_LIST_SEPARATOR = ";"
+
+
+@dataclass
+class ProtoComment:
+    """Describes a piece of syntax that is a comment.
+
+    It's not a :class:`blib2to3.pytree.Leaf` so that:
+
+    * it can be cached (`Leaf` objects should not be reused more than once as
+      they store their lineno, column, prefix, and parent information);
+    * `newlines` and `consumed` fields are kept separate from the `value`. This
+      simplifies handling of special marker comments like ``# fmt: off/on``.
+    """
+
+    type: int  # token.COMMENT or STANDALONE_COMMENT
+    value: str  # content of the comment
+    newlines: int  # how many newlines before the comment
+    consumed: int  # how many characters of the original leaf's prefix did we consume
+    form_feed: bool  # is there a form feed before the comment
+    leading_whitespace: str  # leading whitespace before the comment, if any
+
+
+def generate_comments(leaf: LN) -> Iterator[Leaf]:
+    """Clean the prefix of the `leaf` and generate comments from it, if any.
+
+    Comments in lib2to3 are shoved into the whitespace prefix.  This happens
+    in `pgen2/driver.py:Driver.parse_tokens()`.  This was a brilliant implementation
+    move because it does away with modifying the grammar to include all the
+    possible places in which comments can be placed.
+
+    The sad consequence for us though is that comments don't "belong" anywhere.
+    This is why this function generates simple parentless Leaf objects for
+    comments.  We simply don't know what the correct parent should be.
+
+    No matter though, we can live without this.  We really only need to
+    differentiate between inline and standalone comments.  The latter don't
+    share the line with any code.
+
+    Inline comments are emitted as regular token.COMMENT leaves.  Standalone
+    are emitted with a fake STANDALONE_COMMENT token identifier.
+    """
+    total_consumed = 0
+    for pc in list_comments(leaf.prefix, is_endmarker=leaf.type == token.ENDMARKER):
+        total_consumed = pc.consumed
+        prefix = make_simple_prefix(pc.newlines, pc.form_feed)
+        yield Leaf(pc.type, pc.value, prefix=prefix)
+    normalize_trailing_prefix(leaf, total_consumed)
+
+
+@lru_cache(maxsize=4096)
+def list_comments(prefix: str, *, is_endmarker: bool) -> List[ProtoComment]:
+    """Return a list of :class:`ProtoComment` objects parsed from the given `prefix`."""
+    result: List[ProtoComment] = []
+    if not prefix or "#" not in prefix:
+        return result
+
+    consumed = 0
+    nlines = 0
+    ignored_lines = 0
+    form_feed = False
+    for index, full_line in enumerate(re.split("\r?\n", prefix)):
+        consumed += len(full_line) + 1  # adding the length of the split '\n'
+        match = re.match(r"^(\s*)(\S.*|)$", full_line)
+        assert match
+        whitespace, line = match.groups()
+        if not line:
+            nlines += 1
+            if "\f" in full_line:
+                form_feed = True
+        if not line.startswith("#"):
+            # Escaped newlines outside of a comment are not really newlines at
+            # all. We treat a single-line comment following an escaped newline
+            # as a simple trailing comment.
+            if line.endswith("\\"):
+                ignored_lines += 1
+            continue
+
+        if index == ignored_lines and not is_endmarker:
+            comment_type = token.COMMENT  # simple trailing comment
+        else:
+            comment_type = STANDALONE_COMMENT
+        comment = make_comment(line)
+        result.append(
+            ProtoComment(
+                type=comment_type,
+                value=comment,
+                newlines=nlines,
+                consumed=consumed,
+                form_feed=form_feed,
+                leading_whitespace=whitespace,
+            )
+        )
+        form_feed = False
+        nlines = 0
+    return result
+
+
+def normalize_trailing_prefix(leaf: LN, total_consumed: int) -> None:
+    """Normalize the prefix that's left over after generating comments.
+
+    Note: don't use backslashes for formatting or you'll lose your voting rights.
+    """
+    remainder = leaf.prefix[total_consumed:]
+    if "\\" not in remainder:
+        nl_count = remainder.count("\n")
+        form_feed = "\f" in remainder and remainder.endswith("\n")
+        leaf.prefix = make_simple_prefix(nl_count, form_feed)
+        return
+
+    leaf.prefix = ""
+
+
+def make_comment(content: str) -> str:
+    """Return a consistently formatted comment from the given `content` string.
+
+    All comments (except for "##", "#!", "#:", '#'") should have a single
+    space between the hash sign and the content.
+
+    If `content` didn't start with a hash sign, one is provided.
+    """
+    content = content.rstrip()
+    if not content:
+        return "#"
+
+    if content[0] == "#":
+        content = content[1:]
+    NON_BREAKING_SPACE = " "
+    if (
+        content
+        and content[0] == NON_BREAKING_SPACE
+        and not content.lstrip().startswith("type:")
+    ):
+        content = " " + content[1:]  # Replace NBSP by a simple space
+    if content and content[0] not in COMMENT_EXCEPTIONS:
+        content = " " + content
+    return "#" + content
+
+
+def normalize_fmt_off(
+    node: Node, mode: Mode, lines: Collection[Tuple[int, int]]
+) -> None:
+    """Convert content between `# fmt: off`/`# fmt: on` into standalone comments."""
+    try_again = True
+    while try_again:
+        try_again = convert_one_fmt_off_pair(node, mode, lines)
+
+
+def convert_one_fmt_off_pair(
+    node: Node, mode: Mode, lines: Collection[Tuple[int, int]]
+) -> bool:
+    """Convert content of a single `# fmt: off`/`# fmt: on` into a standalone comment.
+
+    Returns True if a pair was converted.
+    """
+...
+
+Function Description:1. **Purpose**: Determines if a specified syntax element is part of a type annotation in the source code.
+2. **Input**: A syntax element from the parsed source code.
+3. **Output**: A boolean value indicating whether the given syntax element is involved in a type annotation.
+4. **Procedure**: The function checks the type of annotation associated with the syntax element by tracing its position in the syntax tree and examining its relationship with surrounding elements. If the element is identified as part of either a return type or parameter type annotation, the function returns true; otherwise, it returns false.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

@@ -1,0 +1,21 @@
+{
+  "base_id": "ts_004",
+  "code_context_ntokens": 3958,
+  "description": "1. **Purpose**: To fetch a JSON file from a specified directory and file name, decode it, and parse it into a JavaScript object.\n2. **Input**: \n   - A path to the directory containing the JSON file.\n   - The name of the JSON file.\n   - A boolean indicating whether to throw an error if the file is not found (defaults to true).\n   - An optional object containing additional parameters.\n3. **Output**: A promise that resolves to the parsed JavaScript object from the JSON file, or an empty object if the file is not found and not throwing an error.\n4. **Procedure**: \n   - The function first retrieves the file as a byte array using another function.\n   - If the file is not found and the error is non-fatal, it returns an empty object.\n   - The byte array is then decoded into a string using UTF-8 encoding.\n   - Finally, the string is parsed into a JavaScript object using JSON parsing.",
+  "end_byte": 24072,
+  "end_line": 585,
+  "instance_id": "ts_004_ctx4k",
+  "language": "typescript",
+  "needle_name": "getModelJSON",
+  "needle_token_end": 1456,
+  "needle_token_start": 1353,
+  "normalized_language": "typescript",
+  "path": "src/utils/hub.js",
+  "position_ratio": 0.35,
+  "repo": "xenova/transformers.js",
+  "repoqa_description": "Function Description:1. **Purpose**: To fetch a JSON file from a specified directory and file name, decode it, and parse it into a JavaScript object.\n2. **Input**: \n   - A path to the directory containing the JSON file.\n   - The name of the JSON file.\n   - A boolean indicating whether to throw an error if the file is not found (defaults to true).\n   - An optional object containing additional parameters.\n3. **Output**: A promise that resolves to the parsed JavaScript object from the JSON file, or an empty object if the file is not found and not throwing an error.\n4. **Procedure**: \n   - The function first retrieves the file as a byte array using another function.\n   - If the file is not found and the error is non-fatal, it returns an empty object.\n   - The byte array is then decoded into a string using UTF-8 encoding.\n   - Finally, the string is parsed into a JavaScript object using JSON parsing.",
+  "requested_context_tokens": 4096,
+  "sequence": 4,
+  "start_byte": 23714,
+  "start_line": 573
+}

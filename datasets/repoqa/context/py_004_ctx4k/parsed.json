@@ -1,0 +1,198 @@
+{
+  "context_builder": "repoqa-native",
+  "context_type": "repoqa_structured_code_context",
+  "files": [
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "src/black/linegen.py",
+      "symbols": [
+        {
+          "children": [],
+          "code": "def should_split_line(line: Line, opening_bracket: Leaf) -> bool:\n    \"\"\"Should `line` be immediately split with `delimiter_split()` after RHS?\"\"\"\n\n    if not (opening_bracket.parent and opening_bracket.value in \"[{(\"):\n        return False\n\n    # We're essentially checking if the body is delimited by commas and there's more\n    # than one of them (we're excluding the trailing comma and if the delimiter priority\n    # is still commas, that means there's more).\n    exclude = set()\n    trailing_comma = False\n    try:\n        last_leaf = line.leaves[-1]\n        if last_leaf.type == token.COMMA:\n            trailing_comma = True\n            exclude.add(id(last_leaf))\n        max_priority = line.bracket_tracker.max_delimiter_priority(exclude=exclude)\n    except (IndexError, ValueError):\n        return False\n\n    return max_priority == COMMA_PRIORITY and (\n        (line.mode.magic_trailing_comma and trailing_comma)\n        # always explode imports\n        or opening_bracket.parent.type in {syms.atom, syms.import_from}\n    )",
+          "documentation": "Should `line` be immediately split with `delimiter_split()` after RHS?",
+          "end_line": 1613,
+          "kind": "function",
+          "name": "should_split_line",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "should_split_line",
+          "signature": "def should_split_line(line: Line, opening_bracket: Leaf) -> bool",
+          "start_line": 1589,
+          "symbol_id": "src/black/linegen.py#function:should_split_line:1589"
+        },
+        {
+          "children": [],
+          "code": "def generate_trailers_to_omit(line: Line, line_length: int) -> Iterator[Set[LeafID]]:\n    \"\"\"Generate sets of closing bracket IDs that should be omitted in a RHS.\n\n    Brackets can be omitted if the entire trailer up to and including\n    a preceding closing bracket fits in one line.\n\n    Yielded sets are cumulative (contain results of previous yields, too).  First\n    set is empty, unless the line should explode, in which case bracket pairs until\n    the one that needs to explode are omitted.\n    \"\"\"\n\n    omit: Set[LeafID] = set()\n    if not line.magic_trailing_comma:\n        yield omit\n\n    length = 4 * line.depth\n    opening_bracket: Optional[Leaf] = None\n    closing_bracket: Optional[Leaf] = None\n    inner_brackets: Set[LeafID] = set()\n    for index, leaf, leaf_length in line.enumerate_with_length(is_reversed=True):\n        length += leaf_length\n        if length > line_length:\n            break\n\n        has_inline_comment = leaf_length > len(leaf.value) + len(leaf.prefix)\n        if leaf.type == STANDALONE_COMMENT or has_inline_comment:\n            break\n\n        if opening_bracket:\n            if leaf is opening_bracket:\n                opening_bracket = None\n            elif leaf.type in CLOSING_BRACKETS:\n                prev = line.leaves[index - 1] if index > 0 else None\n                if (\n                    prev\n                    and prev.type == token.COMMA\n                    and leaf.opening_bracket is not None\n                    and not is_one_sequence_between(\n                        leaf.opening_bracket, leaf, line.leaves\n                    )\n                ):\n                    # Never omit bracket pairs with trailing commas.\n                    # We need to explode on those.\n                    break\n\n                inner_brackets.add(id(leaf))\n        elif leaf.type in CLOSING_BRACKETS:\n            prev = line.leaves[index - 1] if index > 0 else None\n            if prev and prev.type in OPENING_BRACKETS:\n                # Empty brackets would fail a split so treat them as \"inner\"\n                # brackets (e.g. only add them to the `omit` set if another\n                # pair of brackets was good enough.\n                inner_brackets.add(id(leaf))\n                continue\n\n            if closing_bracket:\n                omit.add(id(closing_bracket))\n                omit.update(inner_brackets)\n                inner_brackets.clear()\n                yield omit\n\n            if (\n                prev\n                and prev.type == token.COMMA\n                and leaf.opening_bracket is not None\n                and not is_one_sequence_between(leaf.opening_bracket, leaf, line.leaves)\n            ):\n                # Never omit bracket pairs with trailing commas.\n                # We need to explode on those.\n                break\n\n            if leaf.value:\n                opening_bracket = leaf.opening_bracket\n                closing_bracket = leaf",
+          "documentation": "Generate sets of closing bracket IDs that should be omitted in a RHS.\n\nBrackets can be omitted if the entire trailer up to and including\na preceding closing bracket fits in one line.\n\nYielded sets are cumulative (contain results of previous yields, too).  First\nset is empty, unless the line should explode, in which case bracket pairs until\nthe one that needs to explode are omitted.",
+          "end_line": 1689,
+          "kind": "function",
+          "name": "generate_trailers_to_omit",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "generate_trailers_to_omit",
+          "signature": "def generate_trailers_to_omit(line: Line, line_length: int) -> Iterator[Set[LeafID]]",
+          "start_line": 1616,
+          "symbol_id": "src/black/linegen.py#function:generate_trailers_to_omit:1616"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "src/black/parsing.py",
+      "symbols": [
+        {
+          "children": [],
+          "code": "class InvalidInput(ValueError):\n    \"\"\"Raised when input source code fails all parse attempts.\"\"\"",
+          "documentation": "Raised when input source code fails all parse attempts.",
+          "end_line": 21,
+          "kind": "class",
+          "name": "InvalidInput",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "InvalidInput",
+          "signature": "class InvalidInput(ValueError)",
+          "start_line": 20,
+          "symbol_id": "src/black/parsing.py#class:InvalidInput:20"
+        },
+        {
+          "children": [],
+          "code": "def get_grammars(target_versions: Set[TargetVersion]) -> List[Grammar]:\n    if not target_versions:\n        # No target_version specified, so try all grammars.\n        return [\n            # Python 3.7-3.9\n            pygram.python_grammar_async_keywords,\n            # Python 3.0-3.6\n            pygram.python_grammar,\n            # Python 3.10+\n            pygram.python_grammar_soft_keywords,\n        ]\n\n    grammars = []\n    # If we have to parse both, try to parse async as a keyword first\n    if not supports_feature(\n        target_versions, Feature.ASYNC_IDENTIFIERS\n    ) and not supports_feature(target_versions, Feature.PATTERN_MATCHING):\n        # Python 3.7-3.9\n        grammars.append(pygram.python_grammar_async_keywords)\n    if not supports_feature(target_versions, Feature.ASYNC_KEYWORDS):\n        # Python 3.0-3.6\n        grammars.append(pygram.python_grammar)\n    if any(Feature.PATTERN_MATCHING in VERSION_TO_FEATURES[v] for v in target_versions):\n        # Python 3.10+\n        grammars.append(pygram.python_grammar_soft_keywords)\n\n    # At least one of the above branches must have been taken, because every Python\n    # version has exactly one of the two 'ASYNC_*' flags\n    return grammars",
+          "documentation": null,
+          "end_line": 52,
+          "kind": "function",
+          "name": "get_grammars",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "get_grammars",
+          "signature": "def get_grammars(target_versions: Set[TargetVersion]) -> List[Grammar]",
+          "start_line": 24,
+          "symbol_id": "src/black/parsing.py#function:get_grammars:24"
+        },
+        {
+          "children": [],
+          "code": "def lib2to3_parse(src_txt: str, target_versions: Iterable[TargetVersion] = ()) -> Node:\n    \"\"\"Given a string with source, return the lib2to3 Node.\"\"\"\n    if not src_txt.endswith(\"\\n\"):\n        src_txt += \"\\n\"\n\n    grammars = get_grammars(set(target_versions))\n    errors = {}\n    for grammar in grammars:\n        drv = driver.Driver(grammar)\n        try:\n            result = drv.parse_string(src_txt, True)\n            break\n\n        except ParseError as pe:\n            lineno, column = pe.context[1]\n            lines = src_txt.splitlines()\n            try:\n                faulty_line = lines[lineno - 1]\n            except IndexError:\n                faulty_line = \"<line number missing in source>\"\n            errors[grammar.version] = InvalidInput(\n                f\"Cannot parse: {lineno}:{column}: {faulty_line}\"\n            )\n\n        except TokenError as te:\n            # In edge cases these are raised; and typically don't have a \"faulty_line\".\n            lineno, column = te.args[1]\n            errors[grammar.version] = InvalidInput(\n                f\"Cannot parse: {lineno}:{column}: {te.args[0]}\"\n            )\n\n    else:\n        # Choose the latest version when raising the actual parsing error.\n        assert len(errors) >= 1\n        exc = errors[max(errors)]\n        raise exc from None\n\n    if isinstance(result, Leaf):\n        result = Node(syms.file_input, [result])\n    return result",
+          "documentation": "Given a string with source, return the lib2to3 Node.",
+          "end_line": 94,
+          "kind": "function",
+          "name": "lib2to3_parse",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "lib2to3_parse",
+          "signature": "def lib2to3_parse(src_txt: str, target_versions: Iterable[TargetVersion] = ()) -> Node",
+          "start_line": 55,
+          "symbol_id": "src/black/parsing.py#function:lib2to3_parse:55"
+        },
+        {
+          "children": [],
+          "code": "def matches_grammar(src_txt: str, grammar: Grammar) -> bool:\n    drv = driver.Driver(grammar)\n    try:\n        drv.parse_string(src_txt, True)\n    except (ParseError, TokenError, IndentationError):\n        return False\n    else:\n        return True",
+          "documentation": null,
+          "end_line": 104,
+          "kind": "function",
+          "name": "matches_grammar",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "matches_grammar",
+          "signature": "def matches_grammar(src_txt: str, grammar: Grammar) -> bool",
+          "start_line": 97,
+          "symbol_id": "src/black/parsing.py#function:matches_grammar:97"
+        },
+        {
+          "children": [],
+          "code": "def lib2to3_unparse(node: Node) -> str:\n    \"\"\"Given a lib2to3 node, return its string representation.\"\"\"\n    code = str(node)\n    return code",
+          "documentation": "Given a lib2to3 node, return its string representation.",
+          "end_line": 110,
+          "kind": "function",
+          "name": "lib2to3_unparse",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "lib2to3_unparse",
+          "signature": "def lib2to3_unparse(node: Node) -> str",
+          "start_line": 107,
+          "symbol_id": "src/black/parsing.py#function:lib2to3_unparse:107"
+        },
+        {
+          "children": [],
+          "code": "def _parse_single_version(\n    src: str, version: Tuple[int, int], *, type_comments: bool\n) -> ast.AST:\n    filename = \"<unknown>\"\n    with warnings.catch_warnings():\n        warnings.simplefilter(\"ignore\", SyntaxWarning)\n        warnings.simplefilter(\"ignore\", DeprecationWarning)\n        return ast.parse(\n            src, filename, feature_version=version, type_comments=type_comments\n        )",
+          "documentation": null,
+          "end_line": 122,
+          "kind": "function",
+          "name": "_parse_single_version",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "_parse_single_version",
+          "signature": "def _parse_single_version(\n    src: str, version: Tuple[int, int], *, type_comments: bool\n) -> ast.AST",
+          "start_line": 113,
+          "symbol_id": "src/black/parsing.py#function:_parse_single_version:113"
+        },
+        {
+          "children": [],
+          "code": "def parse_ast(src: str) -> ast.AST:\n    # TODO: support Python 4+ ;)\n    versions = [(3, minor) for minor in range(3, sys.version_info[1] + 1)]\n\n    first_error = \"\"\n    for version in sorted(versions, reverse=True):\n        try:\n            return _parse_single_version(src, version, type_comments=True)\n        except SyntaxError as e:\n            if not first_error:\n                first_error = str(e)\n\n    # Try to parse without type comments\n    for version in sorted(versions, reverse=True):\n        try:\n            return _parse_single_version(src, version, type_comments=False)\n        except SyntaxError:\n            pass\n\n    raise SyntaxError(first_error)",
+          "documentation": null,
+          "end_line": 144,
+          "kind": "function",
+          "name": "parse_ast",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "parse_ast",
+          "signature": "def parse_ast(src: str) -> ast.AST",
+          "start_line": 125,
+          "symbol_id": "src/black/parsing.py#function:parse_ast:125"
+        },
+        {
+          "children": [],
+          "code": "def _normalize(lineend: str, value: str) -> str:\n    # To normalize, we strip any leading and trailing space from\n    # each line...\n    stripped: List[str] = [i.strip() for i in value.splitlines()]\n    normalized = lineend.join(stripped)\n    # ...and remove any blank lines at the beginning and end of\n    # the whole string\n    return normalized.strip()",
+          "documentation": null,
+          "end_line": 154,
+          "kind": "function",
+          "name": "_normalize",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "_normalize",
+          "signature": "def _normalize(lineend: str, value: str) -> str",
+          "start_line": 147,
+          "symbol_id": "src/black/parsing.py#function:_normalize:147"
+        },
+        {
+          "children": [],
+          "code": "def stringify_ast(node: ast.AST, depth: int = 0) -> Iterator[str]:\n    \"\"\"Simple visitor generating strings to compare ASTs by content.\"\"\"\n\n    if (\n        isinstance(node, ast.Constant)\n        and isinstance(node.value, str)\n        and node.kind == \"u\"\n    ):\n        # It's a quirk of history that we strip the u prefix over here. We used to\n        # rewrite the AST nodes for Python version compatibility and we never copied\n        # over the kind\n        node.kind = None\n\n    yield f\"{'  ' * depth}{node.__class__.__name__}(\"\n\n    for field in sorted(node._fields):  # noqa: F402\n        # TypeIgnore has only one field 'lineno' which breaks this comparison\n        if isinstance(node, ast.TypeIgnore):\n            break\n\n        try:\n            value: object = getattr(node, field)\n        except AttributeError:\n            continue\n\n        yield f\"{'  ' * (depth + 1)}{field}=\"\n\n        if isinstance(value, list):\n            for item in value:\n                # Ignore nested tuples within del statements, because we may insert\n                # parentheses and they change the AST.\n                if (\n                    field == \"targets\"\n                    and isinstance(node, ast.Delete)\n                    and isinstance(item, ast.Tuple)\n                ):\n                    for elt in item.elts:\n                        yield from stringify_ast(elt, depth + 2)\n\n                elif isinstance(item, ast.AST):\n                    yield from stringify_ast(item, depth + 2)\n\n        elif isinstance(value, ast.AST):\n            yield from stringify_ast(value, depth + 2)\n\n        else:\n            normalized: object\n            if (\n                isinstance(node, ast.Constant)\n                and field == \"value\"\n                and isinstance(value, str)\n            ):\n                # Constant strings may be indented across newlines, if they are\n                # docstrings; fold spaces after newlines when comparing. Similarly,\n                # trailing and leading space may be removed.\n                normalized = _normalize(\"\\n\", value)\n            elif field == \"type_comment\" and isinstance(value, str):\n                # Trailing whitespace in type comments is removed.\n                normalized = value.rstrip()\n            else:\n                normalized = value\n            yield f\"{'  ' * (depth + 2)}{normalized!r},  # {value.__class__.__name__}\"\n\n    yield f\"{'  ' * depth})  # /{node.__class__.__name__}\"",
+          "documentation": "Simple visitor generating strings to compare ASTs by content.",
+          "end_line": 220,
+          "kind": "function",
+          "name": "stringify_ast",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "stringify_ast",
+          "signature": "def stringify_ast(node: ast.AST, depth: int = 0) -> Iterator[str]",
+          "start_line": 157,
+          "symbol_id": "src/black/parsing.py#function:stringify_ast:157"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "src/black/ranges.py",
+      "symbols": [],
+      "unparsed_code": "\"\"\"Functions related to Black's formatting by line ranges feature.\"\"\"\n\nimport difflib\nfrom dataclasses import dataclass\nfrom typing import Collection, Iterator, List, Sequence, Set, Tuple, Union\n\nfrom black.nodes import (\n    LN,\n    STANDALONE_COMMENT,\n    Leaf,\n    Node,\n    Visitor,\n    first_leaf,\n    furthest_ancestor_with_last_leaf,\n    last_leaf,\n    syms,\n)\n..."
+    }
+  ],
+  "metadata": {
+    "actual_code_context_tokens": 4018,
+    "base_id": "py_004",
+    "instance_id": "py_004_ctx4k",
+    "language": "python",
+    "normalized_language": "python",
+    "position_ratio": 0.35,
+    "requested_context_tokens": 4096,
+    "sequence": 4
+  },
+  "repository": "psf/black",
+  "workspace_id": "py_004_ctx4k"
+}

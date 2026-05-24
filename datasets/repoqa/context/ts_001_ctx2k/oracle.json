@@ -1,0 +1,15 @@
+{
+  "baseId": "ts_001",
+  "endByte": 21650,
+  "endLine": 682,
+  "instanceId": "ts_001_ctx2k",
+  "language": "typescript",
+  "needleName": "reshape",
+  "normalizedLanguage": "typescript",
+  "path": "src/utils/tensor.js",
+  "repo": "xenova/transformers.js",
+  "sequence": 1,
+  "startByte": 20906,
+  "startLine": 654,
+  "targetFunction": "function reshape(data, dimensions) {\n\n    const totalElements = data.length;\n    const dimensionSize = dimensions.reduce((a, b) => a * b);\n\n    if (totalElements !== dimensionSize) {\n        throw Error(`cannot reshape array of size ${totalElements} into shape (${dimensions})`);\n    }\n\n    /** @type {any} */\n    let reshapedArray = data;\n\n    for (let i = dimensions.length - 1; i >= 0; i--) {\n        reshapedArray = reshapedArray.reduce((acc, val) => {\n            let lastArray = acc[acc.length - 1];\n\n            if (lastArray.length < dimensions[i]) {\n                lastArray.push(val);\n            } else {\n                acc.push([val]);\n            }\n\n            return acc;\n        }, [[]]);\n    }\n\n    return reshapedArray[0];\n}"
+}

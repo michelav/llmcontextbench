@@ -1,0 +1,62 @@
+{
+  "id": "datasets/repoqa-minimal"",
+  "name": "RepoQA experiment example",
+  "output": "outputs",
+  "dataset": {
+    "id": "ctxbench/repoqa",
+    "version": "2026-05-23",
+    "root": "repoqa"
+  },
+  "models": {
+    "gpt1": {
+      "provider": "openai",
+      "name": "gpt-5.4-nano"
+    },
+    "gpt2": {
+      "provider": "openai",
+      "name": "gpt-5.4-mini"
+    },
+    "gemini1": {
+      "provider": "google",
+      "name": "gemini-2.5-flash-lite"
+    },
+    "gemini2": {
+      "provider": "google",
+      "name": "gemini-2.5-flash"
+    }
+  },
+  "scope": {
+    "instances": [
+      "py_001_ctx2k",
+      "py_001_ctx4k"
+    ],
+    "tasks": ["snf_retrieve_function"]
+  },
+  "factors": {
+    "model": ["gpt1", "gpt2", "gemini1", "gemini2"],
+    "strategy": ["inline", "local_function", "local_mcp", "remote_mcp"],
+    "format": ["code", "json"]
+  },
+  "params": {
+    "mcp_server": {
+      "server_url": "https://secure-harlequin-mollusk.fastmcp.app/mcp",
+      "server_label": "ctxbench_lattes",
+      "server_description": "CTXBench Lattes MCP server",
+      "auth_token": "${LATTES_MCP_TOKEN}"
+    }
+  },
+  "evaluation": {
+    "enabled": true
+  },
+  "trace": {
+    "enabled": true,
+    "writeFiles": true,
+    "save_raw_response": true,
+    "save_tool_calls": true,
+    "save_usage": true,
+    "save_errors": true
+  },
+  "execution": {
+    "repeats": 1
+  }
+}

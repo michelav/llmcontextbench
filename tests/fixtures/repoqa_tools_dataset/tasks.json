@@ -1,0 +1,17 @@
+{
+  "datasetId": "ctxbench/repoqa",
+  "version": "test",
+  "description": "Minimal RepoQA fixture for operation-mediated context access tests.",
+  "tasks": [
+    {
+      "id": "snf_retrieve_function",
+      "statement": "Retrieve the described function: {description}",
+      "tags": ["code", "repoqa"],
+      "validation": {
+        "type": "repoqa-scorer",
+        "threshold": 0.75
+      },
+      "contextBlocks": ["function_description", "code_context"]
+    }
+  ]
+}

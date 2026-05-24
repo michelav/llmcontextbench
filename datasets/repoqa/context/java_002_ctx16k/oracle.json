@@ -1,0 +1,15 @@
+{
+  "baseId": "java_002",
+  "endByte": 1874,
+  "endLine": 54,
+  "instanceId": "java_002_ctx16k",
+  "language": "java",
+  "needleName": "parseString",
+  "normalizedLanguage": "java",
+  "path": "gson/src/main/java/com/google/gson/JsonParser.java",
+  "repo": "google/gson",
+  "sequence": 2,
+  "startByte": 1743,
+  "startLine": 51,
+  "targetFunction": "public static JsonElement parseString(String json) throws JsonSyntaxException {\n    return parseReader(new StringReader(json));\n  }"
+}

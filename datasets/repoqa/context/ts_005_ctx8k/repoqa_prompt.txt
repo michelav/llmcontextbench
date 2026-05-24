@@ -1,0 +1,643 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:// Path: src/utils/image.js
+
+/**
+ * @file Helper module for image processing. 
+ * 
+ * These functions and classes are only used internally, 
+ * meaning an end-user shouldn't need to access anything here.
+ * 
+ * @module utils/image
+ */
+
+import { getFile } from './hub.js';
+import { env } from '../env.js';
+import { Tensor } from './tensor.js';
+
+// Will be empty (or not used) if running in browser or web-worker
+import sharp from 'sharp';
+
+const BROWSER_ENV = typeof self !== 'undefined';
+const WEBWORKER_ENV = BROWSER_ENV && self.constructor.name === 'DedicatedWorkerGlobalScope';
+
+let createCanvasFunction;
+let ImageDataClass;
+let loadImageFunction;
+if (BROWSER_ENV) {
+    // Running in browser or web-worker
+    createCanvasFunction = (/** @type {number} */ width, /** @type {number} */ height) => {
+        if (!self.OffscreenCanvas) {
+            throw new Error('OffscreenCanvas not supported by this browser.');
+        }
+        return new self.OffscreenCanvas(width, height)
+    };
+    loadImageFunction = self.createImageBitmap;
+    ImageDataClass = self.ImageData;
+
+} else if (sharp) {
+    // Running in Node.js, electron, or other non-browser environment
+
+    loadImageFunction = async (/**@type {sharp.Sharp}*/img) => {
+        const metadata = await img.metadata();
+        const rawChannels = metadata.channels;
+
+        let { data, info } = await img.raw().toBuffer({ resolveWithObject: true });
+
+        const newImage = new RawImage(new Uint8ClampedArray(data), info.width, info.height, info.channels);
+        if (rawChannels !== undefined && rawChannels !== info.channels) {
+            // Make sure the new image has the same number of channels as the input image.
+            // This is necessary for grayscale images.
+            newImage.convert(rawChannels);
+        }
+        return newImage;
+    }
+
+} else {
+    throw new Error('Unable to load image processing library.');
+}
+
+
+// Defined here: https://github.com/python-pillow/Pillow/blob/a405e8406b83f8bfb8916e93971edc7407b8b1ff/src/libImaging/Imaging.h#L262-L268
+const RESAMPLING_MAPPING = {
+    0: 'nearest',
+    1: 'lanczos',
+    2: 'bilinear',
+    3: 'bicubic',
+    4: 'box',
+    5: 'hamming',
+}
+
+/**
+ * Mapping from file extensions to MIME types.
+ */
+const CONTENT_TYPE_MAP = new Map([
+    ['png', 'image/png'],
+    ['jpg', 'image/jpeg'],
+    ['jpeg', 'image/jpeg'],
+    ['gif', 'image/gif'],
+]);
+
+export class RawImage {
+
+    /**
+     * Create a new `RawImage` object.
+     * @param {Uint8ClampedArray|Uint8Array} data The pixel data.
+     * @param {number} width The width of the image.
+     * @param {number} height The height of the image.
+     * @param {1|2|3|4} channels The number of channels.
+     */
+    constructor(data, width, height, channels) {
+        this.data = data;
+        this.width = width;
+        this.height = height;
+        this.channels = channels;
+    }
+
+    /** 
+     * Returns the size of the image (width, height).
+     * @returns {[number, number]} The size of the image (width, height).
+     */
+    get size() {
+        return [this.width, this.height];
+    }
+
+    /**
+     * Helper method for reading an image from a variety of input types.
+     * @param {RawImage|string|URL} input 
+     * @returns The image object.
+     * 
+     * **Example:** Read image from a URL.
+     * ```javascript
+     * let image = await RawImage.read('https://huggingface.co/datasets/Xenova/transformers.js-docs/resolve/main/football-match.jpg');
+     * // RawImage {
+     * //   "data": Uint8ClampedArray [ 25, 25, 25, 19, 19, 19, ... ],
+     * //   "width": 800,
+     * //   "height": 533,
+     * //   "channels": 3
+     * // }
+     * ```
+     */
+    static async read(input) {
+        if (input instanceof RawImage) {
+            return input;
+        } else if (typeof input === 'string' || input instanceof URL) {
+            return await this.fromURL(input);
+        } else {
+            throw new Error(`Unsupported input type: ${typeof input}`);
+        }
+    }
+
+
+    /**
+     * Read an image from a URL or file path.
+     * @param {string|URL} url The URL or file path to read the image from.
+     * @returns {Promise<RawImage>} The image object.
+     */
+    static async fromURL(url) {
+        let response = await getFile(url);
+        if (response.status !== 200) {
+            throw new Error(`Unable to read image from "${url}" (${response.status} ${response.statusText})`);
+        }
+        let blob = await response.blob();
+        return this.fromBlob(blob);
+    }
+
+    /**
+     * Helper method to create a new Image from a blob.
+     * @param {Blob} blob The blob to read the image from.
+     * @returns {Promise<RawImage>} The image object.
+     */
+    static async fromBlob(blob) {
+        if (BROWSER_ENV) {
+            // Running in environment with canvas
+            let img = await loadImageFunction(blob);
+
+            const ctx = createCanvasFunction(img.width, img.height).getContext('2d');
+
+            // Draw image to context
+            ctx.drawImage(img, 0, 0);
+
+            return new this(ctx.getImageData(0, 0, img.width, img.height).data, img.width, img.height, 4);
+
+        } else {
+            // Use sharp.js to read (and possible resize) the image.
+            let img = sharp(await blob.arrayBuffer());
+
+            return await loadImageFunction(img);
+        }
+    }
+
+    /**
+     * Helper method to create a new Image from a tensor
+     * @param {Tensor} tensor 
+     */
+    static fromTensor(tensor, channel_format = 'CHW') {
+        if (tensor.dims.length !== 3) {
+            throw new Error(`Tensor should have 3 dimensions, but has ${tensor.dims.length} dimensions.`);
+        }
+
+        if (channel_format === 'CHW') {
+            tensor = tensor.transpose(1, 2, 0);
+        } else if (channel_format === 'HWC') {
+            // Do nothing
+        } else {
+            throw new Error(`Unsupported channel format: ${channel_format}`);
+        }
+        if (!(tensor.data instanceof Uint8ClampedArray || tensor.data instanceof Uint8Array)) {
+            throw new Error(`Unsupported tensor type: ${tensor.type}`);
+        }
+        switch (tensor.dims[2]) {
+            case 1:
+            case 2:
+            case 3:
+            case 4:
+                return new RawImage(tensor.data, tensor.dims[1], tensor.dims[0], tensor.dims[2]);
+            default:
+                throw new Error(`Unsupported number of channels: ${tensor.dims[2]}`);
+        }
+    }
+
+    /**
+     * Convert the image to grayscale format.
+     * @returns {RawImage} `this` to support chaining.
+     */
+    grayscale() {
+        if (this.channels === 1) {
+            return this;
+        }
+
+        let newData = new Uint8ClampedArray(this.width * this.height * 1);
+        switch (this.channels) {
+            case 3: // rgb to grayscale
+            case 4: // rgba to grayscale
+                for (let i = 0, offset = 0; i < this.data.length; i += this.channels) {
+                    const red = this.data[i];
+                    const green = this.data[i + 1];
+                    const blue = this.data[i + 2];
+
+                    newData[offset++] = Math.round(0.2989 * red + 0.5870 * green + 0.1140 * blue);
+                }
+                break;
+            default:
+                throw new Error(`Conversion failed due to unsupported number of channels: ${this.channels}`);
+        }
+        return this._update(newData, this.width, this.height, 1);
+    }
+
+    /**
+     * Convert the image to RGB format.
+     * @returns {RawImage} `this` to support chaining.
+     */
+    rgb() {
+        if (this.channels === 3) {
+            return this;
+        }
+
+        let newData = new Uint8ClampedArray(this.width * this.height * 3);
+
+        switch (this.channels) {
+            case 1: // grayscale to rgb
+                for (let i = 0, offset = 0; i < this.data.length; ++i) {
+                    newData[offset++] = this.data[i];
+                    newData[offset++] = this.data[i];
+                    newData[offset++] = this.data[i];
+                }
+                break;
+            case 4: // rgba to rgb
+                for (let i = 0, offset = 0; i < this.data.length; i += 4) {
+                    newData[offset++] = this.data[i];
+...
+// Path: src/utils/audio.js
+/**
+ * @file Helper module for audio processing. 
+ * 
+ * These functions and classes are only used internally, 
+ * meaning an end-user shouldn't need to access anything here.
+ * 
+ * @module utils/audio
+ */
+
+import {
+    getFile,
+} from './hub.js';
+import { FFT, max } from './maths.js';
+import {
+    calculateReflectOffset,
+} from './core.js';
+
+
+/**
+ * Helper function to read audio from a path/URL.
+ * @param {string|URL} url The path/URL to load the audio from.
+ * @param {number} sampling_rate The sampling rate to use when decoding the audio.
+ * @returns {Promise<Float32Array>} The decoded audio as a `Float32Array`.
+ */
+export async function read_audio(url, sampling_rate) {
+    if (typeof AudioContext === 'undefined') {
+        // Running in node or an environment without AudioContext
+        throw Error(
+            "Unable to load audio from path/URL since `AudioContext` is not available in your environment. " +
+            "Instead, audio data should be passed directly to the pipeline/processor. " +
+            "For more information and some example code, see https://huggingface.co/docs/transformers.js/guides/node-audio-processing."
+        )
+    }
+
+    const response = await (await getFile(url)).arrayBuffer();
+    const audioCTX = new AudioContext({ sampleRate: sampling_rate });
+    if (typeof sampling_rate === 'undefined') {
+        console.warn(`No sampling rate provided, using default of ${audioCTX.sampleRate}Hz.`)
+    }
+    const decoded = await audioCTX.decodeAudioData(response);
+
+    /** @type {Float32Array} */
+    let audio;
+
+    // We now replicate HuggingFace's `ffmpeg_read` method:
+    if (decoded.numberOfChannels === 2) {
+        // When downmixing a stereo audio file to mono using the -ac 1 option in FFmpeg,
+        // the audio signal is summed across both channels to create a single mono channel.
+        // However, if the audio is at full scale (i.e. the highest possible volume level),
+        // the summing of the two channels can cause the audio signal to clip or distort.
+
+        // To prevent this clipping, FFmpeg applies a scaling factor of 1/sqrt(2) (~ 0.707)
+        // to the audio signal before summing the two channels. This scaling factor ensures
+        // that the combined audio signal will not exceed the maximum possible level, even
+        // if both channels are at full scale.
+
+        // After applying this scaling factor, the audio signal from both channels is summed
+        // to create a single mono channel. It's worth noting that this scaling factor is
+        // only applied when downmixing stereo audio to mono using the -ac 1 option in FFmpeg.
+        // If you're using a different downmixing method, or if you're not downmixing the
+        // audio at all, this scaling factor may not be needed.
+        const SCALING_FACTOR = Math.sqrt(2);
+
+        const left = decoded.getChannelData(0);
+        const right = decoded.getChannelData(1);
+
+        audio = new Float32Array(left.length);
+        for (let i = 0; i < decoded.length; ++i) {
+            audio[i] = SCALING_FACTOR * (left[i] + right[i]) / 2;
+        }
+
+    } else {
+        // If the audio is not stereo, we can just use the first channel:
+        audio = decoded.getChannelData(0);
+    }
+
+    return audio;
+}
+
+/**
+ * Generates a Hanning window of length M.
+ *
+ * @param {number} M The length of the Hanning window to generate.
+ * @returns {Float64Array} The generated Hanning window.
+ */
+export 
+function hanning(M) {
+    if (M < 1) {
+        return new Float64Array();
+    }
+    if (M === 1) {
+        return new Float64Array([1]);
+    }
+    const denom = M - 1;
+    const factor = Math.PI / denom;
+    const cos_vals = new Float64Array(M);
+    for (let i = 0; i < M; ++i) {
+        const n = 2 * i - denom;
+        cos_vals[i] = 0.5 + 0.5 * Math.cos(factor * n);
+    }
+    return cos_vals;
+}
+
+const HERTZ_TO_MEL_MAPPING = {
+    "htk": (/** @type {number} */ freq) => 2595.0 * Math.log10(1.0 + (freq / 700.0)),
+    "kaldi": (/** @type {number} */ freq) => 1127.0 * Math.log(1.0 + (freq / 700.0)),
+    "slaney": (/** @type {number} */ freq, min_log_hertz = 1000.0, min_log_mel = 15.0, logstep = 27.0 / Math.log(6.4)) =>
+        freq >= min_log_hertz
+            ? min_log_mel + Math.log(freq / min_log_hertz) * logstep
+            : 3.0 * freq / 200.0,
+}
+
+/**
+ * @template {Float32Array|Float64Array|number} T 
+ * @param {T} freq 
+ * @param {string} [mel_scale]
+ * @returns {T}
+ */
+function hertz_to_mel(freq, mel_scale = "htk") {
+    const fn = HERTZ_TO_MEL_MAPPING[mel_scale];
+    if (!fn) {
+        throw new Error('mel_scale should be one of "htk", "slaney" or "kaldi".');
+    }
+
+    return typeof freq === 'number' ? fn(freq) : freq.map(x => fn(x));
+}
+
+const MEL_TO_HERTZ_MAPPING = {
+    "htk": (/** @type {number} */ mels) => 700.0 * (10.0 ** (mels / 2595.0) - 1.0),
+    "kaldi": (/** @type {number} */ mels) => 700.0 * (Math.exp(mels / 1127.0) - 1.0),
+    "slaney": (/** @type {number} */ mels, min_log_hertz = 1000.0, min_log_mel = 15.0, logstep = Math.log(6.4) / 27.0) => mels >= min_log_mel
+        ? min_log_hertz * Math.exp(logstep * (mels - min_log_mel))
+        : 200.0 * mels / 3.0,
+}
+
+/**
+ * @template {Float32Array|Float64Array|number} T 
+ * @param {T} mels 
+ * @param {string} [mel_scale]
+ * @returns {T}
+ */
+function mel_to_hertz(mels, mel_scale = "htk") {
+    const fn = MEL_TO_HERTZ_MAPPING[mel_scale];
+    if (!fn) {
+        throw new Error('mel_scale should be one of "htk", "slaney" or "kaldi".');
+    }
+
+    return typeof mels === 'number' ? fn(mels) : mels.map(x => fn(x));
+}
+
+/**
+* Creates a triangular filter bank.
+*
+* Adapted from torchaudio and librosa.
+*
+* @param {Float64Array} fft_freqs Discrete frequencies of the FFT bins in Hz, of shape `(num_frequency_bins,)`.
+* @param {Float64Array} filter_freqs Center frequencies of the triangular filters to create, in Hz, of shape `(num_mel_filters,)`.
+* @returns {number[][]} of shape `(num_frequency_bins, num_mel_filters)`.
+*/
+function _create_triangular_filter_bank(fft_freqs, filter_freqs) {
+    const filter_diff = Float64Array.from(
+        { length: filter_freqs.length - 1 },
+        (_, i) => filter_freqs[i + 1] - filter_freqs[i]
+    );
+
+    const slopes = Array.from({
+        length: fft_freqs.length
+    }, () => new Array(filter_freqs.length));
+
+    for (let j = 0; j < fft_freqs.length; ++j) {
+        const slope = slopes[j];
+        for (let i = 0; i < filter_freqs.length; ++i) {
+            slope[i] = filter_freqs[i] - fft_freqs[j];
+        }
+    }
+
+    const numFreqs = filter_freqs.length - 2;
+    const ret = Array.from({ length: numFreqs }, () => new Array(fft_freqs.length));
+
+    for (let j = 0; j < fft_freqs.length; ++j) { // 201
+        const slope = slopes[j];
+        for (let i = 0; i < numFreqs; ++i) { // 80
+            const down = -slope[i] / filter_diff[i];
+            const up = slope[i + 2] / filter_diff[i + 1];
+            ret[i][j] = Math.max(0, Math.min(down, up));
+        }
+    }
+    return ret;
+}
+
+/**
+ * Return evenly spaced numbers over a specified interval.
+ * @param {number} start The starting value of the sequence.
+ * @param {number} end The end value of the sequence.
+ * @param {number} num Number of samples to generate.
+ * @returns `num` evenly spaced samples, calculated over the interval `[start, stop]`.
+ */
+function linspace(start, end, num) {
+    const step = (end - start) / (num - 1);
+    return Float64Array.from({ length: num }, (_, i) => start + step * i);
+}
+
+/**
+ * Creates a frequency bin conversion matrix used to obtain a mel spectrogram. This is called a *mel filter bank*, and
+ * various implementation exist, which differ in the number of filters, the shape of the filters, the way the filters
+ * are spaced, the bandwidth of the filters, and the manner in which the spectrum is warped. The goal of these
+ * features is to approximate the non-linear human perception of the variation in pitch with respect to the frequency.
+ * @param {number} num_frequency_bins Number of frequencies used to compute the spectrogram (should be the same as in `stft`).
+ * @param {number} num_mel_filters Number of mel filters to generate.
+ * @param {number} min_frequency Lowest frequency of interest in Hz.
+ * @param {number} max_frequency Highest frequency of interest in Hz. This should not exceed `sampling_rate / 2`.
+ * @param {number} sampling_rate Sample rate of the audio waveform.
+ * @param {string} [norm] If `"slaney"`, divide the triangular mel weights by the width of the mel band (area normalization).
+ * @param {string} [mel_scale] The mel frequency scale to use, `"htk"` or `"slaney"`.
+ * @param {boolean} [triangularize_in_mel_space] If this option is enabled, the triangular filter is applied in mel space rather than frequency space.
+ * This should be set to `true` in order to get the same results as `torchaudio` when computing mel filters.
+ * @returns {number[][]} Triangular filter bank matrix, which is a 2D array of shape (`num_frequency_bins`, `num_mel_filters`).
+ * This is a projection matrix to go from a spectrogram to a mel spectrogram.
+ */
+export function mel_filter_bank(
+    num_frequency_bins,
+    num_mel_filters,
+    min_frequency,
+    max_frequency,
+    sampling_rate,
+    norm = null,
+    mel_scale = "htk",
+    triangularize_in_mel_space = false,
+) {
+    if (norm !== null && norm !== "slaney") {
+        throw new Error('norm must be one of null or "slaney"');
+    }
+
+    const mel_min = hertz_to_mel(min_frequency, mel_scale);
+    const mel_max = hertz_to_mel(max_frequency, mel_scale);
+    const mel_freqs = linspace(mel_min, mel_max, num_mel_filters + 2);
+
+    let filter_freqs = mel_to_hertz(mel_freqs, mel_scale);
+    let fft_freqs; // frequencies of FFT bins in Hz
+
+    if (triangularize_in_mel_space) {
+        const fft_bin_width = sampling_rate / (num_frequency_bins * 2);
+        fft_freqs = hertz_to_mel(Float64Array.from({ length: num_frequency_bins }, (_, i) => i * fft_bin_width), mel_scale);
+        filter_freqs = mel_freqs;
+    } else {
+        fft_freqs = linspace(0, Math.floor(sampling_rate / 2), num_frequency_bins);
+    }
+
+    const mel_filters = _create_triangular_filter_bank(fft_freqs, filter_freqs);
+
+    if (norm !== null && norm === "slaney") {
+        // Slaney-style mel is scaled to be approx constant energy per channel
+        for (let i = 0; i < num_mel_filters; ++i) {
+            const filter = mel_filters[i];
+            const enorm = 2.0 / (filter_freqs[i + 2] - filter_freqs[i]);
+            for (let j = 0; j < num_frequency_bins; ++j) {
+                // Apply this enorm to all frequency bins
+                filter[j] *= enorm;
+            }
+        }
+    }
+
+    // TODO warn if there is a zero row
+
+    return mel_filters;
+
+}
+
+/**
+ * @template {Float32Array|Float64Array} T
+ * Pads an array with a reflected version of itself on both ends.
+ * @param {T} array The array to pad.
+ * @param {number} left The amount of padding to add to the left.
+ * @param {number} right The amount of padding to add to the right.
+ * @returns {T} The padded array.
+ */
+function padReflect(array, left, right) {
+    // @ts-ignore
+    const padded = new array.constructor(array.length + left + right);
+    const w = array.length - 1;
+
+    for (let i = 0; i < array.length; ++i) {
+        padded[left + i] = array[i];
+    }
+
+    for (let i = 1; i <= left; ++i) {
+        padded[left - i] = array[calculateReflectOffset(i, w)];
+    }
+
+    for (let i = 1; i <= right; ++i) {
+        padded[w + left + i] = array[calculateReflectOffset(w - i, w)];
+    }
+
+    return padded;
+}
+
+/**
+ * Helper function to compute `amplitude_to_db` and `power_to_db`.
+ * @template {Float32Array|Float64Array} T
+ * @param {T} spectrogram 
+ * @param {number} factor 
+ * @param {number} reference 
+ * @param {number} min_value 
+ * @param {number} db_range 
+ * @returns {T}
+ */
+function _db_conversion_helper(spectrogram, factor, reference, min_value, db_range) {
+    if (reference <= 0) {
+        throw new Error('reference must be greater than zero');
+    }
+
+    if (min_value <= 0) {
+        throw new Error('min_value must be greater than zero');
+    }
+
+    reference = Math.max(min_value, reference);
+
+    const logReference = Math.log10(reference);
+    for (let i = 0; i < spectrogram.length; ++i) {
+        spectrogram[i] = factor * Math.log10(Math.max(min_value, spectrogram[i]) - logReference)
+    }
+
+    if (db_range !== null) {
+        if (db_range <= 0) {
+            throw new Error('db_range must be greater than zero');
+        }
+        const maxValue = max(spectrogram)[0] - db_range;
+        for (let i = 0; i < spectrogram.length; ++i) {
+            spectrogram[i] = Math.max(spectrogram[i], maxValue);
+        }
+    }
+
+    return spectrogram;
+}
+
+/**
+ * Converts an amplitude spectrogram to the decibel scale. This computes `20 * log10(spectrogram / reference)`,
+ * using basic logarithm properties for numerical stability. NOTE: Operates in-place.
+ * 
+ * The motivation behind applying the log function on the (mel) spectrogram is that humans do not hear loudness on a
+ * linear scale. Generally to double the perceived volume of a sound we need to put 8 times as much energy into it.
+ * This means that large variations in energy may not sound all that different if the sound is loud to begin with.
+ * This compression operation makes the (mel) spectrogram features match more closely what humans actually hear.
+ * 
+ * @template {Float32Array|Float64Array} T
+ * @param {T} spectrogram The input amplitude (mel) spectrogram.
+ * @param {number} [reference=1.0] Sets the input spectrogram value that corresponds to 0 dB.
+ * For example, use `np.max(spectrogram)` to set the loudest part to 0 dB. Must be greater than zero.
+ * @param {number} [min_value=1e-5] The spectrogram will be clipped to this minimum value before conversion to decibels,
+ * to avoid taking `log(0)`. The default of `1e-5` corresponds to a minimum of -100 dB. Must be greater than zero.
+ * @param {number} [db_range=null] Sets the maximum dynamic range in decibels. For example, if `db_range = 80`, the
+ * difference between the peak value and the smallest value will never be more than 80 dB. Must be greater than zero.
+ * @returns {T} The modified spectrogram in decibels.
+ */
+function amplitude_to_db(spectrogram, reference = 1.0, min_value = 1e-5, db_range = null) {
+    return _db_conversion_helper(spectrogram, 20.0, reference, min_value, db_range);
+}
+
+/**
+ * Converts a power spectrogram to the decibel scale. This computes `10 * log10(spectrogram / reference)`,
+ * using basic logarithm properties for numerical stability. NOTE: Operates in-place.
+ * 
+ * The motivation behind applying the log function on the (mel) spectrogram is that humans do not hear loudness on a
+ * linear scale. Generally to double the perceived volume of a sound we need to put 8 times as much energy into it.
+ * This means that large variations in energy may not sound all that different if the sound is loud to begin with.
+ * This compression operation makes the (mel) spectrogram features match more closely what humans actually hear.
+ * 
+ * Based on the implementation of `librosa.power_to_db`.
+ * 
+ * @template {Float32Array|Float64Array} T
+ * @param {T} spectrogram The input power (mel) spectrogram. Note that a power spectrogram has the amplitudes squared!
+ * @param {number} [reference=1.0] Sets the input spectrogram value that corresponds to 0 dB.
+ * For example, use `np.max(spectrogram)` to set the loudest part to 0 dB. Must be greater than zero.
+ * @param {number} [min_value=1e-10] The spectrogram will be clipped to this minimum value before conversion to decibels,
+ * to avoid taking `log(0)`. The default of `1e-10` corresponds to a minimum of -100 dB. Must be greater than zero.
+ * @param {number} [db_range=null] Sets the maximum dynamic range in decibels. For example, if `db_range = 80`, the
+ * difference between the peak value and the smallest value will never be more than 80 dB. Must be greater than zero.
+ * @returns {T} The modified spectrogram in decibels.
+ */
+function power_to_db(spectrogram, reference = 1.0, min_value = 1e-10, db_range = null) {
+    return _db_conversion_helper(spectrogram, 10.0, reference, min_value, db_range);
+}
+
+/**
+ * Calculates a spectrogram over one waveform using the Short-Time Fourier Transform.
+ * 
+ * This function can create the following kinds of spectrograms:
+...
+
+Function Description:1. **Purpose**: The function is designed to generate a specific type of window function commonly used in signal processing to taper the edges of a signal. This helps to minimize the side effects in the Fourier transform that occur due to the discontinuities at the boundaries of a finite signal.
+2. **Input**: It accepts a single integer that specifies the length of the window.
+3. **Output**: It returns an array of floating-point numbers representing the window values.
+4. **Procedure**: The function calculates the window values using a mathematical formula that involves the cosine function. Each element of the window is computed based on its index, using a specific scaling and shifting of the cosine function to ensure that the first and last values of the window taper smoothly to zero.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

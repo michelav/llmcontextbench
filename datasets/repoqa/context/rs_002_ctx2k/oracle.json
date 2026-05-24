@@ -1,0 +1,15 @@
+{
+  "baseId": "rs_002",
+  "endByte": 45913,
+  "endLine": 1490,
+  "instanceId": "rs_002_ctx2k",
+  "language": "rust",
+  "needleName": "i16_tests",
+  "normalizedLanguage": "rust",
+  "path": "src/number/streaming.rs",
+  "repo": "rust-bakery/nom",
+  "sequence": 2,
+  "startByte": 45461,
+  "startLine": 1482,
+  "targetFunction": "fn i16_tests() {\n    assert_parse!(be_i16(&[0x00, 0x00][..]), Ok((&b\"\"[..], 0)));\n    assert_parse!(be_i16(&[0x7f, 0xff][..]), Ok((&b\"\"[..], 32_767_i16)));\n    assert_parse!(be_i16(&[0xff, 0xff][..]), Ok((&b\"\"[..], -1)));\n    assert_parse!(be_i16(&[0x80, 0x00][..]), Ok((&b\"\"[..], -32_768_i16)));\n    assert_parse!(be_i16(&[][..]), Err(Err::Incomplete(Needed::new(2))));\n    assert_parse!(be_i16(&[0x00][..]), Err(Err::Incomplete(Needed::new(1))));\n  }"
+}

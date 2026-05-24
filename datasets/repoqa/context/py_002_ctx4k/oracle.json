@@ -1,0 +1,15 @@
+{
+  "baseId": "py_002",
+  "endByte": 5711,
+  "endLine": 157,
+  "instanceId": "py_002_ctx4k",
+  "language": "python",
+  "needleName": "convert_unchanged_lines",
+  "normalizedLanguage": "python",
+  "path": "src/black/ranges.py",
+  "repo": "psf/black",
+  "sequence": 2,
+  "startByte": 4065,
+  "startLine": 127,
+  "targetFunction": "def convert_unchanged_lines(src_node: Node, lines: Collection[Tuple[int, int]]) -> None:\n    \"\"\"Converts unchanged lines to STANDALONE_COMMENT.\n\n    The idea is similar to how `# fmt: on/off` is implemented. It also converts the\n    nodes between those markers as a single `STANDALONE_COMMENT` leaf node with\n    the unformatted code as its value. `STANDALONE_COMMENT` is a \"fake\" token\n    that will be formatted as-is with its prefix normalized.\n\n    Here we perform two passes:\n\n    1. Visit the top-level statements, and convert them to a single\n       `STANDALONE_COMMENT` when unchanged. This speeds up formatting when some\n       of the top-level statements aren't changed.\n    2. Convert unchanged \"unwrapped lines\" to `STANDALONE_COMMENT` nodes line by\n       line. \"unwrapped lines\" are divided by the `NEWLINE` token. e.g. a\n       multi-line statement is *one* \"unwrapped line\" that ends with `NEWLINE`,\n       even though this statement itself can span multiple lines, and the\n       tokenizer only sees the last '\\n' as the `NEWLINE` token.\n\n    NOTE: During pass (2), comment prefixes and indentations are ALWAYS\n    normalized even when the lines aren't changed. This is fixable by moving\n    more formatting to pass (1). However, it's hard to get it correct when\n    incorrect indentations are used. So we defer this to future optimizations.\n    \"\"\"\n    lines_set: Set[int] = set()\n    for start, end in lines:\n        lines_set.update(range(start, end + 1))\n    visitor = _TopLevelStatementsVisitor(lines_set)\n    _ = list(visitor.visit(src_node))  # Consume all results.\n    _convert_unchanged_line_by_line(src_node, lines_set)"
+}

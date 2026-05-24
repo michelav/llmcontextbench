@@ -1,0 +1,21 @@
+{
+  "base_id": "rs_003",
+  "code_context_ntokens": 8142,
+  "description": "1. **Purpose**: The function is designed to repeatedly apply a given parser to an input until the parser fails, counting the number of successful applications. It requires at least one successful parse to avoid returning an error.\n2. **Input**: The function takes a parser function as input, which is applied to a sequence or stream.\n3. **Output**: It returns either the count of successful parses as an unsigned integer if at least one parse is successful, or an error if the first application of the parser fails.\n4. **Procedure**: The function initializes a counter and repeatedly applies the provided parser to the input. If the parser succeeds, the input is updated, and the counter is incremented. If the parser fails on the first attempt, an error is returned. The process stops when the parser fails after at least one successful application, returning the count of successful applications.",
+  "end_byte": 23822,
+  "end_line": 791,
+  "instance_id": "rs_003_ctx8k",
+  "language": "rust",
+  "needle_name": "many1_count",
+  "needle_token_end": 2071,
+  "needle_token_start": 1992,
+  "normalized_language": "rust",
+  "path": "src/multi/mod.rs",
+  "position_ratio": 0.25,
+  "repo": "rust-bakery/nom",
+  "repoqa_description": "Function Description:1. **Purpose**: The function is designed to repeatedly apply a given parser to an input until the parser fails, counting the number of successful applications. It requires at least one successful parse to avoid returning an error.\n2. **Input**: The function takes a parser function as input, which is applied to a sequence or stream.\n3. **Output**: It returns either the count of successful parses as an unsigned integer if at least one parse is successful, or an error if the first application of the parser fails.\n4. **Procedure**: The function initializes a counter and repeatedly applies the provided parser to the input. If the parser succeeds, the input is updated, and the counter is incremented. If the parser fails on the first attempt, an error is returned. The process stops when the parser fails after at least one successful application, returning the count of successful applications.",
+  "requested_context_tokens": 8192,
+  "sequence": 3,
+  "start_byte": 23632,
+  "start_line": 783
+}

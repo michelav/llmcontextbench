@@ -1,0 +1,392 @@
+// Path: gson/src/main/java/com/google/gson/JsonStreamParser.java
+/*
+ * Copyright (C) 2009 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.gson;
+
+import com.google.gson.internal.Streams;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
+import com.google.gson.stream.MalformedJsonException;
+...
+// Path: gson/src/main/java/com/google/gson/package-info.java
+/*
+ * Copyright (C) 2008 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * This package provides the {@link com.google.gson.Gson} class to convert Json to Java and
+ * vice-versa.
+ *
+ * <p>The primary class to use is {@link com.google.gson.Gson} which can be constructed with {@code
+ * new Gson()} (using default settings) or by using {@link com.google.gson.GsonBuilder} (to
+ * configure various options such as using versioning and so on).
+ *
+ * @author Inderjeet Singh, Joel Leitch
+ */
+package com.google.gson;
+
+// Path: gson/src/main/java/com/google/gson/JsonParser.java
+/*
+ * Copyright (C) 2009 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.gson;
+
+import com.google.errorprone.annotations.InlineMe;
+import com.google.gson.internal.Streams;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
+import com.google.gson.stream.MalformedJsonException;
+import java.io.IOException;
+import java.io.Reader;
+import java.io.StringReader;
+
+/**
+ * A parser to parse JSON into a parse tree of {@link JsonElement}s.
+ *
+ * @author Inderjeet Singh
+ * @author Joel Leitch
+ * @since 1.3
+ */
+public final class JsonParser {
+  /**
+   * @deprecated No need to instantiate this class, use the static methods instead.
+   */
+  @Deprecated
+  public JsonParser() {}
+
+  /**
+   * Parses the specified JSON string into a parse tree. An exception is thrown if the JSON string
+   * has multiple top-level JSON elements, or if there is trailing data.
+   *
+   * <p>The JSON string is parsed in {@linkplain JsonReader#setStrictness(Strictness) lenient mode}.
+   *
+   * @param json JSON text
+   * @return a parse tree of {@link JsonElement}s corresponding to the specified JSON
+   * @throws JsonParseException if the specified text is not valid JSON
+   * @since 2.8.6
+   */
+  
+public static JsonElement parseString(String json) throws JsonSyntaxException {
+    return parseReader(new StringReader(json));
+  }
+
+  /**
+   * Parses the complete JSON string provided by the reader into a parse tree. An exception is
+   * thrown if the JSON string has multiple top-level JSON elements, or if there is trailing data.
+   *
+   * <p>The JSON data is parsed in {@linkplain JsonReader#setStrictness(Strictness) lenient mode}.
+   *
+   * @param reader JSON text
+   * @return a parse tree of {@link JsonElement}s corresponding to the specified JSON
+   * @throws JsonParseException if there is an IOException or if the specified text is not valid
+   *     JSON
+   * @since 2.8.6
+   */
+  public static JsonElement parseReader(Reader reader) throws JsonIOException, JsonSyntaxException {
+    try {
+      JsonReader jsonReader = new JsonReader(reader);
+      JsonElement element = parseReader(jsonReader);
+      if (!element.isJsonNull() && jsonReader.peek() != JsonToken.END_DOCUMENT) {
+        throw new JsonSyntaxException("Did not consume the entire document.");
+      }
+      return element;
+    } catch (MalformedJsonException e) {
+      throw new JsonSyntaxException(e);
+    } catch (IOException e) {
+      throw new JsonIOException(e);
+    } catch (NumberFormatException e) {
+      throw new JsonSyntaxException(e);
+    }
+  }
+
+  /**
+   * Returns the next value from the JSON stream as a parse tree. Unlike the other {@code parse}
+   * methods, no exception is thrown if the JSON data has multiple top-level JSON elements, or if
+   * there is trailing data.
+   *
+   * <p>The JSON data is parsed in {@linkplain JsonReader#setStrictness(Strictness) lenient mode},
+   * regardless of the strictness setting of the provided reader. The strictness setting of the
+   * reader is restored once this method returns.
+   *
+   * @throws JsonParseException if there is an IOException or if the specified text is not valid
+   *     JSON
+   * @since 2.8.6
+   */
+  public static JsonElement parseReader(JsonReader reader)
+      throws JsonIOException, JsonSyntaxException {
+    Strictness strictness = reader.getStrictness();
+    reader.setStrictness(Strictness.LENIENT);
+    try {
+      return Streams.parse(reader);
+    } catch (StackOverflowError e) {
+      throw new JsonParseException("Failed parsing JSON source: " + reader + " to Json", e);
+    } catch (OutOfMemoryError e) {
+      throw new JsonParseException("Failed parsing JSON source: " + reader + " to Json", e);
+    } finally {
+      reader.setStrictness(strictness);
+    }
+  }
+
+  /**
+   * @deprecated Use {@link JsonParser#parseString}
+   */
+  @Deprecated
+  @InlineMe(replacement = "JsonParser.parseString(json)", imports = "com.google.gson.JsonParser")
+  public JsonElement parse(String json) throws JsonSyntaxException {
+    return parseString(json);
+  }
+
+  /**
+   * @deprecated Use {@link JsonParser#parseReader(Reader)}
+   */
+  @Deprecated
+  @InlineMe(replacement = "JsonParser.parseReader(json)", imports = "com.google.gson.JsonParser")
+  public JsonElement parse(Reader json) throws JsonIOException, JsonSyntaxException {
+    return parseReader(json);
+  }
+
+  /**
+   * @deprecated Use {@link JsonParser#parseReader(JsonReader)}
+   */
+  @Deprecated
+  @InlineMe(replacement = "JsonParser.parseReader(json)", imports = "com.google.gson.JsonParser")
+  public JsonElement parse(JsonReader json) throws JsonIOException, JsonSyntaxException {
+    return parseReader(json);
+  }
+}
+
+// Path: gson/src/main/java/com/google/gson/stream/package-info.java
+/*
+ * Copyright (C) 2021 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/** This package provides classes for processing JSON in an efficient streaming way. */
+package com.google.gson.stream;
+
+// Path: gson/src/main/java/com/google/gson/reflect/package-info.java
+/*
+ * Copyright (C) 2008 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * This package provides utility classes for finding type information for generic types.
+ *
+ * @author Inderjeet Singh, Joel Leitch
+ */
+package com.google.gson.reflect;
+
+// Path: gson/src/main/java/com/google/gson/internal/package-info.java
+/*
+ * Copyright (C) 2011 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * Do NOT use any class in this package as they are meant for internal use in Gson. These classes
+ * will very likely change incompatibly in future versions. You have been warned.
+ *
+ * @author Inderjeet Singh, Joel Leitch, Jesse Wilson
+ */
+package com.google.gson.internal;
+
+// Path: gson/src/main/java/com/google/gson/internal/bind/TypeAdapterRuntimeTypeWrapper.java
+/*
+ * Copyright (C) 2011 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package com.google.gson.internal.bind;
+
+import com.google.gson.Gson;
+import com.google.gson.TypeAdapter;
+import com.google.gson.reflect.TypeToken;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonWriter;
+import java.io.IOException;
+import java.lang.reflect.Type;
+import java.lang.reflect.TypeVariable;
+
+final class TypeAdapterRuntimeTypeWrapper<T> extends TypeAdapter<T> {
+  private final Gson context;
+  private final TypeAdapter<T> delegate;
+  private final Type type;
+
+  TypeAdapterRuntimeTypeWrapper(Gson context, TypeAdapter<T> delegate, Type type) {
+    this.context = context;
+    this.delegate = delegate;
+    this.type = type;
+  }
+
+  @Override
+  public T read(JsonReader in) throws IOException {
+    return delegate.read(in);
+  }
+
+  @Override
+  public void write(JsonWriter out, T value) throws IOException {
+    // Order of preference for choosing type adapters
+    // First preference: a type adapter registered for the runtime type
+    // Second preference: a type adapter registered for the declared type
+    // Third preference: reflective type adapter for the runtime type
+    //                   (if it is a subclass of the declared type)
+    // Fourth preference: reflective type adapter for the declared type
+
+    TypeAdapter<T> chosen = delegate;
+    Type runtimeType = getRuntimeTypeIfMoreSpecific(type, value);
+    if (runtimeType != type) {
+      @SuppressWarnings("unchecked")
+      TypeAdapter<T> runtimeTypeAdapter =
+          (TypeAdapter<T>) context.getAdapter(TypeToken.get(runtimeType));
+      // For backward compatibility only check ReflectiveTypeAdapterFactory.Adapter here but not any
+      // other wrapping adapters, see
+      // https://github.com/google/gson/pull/1787#issuecomment-1222175189
+      if (!(runtimeTypeAdapter instanceof ReflectiveTypeAdapterFactory.Adapter)) {
+        // The user registered a type adapter for the runtime type, so we will use that
+        chosen = runtimeTypeAdapter;
+      } else if (!isReflective(delegate)) {
+        // The user registered a type adapter for Base class, so we prefer it over the
+        // reflective type adapter for the runtime type
+        chosen = delegate;
+      } else {
+        // Use the type adapter for runtime type
+        chosen = runtimeTypeAdapter;
+      }
+    }
+    chosen.write(out, value);
+  }
+
+  /**
+   * Returns whether the type adapter uses reflection.
+   *
+   * @param typeAdapter the type adapter to check.
+   */
+  private static boolean isReflective(TypeAdapter<?> typeAdapter) {
+    // Run this in loop in case multiple delegating adapters are nested
+    while (typeAdapter instanceof SerializationDelegatingTypeAdapter) {
+      TypeAdapter<?> delegate =
+          ((SerializationDelegatingTypeAdapter<?>) typeAdapter).getSerializationDelegate();
+      // Break if adapter does not delegate serialization
+      if (delegate == typeAdapter) {
+        break;
+      }
+      typeAdapter = delegate;
+    }
+
+    return typeAdapter instanceof ReflectiveTypeAdapterFactory.Adapter;
+  }
+
+  /** Finds a compatible runtime type if it is more specific */
+  private static Type getRuntimeTypeIfMoreSpecific(Type type, Object value) {
+    if (value != null && (type instanceof Class<?> || type instanceof TypeVariable<?>)) {
+      type = value.getClass();
+    }
+    return type;
+  }
+}
+
+// Path: gson/src/main/java/com/google/gson/annotations/package-info.java
+/*
+ * Copyright (C) 2008 Google Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * This package provides annotations that can be used with {@link com.google.gson.Gson}.
+ *
+ * @author Inderjeet Singh, Joel Leitch
+ */
+package com.google.gson.annotations;
+

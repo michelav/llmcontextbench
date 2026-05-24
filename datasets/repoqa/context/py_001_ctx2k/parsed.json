@@ -1,0 +1,56 @@
+{
+  "context_builder": "repoqa-native",
+  "context_type": "repoqa_structured_code_context",
+  "files": [
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "src/black/trans.py",
+      "symbols": [
+        {
+          "children": [
+            {
+              "children": [],
+              "code": "def _merge_string_group(\n        self, line: Line, string_indices: List[int]\n    ) -> TResult[Line]:\n        \"\"\"\n        Merges string groups (i.e. set of adjacent strings).\n\n        Each index from `string_indices` designates one string group's first\n        leaf in `line.leaves`.\n\n        Returns:\n            Ok(new_line), if ALL of the validation checks found in\n            _validate_msg(...) pass.\n                OR\n            Err(CannotTransform), otherwise.\n        \"\"\"\n        LL = line.leaves\n\n        is_valid_index = is_valid_index_factory(LL)\n\n        # A dict of {string_idx: tuple[num_of_strings, string_leaf]}.\n        merged_string_idx_dict: Dict[int, Tuple[int, Leaf]] = {}\n        for string_idx in string_indices:\n            vresult = self._validate_msg(line, string_idx)\n            if isinstance(vresult, Err):\n                continue\n            merged_string_idx_dict[string_idx] = self._merge_one_string_group(\n                LL, string_idx, is_valid_index\n            )\n\n        if not merged_string_idx_dict:\n            return TErr(\"No string group is merged\")\n\n        # Build the final line ('new_line') that this method will later return.\n        new_line = line.clone()\n        previous_merged_string_idx = -1\n        previous_merged_num_of_strings = -1\n        for i, leaf in enumerate(LL):\n            if i in merged_string_idx_dict:\n                previous_merged_string_idx = i\n                previous_merged_num_of_strings, string_leaf = merged_string_idx_dict[i]\n                new_line.append(string_leaf)\n\n            if (\n                previous_merged_string_idx\n                <= i\n                < previous_merged_string_idx + previous_merged_num_of_strings\n            ):\n                for comment_leaf in line.comments_after(LL[i]):\n                    new_line.append(comment_leaf, preformatted=True)\n                continue\n\n            append_leaves(new_line, line, [leaf])\n\n        return Ok(new_line)",
+              "documentation": "Merges string groups (i.e. set of adjacent strings).\n\nEach index from `string_indices` designates one string group's first\nleaf in `line.leaves`.\n\nReturns:\n    Ok(new_line), if ALL of the validation checks found in\n    _validate_msg(...) pass.\n        OR\n    Err(CannotTransform), otherwise.",
+              "end_line": 639,
+              "kind": "method",
+              "name": "_merge_string_group",
+              "parent_id": "src/black/trans.py#class:StringMerger:445",
+              "parent_name": "StringMerger",
+              "qualified_name": "StringMerger._merge_string_group",
+              "signature": "def _merge_string_group(\n        self, line: Line, string_indices: List[int]\n    ) -> TResult[Line]",
+              "start_line": 586,
+              "symbol_id": "src/black/trans.py#method:StringMerger._merge_string_group:586"
+            }
+          ],
+          "code": null,
+          "documentation": null,
+          "end_line": 879,
+          "kind": "class",
+          "name": "StringMerger",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "StringMerger",
+          "signature": null,
+          "start_line": 445,
+          "symbol_id": "src/black/trans.py#class:StringMerger:445"
+        }
+      ],
+      "unparsed_code": null
+    }
+  ],
+  "metadata": {
+    "actual_code_context_tokens": 2202,
+    "base_id": "py_001",
+    "instance_id": "py_001_ctx2k",
+    "language": "python",
+    "normalized_language": "python",
+    "position_ratio": 0.05,
+    "requested_context_tokens": 2048,
+    "sequence": 1
+  },
+  "repository": "psf/black",
+  "workspace_id": "py_001_ctx2k"
+}

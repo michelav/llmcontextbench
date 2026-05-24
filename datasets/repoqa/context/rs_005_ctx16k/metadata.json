@@ -1,0 +1,21 @@
+{
+  "base_id": "rs_005",
+  "code_context_ntokens": 16284,
+  "description": "1. **Purpose**: The function is designed to repeatedly apply a given parser and accumulate the results using a specified function, ensuring that the parser is applied at least once.\n2. **Input**: It takes three parameters: a parser that defines how to parse each segment, an initializer function that provides the initial value for the accumulator, and a function that combines the accumulated result with the output of each successful parse.\n3. **Output**: Returns either the accumulated result of all successful parses or an error if the first parse attempt fails or if the parser accepts empty inputs, which could lead to an infinite loop.\n4. **Procedure**: The function initializes an accumulator with the provided initial value. It then enters a loop where it repeatedly applies the parser to the input. For each successful parse, it updates the accumulator using the combining function. The loop continues until the parser fails to parse the input, at which point it returns the accumulated result or an error if no successful parse has occurred.",
+  "end_byte": 34311,
+  "end_line": 1167,
+  "instance_id": "rs_005_ctx16k",
+  "language": "rust",
+  "needle_name": "fold_many1",
+  "needle_token_end": 7411,
+  "needle_token_start": 7251,
+  "normalized_language": "rust",
+  "path": "src/multi/mod.rs",
+  "position_ratio": 0.45,
+  "repo": "rust-bakery/nom",
+  "repoqa_description": "Function Description:1. **Purpose**: The function is designed to repeatedly apply a given parser and accumulate the results using a specified function, ensuring that the parser is applied at least once.\n2. **Input**: It takes three parameters: a parser that defines how to parse each segment, an initializer function that provides the initial value for the accumulator, and a function that combines the accumulated result with the output of each successful parse.\n3. **Output**: Returns either the accumulated result of all successful parses or an error if the first parse attempt fails or if the parser accepts empty inputs, which could lead to an infinite loop.\n4. **Procedure**: The function initializes an accumulator with the provided initial value. It then enters a loop where it repeatedly applies the parser to the input. For each successful parse, it updates the accumulator using the combining function. The loop continues until the parser fails to parse the input, at which point it returns the accumulated result or an error if no successful parse has occurred.",
+  "requested_context_tokens": 16384,
+  "sequence": 5,
+  "start_byte": 33985,
+  "start_line": 1148
+}

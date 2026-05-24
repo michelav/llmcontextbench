@@ -1,0 +1,21 @@
+{
+  "base_id": "py_001",
+  "code_context_ntokens": 4112,
+  "description": "1. **Purpose**: To combine adjacent strings into a single string within a line of code, ensuring that the merged result is syntactically correct.\n2. **Input**: A line of code and a list of indices indicating the starting points of groups of strings to be merged.\n3. **Output**: A modified line of code with the specified groups of strings merged, or an error if the merge cannot be performed.\n4. **Procedure**: \n   - The function iterates over the provided indices, each representing the start of a group of adjacent strings.\n   - For each index, it checks if the group of strings can be merged without violating syntax rules.\n   - If valid, it merges the strings and updates a dictionary with the new string and its position.\n   - If no strings can be merged, it returns an error.\n   - Otherwise, it constructs a new line of code with the merged strings and any remaining elements from the original line, including comments.",
+  "end_byte": 21391,
+  "end_line": 639,
+  "instance_id": "py_001_ctx4k",
+  "language": "python",
+  "needle_name": "_merge_string_group",
+  "needle_token_end": 558,
+  "needle_token_start": 0,
+  "normalized_language": "python",
+  "path": "src/black/trans.py",
+  "position_ratio": 0.05,
+  "repo": "psf/black",
+  "repoqa_description": "Function Description:1. **Purpose**: To combine adjacent strings into a single string within a line of code, ensuring that the merged result is syntactically correct.\n2. **Input**: A line of code and a list of indices indicating the starting points of groups of strings to be merged.\n3. **Output**: A modified line of code with the specified groups of strings merged, or an error if the merge cannot be performed.\n4. **Procedure**: \n   - The function iterates over the provided indices, each representing the start of a group of adjacent strings.\n   - For each index, it checks if the group of strings can be merged without violating syntax rules.\n   - If valid, it merges the strings and updates a dictionary with the new string and its position.\n   - If no strings can be merged, it returns an error.\n   - Otherwise, it constructs a new line of code with the merged strings and any remaining elements from the original line, including comments.",
+  "requested_context_tokens": 4096,
+  "sequence": 1,
+  "start_byte": 19425,
+  "start_line": 585
+}

@@ -1,0 +1,6 @@
+{
+  "instance_id": "repoqa-workspace-1",
+  "repo": "example/repo",
+  "language": "python",
+  "path": "src/example.py"
+}

@@ -1,0 +1,21 @@
+{
+  "base_id": "py_002",
+  "code_context_ntokens": 4049,
+  "description": "1. **Purpose**: The function is designed to transform specific lines of code that have not been modified into a special comment format that preserves their original formatting during further processing. This is particularly useful in scenarios where selective formatting is required, ensuring that unchanged parts of the code remain visually consistent and untouched.\n2. **Input**: The function takes two parameters: a node representing the parsed source code and a collection of line ranges that specify which lines have not been altered.\n3. **Output**: There is no direct output from this function as it modifies the input node in place. The changes involve converting specified lines into a format that will not be altered in subsequent formatting steps.\n4. **Procedure**: The function operates in two main phases:\n   - First, it identifies top-level statements within the unchanged lines and converts these blocks into a special comment type that preserves their formatting.\n   - Second, it processes individual unchanged lines within the node, converting them into the same special comment type. This includes normalizing comment prefixes and indentations to ensure consistency, even though the content itself remains unchanged.",
+  "end_byte": 5711,
+  "end_line": 157,
+  "instance_id": "py_002_ctx4k",
+  "language": "python",
+  "needle_name": "convert_unchanged_lines",
+  "needle_token_end": 850,
+  "needle_token_start": 359,
+  "normalized_language": "python",
+  "path": "src/black/ranges.py",
+  "position_ratio": 0.15,
+  "repo": "psf/black",
+  "repoqa_description": "Function Description:1. **Purpose**: The function is designed to transform specific lines of code that have not been modified into a special comment format that preserves their original formatting during further processing. This is particularly useful in scenarios where selective formatting is required, ensuring that unchanged parts of the code remain visually consistent and untouched.\n2. **Input**: The function takes two parameters: a node representing the parsed source code and a collection of line ranges that specify which lines have not been altered.\n3. **Output**: There is no direct output from this function as it modifies the input node in place. The changes involve converting specified lines into a format that will not be altered in subsequent formatting steps.\n4. **Procedure**: The function operates in two main phases:\n   - First, it identifies top-level statements within the unchanged lines and converts these blocks into a special comment type that preserves their formatting.\n   - Second, it processes individual unchanged lines within the node, converting them into the same special comment type. This includes normalizing comment prefixes and indentations to ensure consistency, even though the content itself remains unchanged.",
+  "requested_context_tokens": 4096,
+  "sequence": 2,
+  "start_byte": 4065,
+  "start_line": 127
+}

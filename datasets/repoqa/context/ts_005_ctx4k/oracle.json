@@ -1,0 +1,15 @@
+{
+  "baseId": "ts_005",
+  "endByte": 3841,
+  "endLine": 101,
+  "instanceId": "ts_005_ctx4k",
+  "language": "typescript",
+  "needleName": "hanning",
+  "normalizedLanguage": "typescript",
+  "path": "src/utils/audio.js",
+  "repo": "xenova/transformers.js",
+  "sequence": 5,
+  "startByte": 3444,
+  "startLine": 85,
+  "targetFunction": "export function hanning(M) {\n    if (M < 1) {\n        return new Float64Array();\n    }\n    if (M === 1) {\n        return new Float64Array([1]);\n    }\n    const denom = M - 1;\n    const factor = Math.PI / denom;\n    const cos_vals = new Float64Array(M);\n    for (let i = 0; i < M; ++i) {\n        const n = 2 * i - denom;\n        cos_vals[i] = 0.5 + 0.5 * Math.cos(factor * n);\n    }\n    return cos_vals;\n}"
+}

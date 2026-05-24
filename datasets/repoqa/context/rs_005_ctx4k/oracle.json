@@ -1,0 +1,15 @@
+{
+  "baseId": "rs_005",
+  "endByte": 34311,
+  "endLine": 1167,
+  "instanceId": "rs_005_ctx4k",
+  "language": "rust",
+  "needleName": "fold_many1",
+  "normalizedLanguage": "rust",
+  "path": "src/multi/mod.rs",
+  "repo": "rust-bakery/nom",
+  "sequence": 5,
+  "startByte": 33985,
+  "startLine": 1148,
+  "targetFunction": "pub fn fold_many1<I, E, F, G, H, R>(\n  parser: F,\n  init: H,\n  g: G,\n) -> impl Parser<I, Output = R, Error = E>\nwhere\n  I: Clone + InputLength,\n  F: Parser<I, Error = E>,\n  G: FnMut(R, <F as Parser<I>>::Output) -> R,\n  H: FnMut() -> R,\n  E: ParseError<I>,\n{\n  FoldMany1 {\n    parser,\n    g,\n    init,\n    r: PhantomData,\n  }\n}"
+}

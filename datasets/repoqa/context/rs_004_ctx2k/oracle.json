@@ -1,0 +1,15 @@
+{
+  "baseId": "rs_004",
+  "endByte": 40444,
+  "endLine": 1659,
+  "instanceId": "rs_004_ctx2k",
+  "language": "rust",
+  "needleName": "test_offset_u8",
+  "normalizedLanguage": "rust",
+  "path": "src/traits.rs",
+  "repo": "rust-bakery/nom",
+  "sequence": 4,
+  "startByte": 40215,
+  "startLine": 1649,
+  "targetFunction": "fn test_offset_u8() {\n    let s = b\"abcd123\";\n    let a = &s[..];\n    let b = &a[2..];\n    let c = &a[..4];\n    let d = &a[3..5];\n    assert_eq!(a.offset(b), 2);\n    assert_eq!(a.offset(c), 0);\n    assert_eq!(a.offset(d), 3);\n  }"
+}

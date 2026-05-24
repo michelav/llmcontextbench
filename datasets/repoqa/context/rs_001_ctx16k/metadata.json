@@ -1,0 +1,21 @@
+{
+  "base_id": "rs_001",
+  "code_context_ntokens": 16288,
+  "description": "1. **Purpose**: The function is designed to identify and extract a sequence of digit characters from a given byte stream.\n2. **Input**: The function takes a byte array as input.\n3. **Output**: It returns a tuple containing the remaining byte array after the digit sequence and the extracted sequence of digit characters as a byte array.\n4. **Procedure**: The function processes the input byte array to locate and capture a contiguous sequence of digit characters. It stops parsing when a non-digit character is encountered or the input ends.",
+  "end_byte": 8135,
+  "end_line": 323,
+  "instance_id": "rs_001_ctx16k",
+  "language": "rust",
+  "needle_name": "yd",
+  "needle_token_end": 832,
+  "needle_token_start": 792,
+  "normalized_language": "rust",
+  "path": "src/bytes/tests.rs",
+  "position_ratio": 0.05,
+  "repo": "rust-bakery/nom",
+  "repoqa_description": "Function Description:1. **Purpose**: The function is designed to identify and extract a sequence of digit characters from a given byte stream.\n2. **Input**: The function takes a byte array as input.\n3. **Output**: It returns a tuple containing the remaining byte array after the digit sequence and the extracted sequence of digit characters as a byte array.\n4. **Procedure**: The function processes the input byte array to locate and capture a contiguous sequence of digit characters. It stops parsing when a non-digit character is encountered or the input ends.",
+  "requested_context_tokens": 16384,
+  "sequence": 1,
+  "start_byte": 8059,
+  "start_line": 320
+}

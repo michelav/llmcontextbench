@@ -1,0 +1,21 @@
+{
+  "base_id": "java_004",
+  "code_context_ntokens": 8047,
+  "description": "1. **Purpose**: To retrieve the current element as a specific null type representation if it is indeed that type, ensuring type safety before casting.\n2. **Input**: No parameters are required as it operates on the current instance of the element.\n3. **Output**: Returns the element as a null type representation if it is valid; otherwise, it throws an exception.\n4. **Procedure**: The method first checks if the current element is of the null type using a type-checking method. If the check passes, the element is cast to the null type and returned. If the check fails, an exception is thrown indicating that the element is not of the expected null type.",
+  "end_byte": 5184,
+  "end_line": 150,
+  "instance_id": "java_004_ctx8k",
+  "language": "java",
+  "needle_name": "getAsJsonNull",
+  "needle_token_end": 2825,
+  "needle_token_start": 2752,
+  "normalized_language": "java",
+  "path": "gson/src/main/java/com/google/gson/JsonElement.java",
+  "position_ratio": 0.35,
+  "repo": "google/gson",
+  "repoqa_description": "Function Description:1. **Purpose**: To retrieve the current element as a specific null type representation if it is indeed that type, ensuring type safety before casting.\n2. **Input**: No parameters are required as it operates on the current instance of the element.\n3. **Output**: Returns the element as a null type representation if it is valid; otherwise, it throws an exception.\n4. **Procedure**: The method first checks if the current element is of the null type using a type-checking method. If the check passes, the element is cast to the null type and returned. If the check fails, an exception is thrown indicating that the element is not of the expected null type.",
+  "requested_context_tokens": 8192,
+  "sequence": 4,
+  "start_byte": 4928,
+  "start_line": 143
+}
