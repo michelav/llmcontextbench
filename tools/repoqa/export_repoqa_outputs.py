@@ -68,11 +68,13 @@ def main() -> int:
     for path, count in written:
         print(f"Wrote {count} rows -> {path}")
 
+    raw_dataset_path = find_raw_dataset_path(dataset_root)
+    raw_arg = raw_dataset_path if raw_dataset_path is not None else dataset_root / "raw" / "repoqa-<version>.json[.gz]"
     print("\nNext examples:")
     for path, _ in written[:3]:
         print(
             "  tools/repoqa/repoqa_python -m repoqa.compute_score "
-            f"--model_output_path {path} --dataset_path {dataset_root / 'raw'}/*"
+            f"--model_output_path {path} --dataset_path {raw_arg}"
         )
     return 0
 
@@ -262,6 +264,19 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     with path.open("w", encoding="utf-8") as handle:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+
+
+def find_raw_dataset_path(dataset_root: Path) -> Path | None:
+    raw_dir = dataset_root / "raw"
+    matches = sorted(
+        path
+        for pattern in ("*.json", "*.json.gz")
+        for path in raw_dir.glob(pattern)
+        if path.is_file()
+    )
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
 def slug(value: str) -> str:

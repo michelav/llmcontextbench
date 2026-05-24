@@ -25,7 +25,7 @@
   "manifestSchemaVersion": 1,
   "name": "CTXBench RepoQA Experimental",
   "origin": {
-    "rawFile": "raw/repoqa-2026-05-23.json",
+    "rawFile": "raw/repoqa-2026-05-23.json.gz",
     "source": "evalplus/repoqa"
   },
   "validation": {

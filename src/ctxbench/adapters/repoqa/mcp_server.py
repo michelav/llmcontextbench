@@ -37,7 +37,14 @@ class RepoQAMCPServer:
         async def list_files(workspace_id: str) -> object:
             return self.call_tool("list_files", {"workspace_id": workspace_id}).content
 
-        @self.app.tool(name="list_symbols", description="List code symbols and metadata for a RepoQA workspace.")
+        @self.app.tool(
+            name="list_symbols",
+            description=(
+                "List code symbols and metadata for a RepoQA workspace. Optional filters: path and kind. "
+                "kind='function' searches callable code, including methods; exact parser kinds such as "
+                "'method', 'class', and other kinds present in parsed.json may also be used."
+            ),
+        )
         async def list_symbols(workspace_id: str, path: str | None = None, kind: str | None = None) -> object:
             return self.call_tool(
                 "list_symbols",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 import subprocess
 from pathlib import Path
@@ -127,13 +128,20 @@ def _load_native_task(dataset_root: Path, instance_id: str) -> dict[str, Any]:
 
 def _load_raw_repoqa_dataset(dataset_root: Path) -> dict[str, Any]:
     raw_dir = dataset_root / "raw"
-    matches = sorted(path for path in raw_dir.glob("*.json") if path.is_file())
+    matches = sorted(
+        path
+        for pattern in ("*.json", "*.json.gz")
+        for path in raw_dir.glob(pattern)
+        if path.is_file()
+    )
     if not matches:
-        raise FileNotFoundError(f"Expected exactly one raw RepoQA JSON in {raw_dir}, found none.")
+        raise FileNotFoundError(
+            f"Expected exactly one raw RepoQA JSON or JSON.GZ in {raw_dir}, found none."
+        )
     if len(matches) > 1:
         names = ", ".join(path.name for path in matches)
-        raise ValueError(f"Expected exactly one raw RepoQA JSON in {raw_dir}, found: {names}")
-    payload = _read_json(matches[0])
+        raise ValueError(f"Expected exactly one raw RepoQA JSON or JSON.GZ in {raw_dir}, found: {names}")
+    payload = _read_json_maybe_gzip(matches[0])
     if not isinstance(payload, dict):
         raise ValueError(f"Raw RepoQA dataset must be a JSON object: {matches[0]}")
     return payload
@@ -247,6 +255,13 @@ def _repoqa_runner_path() -> Path:
 
 def _repoqa_helper_path() -> Path:
     return _repo_root() / "tools" / "repoqa" / "score_response.py"
+
+
+def _read_json_maybe_gzip(path: Path) -> Any:
+    if path.name.endswith(".json.gz"):
+        with gzip.open(path, "rt", encoding="utf-8") as handle:
+            return json.load(handle)
+    return _read_json(path)
 
 
 def _read_json(path: Path) -> Any:

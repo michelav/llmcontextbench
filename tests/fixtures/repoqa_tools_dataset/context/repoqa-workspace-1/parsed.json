@@ -15,7 +15,7 @@
           "code": "class Greeter:\n    def greet(self, name):\n        return f\"Hello, {name}!\"\n",
           "children": [
             {
-              "kind": "function",
+              "kind": "method",
               "name": "greet",
               "start_line": 2,
               "end_line": 3,

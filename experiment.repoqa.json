@@ -1,11 +1,11 @@
 {
-  "id": "datasets/repoqa-minimal"",
+  "id": "datasets/repoqa",
   "name": "RepoQA experiment example",
   "output": "outputs",
   "dataset": {
     "id": "ctxbench/repoqa",
     "version": "2026-05-23",
-    "root": "repoqa"
+    "root": "datasets/repoqa"
   },
   "models": {
     "gpt1": {
@@ -26,10 +26,7 @@
     }
   },
   "scope": {
-    "instances": [
-      "py_001_ctx2k",
-      "py_001_ctx4k"
-    ],
+    "instances": ["py_001_ctx2k", "py_001_ctx4k"],
     "tasks": ["snf_retrieve_function"]
   },
   "factors": {
@@ -39,10 +36,10 @@
   },
   "params": {
     "mcp_server": {
-      "server_url": "https://secure-harlequin-mollusk.fastmcp.app/mcp",
-      "server_label": "ctxbench_lattes",
-      "server_description": "CTXBench Lattes MCP server",
-      "auth_token": "${LATTES_MCP_TOKEN}"
+      "server_url": "https://llmctxbench-repoqa.fastmcp.app/mcp",
+      "server_label": "ctxbench_repoqa",
+      "server_description": "CTXBench RepoQA MCP server",
+      "auth_token": "${REPOQA_MCP_TOKEN}"
     }
   },
   "evaluation": {

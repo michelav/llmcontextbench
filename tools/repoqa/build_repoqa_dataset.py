@@ -147,7 +147,12 @@ def main() -> int:
     (output_root / "raw").mkdir(parents=True, exist_ok=True)
     (output_root / "context").mkdir(parents=True, exist_ok=True)
 
-    raw_file = write_raw_copy(dataset=dataset, output_root=output_root, version=args.version)
+    raw_file = write_raw_copy(
+        dataset=dataset,
+        output_root=output_root,
+        version=args.version,
+        compress=args.compress_raw,
+    )
     base_needles = select_base_needles(
         dataset=dataset,
         requested_languages=requested_languages,
@@ -268,6 +273,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Set ignoreComments=true in repoqa-scorer validation metadata.",
     )
+    parser.add_argument(
+        "--compress-raw",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Write the copied raw RepoQA dataset as raw/repoqa-<version>.json.gz. Default: false.",
+    )
     parser.add_argument("--force", action="store_true", help="Replace output directory if it exists.")
     return parser.parse_args()
 
@@ -339,10 +350,15 @@ def load_repoqa_dataset(input_path: str | None) -> dict[str, Any]:
     return payload
 
 
-def write_raw_copy(*, dataset: dict[str, Any], output_root: Path, version: str) -> str:
-    raw_name = f"repoqa-{version}.json"
+def write_raw_copy(*, dataset: dict[str, Any], output_root: Path, version: str, compress: bool) -> str:
+    raw_name = f"repoqa-{version}.json.gz" if compress else f"repoqa-{version}.json"
     raw_path = output_root / "raw" / raw_name
-    write_json(raw_path, dataset)
+    if compress:
+        with gzip.open(raw_path, "wt", encoding="utf-8") as handle:
+            json.dump(dataset, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            handle.write("\n")
+    else:
+        write_json(raw_path, dataset)
     return f"raw/{raw_name}"
 
 

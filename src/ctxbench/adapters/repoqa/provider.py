@@ -265,7 +265,7 @@ def _symbol_without_code(symbol: dict[str, Any], *, kind: str | None) -> dict[st
         )
         if child is not None
     ]
-    matches = kind is None or symbol.get("kind") == kind
+    matches = kind is None or _symbol_kind_matches(symbol.get("kind"), kind)
     if not matches and not children:
         return None
     stripped = {key: copy.deepcopy(value) for key, value in symbol.items() if key != "code"}
@@ -277,6 +277,14 @@ def _symbol_without_code(symbol: dict[str, Any], *, kind: str | None) -> dict[st
             if isinstance(item, dict)
         ]
     return stripped
+
+
+def _symbol_kind_matches(symbol_kind: Any, requested_kind: str) -> bool:
+    if not isinstance(symbol_kind, str):
+        return False
+    if requested_kind == "function":
+        return symbol_kind in {"function", "method"}
+    return symbol_kind == requested_kind
 
 
 def _find_symbol(symbol: dict[str, Any], symbol_id: str) -> dict[str, Any] | None:

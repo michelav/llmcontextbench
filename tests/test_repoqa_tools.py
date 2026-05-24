@@ -54,6 +54,37 @@ def test_provider_lists_files_symbols_and_reads_visible_file() -> None:
     assert "THIS FALLBACK MUST NOT BE USED" not in visible_file["content"]
 
 
+def test_provider_symbol_kind_function_includes_methods() -> None:
+    provider = RepoQAProvider(contexts_dir=_contexts_dir())
+
+    function_symbols = provider.list_symbols("repoqa-workspace-1", kind="function")
+
+    assert [item["name"] for item in function_symbols] == ["Greeter", "helper"]
+    assert function_symbols[0]["kind"] == "class"
+    assert "code" not in function_symbols[0]
+    assert [(item["name"], item["kind"]) for item in function_symbols[0]["children"]] == [("greet", "method")]
+    assert function_symbols[1]["kind"] == "function"
+
+
+def test_provider_symbol_kind_method_is_exact() -> None:
+    provider = RepoQAProvider(contexts_dir=_contexts_dir())
+
+    method_symbols = provider.list_symbols("repoqa-workspace-1", kind="method")
+
+    assert [item["name"] for item in method_symbols] == ["Greeter"]
+    assert [(item["name"], item["kind"]) for item in method_symbols[0]["children"]] == [("greet", "method")]
+
+
+def test_provider_symbol_kind_class_is_exact() -> None:
+    provider = RepoQAProvider(contexts_dir=_contexts_dir())
+
+    class_symbols = provider.list_symbols("repoqa-workspace-1", kind="class")
+
+    assert [item["name"] for item in class_symbols] == ["Greeter"]
+    assert class_symbols[0]["kind"] == "class"
+    assert class_symbols[0]["children"] == []
+
+
 def test_provider_uses_only_allowed_artifacts(monkeypatch) -> None:
     original_read_text = Path.read_text
     read_paths: list[str] = []
