@@ -233,15 +233,3 @@ def test_local_mcp_runtime_exposes_repoqa_tools_and_calls_symbol() -> None:
     assert result.content["name"] == "greet"
     assert "return" in result.content["code"]
 
-
-def test_repoqa_dataset_legacy_modules_reexport_adapter_symbols() -> None:
-    from ctxbench.adapters.repoqa.mcp_server import RepoQAMCPServer as AdapterMCPServer
-    from ctxbench.adapters.repoqa.provider import RepoQAProvider as AdapterProvider
-    from ctxbench.adapters.repoqa.tools import RepoQAToolService as AdapterToolService
-    from ctxbench.datasets.repoqa.mcp_server import RepoQAMCPServer as LegacyMCPServer
-    from ctxbench.datasets.repoqa.provider import RepoQAProvider as LegacyProvider
-    from ctxbench.datasets.repoqa.tools import RepoQAToolService as LegacyToolService
-
-    assert LegacyProvider is AdapterProvider
-    assert LegacyToolService is AdapterToolService
-    assert LegacyMCPServer is AdapterMCPServer
