@@ -356,10 +356,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.func(args)
     except KeyboardInterrupt:
-        PhaseLogger(stream=sys.stderr).error("Execution interrupted", code=130)
+        PhaseLogger(stream=sys.stderr).error("STATUS", "cli.interrupted", "Execution interrupted", code=130)
         return 130
     except Exception as exc:
-        PhaseLogger(stream=sys.stderr).error(str(exc), code=1)
+        PhaseLogger(stream=sys.stderr).error("STATUS", "cli.failed", str(exc), code=1)
         return 1
 
 

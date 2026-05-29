@@ -26,7 +26,7 @@ from ctxbench.benchmark.results import (
 )
 from ctxbench.util.fs import load_json, write_json
 from ctxbench.util.jsonl import append_jsonl, read_jsonl, write_jsonl
-from ctxbench.util.logging import PhaseLogger, ProgressTracker
+from ctxbench.util.logging import PhaseLogger, ProgressTracker, evaluation_log_context
 
 
 # ---------------------------------------------------------------------------
@@ -261,12 +261,16 @@ def eval_command(
         raise ValueError("--poll-interval must be >= 1.")
 
     logger = PhaseLogger(verbose=verbose)
-    event_logger = lambda label, message, fields: logger.phase(label, message, **fields)
+    def event_logger(event_name: str, message: str, fields: dict[str, object]) -> None:
+        payload = dict(fields)
+        level = str(payload.pop("level", "INFO"))
+        phase = str(payload.pop("phase", "EVAL"))
+        logger.event(level, phase, event_name, message, **payload)
 
     source = Path(responses).resolve() if responses else Path("responses.jsonl").resolve()
     source_root = source.parent
 
-    logger.phase("LOAD", "Loading responses", path=str(source))
+    logger.info("EVAL", "responses.loading", "Loading responses", path=str(source))
     results = _load_responses(source)
 
     active_selector = selector or RunSelector()
@@ -343,8 +347,9 @@ def eval_command(
         if force or result.trialId not in evaluated_repoqa_ids
     ]
     pending = [r for runs, _ in groups.values() for r in runs] + pending_repoqa
-    logger.phase(
-        "LOAD",
+    logger.info(
+        "EVAL",
+        "responses.loaded",
         "Responses loaded",
         total=len(results),
         evaluated=len(results) - len(pending),
@@ -376,11 +381,22 @@ def eval_command(
             if votes:
                 append_jsonl(votes_path, votes)
         if is_skipped and is_repoqa:
-            logger.phase("SKIP", "Evaluation skipped", run=evaluated.trialId)
+            logger.warn(
+                "EVAL",
+                "evaluation.job.skipped",
+                "Evaluation skipped",
+                **evaluation_log_context(evaluated, evaluationMethod="repoqa-scorer"),
+            )
         elif is_skipped:
-            logger.phase("SKIP", "Evaluation skipped (missing context blocks)", run=evaluated.trialId)
+            missing_blocks = item.details.get("missingBlocks") if item is not None else None
+            logger.warn(
+                "EVAL",
+                "evaluation.job.skipped",
+                "Evaluation skipped (missing context blocks)",
+                **evaluation_log_context(evaluated, missingBlocks=missing_blocks),
+            )
         else:
-            logger.phase("WRITE", "Evaluation written", run=evaluated.trialId)
+            logger.info("EVAL", "evaluation.written", "Evaluation written", **evaluation_log_context(evaluated))
         progress_tracker.advance()
 
     if batch:

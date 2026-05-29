@@ -149,6 +149,85 @@ def test_execute_writes_responses_jsonl_with_target_fields(tmp_path):
     assert {"canonicalId", "taskId", "instanceId", "provider", "modelId", "modelName", "strategy", "format", "repeatIndex"} <= set(first["metadata"])
 
 
+def test_plan_verbose_emits_structured_logs_to_stderr(tmp_path, capsys):
+    experiment_path = write_mock_experiment(tmp_path / "experiment.json", evaluation_enabled=False)
+    output_dir = tmp_path / "planned"
+
+    assert main(["plan", str(experiment_path), "--output", str(output_dir), "--verbose"]) == 0
+
+    captured = capsys.readouterr()
+    assert "Planned " in captured.out
+    assert "phase=PLAN eventName=experiment.loaded" in captured.err
+    assert "phase=PLAN eventName=trial.prepared" in captured.err
+
+
+def test_execute_verbose_emits_trial_context_to_stderr(tmp_path, capsys):
+    experiment_path = write_mock_experiment(tmp_path / "experiment.json", evaluation_enabled=False)
+    output_dir = tmp_path / "planned"
+    assert main(["plan", str(experiment_path), "--output", str(output_dir)]) == 0
+    capsys.readouterr()
+
+    assert main(["execute", str(output_dir / "trials.jsonl"), "--verbose", "--task", "q_year"]) == 0
+
+    captured = capsys.readouterr()
+    assert "Processed 1 trial(s)" in captured.out
+    assert "phase=EXECUTE eventName=trial.response.started" in captured.err
+    assert "phase=EXECUTE eventName=trial.response.completed" in captured.err
+    assert "trialId=" in captured.err
+    assert "taskId=q_year" in captured.err
+    assert "modelId=mock" in captured.err
+    assert "modelName=mock" in captured.err
+    assert "strategy=inline" in captured.err
+    assert "format=json" in captured.err
+    assert "repeatIndex=1" in captured.err
+
+
+def test_execute_non_verbose_suppresses_info_logs(tmp_path, capsys):
+    experiment_path = write_mock_experiment(tmp_path / "experiment.json", evaluation_enabled=False)
+    output_dir = tmp_path / "planned"
+    assert main(["plan", str(experiment_path), "--output", str(output_dir)]) == 0
+    capsys.readouterr()
+
+    assert main(["execute", str(output_dir / "trials.jsonl"), "--task", "q_year"]) == 0
+
+    captured = capsys.readouterr()
+    assert "Processed 1 trial(s)" in captured.out
+    assert "phase=EXECUTE eventName=" not in captured.err
+
+
+def test_eval_missing_context_skip_emits_structured_warning(tmp_path, capsys):
+    experiment_path = write_mock_experiment(tmp_path / "experiment.json", evaluation_enabled=True)
+    output_dir = tmp_path / "planned"
+    assert main(["plan", str(experiment_path), "--output", str(output_dir)]) == 0
+    assert main(["execute", str(output_dir / "trials.jsonl"), "--task", "q_year"]) == 0
+    blocks_path = tmp_path / "dataset" / "context" / "cv_demo" / "blocks.json"
+    blocks_path.write_text(json.dumps({}), encoding="utf-8")
+    capsys.readouterr()
+
+    assert main(["eval", str(output_dir / "responses.jsonl"), "--task", "q_year"]) == 0
+
+    captured = capsys.readouterr()
+    assert "[WARN] phase=EVAL eventName=evaluation.job.skipped" in captured.err
+    assert "trialId=" in captured.err
+    assert "taskId=q_year" in captured.err
+    assert "missingBlocks=summary" in captured.err
+
+
+def test_export_filter_failure_uses_structured_stderr_error(tmp_path, capsys):
+    experiment_path = write_mock_experiment(tmp_path / "experiment.json", evaluation_enabled=False)
+    output_dir = tmp_path / "planned"
+    assert main(["plan", str(experiment_path), "--output", str(output_dir)]) == 0
+    assert main(["execute", str(output_dir / "trials.jsonl"), "--task", "q_year"]) == 0
+    capsys.readouterr()
+
+    assert main(["export", str(output_dir / "evals.jsonl"), "--by", "bad"]) == 1
+
+    captured = capsys.readouterr()
+    assert "[ERROR]" not in captured.out
+    assert "[ERROR] phase=EXPORT eventName=export.failed" in captured.err
+    assert "Invalid --by value" in captured.err
+
+
 def write_mock_experiment(path: Path, *, evaluation_enabled: bool = True) -> Path:
     dataset_root = path.parent / "dataset"
     instance_dir = dataset_root / "context" / "cv_demo"

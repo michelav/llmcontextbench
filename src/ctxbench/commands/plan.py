@@ -15,7 +15,7 @@ from ctxbench.dataset.resolver import DatasetNotFoundError, DatasetResolver, Mul
 from ctxbench.dataset.validation import validate_package
 from ctxbench.util.fs import ensure_dir, write_json
 from ctxbench.util.jsonl import write_jsonl
-from ctxbench.util.logging import PhaseLogger, ProgressTracker
+from ctxbench.util.logging import PhaseLogger, ProgressTracker, dataset_log_context, trial_log_context
 
 
 def _dataset_provenance(package: DatasetPackage) -> DatasetProvenance:
@@ -39,7 +39,7 @@ def plan_command(
     cache_dir: Path | None = None,
 ) -> int:
     logger = PhaseLogger(verbose=verbose)
-    logger.phase("LOAD", "Loading experiment", path=path)
+    logger.info("PLAN", "experiment.loaded", "Loading experiment", path=path)
     experiment = load_experiment(path)
     base_dir = Path(path).resolve().parent
     cache = DatasetCache(cache_dir=cache_dir)
@@ -60,31 +60,33 @@ def plan_command(
         adapter = resolved.package
     adapter_metadata = adapter.metadata()
     capability_report = validate_package(adapter)
-    logger.phase(
-        "LOAD",
+    dataset_provenance = _dataset_provenance(adapter)
+    logger.info(
+        "PLAN",
+        "dataset.resolved",
         "Dataset resolved",
-        dataset=adapter_metadata.name,
-        version=capability_report.version,
+        **dataset_log_context(dataset_provenance, dataset_name=adapter_metadata.name),
         tasks=len(adapter.list_task_ids()),
         instances=len(adapter.list_instance_ids()),
     )
-    logger.phase(
-        "LOAD",
+    logger.info(
+        "PLAN",
+        "dataset.capability.checked",
         "Dataset capability check",
+        **dataset_log_context(dataset_provenance, dataset_name=adapter_metadata.name),
         conformant=capability_report.conformant,
         missingMandatory=len(capability_report.missing_mandatory),
         nonconformantDescriptors=len(capability_report.nonconformant_descriptors),
     )
-    dataset_provenance = _dataset_provenance(adapter)
     runspecs = generate_runspecs(
         experiment,
         base_dir,
         adapter,
         dataset_provenance,
         experiment_path=path,
-        on_warning=lambda message, **fields: logger.warn(message, **fields),
+        on_warning=lambda message, **fields: logger.warn("PLAN", "trial.prepare.warning", message, **fields),
     )
-    logger.phase("PLAN", "Expanding trials", input=path, total=len(runspecs))
+    logger.info("PLAN", "trials.expanded", "Expanding trials", input=path, total=len(runspecs))
 
     output_root = Path(output).resolve() if output else resolve_output_root(experiment, base_dir)
     trials_path = resolve_trials_path(experiment, base_dir) if not output else output_root / "trials.jsonl"
@@ -99,11 +101,11 @@ def plan_command(
     payloads = []
     for runspec in runspecs:
         payloads.append(runspec.to_persisted_artifact())
-        logger.phase("PLAN", "Trial prepared", run=runspec.trialId)
+        logger.info("PLAN", "trial.prepared", "Trial prepared", **trial_log_context(runspec))
         progress_tracker.advance()
 
     write_jsonl(trials_path, payloads)
-    logger.phase("WRITE", "Trials written", path=str(trials_path), total=len(payloads))
+    logger.info("PLAN", "trials.written", "Trials written", path=str(trials_path), total=len(payloads))
 
     manifest = {
         "experimentId": experiment.id,
@@ -117,7 +119,7 @@ def plan_command(
         "artifacts": experiment.artifacts.model_dump(mode="json"),
     }
     write_json(manifest_path, manifest)
-    logger.phase("WRITE", "Manifest written", path=str(manifest_path))
+    logger.info("PLAN", "manifest.written", "Manifest written", path=str(manifest_path))
 
     print(f"Planned {len(runspecs)} trials → {trials_path}")
     return 0

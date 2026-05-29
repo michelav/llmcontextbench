@@ -14,6 +14,7 @@ from ctxbench.dataset.errors import AdapterUnavailableError, CapabilityUnavailab
 from ctxbench.dataset.package import DatasetPackage
 from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.util.clock import utc_now_iso
+from ctxbench.util.logging import trial_log_context
 
 def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
     adapter = _resolve_adapter(runspec)
@@ -49,13 +50,19 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
         )
 
     request_metadata = {
+        **trial_log_context(runspec),
         "trialId": runspec.trialId,
         "experimentId": runspec.experimentId,
         "taskId": runspec.taskId,
         "instanceId": runspec.instanceId,
-        "phase": "execution",
+        "phase": "EXECUTE",
         "format": runspec.format,
         "provider": runspec.provider,
+        "modelId": runspec.modelId,
+        "modelName": runspec.modelName,
+        "strategy": runspec.strategy,
+        "repeatIndex": runspec.repeatIndex,
+        "validationType": runspec.validationType,
         "instance_id": runspec.instanceId,
         "task_tags": list(runspec.taskTags),
         "validation_type": runspec.validationType,

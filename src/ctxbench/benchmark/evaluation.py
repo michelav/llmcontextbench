@@ -302,6 +302,13 @@ def _judge_request(
     task_statement: str,
     evaluation_evidence: str,
     engine: Engine,
+    provider: str = "",
+    model_id: str | None = None,
+    model_name: str | None = None,
+    strategy: str = "",
+    format_name: str = "",
+    repeat_index: int = 1,
+    validation_type: str | None = None,
 ) -> tuple[dict[str, Any] | None, EvaluationJudgeInfo, EvaluationTrace]:
     request_params = {
         "temperature": config.temperature,
@@ -349,7 +356,18 @@ def _judge_request(
             "trialId": trial_id,
             "experimentId": exp_id,
             "taskId": task_id,
-            "phase": "evaluation",
+            "instanceId": instance_id,
+            "provider": provider,
+            "modelId": model_id,
+            "modelName": model_name,
+            "strategy": strategy,
+            "format": format_name,
+            "repeatIndex": repeat_index,
+            "validationType": validation_type,
+            "phase": "EVAL",
+            "judgeId": judge_identifier(config),
+            "judgeModel": config.model,
+            "judgeRole": "judge",
             "judge_role": "judge",
         },
     )
@@ -404,6 +422,8 @@ def _evaluate_judge(
     traces: list[EvaluationTrace] = []
     valid_votes: list[dict[str, Any]] = []
     for config in judges:
+        metadata = getattr(result, "metadata", None)
+        validation_type = getattr(result, "validationType", None) or getattr(metadata, "validationType", None)
         payload, judge_info, trace = _judge_request(
             config=config,
             prompt=prompt,
@@ -412,6 +432,13 @@ def _evaluate_judge(
             exp_id=result.experimentId,
             instance_id=result.instanceId,
             task_id=result.taskId,
+            provider=getattr(result, "provider", ""),
+            model_id=getattr(result, "modelId", None),
+            model_name=getattr(result, "modelName", None),
+            strategy=getattr(result, "strategy", ""),
+            format_name=getattr(result, "format", ""),
+            repeat_index=getattr(result, "repeatIndex", 1),
+            validation_type=validation_type,
             task_statement=task_statement,
             evaluation_evidence=evaluation_evidence,
             engine=engine,
@@ -792,11 +819,20 @@ def evaluate_run_result(
     active_engine = engine or Engine()
     if event_logger is not None:
         event_logger(
-            "EVALUATE",
+            "evaluation.started",
             "Starting evaluation",
             {
+                "phase": "EVAL",
                 "trialId": result.trialId,
+                "experimentId": result.experimentId,
                 "taskId": result.taskId,
+                "instanceId": result.instanceId,
+                "provider": result.provider,
+                "modelId": result.modelId,
+                "modelName": result.modelName,
+                "strategy": result.strategy,
+                "format": result.format,
+                "repeatIndex": result.repeatIndex,
                 "validationType": validation_type,
             },
         )
@@ -809,12 +845,22 @@ def evaluate_run_result(
         if missing:
             if event_logger is not None:
                 event_logger(
-                    "SKIP",
+                    "evaluation.job.skipped",
                     "Context blocks not found, evaluation skipped",
                     {
+                        "phase": "EVAL",
+                        "level": "WARN",
+                        "experimentId": result.experimentId,
                         "trialId": result.trialId,
                         "taskId": result.taskId,
                         "instanceId": result.instanceId,
+                        "provider": result.provider,
+                        "modelId": result.modelId,
+                        "modelName": result.modelName,
+                        "strategy": result.strategy,
+                        "format": result.format,
+                        "repeatIndex": result.repeatIndex,
+                        "validationType": validation_type,
                         "missingBlocks": missing,
                     },
                 )
@@ -840,11 +886,20 @@ def evaluate_run_result(
 
     if event_logger is not None:
         event_logger(
-            "EVALUATE",
+            "evaluation.completed",
             "Evaluation completed",
             {
+                "phase": "EVAL",
                 "trialId": result.trialId,
+                "experimentId": result.experimentId,
                 "taskId": result.taskId,
+                "instanceId": result.instanceId,
+                "provider": result.provider,
+                "modelId": result.modelId,
+                "modelName": result.modelName,
+                "strategy": result.strategy,
+                "format": result.format,
+                "repeatIndex": result.repeatIndex,
                 "validationType": validation_type,
                 "outcome": details.get("outcome"),
             },

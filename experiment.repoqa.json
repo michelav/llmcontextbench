@@ -5,7 +5,7 @@
   "dataset": {
     "id": "ctxbench/repoqa",
     "version": "2026-05-23",
-    "root": "datasets/repoqa"
+    "root": "datasets/repoqa-example"
   },
   "models": {
     "gpt1": {
@@ -26,13 +26,13 @@
     }
   },
   "scope": {
-    "instances": ["py_001_ctx2k", "py_001_ctx4k"],
+    "instances": [],
     "tasks": ["snf_retrieve_function"]
   },
   "factors": {
     "model": ["gpt1", "gpt2", "gemini1", "gemini2"],
-    "strategy": ["inline", "local_function", "local_mcp", "remote_mcp"],
-    "format": ["code", "json"]
+    "strategy": ["inline", "local_function", "local_mcp"],
+    "format": ["code"]
   },
   "params": {
     "mcp_server": {

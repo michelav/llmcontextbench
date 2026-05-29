@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import StringIO
 from pathlib import Path
 import sys
 
@@ -13,6 +14,7 @@ from ctxbench.ai.models.claude import ClaudeModel
 from ctxbench.ai.models.gemini import GeminiModel
 from ctxbench.ai.models.mock import MockModel
 from ctxbench.ai.models.openai import OpenAIModel
+from ctxbench.ai.rate_control import RateControlRegistry, RateLimitedModelAdapter
 from ctxbench.ai.runtime import MCPRuntime
 from ctxbench.ai.trace import TraceCollector
 from ctxbench.benchmark import executor as executor_module
@@ -30,6 +32,7 @@ from ctxbench.dataset.errors import CapabilityUnavailableError, UnsupportedRepre
 from ctxbench.dataset.package import DatasetMetadata
 from ctxbench.dataset.payloads import ORACLE_UNAVAILABLE, ContextPayload, EvidencePayload, TaskPayload
 from ctxbench.dataset.provider import DatasetProvider
+from ctxbench.util.logging import PhaseLogger
 import json
 
 
@@ -188,6 +191,18 @@ class ScriptedToolModel(ModelAdapter):
     def generate(self, model_input: ModelInput, request: AIRequest, trace: TraceCollector | None = None) -> ModelResponse:
         self.inputs.append(model_input)
         return self.responses.pop(0)
+
+
+class FlakyRateLimitModel(ModelAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def generate(self, model_input: ModelInput, request: AIRequest, trace: TraceCollector | None = None) -> ModelResponse:
+        self.calls += 1
+        if self.calls == 1:
+            raise TimeoutError("timed out")
+        return ModelResponse(text="ok")
 
 
 class FakeLattesRuntime:
@@ -970,6 +985,94 @@ def test_openai_model_build_payload_includes_prompt_cache_fields():
     assert payload["prompt_cache_retention"] == "24h"
 
 
+def test_rate_limited_model_retry_logs_structured_context(monkeypatch):
+    events: list[tuple[str, str, dict[str, object]]] = []
+    delegate = FlakyRateLimitModel()
+    adapter = RateLimitedModelAdapter(
+        delegate,
+        RateControlRegistry(),
+        provider_name="mock",
+        model_name="mock",
+        event_logger=lambda event_name, message, fields: events.append((event_name, message, fields)),
+    )
+    monkeypatch.setattr("ctxbench.ai.rate_control.time.sleep", lambda _seconds: None)
+    request = AIRequest(
+        question="Task?",
+        context="Context",
+        provider_name="mock",
+        model_name="mock",
+        strategy_name="inline",
+        context_format="json",
+        params={"rate_limit": {"max_attempts": 2, "base_delay_ms": 0, "jitter": False}},
+        metadata={
+            "phase": "EXECUTE",
+            "experimentId": "exp-1",
+            "trialId": "trial-1",
+            "taskId": "q_year",
+            "instanceId": "cv-demo",
+            "modelId": "mock",
+            "modelName": "mock",
+            "strategy": "inline",
+            "format": "json",
+            "repeatIndex": 1,
+        },
+    )
+
+    response = adapter.generate(ModelInput(prompt="Prompt"), request)
+
+    assert response.text == "ok"
+    started = [item for item in events if item[0] == "model.retry.started"]
+    assert len(started) == 1
+    fields = started[0][2]
+    assert fields["level"] == "WARN"
+    assert fields["phase"] == "EXECUTE"
+    assert fields["attempt"] == 1
+    assert fields["errorKind"] == "transient"
+    assert fields["trialId"] == "trial-1"
+    assert fields["taskId"] == "q_year"
+    assert fields["modelId"] == "mock"
+    assert fields["modelName"] == "mock"
+
+
+def test_rate_limited_model_tpm_wait_logs_info_and_logger_suppresses_without_verbose(monkeypatch):
+    events: list[tuple[str, str, dict[str, object]]] = []
+    def fake_acquire(self, tokens, *, on_wait=None):
+        if on_wait is not None:
+            on_wait(250)
+        return 250
+
+    monkeypatch.setattr("ctxbench.ai.rate_control.TokenRateLimiter.acquire", fake_acquire)
+    adapter = RateLimitedModelAdapter(
+        RecordingModel(),
+        RateControlRegistry(),
+        provider_name="mock",
+        model_name="mock",
+        event_logger=lambda event_name, message, fields: events.append((event_name, message, fields)),
+    )
+    monkeypatch.setattr("ctxbench.ai.rate_control.time.sleep", lambda _seconds: None)
+    request = AIRequest(
+        question="Task?",
+        context="Context",
+        provider_name="mock",
+        model_name="mock",
+        strategy_name="inline",
+        context_format="json",
+        params={"rate_limit": {"tpm": 120, "estimated_output_tokens": 1}},
+        metadata={"phase": "EXECUTE", "trialId": "trial-1", "taskId": "q_year"},
+    )
+
+    adapter.generate(ModelInput(prompt="Prompt"), request)
+
+    waits = [item for item in events if item[0] == "rate_limit.tpm.wait"]
+    assert waits
+    assert waits[0][2]["level"] == "INFO"
+    assert waits[0][2]["phase"] == "EXECUTE"
+    stream = StringIO()
+    logger = PhaseLogger(verbose=False, stream=stream)
+    logger.event(str(waits[0][2]["level"]), str(waits[0][2]["phase"]), waits[0][0], waits[0][1], waitMs=250)
+    assert stream.getvalue() == ""
+
+
 def test_openai_model_request_metadata_uses_target_public_keys():
     model = OpenAIModel()
     request = AIRequest(
@@ -1335,7 +1438,10 @@ def test_evaluate_run_result_skips_when_context_block_missing(tmp_path):
     assert artifact["taskId"] == "q_missing"
     assert artifact["status"] == "skipped"
     assert artifact["judgeCount"] == 0
-    assert any(label == "SKIP" and fields.get("taskId") == "q_missing" for label, _message, fields in events)
+    assert any(
+        label == "evaluation.job.skipped" and fields.get("taskId") == "q_missing"
+        for label, _message, fields in events
+    )
 
 
 def test_openai_model_extracts_cache_metadata():

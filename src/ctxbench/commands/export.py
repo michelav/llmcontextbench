@@ -285,7 +285,12 @@ def export_command(
     run_id: str | None = None,
 ) -> int:
     if format not in _SUPPORTED_FORMATS:
-        print(f"Unsupported format '{format}'. Supported: {', '.join(_SUPPORTED_FORMATS)}")
+        PhaseLogger().error(
+            "EXPORT",
+            "export.failed",
+            f"Unsupported format '{format}'. Supported: {', '.join(_SUPPORTED_FORMATS)}",
+            format=format,
+        )
         return 1
 
     source = Path(evals).resolve() if evals else Path("evals.jsonl").resolve()
@@ -294,7 +299,12 @@ def export_command(
 
     responses_path = source_root / "responses.jsonl"
     if not responses_path.exists():
-        print(f"Responses file not found: {responses_path}. Run 'ctxbench execute' first.")
+        logger.error(
+            "EXPORT",
+            "export.failed",
+            f"Responses file not found: {responses_path}. Run 'ctxbench execute' first.",
+            path=str(responses_path),
+        )
         return 1
 
     responses = _load_jsonl(responses_path)
@@ -306,8 +316,8 @@ def export_command(
     votes_list = _load_jsonl(votes_path)
     votes_index = _build_votes_index(votes_list)
 
-    logger.phase(
-        "LOAD", "Files loaded",
+    logger.info(
+        "EXPORT", "export.inputs.loaded", "Files loaded",
         responses=len(responses), evals=len(evals_list), votes=len(votes_list),
     )
 
@@ -320,7 +330,7 @@ def export_command(
     try:
         responses = _apply_by_filters(responses, by or [])
     except ValueError as exc:
-        print(f"[ERROR] {exc}")
+        logger.error("EXPORT", "export.failed", str(exc))
         return 1
 
     run_id_key = _trial_id
@@ -332,6 +342,7 @@ def export_command(
     if format == "csv":
         out_path = Path(output).resolve() if output else source_root / "results.csv"
         _write_csv(merged, out_path)
+        logger.info("EXPORT", "export.completed", "Export completed", path=str(out_path), rows=len(merged), format=format)
         print(f"Exported {len(merged)} row(s) → {out_path}")
 
     return 0

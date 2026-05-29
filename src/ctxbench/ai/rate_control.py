@@ -334,10 +334,11 @@ class RateLimitedModelAdapter(ModelAdapter):
                     message += f" judge_role={request_fields['judgeRole']}"
                 self._log_event(
                     "ERROR",
+                    "rate_limit.capacity.exceeded",
                     "TPM budget lower than single request reservation",
                     {
                         "provider": self.provider_name,
-                        "model": self.model_name,
+                        "modelName": self.model_name,
                         "reservedTokens": reserved_tokens,
                         "tpm": controller.rate_limiter.capacity,
                         **request_fields,
@@ -354,11 +355,12 @@ class RateLimitedModelAdapter(ModelAdapter):
                         reason="tpm_budget",
                     )
                 self._log_event(
-                    "THROTTLE",
+                    "INFO",
+                    "rate_limit.tpm.wait",
                     "Waiting for TPM budget",
                     {
                         "provider": self.provider_name,
-                        "model": self.model_name,
+                        "modelName": self.model_name,
                         "waitMs": wait_ms,
                         "reservedTokens": reserved_tokens,
                         **request_fields,
@@ -392,11 +394,12 @@ class RateLimitedModelAdapter(ModelAdapter):
                         reason="rpm_budget",
                     )
                 self._log_event(
-                    "THROTTLE",
+                    "INFO",
+                    "rate_limit.rpm.wait",
                     "Waiting for RPM budget",
                     {
                         "provider": self.provider_name,
-                        "model": self.model_name,
+                        "modelName": self.model_name,
                         "waitMs": wait_ms,
                         **request_fields,
                     },
@@ -454,11 +457,12 @@ class RateLimitedModelAdapter(ModelAdapter):
                             error=error_info.message,
                         )
                     self._log_event(
-                        "RETRY",
+                        "WARN",
+                        "model.retry.started",
                         "Retrying model call",
                         {
                             "provider": self.provider_name,
-                            "model": self.model_name,
+                            "modelName": self.model_name,
                             "attempt": attempt,
                             "errorKind": error_info.kind,
                             **request_fields,
@@ -473,11 +477,12 @@ class RateLimitedModelAdapter(ModelAdapter):
                             sleep_ms=sleep_ms,
                         )
                     self._log_event(
-                        "RETRY",
+                        "WARN",
+                        "model.retry.sleeping",
                         "Sleeping before retry",
                         {
                             "provider": self.provider_name,
-                            "model": self.model_name,
+                            "modelName": self.model_name,
                             "attempt": attempt,
                             "sleepMs": sleep_ms,
                             **request_fields,
@@ -485,24 +490,38 @@ class RateLimitedModelAdapter(ModelAdapter):
                     )
                     time.sleep(sleep_ms / 1000.0)
 
-    def _log_event(self, label: str, message: str, fields: dict[str, object]) -> None:
+    def _log_event(self, level: str, event_name: str, message: str, fields: dict[str, object]) -> None:
         if self.event_logger is None:
             return
-        self.event_logger(label, message, fields)
+        self.event_logger(event_name, message, {**fields, "level": level})
 
     def _request_fields(self, request: AIRequest) -> dict[str, object]:
         fields: dict[str, object] = {
-            "phase": request.metadata.get("phase", "execution"),
+            "phase": request.metadata.get("phase", "EXECUTE"),
             "strategy": request.strategy_name,
         }
-        if request.metadata.get("taskId") is not None:
-            fields["taskId"] = request.metadata.get("taskId")
-        if request.metadata.get("instance_id") is not None:
+        for key in (
+            "experimentId",
+            "trialId",
+            "taskId",
+            "instanceId",
+            "provider",
+            "modelId",
+            "modelName",
+            "format",
+            "repeatIndex",
+            "validationType",
+            "judgeId",
+            "judgeModel",
+            "judgeRole",
+        ):
+            value = request.metadata.get(key)
+            if value is not None:
+                fields[key] = value
+        if "instanceId" not in fields and request.metadata.get("instance_id") is not None:
             fields["instanceId"] = request.metadata.get("instance_id")
-        if request.metadata.get("judge_role") is not None:
+        if "judgeRole" not in fields and request.metadata.get("judge_role") is not None:
             fields["judgeRole"] = request.metadata.get("judge_role")
-        if request.metadata.get("experimentId") is not None:
-            fields["experimentId"] = request.metadata.get("experimentId")
         return fields
 
 
