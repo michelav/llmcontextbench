@@ -59,6 +59,7 @@ def list_repoqa_tool_specs() -> list[ToolSpec]:
             name="list_symbols",
             description=(
                 "List code symbols and metadata for a RepoQA workspace. Optional filters: path and kind. "
+                "path may be an exact file path or a directory prefix such as 'src' or 'src/package'. "
                 "kind='function' searches callable code, including methods; exact parser kinds such as "
                 "'method', 'class', and other kinds present in parsed.json may also be used."
             ),

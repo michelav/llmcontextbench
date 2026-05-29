@@ -126,6 +126,50 @@ def test_provider_symbol_kind_function_includes_methods() -> None:
     assert function_symbols[1]["kind"] == "function"
 
 
+def test_provider_list_symbols_path_accepts_directory_prefix() -> None:
+    provider = RepoQAProvider(contexts_dir=_contexts_dir())
+
+    symbols = provider.list_symbols("repoqa-workspace-1", path="src")
+
+    assert [item["path"] for item in symbols] == ["src/example.py", "src/example.py"]
+    assert [item["name"] for item in symbols] == ["Greeter", "helper"]
+
+
+def test_provider_list_symbols_path_strips_trailing_slash() -> None:
+    provider = RepoQAProvider(contexts_dir=_contexts_dir())
+
+    without_slash = provider.list_symbols("repoqa-workspace-1", path="src")
+    with_slash = provider.list_symbols("repoqa-workspace-1", path="src/")
+
+    assert with_slash == without_slash
+
+
+def test_provider_list_symbols_path_exact_file_still_works() -> None:
+    provider = RepoQAProvider(contexts_dir=_contexts_dir())
+
+    symbols = provider.list_symbols("repoqa-workspace-1", path="src/example.py")
+
+    assert [item["name"] for item in symbols] == ["Greeter", "helper"]
+    assert {item["path"] for item in symbols} == {"src/example.py"}
+
+
+def test_provider_list_symbols_path_unrelated_prefix_returns_empty() -> None:
+    provider = RepoQAProvider(contexts_dir=_contexts_dir())
+
+    assert provider.list_symbols("repoqa-workspace-1", path="other") == []
+    assert provider.list_symbols("repoqa-workspace-1", path="sr") == []
+
+
+def test_provider_list_symbols_path_prefix_preserves_kind_function_filtering() -> None:
+    provider = RepoQAProvider(contexts_dir=_contexts_dir())
+
+    function_symbols = provider.list_symbols("repoqa-workspace-1", path="src", kind="function")
+
+    assert [item["name"] for item in function_symbols] == ["Greeter", "helper"]
+    assert [(item["name"], item["kind"]) for item in function_symbols[0]["children"]] == [("greet", "method")]
+    assert function_symbols[1]["kind"] == "function"
+
+
 def test_provider_symbol_kind_method_is_exact() -> None:
     provider = RepoQAProvider(contexts_dir=_contexts_dir())
 
@@ -232,4 +276,3 @@ def test_local_mcp_runtime_exposes_repoqa_tools_and_calls_symbol() -> None:
     assert "symbol_id" in schemas["get_symbol"]["required"]
     assert result.content["name"] == "greet"
     assert "return" in result.content["code"]
-

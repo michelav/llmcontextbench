@@ -69,7 +69,7 @@ class RepoQAProvider:
         normalized_kind = kind.strip() if isinstance(kind, str) and kind.strip() else None
         symbols: list[dict[str, Any]] = []
         for item in payload["files"]:
-            if normalized_path is not None and item["path"] != normalized_path:
+            if normalized_path is not None and not _path_matches(item["path"], normalized_path):
                 continue
             for symbol in item.get("symbols", []):
                 stripped = _symbol_without_code(symbol, kind=normalized_kind)
@@ -306,6 +306,15 @@ def _symbol_kind_matches(symbol_kind: Any, requested_kind: str) -> bool:
     if requested_kind == "function":
         return symbol_kind in {"function", "method"}
     return symbol_kind == requested_kind
+
+
+def _path_matches(file_path: Any, requested_path: str) -> bool:
+    if not isinstance(file_path, str):
+        return False
+    prefix = requested_path.strip().rstrip("/")
+    if not prefix:
+        return True
+    return file_path == prefix or file_path.startswith(f"{prefix}/")
 
 
 def _find_symbol(symbol: dict[str, Any], symbol_id: str) -> dict[str, Any] | None:
