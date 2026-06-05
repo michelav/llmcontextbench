@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, TextIO
 
 
-CANONICAL_PHASES = {"DATASET", "PLAN", "EXECUTE", "EVAL", "EXPORT", "STATUS"}
+CANONICAL_PHASES = {"DATASET", "PLAN", "EXECUTE", "EVAL", "EXPORT", "METRICS", "STATUS"}
 _VERBOSE_LEVELS = {"DEBUG", "INFO"}
 
 

@@ -8,6 +8,7 @@ from ctxbench.commands.dataset import fetch_command_from_args, inspect_command_f
 from ctxbench.commands.eval import eval_command
 from ctxbench.commands.execute import execute_command
 from ctxbench.commands.export import export_command
+from ctxbench.commands.metrics import metrics_command
 from ctxbench.commands.plan import plan_command
 from ctxbench.commands.status import status_command
 from ctxbench.util.logging import PhaseLogger
@@ -142,6 +143,31 @@ def _selector_from_args(args: argparse.Namespace, *, include_status: bool = Fals
         not_format=_parse_multi_str(getattr(args, "not_format", []) or []),
         not_repetition=_parse_multi_int(getattr(args, "not_repetition", []) or []),
         not_status=_parse_multi_str(getattr(args, "not_status", []) or []) if include_status else (),
+    )
+
+
+def _metrics_selector_from_args(args: argparse.Namespace) -> RunSelector:
+    selector = _selector_from_args(args, include_status=True)
+    execution_status = _parse_multi_str(getattr(args, "execution_status", []) or [])
+    not_execution_status = _parse_multi_str(getattr(args, "not_execution_status", []) or [])
+    return RunSelector(
+        model=selector.model,
+        provider=selector.provider,
+        instance=selector.instance,
+        task=selector.task,
+        strategy=selector.strategy,
+        format=selector.format,
+        repetition=selector.repetition,
+        status=(*selector.status, *execution_status),
+        trial_id=selector.trial_id,
+        not_model=selector.not_model,
+        not_provider=selector.not_provider,
+        not_instance=selector.not_instance,
+        not_task=selector.not_task,
+        not_strategy=selector.not_strategy,
+        not_format=selector.not_format,
+        not_repetition=selector.not_repetition,
+        not_status=(*selector.not_status, *not_execution_status),
     )
 
 
@@ -331,6 +357,58 @@ def build_parser() -> argparse.ArgumentParser:
         )
     )
 
+    # ── ctxbench metrics ───────────────────────────────────────────────────
+    metrics_parser = subparsers.add_parser(
+        "metrics", help="Compute canonical metrics from existing artifacts"
+    )
+    metrics_parser.add_argument(
+        "inputs", nargs="+",
+        help="Experiment output directory containing trials.jsonl",
+    )
+    metrics_parser.add_argument(
+        "--output", metavar="DIR",
+        help="Directory where metrics artifacts will be written",
+    )
+    metrics_parser.add_argument(
+        "--group-by", metavar="FIELDS",
+        help="Comma-separated aggregate grouping fields (default: dataset_id,configuration)",
+    )
+    _add_selector_args(metrics_parser, include_status=True)
+    metrics_parser.add_argument(
+        "--execution-status", action="append", default=[], metavar="STATUS[,STATUS...]",
+        help="Filter by response-phase status",
+    )
+    metrics_parser.add_argument(
+        "--not-execution-status", action="append", default=[], metavar="STATUS[,STATUS...]",
+        help="Exclude by response-phase status",
+    )
+    metrics_parser.add_argument(
+        "--evaluation-status", action="append", default=[], metavar="STATUS[,STATUS...]",
+        help="Filter by evaluation-phase status",
+    )
+    metrics_parser.add_argument(
+        "--not-evaluation-status", action="append", default=[], metavar="STATUS[,STATUS...]",
+        help="Exclude by evaluation-phase status",
+    )
+    metrics_parser.add_argument(
+        "--force", action="store_true",
+        help="Delete the target metrics directory tree and recreate it",
+    )
+    metrics_parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+    metrics_parser.set_defaults(
+        func=lambda args: metrics_command(
+            args.inputs,
+            output=args.output,
+            group_by=args.group_by,
+            force=args.force,
+            verbose=args.verbose,
+            selector=_metrics_selector_from_args(args),
+            evaluation_status=_parse_multi_str(getattr(args, "evaluation_status", []) or []),
+            not_evaluation_status=_parse_multi_str(getattr(args, "not_evaluation_status", []) or []),
+            command=_metrics_command_string(args),
+        )
+    )
+
     # ── ctxbench status ────────────────────────────────────────────────────
     status_parser = subparsers.add_parser(
         "status", help="Show experiment progress summary"
@@ -348,6 +426,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     return parser
+
+
+def _metrics_command_string(args: argparse.Namespace) -> str:
+    parts = ["ctxbench", "metrics", *args.inputs]
+    if args.output:
+        parts.extend(["--output", args.output])
+    if args.group_by:
+        parts.extend(["--group-by", args.group_by])
+    if args.force:
+        parts.append("--force")
+    return " ".join(parts)
 
 
 def main(argv: list[str] | None = None) -> int:
