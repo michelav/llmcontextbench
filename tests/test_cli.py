@@ -34,6 +34,7 @@ def test_public_cli_exposes_execute_command_in_help():
     assert "plan" in help_output
     assert "eval" in help_output
     assert "export" in help_output
+    assert "metrics" in help_output
     assert "status" in help_output
 
 
@@ -44,7 +45,23 @@ def test_public_cli_registers_only_target_subcommands():
         action for action in parser._actions if isinstance(action, argparse._SubParsersAction)
     )
 
-    assert set(subparser_action.choices) == {"dataset", "plan", "execute", "eval", "export", "status"}
+    assert set(subparser_action.choices) == {"dataset", "plan", "execute", "eval", "export", "metrics", "status"}
+
+
+def test_metrics_help_exposes_artifact_options(capsys):
+    parser = build_parser()
+
+    with pytest.raises(SystemExit) as excinfo:
+        parser.parse_args(["metrics", "--help"])
+
+    assert excinfo.value.code == 0
+    out = capsys.readouterr().out
+    assert "usage: ctxbench metrics" in out
+    assert "--output" in out
+    assert "--group-by" in out
+    assert "--execution-status" in out
+    assert "--evaluation-status" in out
+    assert "--force" in out
 
 
 def test_execute_help_uses_target_public_terms(capsys):

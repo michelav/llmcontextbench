@@ -408,6 +408,13 @@ Run the full test suite when appropriate:
 pytest -q
 ```
 
+Report test coverage when needed:
+
+```bash
+pytest --cov=ctxbench --cov-report=term-missing
+pytest --cov=ctxbench --cov-report=term-missing --cov-report=xml:coverage.xml --cov-report=html:htmlcov
+```
+
 RepoQA dataset generation uses a separate locked tool environment:
 
 ```bash
