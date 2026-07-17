@@ -17,6 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "pytest>=8",
+  "pytest-cov>=7",
 ]
 
 [project.scripts]
@@ -31,6 +32,18 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.coverage.run]
+branch = true
+source = ["ctxbench"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+omit = [
+  "tests/*",
+  "src/ctxbench.egg-info/*",
+]
 
 [tool.uv.sources]
 specify-cli = { git = "https://github.com/github/spec-kit.git", rev = "v0.8.11" }
