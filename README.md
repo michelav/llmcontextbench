@@ -437,3 +437,7 @@ Legacy names such as `copa`, `query`, `queries.jsonl`, `answers.jsonl`,
 `runId`, `questionId`, and `answer` may still appear in historical specs,
 generated metadata, or migration notes. New documentation, examples, and public
 interfaces should use the current terminology.
+
+## License
+
+CTXBench is licensed under the [MIT License](LICENSE).
