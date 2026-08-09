@@ -5,13 +5,14 @@
 The CLI exposes both dataset-management commands and lifecycle commands.
 
 ```text
-ctxbench dataset fetch
-ctxbench dataset inspect
-ctxbench plan
-ctxbench execute
-ctxbench eval
-ctxbench export
-ctxbench status
+llmctxbench dataset fetch
+llmctxbench dataset inspect
+llmctxbench plan
+llmctxbench execute
+llmctxbench eval
+llmctxbench export
+llmctxbench metrics
+llmctxbench status
 ```
 
 The CLI should remain thin: parse arguments, resolve selectors, and delegate to command handlers.
@@ -20,7 +21,7 @@ The CLI should remain thin: parse arguments, resolve selectors, and delegate to 
 
 ```mermaid
 flowchart TB
-    CLI["ctxbench CLI<br/>argument parsing"]
+    CLI["llmctxbench CLI<br/>argument parsing"]
     Selectors["Selector parser"]
     DatasetFetch["dataset fetch command"]
     DatasetInspect["dataset inspect command"]
@@ -28,6 +29,7 @@ flowchart TB
     Execute["execute command"]
     Eval["eval command"]
     Export["export command"]
+    Metrics["metrics command"]
     Status["status command"]
     Core["Benchmark core"]
     Store["Artifact store / cache"]
@@ -39,6 +41,7 @@ flowchart TB
     CLI --> Execute
     CLI --> Eval
     CLI --> Export
+    CLI --> Metrics
     CLI --> Status
 
     DatasetFetch --> Store
@@ -47,6 +50,7 @@ flowchart TB
     Execute --> Core
     Eval --> Core
     Export --> Store
+    Metrics --> Store
     Status --> Store
     Core --> Store
 ```
@@ -57,18 +61,19 @@ flowchart TB
 
 | Command | Responsibility |
 |---|---|
-| `ctxbench dataset fetch` | Materialize a dataset into the local cache. |
-| `ctxbench dataset inspect` | Validate and report capability/provenance for a local or cached dataset reference. |
+| `llmctxbench dataset fetch` | Materialize a dataset into the local cache. |
+| `llmctxbench dataset inspect` | Validate and report capability/provenance for a local or cached dataset reference. |
 
 ### Lifecycle commands
 
 | Command | Responsibility |
 |---|---|
-| `ctxbench plan` | Expand experiment into trials. |
-| `ctxbench execute` | Execute trials and collect responses. |
-| `ctxbench eval` | Evaluate responses. |
-| `ctxbench export` | Build analysis-ready files. |
-| `ctxbench status` | Report progress from existing artifacts. |
+| `llmctxbench plan` | Expand experiment into trials. |
+| `llmctxbench execute` | Execute trials and collect responses. |
+| `llmctxbench eval` | Evaluate responses. |
+| `llmctxbench export` | Build analysis-ready files. |
+| `llmctxbench metrics` | Compute canonical effectiveness/efficiency/robustness/evaluation-reliability/observability metrics from existing run artifacts. |
+| `llmctxbench status` | Report progress from existing artifacts. |
 
 Lifecycle commands do not fetch remote datasets implicitly.
 
@@ -95,7 +100,7 @@ Recommended selectors:
 The parser shape is:
 
 ```text
-ctxbench
+llmctxbench
   dataset
     fetch
     inspect
@@ -103,10 +108,11 @@ ctxbench
   execute
   eval
   export
+  metrics
   status
 ```
 
-`ctxbench dataset` requires a subcommand.
+`llmctxbench dataset` requires a subcommand.
 
 ## Historical migration reference
 

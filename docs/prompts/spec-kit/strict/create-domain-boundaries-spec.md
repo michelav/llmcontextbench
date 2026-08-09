@@ -13,7 +13,7 @@ SPECIFY_FEATURE_DIRECTORY=specs/003-domain-architecture-boundaries
 
 Create a specification named "domain-architecture-boundaries".
 
-The goal is to make CTXBench domain-neutral before adding a new software repository domain.
+The goal is to make LLMContextBench domain-neutral before adding a new software repository domain.
 
 The current Lattes dataset must become one domain implementation, not an assumption of the benchmark core.
 

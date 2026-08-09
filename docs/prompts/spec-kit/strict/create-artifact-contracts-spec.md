@@ -13,7 +13,7 @@ SPECIFY_FEATURE_DIRECTORY=specs/002-artifact-contracts-and-migration
 
 Create a specification named "artifact-contracts-and-migration".
 
-The goal is to define target artifact contracts and migration behavior for CTXBench.
+The goal is to define target artifact contracts and migration behavior for LLMContextBench.
 
 The spec must distinguish:
 

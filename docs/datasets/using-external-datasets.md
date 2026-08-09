@@ -3,12 +3,12 @@
 ## Purpose
 
 This guide documents the supported workflow for working with datasets that live outside the
-`ctxbench-cli` repository.
+LLMContextBench repository.
 
 Two command families matter:
 
-- dataset-management commands: `ctxbench dataset fetch`, `ctxbench dataset inspect`
-- lifecycle commands: `ctxbench plan`, `ctxbench execute`, `ctxbench eval`, `ctxbench export`, `ctxbench status`
+- dataset-management commands: `llmctxbench dataset fetch`, `llmctxbench dataset inspect`
+- lifecycle commands: `llmctxbench plan`, `llmctxbench execute`, `llmctxbench eval`, `llmctxbench export`, `llmctxbench metrics`, `llmctxbench status`
 
 Lifecycle commands are local-only. They do not fetch, clone, or download datasets.
 
@@ -17,29 +17,29 @@ Lifecycle commands are local-only. They do not fetch, clone, or download dataset
 Use this path when the experiment references a dataset by `id` and `version`.
 
 ```bash
-ctxbench dataset fetch \
+llmctxbench dataset fetch \
   --descriptor-url https://github.com/ctxbench/lattes/releases/download/v0.1.0-dataset/ctxbench-lattes-v0.1.0.dataset.json \
   --cache-dir ./.ctxbench/datasets
 
-ctxbench dataset inspect ctxbench/lattes@0.1.0 --cache-dir ./.ctxbench/datasets
+llmctxbench dataset inspect ctxbench/lattes@0.1.0 --cache-dir ./.ctxbench/datasets
 
-ctxbench plan tests/fixtures/lattes_provider_free/experiment.json \
+llmctxbench plan tests/fixtures/lattes_provider_free/experiment.json \
   --output outputs/lattes_example \
   --cache-dir ./.ctxbench/datasets
-ctxbench execute outputs/lattes_example/trials.jsonl
-ctxbench eval outputs/lattes_example/responses.jsonl
-ctxbench export outputs/lattes_example/evals.jsonl --to csv --output outputs/lattes_example/results.csv
-ctxbench status outputs/lattes_example
+llmctxbench execute outputs/lattes_example/trials.jsonl
+llmctxbench eval outputs/lattes_example/responses.jsonl
+llmctxbench export outputs/lattes_example/evals.jsonl --to csv --output outputs/lattes_example/results.csv
+llmctxbench status outputs/lattes_example
 ```
 
 Expected artifact progression:
 
-- `ctxbench dataset fetch`: materializes the dataset into the local cache
-- `ctxbench dataset inspect`: reports capability and provenance metadata
-- `ctxbench plan`: writes `manifest.json` and `trials.jsonl`
-- `ctxbench execute`: writes `responses.jsonl` and execution traces
-- `ctxbench eval`: writes `evals.jsonl`, `judge_votes.jsonl`, `evals-summary.json`, and eval traces
-- `ctxbench export`: writes `results.csv`
+- `llmctxbench dataset fetch`: materializes the dataset into the local cache
+- `llmctxbench dataset inspect`: reports capability and provenance metadata
+- `llmctxbench plan`: writes `manifest.json` and `trials.jsonl`
+- `llmctxbench execute`: writes `responses.jsonl` and execution traces
+- `llmctxbench eval`: writes `evals.jsonl`, `judge_votes.jsonl`, `evals-summary.json`, and eval traces
+- `llmctxbench export`: writes `results.csv`
 
 ## Local-path shortcut
 
@@ -53,11 +53,11 @@ Use this path when the experiment points directly to a dataset root.
 }
 ```
 
-For local paths, skip `ctxbench dataset fetch` and go straight to inspection or planning:
+For local paths, skip `llmctxbench dataset fetch` and go straight to inspection or planning:
 
 ```bash
-ctxbench dataset inspect datasets/local-dataset
-ctxbench plan experiment.json --output outputs/local_example
+llmctxbench dataset inspect datasets/local-dataset
+llmctxbench plan experiment.json --output outputs/local_example
 ```
 
 ## Verified archive acquisition
@@ -67,21 +67,21 @@ ctxbench plan experiment.json --output outputs/local_example
 Preferred remote source:
 
 ```bash
-ctxbench dataset fetch \
+llmctxbench dataset fetch \
   --descriptor-url https://github.com/ctxbench/lattes/releases/download/v0.1.0-dataset/ctxbench-lattes-v0.1.0.dataset.json
 ```
 
 Offline descriptor source:
 
 ```bash
-ctxbench dataset fetch \
+llmctxbench dataset fetch \
   --descriptor-file ./downloads/ctxbench-lattes-v0.1.0.dataset.json
 ```
 
 ### Direct archive URL with `--sha256`
 
 ```bash
-ctxbench dataset fetch \
+llmctxbench dataset fetch \
   --dataset-url https://github.com/ctxbench/lattes/releases/download/v0.1.0-dataset/ctxbench-lattes-v0.1.0.tar.gz \
   --id ctxbench/lattes \
   --version 0.1.0 \
@@ -91,7 +91,7 @@ ctxbench dataset fetch \
 ### Direct archive URL with `--sha256-url`
 
 ```bash
-ctxbench dataset fetch \
+llmctxbench dataset fetch \
   --dataset-url https://github.com/ctxbench/lattes/releases/download/v0.1.0-dataset/ctxbench-lattes-v0.1.0.tar.gz \
   --id ctxbench/lattes \
   --version 0.1.0 \
@@ -101,7 +101,7 @@ ctxbench dataset fetch \
 ### Local archive with `--sha256-file`
 
 ```bash
-ctxbench dataset fetch \
+llmctxbench dataset fetch \
   --dataset-file ./downloads/ctxbench-lattes-v0.1.0.tar.gz \
   --id ctxbench/lattes \
   --version 0.1.0 \
@@ -111,7 +111,7 @@ ctxbench dataset fetch \
 ### Local unpacked directory
 
 ```bash
-ctxbench dataset fetch --dataset-dir ./datasets/lattes
+llmctxbench dataset fetch --dataset-dir ./datasets/lattes
 ```
 
 Rules:
@@ -135,7 +135,7 @@ Archive extraction is safety-checked. The fetch command rejects:
 - FIFOs
 - other special files
 
-After extraction, CTXBench requires exactly one dataset manifest. It accepts either:
+After extraction, LLMContextBench requires exactly one dataset manifest. It accepts either:
 
 - a single top-level directory containing the dataset package
 - files directly at the archive root
@@ -146,15 +146,15 @@ It fails if there is no manifest, or more than one manifest.
 
 ### Missing dataset
 
-If `ctxbench plan` cannot resolve `dataset.id@version` locally, it fails and tells you to run:
+If `llmctxbench plan` cannot resolve `dataset.id@version` locally, it fails and tells you to run:
 
 ```bash
-ctxbench dataset fetch --descriptor-url <url>
+llmctxbench dataset fetch --descriptor-url <url>
 ```
 
 ### Cache reuse and replacement
 
-If the requested dataset identity, version, and content identity are already cached, `ctxbench dataset fetch`
+If the requested dataset identity, version, and content identity are already cached, `llmctxbench dataset fetch`
 prints the existing materialized path and exits without downloading, extracting, or overwriting.
 
 If the same dataset identity and version are cached with conflicting content:
@@ -188,11 +188,12 @@ unpacked dataset manifest does not match them, the fetch operation fails and not
 
 The lifecycle commands below do not acquire datasets:
 
-- `ctxbench plan`
-- `ctxbench execute`
-- `ctxbench eval`
-- `ctxbench export`
-- `ctxbench status`
+- `llmctxbench plan`
+- `llmctxbench execute`
+- `llmctxbench eval`
+- `llmctxbench export`
+- `llmctxbench metrics`
+- `llmctxbench status`
 
 Consequences:
 
@@ -217,9 +218,9 @@ Dataset commands share the same cache-root selection rules:
 
 - `--cache-dir <path>` overrides everything else
 - `CTXBENCH_DATASET_CACHE` applies when `--cache-dir` is omitted
-- otherwise CTXBench uses the default dataset cache location
+- otherwise LLMContextBench uses the default dataset cache location
 
-Use the same cache root for `ctxbench dataset fetch`, `ctxbench dataset inspect`, and `ctxbench plan`
+Use the same cache root for `llmctxbench dataset fetch`, `llmctxbench dataset inspect`, and `llmctxbench plan`
 when you are not using the default location.
 
 Flat export adds:

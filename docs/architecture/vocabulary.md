@@ -6,7 +6,7 @@
 |---|---|
 | `dataset` | Versioned package of benchmark inputs. |
 | `dataset repository` | External source that publishes a dataset package or release asset. |
-| `dataset package` | The dataset distribution envelope resolved by CTXBench. |
+| `dataset package` | The dataset distribution envelope resolved by LLMContextBench. |
 | `dataset materialization` | One locally materialized copy of a dataset package. |
 | `dataset cache` | Local store of fetched dataset materializations and manifests. |
 | `dataset resolver` | Local-only component that resolves `root` or `id@version` references. |
@@ -25,6 +25,7 @@
 | `judge vote` | One individual judge assessment. |
 | `trace` | Detailed event record of execution or evaluation. |
 | `result` | Derived analysis-ready artifact, usually exported as CSV. |
+| `metric dimension` | One of five canonical metric groupings computed by `llmctxbench metrics`: effectiveness, efficiency, robustness, evaluation reliability, observability. |
 
 ## Instance
 
@@ -96,6 +97,21 @@ evals.jsonl
 judge_votes.jsonl
 ```
 
+## Metrics
+
+`llmctxbench metrics` computes derived, artifact-only metrics from one or more existing run
+directories' canonical execution/evaluation artifacts, grouped into five metric dimensions.
+
+Recommended files:
+
+```text
+metrics/trial_metrics.csv
+metrics/aggregate_metrics.csv
+metrics/dimension_summary.csv
+metrics/summary.json
+metrics/dimensions/{effectiveness,efficiency,robustness,evaluation_reliability,observability}.csv
+```
+
 ## Naming rules
 
 Use JSON fields with `Id` suffix:
@@ -121,8 +137,8 @@ judge_votes.jsonl
 
 ## Dataset distribution notes
 
-- `ctxbench dataset fetch` materializes a dataset into the local dataset cache.
-- `ctxbench dataset inspect` reports a dataset capability report without provider calls.
+- `llmctxbench dataset fetch` materializes a dataset into the local dataset cache.
+- `llmctxbench dataset inspect` reports a dataset capability report without provider calls.
 - lifecycle artifacts preserve dataset provenance as a nested `dataset` object.
 
 ## Historical migration reference

@@ -1,8 +1,8 @@
-# CTXBench Redesign Spec Roadmap
+# LLMContextBench Redesign Spec Roadmap
 
 ## Purpose
 
-This roadmap tracks the sequence of specs needed to migrate CTXBench toward the target architecture while preserving research validity, reproducibility, artifact contracts, metric provenance, and migration safety.
+This roadmap tracks the sequence of specs needed to migrate LLMContextBench toward the target architecture while preserving research validity, reproducibility, artifact contracts, metric provenance, and migration safety.
 
 ## Status legend
 
@@ -19,7 +19,7 @@ This roadmap tracks the sequence of specs needed to migrate CTXBench toward the 
 |---|---|---|---|---|---|---|
 | `001-command-model-and-phase-renaming` | Rename CLI, commands, and phase terminology to target architecture. | Architecture docs | `002` | draft | TBD | Keep compatibility explicit. |
 | `002-artifact-contracts-and-migration` | Define canonical/derived artifacts and migration from legacy names. | `001` | `003`, `004` | draft | TBD | Include metric provenance. |
-| `003-domain-architecture-boundaries` | Make CTXBench core domain-neutral. | `001`, `002` | `004`, `005`, `006` | draft | TBD | Avoid speculative plugin framework. |
+| `003-domain-architecture-boundaries` | Make LLMContextBench core domain-neutral. | `001`, `002` | `004`, `005`, `006` | draft | TBD | Avoid speculative plugin framework. |
 | `004-dataset-artifact-model` | Define domain-neutral artifact roles and representations. | `002`, `003` | `005`, `006` | draft | TBD | Separate context from evidence. |
 | `005-lattes-dataset-migration` | Migrate Lattes to the domain-neutral artifact model. | `004` | `006` | draft | TBD | Preserve current behavior. |
 | `006-software-repository-domain` | Add the software repository domain. | `003`, `004`, `005` | Future experiments | deferred | TBD | Do not detail too early. |

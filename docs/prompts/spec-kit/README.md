@@ -1,4 +1,4 @@
-# CTXBench Prompt Templates — Light Version
+# LLMContextBench Prompt Templates — Light Version
 
 Short prompt templates for day-to-day use with Spec Kit, Claude, and Codex.
 

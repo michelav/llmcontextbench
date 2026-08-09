@@ -57,7 +57,7 @@ def metrics_command(
             failure_rows=failures,
             inputs=artifacts,
             selectors=_selectors_manifest(active_selector, evaluation_status, not_evaluation_status),
-            command=command or "ctxbench metrics " + " ".join(inputs),
+            command=command or "llmctxbench metrics " + " ".join(inputs),
         )
         logger.info("METRICS", "metrics.completed", "Metrics completed", path=str(output_dir), rows=len(selected_rows))
         print(f"Wrote metrics to {output_dir}")

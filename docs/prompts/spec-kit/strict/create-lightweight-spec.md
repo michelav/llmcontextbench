@@ -18,7 +18,7 @@ dependencies, acceptance criteria, and non-goals. Do not over-detail implementat
 
 Goal:
 
-Define target artifact contracts and migration behavior for CTXBench.
+Define target artifact contracts and migration behavior for LLMContextBench.
 
 The spec must distinguish:
 

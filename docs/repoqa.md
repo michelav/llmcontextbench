@@ -1,7 +1,7 @@
 # RepoQA Tool Environment
 
-CTXBench keeps RepoQA in an isolated tool environment under `tools/repoqa/`.
-This avoids adding RepoQA's research dependencies to the main ctxbench runtime while keeping dataset generation reproducible.
+LLMContextBench keeps RepoQA in an isolated tool environment under `tools/repoqa/`.
+This avoids adding RepoQA's research dependencies to the main LLMContextBench runtime while keeping dataset generation reproducible.
 
 ## Setup
 
@@ -60,4 +60,4 @@ tools/repoqa/repoqa_build_dataset \
   --force
 ```
 
-Provider-backed ctxbench execution and evaluation remain separate. Do not use this tool environment to run `ctxbench execute` or `ctxbench eval` against real providers.
+Provider-backed ctxbench execution and evaluation remain separate. Do not use this tool environment to run `llmctxbench execute` or `llmctxbench eval` against real providers.

@@ -1,38 +1,38 @@
-# CTXBench Architecture
+# LLMContextBench Architecture
 
-This document is the entry point for the CTXBench architecture documentation. It's loosely organized into [C4 Model](https://c4model.com/) style but with a few other structures added when necessary.
+This document is the entry point for the LLMContextBench architecture documentation. It's loosely organized into [C4 Model](https://c4model.com/) style but with a few other structures added when necessary.
 
-CTXBench is a Python-based command-line benchmark framework for evaluating context provisioning strategies in LLM-based systems. It is a research tool: the architecture prioritizes simplicity, reproducibility, explicit artifacts, and comparability between strategies.
+LLMContextBench is a Python-based command-line benchmark framework for evaluating context provisioning strategies in LLM-based systems. It is a research tool: the architecture prioritizes simplicity, reproducibility, explicit artifacts, and comparability between strategies.
 
 ## Architectural scope
 
-CTXBench supports experiments where a stable set of dataset instances and tasks is executed across different models, context formats, and context provisioning strategies.
+LLMContextBench supports experiments where a stable set of dataset instances and tasks is executed across different models, context formats, and context provisioning strategies.
 
 The canonical workflow is:
 
 ```text
 experiment.json
    ↓
-ctxbench plan
+llmctxbench plan
    ↓
 trials.jsonl + manifest.json
    ↓
-ctxbench execute
+llmctxbench execute
    ↓
 responses.jsonl + traces/executions/
    ↓
-ctxbench eval
+llmctxbench eval
    ↓
 evals.jsonl + judge_votes.jsonl + evals-summary.json + traces/evals/
    ↓
-ctxbench export
+llmctxbench export
    ↓
 results.csv
 ```
 
 ## Technology baseline
 
-The current implementation is a Python project. The current package metadata still uses the legacy name `copa`, but the public CLI and artifact contract use `ctxbench`. The internal package path remains `src/copa/` in the current repository layout.
+The current implementation is a Python project. The public CLI command is `llmctxbench`; the Python package/import path and artifact contract remain `ctxbench` (`src/ctxbench/`).
 
 | Concern | Decision |
 |---|---|
@@ -91,13 +91,14 @@ remote_mcp
 
 ### Observability by design
 
-CTXBench should record responses, metrics, traces, evaluation outcomes, and judge votes. For provider-managed or remote flows, missing observability should be recorded as an architectural property of the strategy.
+LLMContextBench should record responses, metrics, traces, evaluation outcomes, and judge votes. For provider-managed or remote flows, missing observability should be recorded as an architectural property of the strategy.
 
 ## Main design decisions
 
 | Decision | Rationale |
 |---|---|
 | Use `CTXBench` as public name | More general than the legacy `COPA` name and aligned with context provisioning. |
+| Rename the product to `LLMContextBench` and the CLI command to `llmctxbench` | Disambiguates the project from other "ctxbench"-named tools; the Python package/import path (`ctxbench`) was kept to limit blast radius. |
 | Use `execute` instead of `query` or `run` | `query` is too narrow; `run` conflicts with run/runId wording. |
 | Use `trial` instead of `run` | A trial is one planned experimental execution. |
 | Use `response` instead of `answer` | Not every task is Q/A. |
@@ -124,12 +125,12 @@ This documentation follows the C4 organization where it helps, without forcing u
 
 ## C4 usage in this project
 
-CTXBench is not a commercial distributed platform, so the C4 model should be used pragmatically.
+LLMContextBench is not a commercial distributed platform, so the C4 model should be used pragmatically.
 
 Recommended use:
 
 ```text
-System Context: who uses CTXBench and which external systems it touches.
+System Context: who uses LLMContextBench and which external systems it touches.
 Container: major executable/logical parts of the framework.
 Component: internal modules that implement planning, execution, evaluation, export.
 Deployment: where the Python runner, local files, providers, and MCP servers run.
@@ -148,11 +149,11 @@ The deployment and dynamic diagrams are especially important for MCP because MCP
 ### Framework repository
 
 ```text
-ctxbench-cli/
+llmcontextbench/
 ├── README.md
 ├── pyproject.toml
 ├── src/
-│   └── copa/
+│   └── ctxbench/
 │       ├── cli.py
 │       ├── commands/
 │       ├── benchmark/

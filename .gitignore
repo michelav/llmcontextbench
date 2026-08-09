@@ -19,3 +19,7 @@ temp/
 .specify/feature.json
 .codex
 .claude
+
+# Local dataset fetch/build artifacts (not the tracked dataset packages themselves)
+datasets/*.tar.gz
+datasets/repoqa-example/

@@ -1,7 +1,7 @@
 [project]
 name = "ctxbench-repoqa-tools"
 version = "0.1.0"
-description = "Isolated RepoQA tooling environment for CTXBench dataset generation and scoring."
+description = "Isolated RepoQA tooling environment for LLMContextBench dataset generation and scoring."
 requires-python = ">=3.11,<3.13"
 dependencies = [
   "repoqa @ git+https://github.com/evalplus/repoqa.git@ae876deb1365dbf5a15b0533723c8ed123eee586",

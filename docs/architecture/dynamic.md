@@ -9,7 +9,7 @@ Dynamic diagrams document runtime behavior for the dataset-distribution flow add
 ```mermaid
 sequenceDiagram
     participant U as Researcher
-    participant C as ctxbench dataset fetch
+    participant C as llmctxbench dataset fetch
     participant R as Remote dataset repository
     participant V as SHA-256 source
     participant X as Safe extractor
@@ -33,7 +33,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant U as Researcher
-    participant I as ctxbench dataset inspect
+    participant I as llmctxbench dataset inspect
     participant R as DatasetResolver
     participant P as DatasetPackage
 
@@ -50,7 +50,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant U as Researcher
-    participant P as ctxbench plan
+    participant P as llmctxbench plan
     participant R as DatasetResolver
     participant K as Local dataset cache
 
@@ -67,7 +67,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant U as Researcher
-    participant P as ctxbench plan
+    participant P as llmctxbench plan
     participant R as DatasetResolver
     participant K as Local dataset cache
 

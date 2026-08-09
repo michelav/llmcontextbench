@@ -121,7 +121,7 @@ def test_plan_with_missing_cached_dataset_suggests_fetch(tmp_path: Path) -> None
     with pytest.raises(Exception) as excinfo:
         plan_command(str(experiment_path), output=str(tmp_path / "planned"), cache_dir=tmp_path / "cache")
 
-    assert "ctxbench dataset fetch" in str(excinfo.value)
+    assert "llmctxbench dataset fetch" in str(excinfo.value)
 
 
 def test_plan_with_semantic_cached_dataset_uses_latest_materialization(tmp_path: Path) -> None:
@@ -200,5 +200,5 @@ def test_plan_help_includes_cache_dir(capsys: pytest.CaptureFixture[str]) -> Non
 
     captured = capsys.readouterr()
     assert "usage:" in captured.out
-    assert "ctxbench plan" in captured.out
+    assert "llmctxbench plan" in captured.out
     assert "--cache-dir" in captured.out

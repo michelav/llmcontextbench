@@ -13,13 +13,14 @@ Core strategies:
 - `local_mcp`: local MCP runtime controlled by the benchmark.
 - `remote_mcp`: remote MCP server used as a context provider.
 
-Core benchmark workflow:
+Core benchmark workflow (CLI command: `llmctxbench`; Python package/import path remains `ctxbench`):
 
-- `ctxbench plan`
-- `ctxbench execute`
-- `ctxbench eval`
-- `ctxbench export`
-- `ctxbench status`
+- `llmctxbench plan`
+- `llmctxbench execute`
+- `llmctxbench eval`
+- `llmctxbench export`
+- `llmctxbench metrics`
+- `llmctxbench status`
 
 The benchmark artifacts can be large. Be careful with token usage and context size.
 
@@ -211,11 +212,12 @@ When updating documentation:
 
 Use current command names:
 
-- `ctxbench plan`
-- `ctxbench execute`
-- `ctxbench eval`
-- `ctxbench export`
-- `ctxbench status`
+- `llmctxbench plan`
+- `llmctxbench execute`
+- `llmctxbench eval`
+- `llmctxbench export`
+- `llmctxbench metrics`
+- `llmctxbench status`
 
 Do not document obsolete commands unless explicitly writing migration notes.
 
@@ -270,8 +272,9 @@ Drop:
 - full dataset content.
 
 <!-- SPECKIT START -->
-For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current active plan.
-
-Active plan: specs/004-dataset-package-capabilities/plan.md
+Spec-driven development (the `specs/` folders, worklogs, and usage tracking described
+above) is not currently in active use for day-to-day changes. Spec 004
+(`specs/004-dataset-package-capabilities/plan.md`) was the last actively worked plan and
+is effectively complete. Do not treat any `specs/*` entry as an in-progress active plan
+unless the user explicitly says otherwise for that session.
 <!-- SPECKIT END -->
