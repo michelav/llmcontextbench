@@ -2,7 +2,7 @@
 
 ## Overview
 
-CTXBench has two related flows:
+LLMContextBench has two related flows:
 
 1. dataset acquisition and inspection
 2. benchmark lifecycle
@@ -12,20 +12,22 @@ step and go straight to inspection or planning.
 
 ```mermaid
 flowchart LR
-    A["remote dataset repository"] --> B["ctxbench dataset fetch"]
+    A["remote dataset repository"] --> B["llmctxbench dataset fetch"]
     B --> C["local dataset cache"]
-    C --> D["ctxbench dataset inspect"]
+    C --> D["llmctxbench dataset inspect"]
     E["local dataset root"] --> D
-    C --> F["ctxbench plan"]
+    C --> F["llmctxbench plan"]
     E --> F
     G["experiment.json"] --> F
     F --> H["trials.jsonl<br/>manifest.json"]
-    H --> I["ctxbench execute"]
+    H --> I["llmctxbench execute"]
     I --> J["responses.jsonl<br/>traces/executions/"]
-    J --> K["ctxbench eval"]
+    J --> K["llmctxbench eval"]
     K --> L["evals.jsonl<br/>judge_votes.jsonl<br/>evals-summary.json<br/>traces/evals/"]
-    L --> M["ctxbench export"]
+    L --> M["llmctxbench export"]
     M --> N["results.csv"]
+    L --> O["llmctxbench metrics"]
+    O --> P["metrics/ (dimension CSVs + summary.json)"]
 ```
 
 For `plan`, `execute`, and `eval`, adapter resolution happens once at the start of the phase before
@@ -40,7 +42,7 @@ present.
 ## Planning
 
 ```bash
-ctxbench plan experiments/lattes_baseline_001.json --output outputs/lattes_baseline_001
+llmctxbench plan experiments/lattes_baseline_001.json --output outputs/lattes_baseline_001
 ```
 
 Produces:
@@ -53,7 +55,7 @@ trials.jsonl
 ## Execution
 
 ```bash
-ctxbench execute outputs/lattes_baseline_001/trials.jsonl
+llmctxbench execute outputs/lattes_baseline_001/trials.jsonl
 ```
 
 Produces:
@@ -66,7 +68,7 @@ traces/executions/<trialId>.json
 ## Evaluation
 
 ```bash
-ctxbench eval outputs/lattes_baseline_001/responses.jsonl
+llmctxbench eval outputs/lattes_baseline_001/responses.jsonl
 ```
 
 Produces:
@@ -81,7 +83,7 @@ evals-summary.json
 ## Export
 
 ```bash
-ctxbench export outputs/lattes_baseline_001/evals.jsonl --format csv --output outputs/lattes_baseline_001/results.csv
+llmctxbench export outputs/lattes_baseline_001/evals.jsonl --format csv --output outputs/lattes_baseline_001/results.csv
 ```
 
 Produces:
@@ -90,17 +92,39 @@ Produces:
 results.csv
 ```
 
-`ctxbench export` derives rows from response, evaluation, and judge-vote artifacts. It does not
+`llmctxbench export` derives rows from response, evaluation, and judge-vote artifacts. It does not
 resolve the dataset, materialize a dataset package, or call provider-backed execution/evaluation.
+
+## Metrics
+
+```bash
+llmctxbench metrics outputs/lattes_baseline_001
+```
+
+Produces:
+
+```text
+metrics/trial_metrics.csv
+metrics/aggregate_metrics.csv
+metrics/dimension_summary.csv
+metrics/summary.json
+metrics/failure_cases.csv
+metrics/metrics-manifest.json
+metrics/dimensions/{effectiveness,efficiency,robustness,evaluation_reliability,observability}.csv
+```
+
+`llmctxbench metrics` is an artifact-only reader like `export` and `status`: it computes the
+canonical metric dimensions from one or more existing run directories and does not resolve the
+dataset or call providers.
 
 ## Status
 
 ```bash
-ctxbench status outputs/lattes_baseline_001
-ctxbench status outputs/lattes_baseline_001 --by judge
+llmctxbench status outputs/lattes_baseline_001
+llmctxbench status outputs/lattes_baseline_001 --by judge
 ```
 
-`ctxbench status` reports lifecycle progress from artifact counts and statuses. It does not inspect
+`llmctxbench status` reports lifecycle progress from artifact counts and statuses. It does not inspect
 or resolve the dataset.
 
 ## Local-path shortcut
@@ -108,11 +132,12 @@ or resolve the dataset.
 If the experiment uses `dataset.root`, the workflow becomes:
 
 ```text
-ctxbench dataset inspect <dataset-root>
-ctxbench plan
-ctxbench execute
-ctxbench eval
-ctxbench export
+llmctxbench dataset inspect <dataset-root>
+llmctxbench plan
+llmctxbench execute
+llmctxbench eval
+llmctxbench export
+llmctxbench metrics
 ```
 
 No fetch step is required.
@@ -122,8 +147,8 @@ No fetch step is required.
 | Strategy | Description |
 |---|---|
 | `inline` | Inserts the selected context representation returned by `adapter.get_context(..., representation=format)` directly into the model input. |
-| `local_function` | Exposes local Python functions while CTXBench controls the tool loop. |
-| `local_mcp` | Exposes tools through a local MCP runtime while CTXBench controls the loop. |
+| `local_function` | Exposes local Python functions while LLMContextBench controls the tool loop. |
+| `local_mcp` | Exposes tools through a local MCP runtime while LLMContextBench controls the loop. |
 | `remote_mcp` | Uses a remote MCP server; provider or remote integration may control part of the loop. |
 
 For detailed runtime flows, see `dynamic.md`.

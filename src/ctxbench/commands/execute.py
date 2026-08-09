@@ -14,13 +14,13 @@ from ctxbench.util.logging import PhaseLogger, ProgressTracker, trial_log_contex
 
 def _load_runspecs(path: Path) -> list[TrialSpec]:
     if not path.exists():
-        raise FileNotFoundError(f"Trials file not found: {path}. Run 'ctxbench plan' first.")
+        raise FileNotFoundError(f"Trials file not found: {path}. Run 'llmctxbench plan' first.")
     payloads = [dict(item) for item in read_jsonl(path)]
     if not payloads:
         return []
     if "dataset" not in payloads[0]:
         raise ValueError(
-            "Trials file is missing context data. Re-run 'ctxbench plan' to regenerate."
+            "Trials file is missing context data. Re-run 'llmctxbench plan' to regenerate."
         )
     return [TrialSpec.model_validate(payload) for payload in payloads]
 

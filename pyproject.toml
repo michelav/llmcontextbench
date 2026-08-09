@@ -1,7 +1,7 @@
 [project]
 name = "ctxbench"
 version = "0.3.0"
-description = "Strict uv + Nix (uv2nix) template"
+description = "LLMContextBench: a benchmark for context-provisioning strategies in LLM-based systems"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
@@ -21,7 +21,7 @@ dev = [
 ]
 
 [project.scripts]
-ctxbench = "ctxbench.cli:main"
+llmctxbench = "ctxbench.cli:main"
 
 [build-system]
 requires = ["setuptools>=69", "wheel"]

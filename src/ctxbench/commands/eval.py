@@ -39,7 +39,7 @@ def _trial_id(row: dict[str, Any]) -> str:
 
 def _load_responses(path: Path) -> list[TrialResult]:
     if not path.exists():
-        raise FileNotFoundError(f"Responses file not found: {path}. Run 'ctxbench execute' first.")
+        raise FileNotFoundError(f"Responses file not found: {path}. Run 'llmctxbench execute' first.")
     payloads = [dict(item) for item in read_jsonl(path)]
     if not payloads:
         return []
@@ -52,7 +52,7 @@ def _load_responses(path: Path) -> list[TrialResult]:
         )
     if "dataset" not in payloads[0]:
         raise ValueError(
-            "Responses file is missing context data. Re-run 'ctxbench execute' to regenerate."
+            "Responses file is missing context data. Re-run 'llmctxbench execute' to regenerate."
         )
     return [TrialResult.model_validate(item) for item in payloads]
 
@@ -65,7 +65,7 @@ def _load_manifest(source_root: Path) -> dict[str, Any]:
     path = source_root / "manifest.json"
     if not path.exists():
         raise ValueError(
-            f"Missing manifest: {path}. Re-run 'ctxbench plan' to regenerate."
+            f"Missing manifest: {path}. Re-run 'llmctxbench plan' to regenerate."
         )
     payload = load_json(path)
     if not isinstance(payload, dict):

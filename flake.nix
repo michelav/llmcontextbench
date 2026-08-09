@@ -63,14 +63,14 @@
         };
 
         ctxbenchPkg = pkgs.symlinkJoin {
-          name = "ctxbench";
+          name = "llmctxbench";
           paths = [ venv ];
           nativeBuildInputs = [ pkgs.makeWrapper ];
           postBuild = ''
-            if [ -e "$out/bin/ctxbench" ]; then
-              rm "$out/bin/ctxbench"
+            if [ -e "$out/bin/llmctxbench" ]; then
+              rm "$out/bin/llmctxbench"
             fi
-            makeWrapper "${venv}/bin/python" "$out/bin/ctxbench" \
+            makeWrapper "${venv}/bin/python" "$out/bin/llmctxbench" \
               --prefix PYTHONPATH : "${./src}" \
               --add-flags "-m" \
               --add-flags "ctxbench.cli"
@@ -83,7 +83,7 @@
 
         apps.default = {
           type = "app";
-          program = "${ctxbenchPkg}/bin/ctxbench";
+          program = "${ctxbenchPkg}/bin/llmctxbench";
         };
 
         devShells.default = pkgs.mkShell {
@@ -111,7 +111,7 @@
               echo "warning: .venv exists and is not a symlink; not replacing it"
             fi
 
-            echo "ctxbench dev shell ready (from uv.lock)."
+            echo "llmctxbench dev shell ready (from uv.lock)."
             echo "Python: $(which python)"
             python -m debugpy --version || true
           '';

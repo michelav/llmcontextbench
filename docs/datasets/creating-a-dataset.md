@@ -3,7 +3,7 @@
 ## Purpose
 
 This guide describes the distribution-facing requirements for a dataset package used by
-CTXBench. Spec 003 owns the external distribution contract. Spec 004 owns the internal
+LLMContextBench. Spec 003 owns the external distribution contract. Spec 004 owns the internal
 core-versus-adapter boundary and is the authoritative source for adapter responsibility
 separation.
 
@@ -49,8 +49,8 @@ Minimum recommended shape:
   "id": "ctxbench/lattes",
   "datasetVersion": "0.1.0",
   "manifestSchemaVersion": 1,
-  "name": "CTXBench Lattes",
-  "description": "Lattes benchmark dataset for CTXBench.",
+  "name": "LLMContextBench Lattes",
+  "description": "Lattes benchmark dataset for LLMContextBench.",
   "layout": {
     "tasks": "tasks.json",
     "taskInstances": "tasks.instance.json",
@@ -59,7 +59,7 @@ Minimum recommended shape:
 }
 ```
 
-`datasetVersion` is the version of the dataset package contents. It is not the CTXBench CLI
+`datasetVersion` is the version of the dataset package contents. It is not the LLMContextBench CLI
 version, a GitHub release tag, the manifest schema version, or a checksum.
 
 ## Mandatory extension points
@@ -141,13 +141,13 @@ Unsafe archive entries are rejected.
 Validate the dataset package without real provider calls:
 
 ```bash
-ctxbench dataset inspect /path/to/dataset-root
+llmctxbench dataset inspect /path/to/dataset-root
 ```
 
 Or, for a materialized cached dataset:
 
 ```bash
-ctxbench dataset inspect dataset-id@version
+llmctxbench dataset inspect dataset-id@version
 ```
 
 What to check:

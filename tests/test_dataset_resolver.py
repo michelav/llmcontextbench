@@ -157,7 +157,7 @@ def test_resolver_missing_dataset_suggests_fetch(tmp_path: Path) -> None:
     with pytest.raises(DatasetNotFoundError) as excinfo:
         resolver.resolve(ExperimentDataset(id="ctxbench/missing", version="9.9.9"), cache)
 
-    assert "ctxbench dataset fetch" in str(excinfo.value)
+    assert "llmctxbench dataset fetch" in str(excinfo.value)
 
 
 def test_resolver_rejects_multi_dataset_reference(tmp_path: Path) -> None:

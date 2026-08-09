@@ -82,12 +82,12 @@ def main() -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Export CTXBench responses.jsonl into RepoQA-compatible model-output JSONL. "
+            "Export LLMContextBench responses.jsonl into RepoQA-compatible model-output JSONL. "
             "Each output row is native_task.json plus output=[ctxbench response]."
         )
     )
-    parser.add_argument("--responses", required=True, help="Path to CTXBench responses.jsonl.")
-    parser.add_argument("--dataset-root", required=True, help="Path to generated CTXBench RepoQA dataset root.")
+    parser.add_argument("--responses", required=True, help="Path to LLMContextBench responses.jsonl.")
+    parser.add_argument("--dataset-root", required=True, help="Path to generated LLMContextBench RepoQA dataset root.")
     parser.add_argument(
         "--output",
         required=True,
@@ -105,13 +105,13 @@ def parse_args() -> argparse.Namespace:
         "--format",
         action="append",
         default=[],
-        help="Only export responses with this CTXBench format. Can be repeated.",
+        help="Only export responses with this LLMContextBench format. Can be repeated.",
     )
     parser.add_argument(
         "--strategy",
         action="append",
         default=[],
-        help="Only export responses with this CTXBench strategy. Can be repeated.",
+        help="Only export responses with this LLMContextBench strategy. Can be repeated.",
     )
     parser.add_argument(
         "--split",
@@ -122,7 +122,7 @@ def parse_args() -> argparse.Namespace:
         "--success-only",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Export only successful CTXBench responses. Default: true.",
+        help="Export only successful LLMContextBench responses. Default: true.",
     )
     parser.add_argument(
         "--skipped-output",

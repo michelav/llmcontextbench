@@ -304,7 +304,7 @@ def test_plan_rejects_unresolved_dataset_without_fetching(
     with pytest.raises(Exception) as excinfo:
         plan_command(str(experiment_path), output=str(tmp_path / "planned"), cache_dir=tmp_path / "cache")
 
-    assert "ctxbench dataset fetch" in str(excinfo.value)
+    assert "llmctxbench dataset fetch" in str(excinfo.value)
 
 
 def test_execute_rejects_missing_planned_materialization_without_fetching(

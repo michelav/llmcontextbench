@@ -5,7 +5,7 @@
 
 SPECIFY_FEATURE_DIRECTORY=specs/001-command-model-and-phase-renaming
 
-Create a spec for migrating the public CLI and phase terminology to the target CTXBench architecture.
+Create a spec for migrating the public CLI and phase terminology to the target LLMContextBench architecture.
 
 Use docs/architecture as the source of target vocabulary.
 

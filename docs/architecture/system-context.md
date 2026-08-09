@@ -6,7 +6,7 @@
 flowchart LR
     R["Researcher / Experiment Designer"]
     A["Analyst / Reviewer"]
-    C["CTXBench<br/>Python CLI benchmark runner"]
+    C["LLMContextBench<br/>Python CLI benchmark runner"]
     D["Dataset package<br/>instances, tasks, context artifacts"]
     L["LLM providers<br/>OpenAI, Google, Anthropic, etc."]
     M["Remote MCP server<br/>optional"]
@@ -22,6 +22,6 @@ flowchart LR
 
 ## Explanation
 
-CTXBench is a local/CI-executed research tool that orchestrates benchmark experiments over dataset packages and LLM providers.
+LLMContextBench is a local/CI-executed research tool that orchestrates benchmark experiments over dataset packages and LLM providers.
 
 It can optionally interact with remote MCP servers when evaluating protocol-based context provisioning.

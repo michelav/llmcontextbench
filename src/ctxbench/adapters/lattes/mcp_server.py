@@ -122,7 +122,7 @@ def _default_contexts_dir() -> str:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the CTXBench Lattes MCP server.")
+    parser = argparse.ArgumentParser(description="Run the LLMContextBench Lattes MCP server.")
     parser.add_argument(
         "--transport",
         choices=["stdio", "streamable-http", "http", "sse"],

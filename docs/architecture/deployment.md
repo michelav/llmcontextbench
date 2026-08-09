@@ -4,14 +4,14 @@
 
 This diagram documents the physical/runtime topology.
 
-This is the best C4 view for showing where the CTXBench Python process runs, where artifacts are stored, where LLM providers are called, and how local and remote MCP differ.
+This is the best C4 view for showing where the LLMContextBench Python process runs, where artifacts are stored, where LLM providers are called, and how local and remote MCP differ.
 
 ## Deployment: inline and local function strategies
 
 ```mermaid
 flowchart TB
     subgraph Node1["Researcher workstation or CI runner"]
-        CLI["CTXBench Python process<br/>ctxbench"]
+        CLI["LLMContextBench Python process<br/>llmctxbench"]
         FS["Local filesystem<br/>dataset, experiments, outputs"]
         FUNC["Local Python functions<br/>local_function strategy"]
     end
@@ -28,7 +28,7 @@ flowchart TB
 ```mermaid
 flowchart TB
     subgraph Node1["Researcher workstation or CI runner"]
-        CLI["CTXBench Python process<br/>ctxbench"]
+        CLI["LLMContextBench Python process<br/>ctxbench"]
         FS["Local filesystem<br/>dataset, experiments, outputs"]
         subgraph MCPLOCAL["Local MCP runtime"]
             MCPC["MCP client"]
@@ -50,7 +50,7 @@ flowchart TB
 ```mermaid
 flowchart TB
     subgraph Node1["Researcher workstation or CI runner"]
-        CLI["CTXBench Python process<br/>ctxbench"]
+        CLI["LLMContextBench Python process<br/>ctxbench"]
         FS["Local filesystem<br/>experiment outputs"]
     end
 
@@ -73,9 +73,9 @@ flowchart TB
 
 | Strategy | Runtime topology |
 |---|---|
-| `inline` | CTXBench reads local context and sends it to provider in the model input. |
-| `local_function` | CTXBench executes local Python functions that read local dataset artifacts. |
-| `local_mcp` | CTXBench uses a local MCP client/server boundary, usually with local files. |
+| `inline` | LLMContextBench reads local context and sends it to provider in the model input. |
+| `local_function` | LLMContextBench executes local Python functions that read local dataset artifacts. |
+| `local_mcp` | LLMContextBench uses a local MCP client/server boundary, usually with local files. |
 | `remote_mcp` | Provider/model interacts with a remote MCP server that reads a remote or service-side context store. |
 
 ## Why deployment matters for MCP
@@ -83,7 +83,7 @@ flowchart TB
 The remote MCP strategy changes the physical architecture:
 
 ```text
-- context serving moves out of the CTXBench process
+- context serving moves out of the LLMContextBench process
 - a network boundary is introduced
 - part of the tool loop may become provider-managed
 - observability can decrease

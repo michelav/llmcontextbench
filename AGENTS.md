@@ -101,24 +101,27 @@ The benchmark workflow is:
 
 ```text
 experiment config
-  -> ctxbench plan
+  -> llmctxbench plan
   -> trials.jsonl + manifest.json
-  -> ctxbench execute
+  -> llmctxbench execute
   -> responses.jsonl + execution traces
-  -> ctxbench eval
+  -> llmctxbench eval
   -> evals.jsonl + judge_votes.jsonl + eval traces
-  -> ctxbench export
+  -> llmctxbench export
   -> results.csv
+  -> llmctxbench metrics
+  -> metrics/ (dimension CSVs + summary.json)
 ```
 
 Use current CLI commands:
 
 ```bash
-ctxbench plan
-ctxbench execute
-ctxbench eval
-ctxbench export
-ctxbench status
+llmctxbench plan
+llmctxbench execute
+llmctxbench eval
+llmctxbench export
+llmctxbench metrics
+llmctxbench status
 ```
 
 Do not introduce documentation or scripts using obsolete command names.
@@ -128,7 +131,9 @@ Do not introduce documentation or scripts using obsolete command names.
 The implementation may still contain legacy internal names such as `copa`.
 
 The target public architecture uses `ctxbench`, `execute`, `trials.jsonl`, `responses.jsonl`,
-`trialId`, `taskId`, and `response`.
+`trialId`, `taskId`, and `response`. The installed CLI command is `llmctxbench`; the Python
+package/import path and dataset-namespace identifiers (`ctxbench/lattes`, `ctxbench/repoqa`)
+remain `ctxbench`.
 
 Treat legacy names as migration details, not permanent public concepts. New specs, docs, examples,
 and code should prefer target terminology unless explicitly working on compatibility.
@@ -217,6 +222,7 @@ pytest -k plan
 pytest -k execute
 pytest -k eval
 pytest -k export
+pytest -k metrics
 pytest -k cli
 ```
 
@@ -230,8 +236,8 @@ Do not change lockfiles unless dependency changes are explicitly requested.
 Never run these commands against real providers unless explicitly requested:
 
 ```bash
-ctxbench execute
-ctxbench eval
+llmctxbench execute
+llmctxbench eval
 ```
 
 Before running provider-backed commands, state the likely cost or risk.

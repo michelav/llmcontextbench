@@ -9,7 +9,7 @@ flowchart TB
     Cache["Local dataset cache"]
     DatasetRoot["Local dataset root"]
 
-    subgraph CTX["CTXBench Python application"]
+    subgraph CTX["LLMContextBench Python application"]
         CLI["CLI Layer"]
         EXP["Experiment Loader"]
         RES["Dataset Resolver"]

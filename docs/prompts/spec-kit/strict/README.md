@@ -1,4 +1,4 @@
-# CTXBench Prompt Templates
+# LLMContextBench Prompt Templates
 
 Reusable prompt templates for running a specification-driven workflow with Spec Kit, Claude, and Codex.
 

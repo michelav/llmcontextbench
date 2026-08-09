@@ -1,6 +1,6 @@
 # Artifact Contracts
 
-This document is the authoritative reference for the CTXBench artifact set, artifact classification, legacy no-alias policy, and metric provenance taxonomy.
+This document is the authoritative reference for the LLMContextBench artifact set, artifact classification, legacy no-alias policy, and metric provenance taxonomy.
 
 ## Artifact lifecycle
 
@@ -13,6 +13,13 @@ This document is the authoritative reference for the CTXBench artifact set, arti
 | `judge_votes.jsonl` | `eval` | `canonical` | Evaluation artifacts |
 | `evals-summary.json` | `eval` | `derived` | Analysis-ready exports |
 | `results.csv` | `export` | `derived` | Analysis-ready exports |
+| `metrics/trial_metrics.csv` | `metrics` | `derived` | Analysis-ready exports |
+| `metrics/aggregate_metrics.csv` | `metrics` | `derived` | Analysis-ready exports |
+| `metrics/dimension_summary.csv` | `metrics` | `derived` | Analysis-ready exports |
+| `metrics/summary.json` | `metrics` | `derived` | Analysis-ready exports |
+| `metrics/failure_cases.csv` | `metrics` | `derived` | Analysis-ready exports |
+| `metrics/dimensions/{effectiveness,efficiency,robustness,evaluation_reliability,observability}.csv` | `metrics` | `derived` | Analysis-ready exports |
+| `metrics/metrics-manifest.json` | `metrics` | `derived` | Analysis-ready exports |
 | `traces/executions/<trialId>.json` | `execute` | `canonical` | Traces |
 | `traces/evals/<trialId>.json` | `eval` | `canonical` | Traces |
 
@@ -20,7 +27,7 @@ This document is the authoritative reference for the CTXBench artifact set, arti
 
 Canonical artifacts are the authoritative record of a benchmark phase.
 
-Derived artifacts are reproducible from canonical artifacts without re-invoking providers. Regenerating `evals-summary.json` or `results.csv` must not require re-running `ctxbench execute` or `ctxbench eval`.
+Derived artifacts are reproducible from canonical artifacts without re-invoking providers. Regenerating `evals-summary.json` or `results.csv` must not require re-running `llmctxbench execute` or `llmctxbench eval`.
 
 ## Execution Artifacts
 
@@ -71,6 +78,11 @@ Analysis-ready exports are reproducible summaries or tabular outputs intended fo
 
 - `evals-summary.json` is an eval-phase derived artifact reproducible from evaluation-phase canonical artifacts without provider re-runs.
 - `results.csv` is an export-phase derived artifact reproducible from canonical artifacts without provider re-runs.
+- `metrics/*` are metrics-phase derived artifacts, computed by `llmctxbench metrics` from one or more
+  run directories' canonical execution/evaluation artifacts, without provider re-runs. They cover
+  five metric dimensions (effectiveness, efficiency, robustness, evaluation reliability,
+  observability); see the metric provenance taxonomy below for how individual metric values within
+  them are classified.
 
 ## Traces
 

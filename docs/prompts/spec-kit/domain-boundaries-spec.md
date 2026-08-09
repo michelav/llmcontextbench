@@ -5,7 +5,7 @@
 
 SPECIFY_FEATURE_DIRECTORY=specs/003-domain-architecture-boundaries
 
-Create a spec for making CTXBench domain-neutral.
+Create a spec for making LLMContextBench domain-neutral.
 
 Goal:
 Lattes must become one domain implementation, not a benchmark core assumption.

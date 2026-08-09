@@ -198,21 +198,21 @@ def main() -> int:
     write_context_artifacts(output_root=output_root, prepared=prepared)
     write_instances_index(output_root=output_root, prepared=prepared)
 
-    print(f"Generated CTXBench RepoQA package: {output_root}")
+    print(f"Generated LLMContextBench RepoQA package: {output_root}")
     print(f"Base needles: {len(base_needles)}")
     print(f"Context sizes: {', '.join(str(size) for size in context_sizes)}")
     print(f"Instances: {len(prepared)}")
     print(f"Task: {DEFAULT_TASK_ID}")
     print(f"Validation: {DEFAULT_VALIDATION_TYPE}")
     print("Next:")
-    print(f"  ctxbench dataset inspect {output_root}")
+    print(f"  llmctxbench dataset inspect {output_root}")
     return 0
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Convert RepoQA data into a CTXBench dataset package while using "
+            "Convert RepoQA data into a LLMContextBench dataset package while using "
             "RepoQA's native code-context generation."
         )
     )
@@ -224,7 +224,7 @@ def parse_args() -> argparse.Namespace:
             "repoqa.data.get_repoqa_data(), which may download/cache the default RepoQA release."
         ),
     )
-    parser.add_argument("--output", required=True, help="Output CTXBench dataset root, e.g. datasets/repoqa.")
+    parser.add_argument("--output", required=True, help="Output LLMContextBench dataset root, e.g. datasets/repoqa.")
     parser.add_argument("--dataset-id", default=DEFAULT_DATASET_ID)
     parser.add_argument("--version", default="2024-06-23-experimental.1")
     parser.add_argument(
@@ -581,7 +581,7 @@ def prepare_single_native_instance(
 
 
 def render_model_code_context(*, language: str, repo: str, primary_path: str, native_code_context: str) -> str:
-    """Render CTXBench's text context.
+    """Render LLMContextBench's text context.
 
     The model-facing text context adds repository/file orientation but no token
     or analysis metadata. native_code_context.txt keeps the exact RepoQA output.

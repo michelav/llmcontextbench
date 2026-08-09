@@ -1,4 +1,4 @@
-# CTXBench Redesign Spec Roadmap
+# LLMContextBench Redesign Spec Roadmap
 
 ## Status legend
 
@@ -15,7 +15,7 @@
 |---|---|---|---|---|---|---|
 | `001-command-model-and-phase-renaming` | Rename CLI, commands, and phase terminology. | Architecture docs | `002` | draft | TBD | Keep compatibility explicit. |
 | `002-artifact-contracts-and-migration` | Define canonical/derived artifacts and migration. | `001` | `003`, `004` | draft | TBD | Include metric provenance. |
-| `003-domain-architecture-boundaries` | Make CTXBench core domain-neutral. | `001`, `002` | `004`, `005`, `006` | draft | TBD | Avoid plugin framework until needed. |
+| `003-domain-architecture-boundaries` | Make LLMContextBench core domain-neutral. | `001`, `002` | `004`, `005`, `006` | draft | TBD | Avoid plugin framework until needed. |
 | `004-dataset-artifact-model` | Define domain-neutral artifact roles and representations. | `002`, `003` | `005`, `006` | draft | TBD | Separate context from evidence. |
 | `005-lattes-dataset-migration` | Migrate Lattes to the artifact model. | `004` | `006` | draft | TBD | Preserve behavior. |
 | `006-software-repository-domain` | Add software repository domain. | `003`, `004`, `005` | Future experiments | deferred | TBD | Do not detail too early. |

@@ -302,7 +302,7 @@ def export_command(
         logger.error(
             "EXPORT",
             "export.failed",
-            f"Responses file not found: {responses_path}. Run 'ctxbench execute' first.",
+            f"Responses file not found: {responses_path}. Run 'llmctxbench execute' first.",
             path=str(responses_path),
         )
         return 1

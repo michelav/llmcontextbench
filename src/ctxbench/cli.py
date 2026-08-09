@@ -176,7 +176,7 @@ def _metrics_selector_from_args(args: argparse.Namespace) -> RunSelector:
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="ctxbench", description="CTXBench benchmark CLI")
+    parser = argparse.ArgumentParser(prog="llmctxbench", description="LLMContextBench benchmark CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # ── ctxbench dataset ───────────────────────────────────────────────────

@@ -16,13 +16,13 @@ from ctxbench.cli import _selector_from_args, build_parser, main
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_public_cli_parser_uses_ctxbench_prog_name():
+def test_public_cli_parser_uses_llmctxbench_prog_name():
     parser = build_parser()
 
-    assert parser.prog == "ctxbench"
+    assert parser.prog == "llmctxbench"
     help_output = parser.format_help()
-    assert "usage: ctxbench" in help_output
-    assert "CTXBench benchmark CLI" in help_output
+    assert "usage: llmctxbench" in help_output
+    assert "LLMContextBench benchmark CLI" in help_output
 
 
 def test_public_cli_exposes_execute_command_in_help():
@@ -56,7 +56,7 @@ def test_metrics_help_exposes_artifact_options(capsys):
 
     assert excinfo.value.code == 0
     out = capsys.readouterr().out
-    assert "usage: ctxbench metrics" in out
+    assert "usage: llmctxbench metrics" in out
     assert "--output" in out
     assert "--group-by" in out
     assert "--execution-status" in out
@@ -72,7 +72,7 @@ def test_execute_help_uses_target_public_terms(capsys):
 
     assert excinfo.value.code == 0
     out = capsys.readouterr().out
-    assert "usage: ctxbench execute" in out
+    assert "usage: llmctxbench execute" in out
     assert "Path to trials.jsonl" in out
     assert "responses already exist" in out
 
@@ -112,20 +112,20 @@ def test_execute_parser_maps_target_selector_flags():
     assert selector.not_repetition == (3,)
 
 
-def test_pyproject_exposes_ctxbench_script_only():
+def test_pyproject_exposes_llmctxbench_script_only():
     pyproject = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     scripts = pyproject["project"]["scripts"]
 
-    assert scripts["ctxbench"] == "ctxbench.cli:main"
-    assert set(scripts) == {"ctxbench"}
+    assert scripts["llmctxbench"] == "ctxbench.cli:main"
+    assert set(scripts) == {"llmctxbench"}
 
 
-def test_flake_exposes_ctxbench_binary_and_app():
+def test_flake_exposes_llmctxbench_binary_and_app():
     flake = (REPO_ROOT / "flake.nix").read_text(encoding="utf-8")
 
-    assert 'name = "ctxbench";' in flake
-    assert '"$out/bin/ctxbench"' in flake
-    assert 'program = "${ctxbenchPkg}/bin/ctxbench";' in flake
+    assert 'name = "llmctxbench";' in flake
+    assert '"$out/bin/llmctxbench"' in flake
+    assert 'program = "${ctxbenchPkg}/bin/llmctxbench";' in flake
     assert '--add-flags "ctxbench.cli"' in flake
 
 

@@ -176,7 +176,7 @@ class DatasetResolver:
             if not matches:
                 raise DatasetNotFoundError(
                     f"Dataset {dataset_ref.id}@{dataset_ref.version} was not found in the local cache. "
-                    "Run ctxbench dataset fetch to materialize it first."
+                    "Run llmctxbench dataset fetch to materialize it first."
                 )
             manifest = matches[0]
             adapter_ref = DatasetProvenance(
