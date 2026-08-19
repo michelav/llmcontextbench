@@ -18,6 +18,21 @@ Primary comparison dimensions include:
 - judge agreement
 - reproducibility
 
+## Publications
+
+This project is associated with two papers published at SBES 2026:
+
+- **Research Track:**  
+  [*Evaluating Context Provisioning Strategies for LLM-Based Systems: An Empirical Study with the Lattes Platform*](./publications/llmctxbench-sbes2026-research-track.pdf)
+
+- **Tools Track:**  
+  [*LLMContextBench: A Benchmark Tool for Evaluating Context Provisioning Strategies in LLM-Based Systems*](./publications/llmctxbench-sbes2026-tool-track.pdf)
+
+The Research Track paper presents the empirical study that evaluates different
+context provisioning strategies, while the Tools Track paper presents
+LLMContextBench, the infrastructure developed to support reproducible and
+extensible experiments.
+
 ## Repository Organization
 
 The current public CLI command is `llmctxbench`. The underlying Python
@@ -478,6 +493,19 @@ Legacy names such as `copa`, `query`, `queries.jsonl`, `answers.jsonl`,
 `runId`, `questionId`, and `answer` may still appear in historical specs,
 generated metadata, or migration notes. New documentation, examples, and public
 interfaces should use the current terminology.
+
+## Citing
+
+If you use LLMContextBench in your research, please cite the Tools Track paper:
+
+> *LLMContextBench: A Benchmark Tool for Evaluating Context Provisioning
+> Strategies in LLM-Based Systems*. SBES 2026, Tools Track.
+
+If your work relies on the Lattes empirical study or its experimental results,
+please also cite:
+
+> *Evaluating Context Provisioning Strategies for LLM-Based Systems:
+> An Empirical Study with the Lattes Platform*. SBES 2026, Research Track.
 
 ## License
 
