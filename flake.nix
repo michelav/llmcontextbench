@@ -93,8 +93,6 @@
             pkgs.ruff
             pkgs.uv
             pkgs.git
-            pkgs.codex
-            pkgs.claude-code
             pkgs.duckdb
           ];
 
