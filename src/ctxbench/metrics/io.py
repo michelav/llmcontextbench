@@ -87,13 +87,6 @@ def _read_optional_jsonl(path: Path) -> list[dict[str, Any]]:
     return read_jsonl(path) if path.exists() else []
 
 
-def _load_json(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return payload if isinstance(payload, dict) else None
-
-
 def _validate_unique_trial_ids(inputs: list[ExperimentArtifacts]) -> None:
     seen: dict[str, Path] = {}
     for artifacts in inputs:

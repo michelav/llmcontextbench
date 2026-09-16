@@ -62,7 +62,7 @@ def _write_eval_fixture(root: Path) -> Path:
 
     (root / "manifest.json").write_text(
         json.dumps(
-            {
+            {"provisioningArtifactVersion": 1, "configurations": {"inline-json": {"strategy": "inline", "representation": "json"}},
                 "experimentId": "exp_mock",
                 "trialId": "run-1",
                 "taskId": "q_one",
@@ -91,7 +91,8 @@ def _write_eval_fixture(root: Path) -> Path:
                         "modelId": "model",
                         "modelName": "model",
                         "strategy": "inline",
-                        "format": "json",
+                        "representation": "json",
+                        "configurationId": "inline-json",
                         "repeatIndex": 1,
                         "dataset": {"root": str(dataset_root.resolve())},
                         "taskStatement": "Task one?",
@@ -103,7 +104,8 @@ def _write_eval_fixture(root: Path) -> Path:
                             "modelId": "model",
                             "modelName": "model",
                             "strategy": "inline",
-                            "format": "json",
+                            "representation": "json",
+                            "configurationId": "inline-json",
                             "repeatIndex": 1,
                             "validationType": "judge",
                             "parameters": {},
@@ -132,7 +134,8 @@ def _write_eval_fixture(root: Path) -> Path:
                         "modelId": "model",
                         "modelName": "model",
                         "strategy": "inline",
-                        "format": "json",
+                        "representation": "json",
+                        "configurationId": "inline-json",
                         "repeatIndex": 1,
                         "validationType": "judge",
                         "outputRoot": str(root.resolve()),
@@ -157,7 +160,8 @@ def _write_eval_fixture(root: Path) -> Path:
                             "modelId": "model",
                             "modelName": "model",
                             "strategy": "inline",
-                            "format": "json",
+                            "representation": "json",
+                            "configurationId": "inline-json",
                             "repeatIndex": 1,
                             "validationType": "judge",
                             "parameters": {},
@@ -280,7 +284,7 @@ def test_export_reads_responses_and_emits_target_fields(tmp_path):
 
     (root / "evals.jsonl").write_text(
         json.dumps(
-            {
+            {"configurationId": "inline-json", "representation": "json", "metadata": {"configurationId": "inline-json", "strategy": "inline", "representation": "json"},
                 "trialId": "run-1",
                 "experimentId": "exp_mock",
                 "instanceId": "cv_demo",
@@ -352,7 +356,7 @@ def test_status_counts_trials_and_responses(tmp_path, capsys):
         "\n".join(
             [
                 json.dumps(
-                    {
+                    {"configurationId": "inline-json", "representation": "json", "strategy": "inline", "metadata": {"configurationId": "inline-json", "strategy": "inline", "representation": "json"},
                         "trialId": "run-1",
                         "experimentId": "exp_mock",
                         "instanceId": "cv_demo",

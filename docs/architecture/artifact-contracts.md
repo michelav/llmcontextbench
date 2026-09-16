@@ -2,6 +2,38 @@
 
 This document is the authoritative reference for the LLMContextBench artifact set, artifact classification, legacy no-alias policy, and metric provenance taxonomy.
 
+## Provisioning contract v1 (clean break)
+
+Every lifecycle input requires `manifest.json` with `provisioningArtifactVersion: 1`
+and a nonempty `configurations` map of selected IDs to `{strategy, representation}`.
+Trials and responses persist `configurationId`, `strategy`, and `representation`
+both at the root and in shared trial metadata. Evaluations inherit that metadata
+and expose the same fields. Readers reject disagreement with the planned manifest.
+Judge votes continue to link through `trialId`; their voting and cost semantics are unchanged.
+
+IDs match `^[a-z][a-z0-9_.-]*$`. Definitions accept exactly two required fields.
+Tool strategies require `json`; inline availability is the dataset adapter's
+responsibility. Legacy factor axes and legacy artifacts are rejected, never inferred
+or upgraded in place. Historical files require the previous benchmark version.
+Plan a new experiment with explicit configurations in a fresh directory; planning
+refuses to overwrite an existing execution snapshot.
+
+Canonical trial identity is sorted, compact JSON containing `identityVersion: 2`,
+`experimentId`, `taskId`, `instanceId`, `provider`, `modelName`, `repeatIndex`,
+`configurationId` and the resolved `configuration` definition. SHA-256 short IDs
+retain collision handling. Changing an ID or definition changes identity; key order
+does not. Later edits to the experiment do not affect planned trials.
+
+CSV export includes the three treatment fields. Metrics summary and manifest schema
+versions are `2.0`; default grouping is `dataset_id,configurationId`. Their manifest
+snapshots input definitions. Equal definitions with distinct IDs remain distinct;
+unequal definitions with the same ID cannot be combined. Robustness uses the
+`representation` axis and `primary_success_rate_range_by_representation` column.
+Strategy aggregation discloses when it pools multiple configurations.
+
+Future operation profiles are deferred. Any future typed `operationProfile` must
+include its resolved content in identity; no placeholder fields are accepted now.
+
 ## Artifact lifecycle
 
 | Artifact | Producing phase | Class | Role |
@@ -97,7 +129,7 @@ Execution traces record dataset-context metadata using the adapter-boundary voca
 
 - `instance_id`: canonical instance identifier.
 - `context_representation`: the requested logical context representation, derived from the
-  trial `format` value and passed to `DatasetPackage.get_context(..., representation)`.
+  trial `representation` value and passed to `DatasetPackage.get_context(..., representation)`.
 - `context_obtained`: `true` when the execute phase obtained model-facing context through
   `get_context`; `false` for tool-mediated strategies.
 

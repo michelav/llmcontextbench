@@ -74,9 +74,9 @@ The distribution envelope must provide the capabilities below.
 5. Instance loading: enumerate and resolve dataset instances.
 6. Task loading: enumerate and resolve dataset tasks.
 7. Artifact resolution: locate the artifacts required by planning, execution, and evaluation.
-8. Context artifact provider: supply the artifact a strategy uses for `(instanceId, taskId, strategy, format)`.
+8. Context artifact provider: supply the artifact a strategy uses for `(instanceId, taskId, representation)`.
 9. Evidence artifact provider: supply the evaluation evidence artifact used by the judge path.
-10. Format-specific readers: keep format-specific decoding inside the dataset package.
+10. Representation-specific readers: keep representation-specific decoding inside the dataset package.
 11. Fixture coverage: expose at least one provider-free fixture suitable for conformance tests.
 
 ## Optional extension points

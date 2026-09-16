@@ -400,6 +400,10 @@ class Experiment(BaseModel):
     execution: ExperimentExecution = Field(default_factory=ExperimentExecution)
     artifacts: ExperimentArtifacts = Field(default_factory=ExperimentArtifacts)
 
+    def __init__(self, **data: Any) -> None:
+        super().__init__(**data)
+        self._validate_model()
+
     @classmethod
     def model_validate(cls, data: Any) -> "Experiment":
         if isinstance(data, cls):
@@ -412,9 +416,12 @@ class Experiment(BaseModel):
         if "scope" in payload:
             payload["scope"] = ExperimentScope.model_validate(payload["scope"])
 
+        configurations = payload.get("configurations")
+        if not isinstance(configurations, dict) or not configurations:
+            raise ValueError("Experiment requires nonempty top-level configurations and factors.configuration; legacy strategy/format factors are unsupported.")
         payload["configurations"] = {
             key: ProvisioningConfiguration.model_validate(value)
-            for key, value in payload.get("configurations", {}).items()
+            for key, value in configurations.items()
         }
         # New format: top-level "models" section present
         if "models" in payload and isinstance(payload["models"], dict):
@@ -877,6 +884,13 @@ class EvaluationItemResult(BaseModel):
     evaluationDurationMs: int | None = None
     evaluationTrace: EvaluationTrace = Field(default_factory=EvaluationTrace)
     contextBlocks: list[str] | None = None
+
+    def __init__(self, **data: Any) -> None:
+        super().__init__(**data)
+        for field, metadata_field in (("executionStrategy", "strategy"), ("executionRepresentation", "representation")):
+            value = getattr(self, field)
+            if value is not None and value != getattr(self.metadata, metadata_field):
+                raise ValueError(f"Inconsistent evaluation provisioning field: {field}")
 
     @classmethod
     def model_validate(cls, data: Any) -> "EvaluationItemResult":

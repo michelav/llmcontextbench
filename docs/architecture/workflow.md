@@ -83,7 +83,7 @@ evals-summary.json
 ## Export
 
 ```bash
-llmctxbench export outputs/lattes_baseline_001/evals.jsonl --format csv --output outputs/lattes_baseline_001/results.csv
+llmctxbench export outputs/lattes_baseline_001/evals.jsonl --to csv --output outputs/lattes_baseline_001/results.csv
 ```
 
 Produces:
@@ -146,7 +146,7 @@ No fetch step is required.
 
 | Strategy | Description |
 |---|---|
-| `inline` | Inserts the selected context representation returned by `adapter.get_context(..., representation=format)` directly into the model input. |
+| `inline` | Inserts the selected context representation returned by `adapter.get_context(..., representation=trial.representation)` directly into the model input. |
 | `local_function` | Exposes local Python functions while LLMContextBench controls the tool loop. |
 | `local_mcp` | Exposes tools through a local MCP runtime while LLMContextBench controls the loop. |
 | `remote_mcp` | Uses a remote MCP server; provider or remote integration may control part of the loop. |

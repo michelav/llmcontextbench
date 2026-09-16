@@ -72,11 +72,8 @@ def _write_experiment(path: Path, dataset_root: Path) -> Path:
                 "output": "outputs",
                 "dataset": {"root": str(dataset_root)},
                 "scope": {"instances": [], "tasks": []},
-                "factors": {
-                    "model": [{"provider": "mock", "name": "mock"}],
-                    "strategy": ["inline"],
-                    "format": ["json"],
-                },
+                "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['inline-json']},
+                "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json'}},
                 "evaluation": {
                     "enabled": True,
                     "judges": [{"id": "judge-a", "provider": "mock", "model": "judge-a", "temperature": 0}],
@@ -107,7 +104,8 @@ def _fake_execute_runspec(runspec, engine) -> TrialResult:
         modelId=runspec.modelId,
         modelName=runspec.modelName,
         strategy=runspec.strategy,
-        format=runspec.format,
+        representation=runspec.representation,
+        configurationId=runspec.configurationId,
         repeatIndex=runspec.repeatIndex,
         outputRoot=runspec.outputRoot,
         response="2020",

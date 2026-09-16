@@ -42,7 +42,8 @@ def make_metadata() -> TrialMetadata:
         modelId="mock",
         modelName="mock",
         strategy="inline",
-        format="json",
+        representation="json",
+        configurationId="inline-json",
         repeatIndex=1,
         taskTags=["objective"],
         validationType="judge",
@@ -64,7 +65,8 @@ def make_runspec_payload() -> dict[str, object]:
         "modelId": "mock",
         "provider": "mock",
         "strategy": "inline",
-        "format": "json",
+        "representation": "json",
+        "configurationId": "inline-json",
         "params": {},
         "repeatIndex": 1,
         "outputRoot": "/tmp/output",
@@ -84,7 +86,8 @@ def make_runspec_payload() -> dict[str, object]:
             "modelId": "mock",
             "modelName": "mock",
             "strategy": "inline",
-            "format": "json",
+            "representation": "json",
+            "configurationId": "inline-json",
             "repeatIndex": 1,
             "taskTags": ["objective"],
             "validationType": "judge",
@@ -107,7 +110,8 @@ def make_runresult_payload() -> dict[str, object]:
         "modelId": "mock",
         "model": "mock",
         "strategy": "inline",
-        "format": "json",
+        "representation": "json",
+        "configurationId": "inline-json",
         "repeatIndex": 1,
         "outputRoot": "/tmp/output",
         "status": "success",
@@ -130,7 +134,8 @@ def make_runresult_payload() -> dict[str, object]:
             "modelId": "mock",
             "modelName": "mock",
             "strategy": "inline",
-            "format": "json",
+            "representation": "json",
+            "configurationId": "inline-json",
             "repeatIndex": 1,
             "taskTags": ["objective"],
             "validationType": "judge",
@@ -236,6 +241,7 @@ def test_runresult_model_validate_rejects_legacy_metadata_field():
 
 def test_evaluation_item_serializers_use_trial_and_task_ids():
     item = EvaluationItemResult(
+        metadata=make_metadata(),
         experimentId="exp-1",
         trialId="trial-1",
         dataset=DatasetProvenance(
@@ -288,7 +294,8 @@ def test_evaluation_run_result_model_validate_rejects_legacy_public_fields():
         "modelId": "mock",
         "modelName": "mock",
         "strategy": "inline",
-        "format": "json",
+        "representation": "json",
+        "configurationId": "inline-json",
         "repeatIndex": 1,
     }
 

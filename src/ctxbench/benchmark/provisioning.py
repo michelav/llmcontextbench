@@ -19,7 +19,8 @@ def validate_manifest(root: Path) -> dict[str, Any]:
     if not path.exists():
         raise ValueError(f"{LEGACY_MESSAGE} Missing {path}.")
     manifest = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(manifest, dict) or type(manifest.get("provisioningArtifactVersion")) is not int or manifest["provisioningArtifactVersion"] != PROVISIONING_ARTIFACT_VERSION:
+    version = manifest.get("provisioningArtifactVersion") if isinstance(manifest, dict) else None
+    if type(version) is not int or version != PROVISIONING_ARTIFACT_VERSION:
         raise ValueError(LEGACY_MESSAGE)
     configurations = manifest.get("configurations")
     if not isinstance(configurations, dict) or not configurations:

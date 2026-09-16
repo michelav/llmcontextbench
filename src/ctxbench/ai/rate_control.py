@@ -509,6 +509,7 @@ class RateLimitedModelAdapter(ModelAdapter):
             "modelId",
             "modelName",
             "representation",
+            "configurationId",
             "repeatIndex",
             "validationType",
             "judgeId",

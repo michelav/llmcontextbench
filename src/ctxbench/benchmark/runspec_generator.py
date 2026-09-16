@@ -188,7 +188,7 @@ def generate_runspecs(
                     modelName=item["modelName"],
                     strategy=item["strategy"],
                     representation=item["representation"],
-                configurationId=item["configurationId"],
+                    configurationId=item["configurationId"],
                     repeatIndex=item["repeatIndex"],
                     taskTags=item["taskTags"],
                     validationType=item["validationType"],

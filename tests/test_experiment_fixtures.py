@@ -44,7 +44,7 @@ def test_lattes_adapter_experiment_fixture_omits_adapter_implementation_details(
 def test_lattes_adapter_experiment_fixture_formats_are_plain_strings() -> None:
     payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 
-    formats = payload.get("factors", {}).get("format", [])
+    formats = [value["representation"] for value in payload["configurations"].values()]
 
     assert formats
     assert all(isinstance(value, str) and value for value in formats)

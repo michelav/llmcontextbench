@@ -61,3 +61,12 @@ tools/repoqa/repoqa_build_dataset \
 ```
 
 Provider-backed ctxbench execution and evaluation remain separate. Do not use this tool environment to run `llmctxbench execute` or `llmctxbench eval` against real providers.
+
+## Exporting native RepoQA model outputs
+
+Run `tools/repoqa/export_repoqa_outputs.py` in the benchmark Python environment. It
+requires the provisioning manifest and validates canonical responses before export.
+Use `--configuration ID`, `--strategy NAME`, or `--representation NAME` to filter;
+`--split` writes separate files per model and persisted configuration ID. Native
+output rows retain `configurationId`, `strategy`, and `representation` in `ctxbench`
+metadata. Historical outputs require the previous benchmark version.

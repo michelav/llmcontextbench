@@ -1,4 +1,3 @@
-from copy import deepcopy
 import json
 from pathlib import Path
 
@@ -6,7 +5,6 @@ import pytest
 
 from ctxbench.benchmark.models import Experiment, ProvisioningConfiguration, TrialSpec
 from ctxbench.benchmark.runspec_generator import generate_runspecs
-from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.benchmark.models import DatasetProvenance
 from ctxbench.util.artifacts import canonical_trial_identity
 
@@ -65,10 +63,9 @@ def test_identity_encodes_configuration_and_structured_dimensions():
     assert first != canonical_trial_identity(**{**args, 'experiment_id': 'e', 'task_id': 'x|t'})
 
 
-def test_planned_lifecycle_uses_configuration_snapshot(tmp_path, monkeypatch):
+def test_planned_lifecycle_uses_configuration_snapshot(tmp_path):
     from ctxbench.commands.plan import plan_command
     from ctxbench.commands.execute import execute_command
-    from ctxbench.commands.eval import eval_command
     from ctxbench.benchmark.provisioning import validate_artifact_directory
     payload = experiment_payload()
     payload['dataset']['root'] = str(Path(payload['dataset']['root']).resolve())
@@ -130,6 +127,8 @@ def test_reporting_preserves_distinct_ids_and_rejects_conflicts(tmp_path, capsys
     assert main(['status', str(out), '--by', 'configuration']) == 0
     assert main(['metrics', str(out), '--group-by', 'strategy', '--output', str(tmp_path / 'pooled')]) == 0
     assert 'pool multiple configurations' in capsys.readouterr().err
+    pooled = json.loads((tmp_path / 'pooled/summary.json').read_text())
+    assert pooled['pooledConfigurations'] == [{'group': {'strategy': 'inline'}, 'configurationIds': ['first', 'second']}]
     assert main(['metrics', str(out), '--configuration', 'first', '--not-representation', 'html', '--output', str(tmp_path / 'selected')]) == 0
     assert len(list(csv.DictReader((tmp_path / 'selected/trial_metrics.csv').open()))) == 1
     p['id'] = 'different-experiment'
@@ -139,3 +138,21 @@ def test_reporting_preserves_distinct_ids_and_rejects_conflicts(tmp_path, capsys
     plan_command(str(path), str(other), cache_dir=tmp_path / 'cache')
     with pytest.raises(ValueError, match='Conflicting definitions'):
         load_inputs([str(out), str(other)], PhaseLogger())
+
+
+@pytest.mark.parametrize("artifact", ["trials", "responses", "evals"])
+def test_artifact_definition_disagreement_rejected(tmp_path, artifact):
+    from ctxbench.benchmark.provisioning import validate_artifact_directory
+    definition = {"strategy": "inline", "representation": "json"}
+    (tmp_path / "manifest.json").write_text(json.dumps({"provisioningArtifactVersion": 1, "configurations": {"a": definition}}))
+    row = {"trialId": "t", "configurationId": "a", **definition, "metadata": {"configurationId": "a", **definition}}
+    row["representation"] = "html"
+    (tmp_path / f"{artifact}.jsonl").write_text(json.dumps(row) + "\n")
+    with pytest.raises(ValueError, match="Inconsistent provisioning field representation"):
+        validate_artifact_directory(tmp_path)
+
+
+def test_direct_experiment_constructor_validates_references():
+    from ctxbench.benchmark.models import ExperimentDataset
+    with pytest.raises(ValueError, match="Undefined configuration"):
+        Experiment(id="bad", dataset=ExperimentDataset(root="/tmp"), factors={"model": [{"provider": "mock", "name": "mock"}], "configuration": ["unknown"]}, configurations={})

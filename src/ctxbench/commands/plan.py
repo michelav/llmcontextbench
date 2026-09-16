@@ -5,7 +5,7 @@ from pathlib import Path
 from ctxbench.adapters.registry import get_default_registry
 from ctxbench.benchmark.experiment_loader import load_experiment
 from ctxbench.benchmark.models import DatasetProvenance
-from ctxbench.benchmark.provisioning import validate_artifact_directory
+from ctxbench.benchmark.provisioning import PROVISIONING_ARTIFACT_VERSION, validate_artifact_directory
 from ctxbench.benchmark.paths import resolve_output_root, resolve_trials_path
 from ctxbench.benchmark.runspec_generator import generate_runspecs
 from ctxbench.dataset.cache import DatasetCache
@@ -114,7 +114,7 @@ def plan_command(
     logger.info("PLAN", "trials.written", "Trials written", path=str(trials_path), total=len(payloads))
 
     manifest = {
-        "provisioningArtifactVersion": 1,
+        "provisioningArtifactVersion": PROVISIONING_ARTIFACT_VERSION,
         "configurations": {key: experiment.configurations[key].model_dump(mode="json") for key in experiment.factors["configuration"]},
         "experimentId": experiment.id,
         "experimentPath": str(Path(path).resolve()),

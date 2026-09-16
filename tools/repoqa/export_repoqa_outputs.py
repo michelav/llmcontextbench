@@ -8,6 +8,8 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from ctxbench.benchmark.provisioning import validate_artifact_directory
+
 
 def main() -> int:
     args = parse_args()
@@ -15,6 +17,7 @@ def main() -> int:
     dataset_root = Path(args.dataset_root).expanduser().resolve()
     output_path = Path(args.output).expanduser().resolve()
 
+    validate_artifact_directory(responses_path.parent)
     rows = read_jsonl(responses_path)
     trials_by_id = read_trials_by_id(Path(args.trials).expanduser().resolve()) if args.trials else {}
 
@@ -28,8 +31,12 @@ def main() -> int:
             skipped.append(skip_record(merged, "response_not_successful"))
             continue
 
-        if args.format and str(merged.get("format") or "") not in set(args.format):
-            skipped.append(skip_record(merged, "format_filtered"))
+        if args.representation and str(merged.get("representation") or "") not in set(args.representation):
+            skipped.append(skip_record(merged, "representation_filtered"))
+            continue
+
+        if args.configuration and str(merged.get("configurationId") or "") not in set(args.configuration):
+            skipped.append(skip_record(merged, "configuration_filtered"))
             continue
 
         if args.strategy and str(merged.get("strategy") or "") not in set(args.strategy):
@@ -102,11 +109,12 @@ def parse_args() -> argparse.Namespace:
         help="Optional path to trials.jsonl. Used to fill metadata if responses are incomplete.",
     )
     parser.add_argument(
-        "--format",
+        "--representation",
         action="append",
         default=[],
-        help="Only export responses with this LLMContextBench format. Can be repeated.",
+        help="Only export responses with this LLMContextBench representation. Can be repeated.",
     )
+    parser.add_argument("--configuration", action="append", default=[], help="Only export this provisioning configuration ID (repeatable).")
     parser.add_argument(
         "--strategy",
         action="append",
@@ -116,7 +124,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--split",
         action="store_true",
-        help="Write one RepoQA JSONL per model/strategy/format combination.",
+        help="Write one RepoQA JSONL per model/configuration combination.",
     )
     parser.add_argument(
         "--success-only",
@@ -209,8 +217,9 @@ def build_repoqa_output_row(*, native_task: dict[str, Any], response: dict[str, 
         "modelId": response.get("modelId"),
         "modelName": response.get("model") or response.get("modelName"),
         "provider": response.get("provider"),
+        "configurationId": response["configurationId"],
         "strategy": response.get("strategy"),
-        "format": response.get("format"),
+        "representation": response.get("representation"),
         "repeatIndex": response.get("repeatIndex"),
         "usage": response.get("usage", {}),
         "metricsSummary": response.get("metricsSummary", {}),
@@ -242,9 +251,8 @@ def write_outputs(*, exported: list[dict[str, Any]], output_path: Path, split: b
 def group_label(row: dict[str, Any]) -> str:
     ctxbench = row.get("ctxbench") if isinstance(row.get("ctxbench"), dict) else {}
     model = ctxbench.get("modelId") or ctxbench.get("modelName") or "model"
-    strategy = ctxbench.get("strategy") or "strategy"
-    fmt = ctxbench.get("format") or "format"
-    return slug("__".join([str(model), str(strategy), str(fmt)]))
+    configuration_id = ctxbench["configurationId"]
+    return f"{slug(str(model))}__{configuration_id}"
 
 
 def skip_record(row: dict[str, Any], reason: str) -> dict[str, Any]:
@@ -254,8 +262,9 @@ def skip_record(row: dict[str, Any], reason: str) -> dict[str, Any]:
         "instanceId": row.get("instanceId"),
         "status": row.get("status"),
         "errorMessage": row.get("errorMessage") or row.get("error"),
+        "configurationId": row.get("configurationId"),
         "strategy": row.get("strategy"),
-        "format": row.get("format"),
+        "representation": row.get("representation"),
     }
 
 

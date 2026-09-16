@@ -87,7 +87,8 @@ Recommended selectors:
 --instance
 --task
 --strategy
---format
+--configuration
+--representation
 --repetition
 --trial
 --trial-file

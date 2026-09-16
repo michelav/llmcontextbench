@@ -78,6 +78,12 @@ def compute_all(rows: list[dict[str, Any]], group_fields: list[str]) -> dict[str
                     merged[item_key] = value
         merged.update(robustness_by_key.get(key, {}))
         aggregate.append({field: merged.get(field) for field in [*group_fields, *AGGREGATE_FIELDS]})
+    summary = _summary(rows, aggregate)
+    summary["pooledConfigurations"] = [
+        {"group": dict(zip(group_fields, key)), "configurationIds": sorted({row["configurationId"] for row in items})}
+        for key, items in grouped
+        if len({row["configurationId"] for row in items}) > 1
+    ]
     return {
         "effectiveness": effectiveness,
         "efficiency": efficiency,
@@ -86,7 +92,7 @@ def compute_all(rows: list[dict[str, Any]], group_fields: list[str]) -> dict[str
         "observability": observability,
         "aggregate": aggregate,
         "dimension_summary": _dimension_summary(group_fields, effectiveness, efficiency, robustness, evaluation, observability),
-        "summary": _summary(rows, aggregate),
+        "summary": summary,
     }
 
 

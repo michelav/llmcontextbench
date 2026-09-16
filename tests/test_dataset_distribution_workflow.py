@@ -61,11 +61,8 @@ def _write_experiment(path: Path, dataset_ref: object) -> Path:
                 "output": "outputs",
                 "dataset": dataset_ref,
                 "scope": {"instances": [], "tasks": []},
-                "factors": {
-                    "model": [{"provider": "mock", "name": "mock"}],
-                    "strategy": ["inline"],
-                    "format": ["json"],
-                },
+                "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['inline-json']},
+                "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json'}},
                 "evaluation": {"enabled": False, "judges": []},
             }
         ),

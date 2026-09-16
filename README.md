@@ -221,7 +221,7 @@ reproducible and safe to extract.
 
 ### 2. Create or Choose an Experiment Config
 
-An experiment selects the dataset, scope, model factors, strategies, formats,
+An experiment selects the dataset, scope, model factors, named provisioning configurations,
 and evaluation settings.
 
 Minimal local-dataset shape:
@@ -244,8 +244,10 @@ Minimal local-dataset shape:
         "name": "mock-model"
       }
     ],
-    "strategy": ["inline"],
-    "format": ["json"]
+    "configuration": ["i-json"]
+  },
+  "configurations": {
+    "i-json": {"strategy": "inline", "representation": "json"}
   },
   "evaluation": {
     "enabled": false,
@@ -256,6 +258,17 @@ Minimal local-dataset shape:
 
 Empty `scope.instances` and `scope.tasks` mean all available instances and
 tasks. Use small scopes for exploratory runs.
+
+A configuration ID is an experiment-defined lowercase identifier. Its definition has
+exactly `strategy` and `representation`; its spelling does not select behavior.
+Select IDs through `factors.configuration`. Tools require `json`; inline supports
+representations supplied by the dataset adapter. Planning expands instances × tasks ×
+models × configurations × repeats and snapshots selected definitions in the manifest.
+
+This is a clean artifact-contract break: historical executions require the previous
+benchmark version. Replace `factors.strategy` / `factors.format` with explicit
+configurations and plan into a fresh directory. Trial IDs change when either the ID
+or its definition changes. See [artifact contracts](docs/architecture/artifact-contracts.md).
 
 For a provider-free smoke-check configuration, see
 `tests/fixtures/fake_dataset/experiment.json`.
@@ -284,7 +297,7 @@ Before execution, status can still summarize what artifacts exist:
 llmctxbench status outputs/getting-started
 ```
 
-Breakdowns are available by `model`, `strategy`, `instance`, `task`, or
+Breakdowns are available by `configuration`, `representation`, `model`, `strategy`, `instance`, `task`, or
 `judge`:
 
 ```bash
@@ -309,7 +322,7 @@ llmctxbench eval outputs/getting-started/responses.jsonl --model mock-model --st
 ```
 
 Selectors include `--model`, `--provider`, `--instance`, `--task`,
-`--strategy`, `--format`, `--repetition`, `--trial`, and `--trial-file`, plus
+`--configuration`, `--strategy`, `--representation`, `--repetition`, `--trial`, and `--trial-file`, plus
 matching `--not-*` variants.
 
 ### 6. Export Results
@@ -510,3 +523,17 @@ please also cite:
 ## License
 
 LLMContextBench is licensed under the [MIT License](LICENSE).
+
+### Configuration comparisons
+
+`llmctxbench metrics outputs/getting-started` groups by `dataset_id,configurationId`.
+Export and metrics retain `configurationId`, `strategy`, and `representation`;
+metrics reject conflicting definitions of one ID across experiments. Strategy-only
+summaries may pool multiple configurations and disclose that pooling.
+`outputs_analysis.ipynb` reads the canonical artifacts, validates the contract and
+uses persisted configuration IDs. Set `CTXBENCH_ANALYSIS_INPUT` to the execution
+directory and optionally `CTXBENCH_ANALYSIS_OUTPUT` to a derived-output directory.
+The notebook retains its judge-vote statistics and separate execution/evaluation costs.
+
+Operation profiles are deferred. A future typed `operationProfile` extension must
+include its resolved content in trial identity; no placeholder or registry exists now.

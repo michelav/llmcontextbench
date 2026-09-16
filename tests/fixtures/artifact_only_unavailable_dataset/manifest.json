@@ -20,5 +20,12 @@
   },
   "trace": {
     "writeFiles": false
+  },
+  "provisioningArtifactVersion": 1,
+  "configurations": {
+    "inline-json": {
+      "strategy": "inline",
+      "representation": "json"
+    }
   }
 }

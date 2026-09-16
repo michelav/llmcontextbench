@@ -43,7 +43,7 @@ def make_request(**overrides: object) -> AIRequest:
         "provider_name": "mock",
         "model_name": "mock",
         "strategy_name": "inline",
-        "context_format": "json",
+        "context_representation": "json",
         "params": {},
         "metadata": {"taskId": "q1", "lattes_id": "cv-demo", "instanceId": "cv-demo"},
     }
@@ -58,11 +58,8 @@ def make_experiment() -> Experiment:
             "output": "outputs",
             "dataset": str((Path.cwd() / "examples" / "datasets" / "lattes").resolve()),
             "scope": {"instances": [], "tasks": []},
-            "factors": {
-                "model": [{"provider": "mock", "name": "mock"}],
-                "strategy": ["inline"],
-                "format": ["json"],
-            },
+            "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['inline-json']},
+            "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json'}},
             "evaluation": {
                 "enabled": True,
                 "judges": [{"provider": "mock", "model": "mock", "temperature": 0}],
@@ -342,7 +339,8 @@ def _runspec_for_executor(
             "provider": provider,
             "model": "recording-model",
             "strategy": strategy,
-            "format": "json",
+            "representation": "json",
+            "configurationId": "inline-json",
             "repeatIndex": 1,
             "params": params or {},
             "trace": {"enabled": True},
@@ -353,7 +351,8 @@ def _runspec_for_executor(
                 "provider": provider,
                 "modelName": "recording-model",
                 "strategy": strategy,
-                "format": "json",
+                "representation": "json",
+                "configurationId": "inline-json",
                 "repeatIndex": 1,
             },
         }
@@ -377,7 +376,8 @@ def _run_result_for_evaluation(dataset: ExperimentDataset) -> TrialResult:
             "provider": "mock",
             "model": "mock",
             "strategy": "inline",
-            "format": "json",
+            "representation": "json",
+            "configurationId": "inline-json",
             "repeatIndex": 1,
             "response": "The PhD was obtained in 2020.",
             "status": "success",
@@ -396,7 +396,8 @@ def _run_result_for_evaluation(dataset: ExperimentDataset) -> TrialResult:
                 "provider": "mock",
                 "modelName": "mock",
                 "strategy": "inline",
-                "format": "json",
+                "representation": "json",
+                "configurationId": "inline-json",
                 "repeatIndex": 1,
             },
         }
@@ -670,11 +671,8 @@ def test_experiment_validation_rejects_bare_mcp_strategy_factor():
                 "output": "outputs",
                 "dataset": "/tmp/dataset",
                 "scope": {"instances": [], "tasks": []},
-                "factors": {
-                    "model": [{"provider": "mock", "name": "mock"}],
-                    "strategy": ["mcp"],
-                    "format": ["json"],
-                },
+                "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['mcp-json']},
+                "configurations": {'mcp-json': {'strategy': 'mcp', 'representation': 'json'}},
             }
         )
 
@@ -693,7 +691,8 @@ def test_runspec_model_validate_rejects_bare_mcp_strategy_in_public_record():
                 "model": "mock",
                 "modelId": "mock",
                 "strategy": "mcp",
-                "format": "json",
+                "representation": "json",
+                "configurationId": "inline-json",
                 "params": {},
                 "repeatIndex": 1,
                 "trace": {"enabled": False, "writeFiles": True, "save_raw_response": False, "save_tool_calls": False, "save_usage": False, "save_errors": False},
@@ -706,7 +705,8 @@ def test_runspec_model_validate_rejects_bare_mcp_strategy_in_public_record():
                     "modelId": "mock",
                     "modelName": "mock",
                     "strategy": "mcp",
-                    "format": "json",
+                    "representation": "json",
+                    "configurationId": "inline-json",
                     "repeatIndex": 1,
                 },
             }
@@ -727,7 +727,8 @@ def test_runresult_model_validate_rejects_bare_mcp_strategy_in_public_record():
                 "model": "mock",
                 "modelId": "mock",
                 "strategy": "mcp",
-                "format": "json",
+                "representation": "json",
+                "configurationId": "inline-json",
                 "repeatIndex": 1,
                 "status": "success",
                 "response": "2018",
@@ -742,7 +743,8 @@ def test_runresult_model_validate_rejects_bare_mcp_strategy_in_public_record():
                     "modelId": "mock",
                     "modelName": "mock",
                     "strategy": "mcp",
-                    "format": "json",
+                    "representation": "json",
+                    "configurationId": "inline-json",
                     "repeatIndex": 1,
                 },
             }
@@ -766,7 +768,7 @@ def test_evaluate_judge_persists_rating_and_justification(monkeypatch):
     monkeypatch.setattr(evaluation_module, "_judge_request", fake_judge_request)
 
     details, judge_info, _ = _evaluate_judge(
-        result=type("R", (), {"response": "Answer", "trialId": "run-1", "experimentId": "exp-1", "instanceId": "cv-demo", "taskId": "q_summary"})(),
+        result=type("R", (), {"configurationId": "inline-json", "representation": "json", "response": "Answer", "trialId": "run-1", "experimentId": "exp-1", "instanceId": "cv-demo", "taskId": "q_summary"})(),
         task_statement="Task?",
         context_payload={"summary": "Ground truth answer."},
         judges=make_experiment().evaluation.judges,
@@ -790,11 +792,8 @@ def test_evaluate_judge_aggregates_multiple_judges(monkeypatch):
             "output": "outputs",
             "dataset": str((Path.cwd() / "datasets" / "lattes").resolve()),
             "scope": {"instances": [], "tasks": []},
-            "factors": {
-                "model": [{"provider": "mock", "name": "mock"}],
-                "strategy": ["inline"],
-                "format": ["json"],
-            },
+            "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['inline-json']},
+            "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json'}},
             "evaluation": {
                 "enabled": True,
                 "judges": [
@@ -828,7 +827,7 @@ def test_evaluate_judge_aggregates_multiple_judges(monkeypatch):
     monkeypatch.setattr(evaluation_module, "_judge_request", fake_judge_request)
 
     details, judge_info, _ = _evaluate_judge(
-        result=type("R", (), {"response": "Answer", "trialId": "run-1", "experimentId": "exp-1", "instanceId": "cv-demo", "taskId": "q_summary"})(),
+        result=type("R", (), {"configurationId": "inline-json", "representation": "json", "response": "Answer", "trialId": "run-1", "experimentId": "exp-1", "instanceId": "cv-demo", "taskId": "q_summary"})(),
         task_statement="Task?",
         context_payload={"summary": "Ground truth answer."},
         judges=experiment.evaluation.judges,
@@ -892,7 +891,8 @@ def test_execute_runspec_persists_metrics_summary_with_nulls_for_remote_mcp(tmp_
             "provider": "mock",
             "model": "mock",
             "strategy": "remote_mcp",
-            "format": "json",
+            "representation": "json",
+            "configurationId": "inline-json",
             "repeatIndex": 1,
             "params": {"mcp_server": {"server_url": "https://example.test/mcp"}},
             "trace": {"enabled": True},
@@ -903,7 +903,8 @@ def test_execute_runspec_persists_metrics_summary_with_nulls_for_remote_mcp(tmp_
                 "provider": "mock",
                 "modelName": "mock",
                 "strategy": "remote_mcp",
-                "format": "json",
+                "representation": "json",
+                "configurationId": "inline-json",
                 "repeatIndex": 1,
             },
         }
@@ -935,7 +936,8 @@ def test_execute_runspec_injects_openai_inline_prompt_cache_key(tmp_path):
             "provider": "openai",
             "model": "gpt-5.4-mini",
             "strategy": "inline",
-            "format": "html",
+            "representation": "html",
+            "configurationId": "inline-html",
             "repeatIndex": 1,
             "params": {},
             "metadata": {
@@ -945,7 +947,8 @@ def test_execute_runspec_injects_openai_inline_prompt_cache_key(tmp_path):
                 "provider": "openai",
                 "modelName": "gpt-5.4-mini",
                 "strategy": "inline",
-                "format": "html",
+                "representation": "html",
+                "configurationId": "inline-html",
                 "repeatIndex": 1,
             },
         }
@@ -970,7 +973,7 @@ def test_openai_model_build_payload_includes_prompt_cache_fields():
         provider_name="openai",
         model_name="gpt-5.4-mini",
         strategy_name="inline",
-        context_format="text",
+        context_representation="text",
         params={
             "prompt_cache_key": "inl:html:abc123",
             "prompt_cache_retention": "24h",
@@ -1002,7 +1005,7 @@ def test_rate_limited_model_retry_logs_structured_context(monkeypatch):
         provider_name="mock",
         model_name="mock",
         strategy_name="inline",
-        context_format="json",
+        context_representation="json",
         params={"rate_limit": {"max_attempts": 2, "base_delay_ms": 0, "jitter": False}},
         metadata={
             "phase": "EXECUTE",
@@ -1013,7 +1016,8 @@ def test_rate_limited_model_retry_logs_structured_context(monkeypatch):
             "modelId": "mock",
             "modelName": "mock",
             "strategy": "inline",
-            "format": "json",
+            "representation": "json",
+            "configurationId": "inline-json",
             "repeatIndex": 1,
         },
     )
@@ -1056,7 +1060,7 @@ def test_rate_limited_model_tpm_wait_logs_info_and_logger_suppresses_without_ver
         provider_name="mock",
         model_name="mock",
         strategy_name="inline",
-        context_format="json",
+        context_representation="json",
         params={"rate_limit": {"tpm": 120, "estimated_output_tokens": 1}},
         metadata={"phase": "EXECUTE", "trialId": "trial-1", "taskId": "q_year"},
     )
@@ -1081,7 +1085,7 @@ def test_openai_model_request_metadata_uses_target_public_keys():
         provider_name="openai",
         model_name="gpt-5.4-mini",
         strategy_name="inline",
-        context_format="text",
+        context_representation="text",
         params={},
         metadata={
             "trialId": "trial-1",
@@ -1109,7 +1113,7 @@ def test_claude_model_request_metadata_uses_target_public_keys():
         provider_name="anthropic",
         model_name="claude-sonnet",
         strategy_name="inline",
-        context_format="text",
+        context_representation="text",
         params={},
         metadata={
             "trialId": "trial-1",
@@ -1134,7 +1138,7 @@ def test_openai_native_mcp_tools_accept_remote_mcp_and_reject_mcp():
         provider_name="openai",
         model_name="gpt-5.4-mini",
         strategy_name="remote_mcp",
-        context_format="text",
+        context_representation="text",
         params={"mcp_server": {"server_url": "https://example.test/mcp"}},
         metadata={},
     )
@@ -1157,7 +1161,7 @@ def test_claude_native_mcp_servers_accept_remote_mcp_and_reject_mcp():
         provider_name="anthropic",
         model_name="claude-sonnet",
         strategy_name="remote_mcp",
-        context_format="text",
+        context_representation="text",
         params={"mcp_server": {"server_url": "https://example.test/mcp"}},
         metadata={},
     )
@@ -1180,7 +1184,7 @@ def test_gemini_native_mcp_tool_accepts_remote_mcp_and_rejects_mcp():
         provider_name="google",
         model_name="gemini-2.5-flash",
         strategy_name="remote_mcp",
-        context_format="text",
+        context_representation="text",
         params={"mcp_server": {"server_url": "https://example.test/mcp"}},
         metadata={},
     )
@@ -1206,7 +1210,7 @@ def test_gemini_generate_uses_native_mcp_path_for_remote_mcp(monkeypatch):
         provider_name="google",
         model_name="gemini-2.5-flash",
         strategy_name="remote_mcp",
-        context_format="text",
+        context_representation="text",
         params={"mcp_server": {"server_url": "https://example.test/mcp"}},
         metadata={},
     )
@@ -1241,7 +1245,7 @@ def test_mock_model_uses_task_metadata_lookup():
         provider_name="mock",
         model_name="mock",
         strategy_name="inline",
-        context_format="json",
+        context_representation="json",
         params={},
         metadata={"taskId": "q_task"},
     )
@@ -1396,7 +1400,8 @@ def test_evaluate_run_result_skips_when_context_block_missing(tmp_path):
             "provider": "mock",
             "model": "mock",
             "strategy": "inline",
-            "format": "json",
+            "representation": "json",
+            "configurationId": "inline-json",
             "repeatIndex": 1,
             "response": "unknown",
             "status": "success",
@@ -1415,7 +1420,8 @@ def test_evaluate_run_result_skips_when_context_block_missing(tmp_path):
                 "provider": "mock",
                 "modelName": "mock",
                 "strategy": "inline",
-                "format": "json",
+                "representation": "json",
+                "configurationId": "inline-json",
                 "repeatIndex": 1,
             },
         }
