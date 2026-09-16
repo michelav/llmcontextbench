@@ -27,12 +27,22 @@
   },
   "scope": {
     "instances": [],
-    "tasks": ["snf_retrieve_function"]
+    "tasks": [
+      "snf_retrieve_function"
+    ]
   },
   "factors": {
-    "model": ["gpt1", "gpt2", "gemini1", "gemini2"],
-    "strategy": ["inline", "local_function", "local_mcp"],
-    "format": ["code"]
+    "model": [
+      "gpt1",
+      "gpt2",
+      "gemini1",
+      "gemini2"
+    ],
+    "configuration": [
+      "inline-code",
+      "local-function-json",
+      "local-mcp-json"
+    ]
   },
   "params": {
     "mcp_server": {
@@ -55,5 +65,19 @@
   },
   "execution": {
     "repeats": 1
+  },
+  "configurations": {
+    "inline-code": {
+      "strategy": "inline",
+      "representation": "code"
+    },
+    "local-function-json": {
+      "strategy": "local_function",
+      "representation": "json"
+    },
+    "local-mcp-json": {
+      "strategy": "local_mcp",
+      "representation": "json"
+    }
   }
 }

@@ -17,8 +17,10 @@ def trialspec_id(
     provider: str,
     model_name: str,
     strategy: str,
-    format_name: str,
+    representation: str,
     repetition: int,
+    *,
+    configuration_id: str,
 ) -> str:
     return canonical_trial_identity(
         experiment_id=experiment_id,
@@ -27,8 +29,9 @@ def trialspec_id(
         provider=provider,
         model_name=model_name,
         strategy=strategy,
-        format_name=format_name,
+        representation=representation,
         repetition=repetition,
+        configuration_id=configuration_id,
     )
 
 

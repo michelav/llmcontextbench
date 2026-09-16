@@ -59,13 +59,6 @@ def resolve_models(experiment: Experiment) -> list[dict[str, str]]:
     return old_models
 
 
-def effective_formats_for_strategy(strategy_name: str, formats: list[Any]) -> list[str]:
-    resolved_formats = [str(item) for item in formats if isinstance(item, str) and item.strip()]
-    if strategy_name in {"local_function", "local_mcp", "remote_mcp"}:
-        return ["json"]
-    return resolved_formats
-
-
 def generate_runspecs(
     experiment: Experiment,
     base_dir: str | Path,
@@ -86,8 +79,7 @@ def generate_runspecs(
         if not scoped_instances or instance_id in scoped_instances
     ]
     models = resolve_models(experiment)
-    strategies = experiment.factors.get("strategy", [])
-    formats = experiment.factors.get("format", [])
+    configurations = experiment.factors["configuration"]
     output_root = str((Path(base_dir) / experiment.output).resolve())
     draft_specs: list[dict[str, Any]] = []
     for instance_id in instance_ids:
@@ -107,50 +99,54 @@ def generate_runspecs(
                 provider_name = model["provider"]
                 model_id = model["id"]
                 model_name = model["name"]
-                for strategy_name in strategies:
-                    for format_name in effective_formats_for_strategy(strategy_name, formats):
-                        params = resolve_params(experiment, model_name, model_id=model_id)
-                        for repeat_index in range(1, experiment.execution.repeats + 1):
-                            canonical_id = canonical_trial_identity(
-                                experiment.id,
-                                task_id,
-                                instance_id,
-                                provider_name,
-                                model_name,
-                                strategy_name,
-                                format_name,
-                                repeat_index,
-                            )
-                            draft_specs.append(
-                                {
-                                    "canonical_id": canonical_id,
-                                    "experimentId": experiment.id,
-                                    "dataset": dataset_provenance,
-                                    "experimentPath": str(Path(experiment_path).resolve())
-                                    if experiment_path
-                                    else None,
-                                    "taskId": task_id,
-                                    "taskStatement": rendered_task_statement,
-                                    "taskTemplate": task.statement,
-                                    "instanceId": instance_id,
-                                    "provider": provider_name,
-                                    "modelId": model_id,
-                                    "modelName": model_name,
-                                    "strategy": strategy_name,
-                                    "format": format_name,
-                                    "params": params,
-                                    "repeatIndex": repeat_index,
-                                    "outputRoot": output_root,
-                                    "evaluationEnabled": experiment.evaluation.enabled,
-                                    "trace": experiment.trace,
-                                    "artifacts": experiment.artifacts,
-                                    "taskTags": list(task.tags),
-                                    "validationType": task.validation_type,
-                                    "validationConfig": dict(task.validation_config),
-                                    "contextBlocks": list(task.context_blocks),
-                                    "parameters": parameters,
-                                }
-                            )
+                for configuration_id in configurations:
+                    configuration = experiment.configurations[configuration_id]
+                    strategy_name = configuration.strategy
+                    representation = configuration.representation
+                    params = resolve_params(experiment, model_name, model_id=model_id)
+                    for repeat_index in range(1, experiment.execution.repeats + 1):
+                        canonical_id = canonical_trial_identity(
+                            experiment.id,
+                            task_id,
+                            instance_id,
+                            provider_name,
+                            model_name,
+                            strategy_name,
+                            representation,
+                            repeat_index,
+                            configuration_id=configuration_id,
+                        )
+                        draft_specs.append(
+                            {
+                                "canonical_id": canonical_id,
+                                "experimentId": experiment.id,
+                                "dataset": dataset_provenance,
+                                "experimentPath": str(Path(experiment_path).resolve())
+                                if experiment_path
+                                else None,
+                                "taskId": task_id,
+                                "taskStatement": rendered_task_statement,
+                                "taskTemplate": task.statement,
+                                "instanceId": instance_id,
+                                "provider": provider_name,
+                                "modelId": model_id,
+                                "modelName": model_name,
+                                "strategy": strategy_name,
+                                "representation": representation,
+                                "configurationId": configuration_id,
+                                "params": params,
+                                "repeatIndex": repeat_index,
+                                "outputRoot": output_root,
+                                "evaluationEnabled": experiment.evaluation.enabled,
+                                "trace": experiment.trace,
+                                "artifacts": experiment.artifacts,
+                                "taskTags": list(task.tags),
+                                "validationType": task.validation_type,
+                                "validationConfig": dict(task.validation_config),
+                                "contextBlocks": list(task.context_blocks),
+                                "parameters": parameters,
+                            }
+                        )
 
     run_ids = build_short_ids([item["canonical_id"] for item in draft_specs])
     runspecs: list[TrialSpec] = []
@@ -175,7 +171,8 @@ def generate_runspecs(
                 modelId=item["modelId"],
                 modelName=item["modelName"],
                 strategy=item["strategy"],
-                format=item["format"],
+                representation=item["representation"],
+                configurationId=item["configurationId"],
                 params=item["params"],
                 repeatIndex=item["repeatIndex"],
                 outputRoot=item["outputRoot"],
@@ -190,7 +187,8 @@ def generate_runspecs(
                     modelId=item["modelId"],
                     modelName=item["modelName"],
                     strategy=item["strategy"],
-                    format=item["format"],
+                    representation=item["representation"],
+                configurationId=item["configurationId"],
                     repeatIndex=item["repeatIndex"],
                     taskTags=item["taskTags"],
                     validationType=item["validationType"],

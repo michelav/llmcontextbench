@@ -4,7 +4,11 @@
   "output": "exoutputs",
   "dataset": "datasets/lattes",
   "scope": {
-    "instances": ["5521922960404236", "5123602572479168", "9674541381385819"],
+    "instances": [
+      "5521922960404236",
+      "5123602572479168",
+      "9674541381385819"
+    ],
     "questions": []
   },
   "factors": {
@@ -20,8 +24,12 @@
         "name": "gemini-2.5-flash"
       }
     ],
-    "strategy": ["inline", "local_function", "local_mcp", "mcp"],
-    "format": ["json"]
+    "configuration": [
+      "inline-json",
+      "local-function-json",
+      "local-mcp-json",
+      "mcp-json"
+    ]
   },
   "params": {
     "common": {
@@ -120,5 +128,23 @@
   },
   "execution": {
     "repeats": 1
+  },
+  "configurations": {
+    "inline-json": {
+      "strategy": "inline",
+      "representation": "json"
+    },
+    "local-function-json": {
+      "strategy": "local_function",
+      "representation": "json"
+    },
+    "local-mcp-json": {
+      "strategy": "local_mcp",
+      "representation": "json"
+    },
+    "mcp-json": {
+      "strategy": "mcp",
+      "representation": "json"
+    }
   }
 }

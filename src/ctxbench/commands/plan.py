@@ -108,6 +108,8 @@ def plan_command(
     logger.info("PLAN", "trials.written", "Trials written", path=str(trials_path), total=len(payloads))
 
     manifest = {
+        "provisioningArtifactVersion": 1,
+        "configurations": {key: experiment.configurations[key].model_dump(mode="json") for key in experiment.factors["configuration"]},
         "experimentId": experiment.id,
         "experimentPath": str(Path(path).resolve()),
         "dataset": dataset_provenance.model_dump(mode="json"),

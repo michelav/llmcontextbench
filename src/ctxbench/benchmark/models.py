@@ -347,6 +347,43 @@ class ExperimentArtifacts(BaseModel):
     writeIndividualJson: bool = False
 
 
+class ProvisioningConfiguration(BaseModel):
+    strategy: str
+    representation: str
+
+    def __init__(self, **data: Any) -> None:
+        extra = set(data) - {"strategy", "representation"}
+        # Subclasses add identity and artifact fields.
+        if type(self) is ProvisioningConfiguration and extra:
+            raise ValueError(f"Unexpected configuration fields: {', '.join(sorted(extra))}")
+        super().__init__(**data)
+        if self.strategy not in VALID_STRATEGY_NAMES:
+            raise ValueError(f"unknown strategy: {self.strategy}")
+        if not self.representation.strip():
+            raise ValueError("Configuration representation must be non-empty.")
+        if self.strategy != "inline" and self.representation != "json":
+            raise ValueError("Tool strategies support only the json representation.")
+
+
+CONFIGURATION_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]*$")
+
+
+class ProvisioningTreatment(ProvisioningConfiguration):
+    configurationId: str
+
+    def __init__(self, **data: Any) -> None:
+        if "format" in data:
+            raise ValueError("Legacy provisioning artifact: use the previous benchmark version or re-plan in a fresh directory.")
+        super().__init__(**data)
+        if not CONFIGURATION_ID_PATTERN.fullmatch(self.configurationId):
+            raise ValueError("Configuration IDs must be lowercase identifiers.")
+        metadata = getattr(self, "metadata", None)
+        if metadata is not None:
+            for field in ("configurationId", "strategy", "representation"):
+                if getattr(self, field) != getattr(metadata, field):
+                    raise ValueError(f"Inconsistent provisioning field: {field}")
+
+
 class Experiment(BaseModel):
     id: str
     name: str | None = None
@@ -354,6 +391,7 @@ class Experiment(BaseModel):
     dataset: ExperimentDataset
     scope: ExperimentScope = Field(default_factory=ExperimentScope)
     factors: dict[str, list[Any]]
+    configurations: dict[str, ProvisioningConfiguration]
     models: dict[str, ModelEntry] = Field(default_factory=dict)
     params: ExperimentParams = Field(default_factory=ExperimentParams)
     expansion: ExperimentExpansion = Field(default_factory=ExperimentExpansion)
@@ -374,6 +412,10 @@ class Experiment(BaseModel):
         if "scope" in payload:
             payload["scope"] = ExperimentScope.model_validate(payload["scope"])
 
+        payload["configurations"] = {
+            key: ProvisioningConfiguration.model_validate(value)
+            for key, value in payload.get("configurations", {}).items()
+        }
         # New format: top-level "models" section present
         if "models" in payload and isinstance(payload["models"], dict):
             parsed_models: dict[str, ModelEntry] = {
@@ -426,7 +468,9 @@ class Experiment(BaseModel):
         return experiment
 
     def _validate_model(self) -> None:
-        required = {"model", "strategy", "format"}
+        if {"strategy", "format"} & self.factors.keys():
+            raise ValueError("Legacy factors.strategy/format are unsupported; define configurations and factors.configuration.")
+        required = {"model", "configuration"}
         missing = [name for name in sorted(required) if name not in self.factors]
         if missing:
             raise ValueError(f"Experiment factors missing required keys: {', '.join(missing)}")
@@ -466,25 +510,25 @@ class Experiment(BaseModel):
                 if model_id in model_ids:
                     raise ValueError(f"Duplicate model id in experiment factors.model: {model_id}")
                 model_ids.add(model_id)
-        for factor_name in ("strategy", "format"):
-            invalid = [value for value in self.factors.get(factor_name, []) if not isinstance(value, str) or not value.strip()]
-            if invalid:
-                raise ValueError(f"Experiment factors.{factor_name} entries must be non-empty strings.")
-        invalid_strategies = [value for value in self.factors.get("strategy", []) if value not in VALID_STRATEGY_NAMES]
-        if invalid_strategies:
-            joined = ", ".join(sorted({str(value) for value in invalid_strategies}))
-            raise ValueError(f"unknown strategy: {joined}")
+        for configuration_id in self.configurations:
+            if not CONFIGURATION_ID_PATTERN.fullmatch(configuration_id):
+                raise ValueError("Configuration IDs must be lowercase identifiers.")
+        seen: set[str] = set()
+        for ref in self.factors["configuration"]:
+            if not isinstance(ref, str) or ref not in self.configurations:
+                raise ValueError(f"Undefined configuration reference: {ref!r}")
+            if ref in seen:
+                raise ValueError(f"Duplicate configuration reference: {ref}")
+            seen.add(ref)
 
 
-class TrialMetadata(BaseModel):
+class TrialMetadata(ProvisioningTreatment):
     canonicalId: str
     taskId: str
     instanceId: str
     provider: str
     modelId: str | None = None
     modelName: str | None = None
-    strategy: str
-    format: str
     repeatIndex: int
     taskTags: list[str] = Field(default_factory=list)
     validationType: str | None = None
@@ -506,7 +550,7 @@ class TrialMetadata(BaseModel):
 RunMetadata = TrialMetadata
 
 
-class TrialSpec(BaseModel):
+class TrialSpec(ProvisioningTreatment):
     id: str
     trialId: str
     experimentId: str
@@ -524,8 +568,6 @@ class TrialSpec(BaseModel):
     provider: str
     modelId: str | None = None
     modelName: str | None = None
-    strategy: str
-    format: str
     params: dict[str, Any] = Field(default_factory=dict)
     repeatIndex: int = 1
     outputRoot: str | None = None
@@ -567,7 +609,8 @@ class TrialSpec(BaseModel):
                 "modelId": payload.get("modelId"),
                 "modelName": payload.get("modelName"),
                 "strategy": payload.get("strategy", ""),
-                "format": payload.get("format", ""),
+                "representation": payload.get("representation", ""),
+                "configurationId": payload.get("configurationId", ""),
                 "repeatIndex": payload.get("repeatIndex", 1),
                 "validationConfig": payload.get("validationConfig", {}),
                 "parameters": payload.get("parameters", {}),
@@ -595,7 +638,8 @@ class TrialSpec(BaseModel):
             "modelId": self.modelId,
             "provider": self.provider,
             "strategy": self.strategy,
-            "format": self.format,
+            "representation": self.representation,
+            "configurationId": self.configurationId,
             "params": self.params,
             "repeatIndex": self.repeatIndex,
             "outputRoot": self.outputRoot,
@@ -615,7 +659,8 @@ class TrialSpec(BaseModel):
                 "modelId": self.metadata.modelId,
                 "modelName": self.metadata.modelName,
                 "strategy": self.metadata.strategy,
-                "format": self.metadata.format,
+                "representation": self.metadata.representation,
+                "configurationId": self.metadata.configurationId,
                 "repeatIndex": self.metadata.repeatIndex,
                 "taskTags": list(self.metadata.taskTags),
                 "validationType": self.metadata.validationType,
@@ -654,7 +699,7 @@ class EvaluationResult(BaseModel):
     evaluator: str | None = None
 
 
-class TrialResult(BaseModel):
+class TrialResult(ProvisioningTreatment):
     trialId: str
     experimentId: str
     dataset: DatasetProvenance
@@ -670,8 +715,6 @@ class TrialResult(BaseModel):
     provider: str
     modelId: str | None = None
     modelName: str | None = None
-    strategy: str
-    format: str
     repeatIndex: int
     outputRoot: str | None = None
     response: str
@@ -719,7 +762,8 @@ class TrialResult(BaseModel):
                 "modelId": payload.get("modelId"),
                 "modelName": payload.get("modelName"),
                 "strategy": payload.get("strategy", ""),
-                "format": payload.get("format", ""),
+                "representation": payload.get("representation", ""),
+                "configurationId": payload.get("configurationId", ""),
                 "repeatIndex": payload.get("repeatIndex", 1),
                 "validationConfig": payload.get("validationConfig", {}),
                 "parameters": payload.get("parameters", {}),
@@ -747,7 +791,8 @@ class TrialResult(BaseModel):
             "modelId": self.modelId,
             "model": self.modelName,
             "strategy": self.strategy,
-            "format": self.format,
+            "representation": self.representation,
+            "configurationId": self.configurationId,
             "repeatIndex": self.repeatIndex,
             "outputRoot": self.outputRoot,
             "status": self.status,
@@ -770,7 +815,8 @@ class TrialResult(BaseModel):
                 "modelId": self.metadata.modelId,
                 "modelName": self.metadata.modelName,
                 "strategy": self.metadata.strategy,
-                "format": self.metadata.format,
+                "representation": self.metadata.representation,
+                "configurationId": self.metadata.configurationId,
                 "repeatIndex": self.metadata.repeatIndex,
                 "taskTags": list(self.metadata.taskTags),
                 "validationType": self.metadata.validationType,

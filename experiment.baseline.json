@@ -172,9 +172,19 @@
     ]
   },
   "factors": {
-    "model": ["gpt1", "gpt2", "gemini1", "gemini2"],
-    "strategy": ["inline", "local_function", "local_mcp", "remote_mcp"],
-    "format": ["html", "json"]
+    "model": [
+      "gpt1",
+      "gpt2",
+      "gemini1",
+      "gemini2"
+    ],
+    "configuration": [
+      "inline-html",
+      "inline-json",
+      "local-function-json",
+      "local-mcp-json",
+      "remote-mcp-json"
+    ]
   },
   "params": {
     "mcp_server": {
@@ -186,7 +196,11 @@
   },
   "evaluation": {
     "enabled": true,
-    "judges": ["juiz-gpt", "juiz-gemini", "juiz-claude"]
+    "judges": [
+      "juiz-gpt",
+      "juiz-gemini",
+      "juiz-claude"
+    ]
   },
   "trace": {
     "enabled": true,
@@ -198,5 +212,27 @@
   },
   "execution": {
     "repeats": 1
+  },
+  "configurations": {
+    "inline-html": {
+      "strategy": "inline",
+      "representation": "html"
+    },
+    "inline-json": {
+      "strategy": "inline",
+      "representation": "json"
+    },
+    "local-function-json": {
+      "strategy": "local_function",
+      "representation": "json"
+    },
+    "local-mcp-json": {
+      "strategy": "local_mcp",
+      "representation": "json"
+    },
+    "remote-mcp-json": {
+      "strategy": "remote_mcp",
+      "representation": "json"
+    }
   }
 }

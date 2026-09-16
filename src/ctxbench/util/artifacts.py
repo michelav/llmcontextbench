@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from typing import Protocol
 
@@ -13,7 +14,8 @@ class TrialIdentity(Protocol):
     provider: str
     modelName: str | None
     strategy: str
-    format: str
+    representation: str
+    configurationId: str
     repeatIndex: int
 
 
@@ -29,21 +31,23 @@ def canonical_trial_identity(
     provider: str,
     model_name: str,
     strategy: str,
-    format_name: str,
+    representation: str,
     repetition: int,
+    *,
+    configuration_id: str,
 ) -> str:
-    return "|".join(
-        [
-            experiment_id or "",
-            task_id or "",
-            instance_id or "",
-            provider or "",
-            model_name or "",
-            strategy or "",
-            format_name or "",
-            str(repetition),
-        ]
-    )
+    return json.dumps({
+        "identityVersion": 2,
+        "experimentId": experiment_id,
+        "taskId": task_id,
+        "instanceId": instance_id,
+        "provider": provider,
+        "modelName": model_name,
+        "configurationId": configuration_id,
+        "configuration": {"strategy": strategy, "representation": representation},
+        "repeatIndex": repetition,
+    }, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
 
 
 def canonical_identity_from_trial(trial: TrialIdentity) -> str:
@@ -54,7 +58,8 @@ def canonical_identity_from_trial(trial: TrialIdentity) -> str:
         provider=trial.provider,
         model_name=trial.modelName or "",
         strategy=trial.strategy,
-        format_name=trial.format,
+        representation=trial.representation,
+        configuration_id=trial.configurationId,
         repetition=trial.repeatIndex,
     )
 

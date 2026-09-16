@@ -15,15 +15,18 @@
         "name": "mock-model"
       }
     ],
-    "strategy": [
-      "inline"
-    ],
-    "format": [
-      "json"
+    "configuration": [
+      "inline-json"
     ]
   },
   "evaluation": {
     "enabled": false,
     "judges": []
+  },
+  "configurations": {
+    "inline-json": {
+      "strategy": "inline",
+      "representation": "json"
+    }
   }
 }
