@@ -46,6 +46,12 @@ def metrics_command(
             rows=len(rows),
             selected=len(selected_rows),
         )
+        if "strategy" in group_fields and "configurationId" not in group_fields:
+            groups: dict[tuple[Any, ...], set[str]] = {}
+            for row in selected_rows:
+                groups.setdefault(tuple(row.get(field) for field in group_fields), set()).add(row["configurationId"])
+            if any(len(ids) > 1 for ids in groups.values()):
+                logger.warn("METRICS", "metrics.configurations.pooled", "Strategy summaries pool multiple configurations; see trial_metrics.csv and metrics-manifest.json for definitions.")
         dimensions = compute_all(selected_rows, group_fields)
         failures = failure_cases(selected_rows)
         prepare_output_dir(output_dir, force=force)
@@ -77,8 +83,10 @@ def _selectors_manifest(
         "provider": list(selector.provider),
         "instance": list(selector.instance),
         "task": list(selector.task),
+        "configuration": list(selector.configuration),
+        "notConfiguration": list(selector.not_configuration),
         "strategy": list(selector.strategy),
-        "format": list(selector.format),
+        "representation": list(selector.representation),
         "repetition": list(selector.repetition),
         "trial": list(selector.trial_id),
         "executionStatus": list(selector.status),
@@ -88,7 +96,7 @@ def _selectors_manifest(
         "notInstance": list(selector.not_instance),
         "notTask": list(selector.not_task),
         "notStrategy": list(selector.not_strategy),
-        "notFormat": list(selector.not_format),
+        "notRepresentation": list(selector.not_representation),
         "notRepetition": list(selector.not_repetition),
         "notExecutionStatus": list(selector.not_status),
         "notEvaluationStatus": list(not_evaluation_status),

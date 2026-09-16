@@ -99,3 +99,43 @@ def test_legacy_directories_rejected_at_lifecycle_boundaries(tmp_path):
     for command, arg in [(execute_command, tmp_path / 'trials.jsonl'), (eval_command, tmp_path / 'responses.jsonl'), (export_command, tmp_path / 'evals.jsonl'), (status_command, tmp_path)]:
         with pytest.raises(ValueError, match='previous benchmark version'):
             command(str(arg))
+
+
+def test_reporting_preserves_distinct_ids_and_rejects_conflicts(tmp_path, capsys):
+    import csv
+    from ctxbench.cli import main
+    from ctxbench.commands.plan import plan_command
+    from ctxbench.commands.execute import execute_command
+    from ctxbench.metrics.io import load_inputs
+    from ctxbench.util.logging import PhaseLogger
+    p = experiment_payload()
+    p['dataset']['root'] = str(Path(p['dataset']['root']).resolve())
+    p['configurations'] = {key: {'strategy': 'inline', 'representation': 'json'} for key in ['first', 'second']}
+    p['factors']['configuration'] = ['first', 'second']
+    path = tmp_path / 'experiment.json'
+    path.write_text(json.dumps(p))
+    out = tmp_path / 'planned'
+    plan_command(str(path), str(out), cache_dir=tmp_path / 'cache')
+    execute_command(str(out / 'trials.jsonl'))
+    assert main(['export', str(out / 'evals.jsonl'), '--configuration', 'second']) == 0
+    rows = list(csv.DictReader((out / 'results.csv').open()))
+    assert [r['configurationId'] for r in rows] == ['second']
+    assert rows[0]['representation'] == 'json'
+    assert main(['metrics', str(out)]) == 0
+    rows = list(csv.DictReader((out / 'metrics/aggregate_metrics.csv').open()))
+    assert {r['configurationId'] for r in rows} == {'first', 'second'}
+    manifest = json.loads((out / 'metrics/metrics-manifest.json').read_text())
+    assert manifest['schemaVersion'] == '2.0'
+    assert manifest['inputs'][0]['configurations'] == p['configurations']
+    assert main(['status', str(out), '--by', 'configuration']) == 0
+    assert main(['metrics', str(out), '--group-by', 'strategy', '--output', str(tmp_path / 'pooled')]) == 0
+    assert 'pool multiple configurations' in capsys.readouterr().err
+    assert main(['metrics', str(out), '--configuration', 'first', '--not-representation', 'html', '--output', str(tmp_path / 'selected')]) == 0
+    assert len(list(csv.DictReader((tmp_path / 'selected/trial_metrics.csv').open()))) == 1
+    p['id'] = 'different-experiment'
+    p['configurations']['first']['representation'] = 'html'
+    path.write_text(json.dumps(p))
+    other = tmp_path / 'other'
+    plan_command(str(path), str(other), cache_dir=tmp_path / 'cache')
+    with pytest.raises(ValueError, match='Conflicting definitions'):
+        load_inputs([str(out), str(other)], PhaseLogger())

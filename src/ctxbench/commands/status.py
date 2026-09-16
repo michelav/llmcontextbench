@@ -191,7 +191,21 @@ def status_command(output_dir: str | None = None, *, by: str | None = None) -> i
                 print(
                     f"{judge_id:<24} {total:>8} {success:>8} {failed:>8} {pending:>8}"
                 )
+        elif by in {"configuration", "representation", "strategy", "model", "instance", "task"}:
+            field = {"configuration": "configurationId", "model": "modelId", "instance": "instanceId", "task": "taskId"}.get(by, by)
+            from ctxbench.util.jsonl import read_jsonl
+            groups: dict[str, list[dict[str, object]]] = {}
+            for trial in read_jsonl(trials_path):
+                groups.setdefault(str(trial.get(field)), []).append(trial)
+            print(f"\n{by:<24} {'Total':>8} {'Success':>8} {'Failed':>8} {'Pending':>8}")
+            for label, trials in sorted(groups.items()):
+                statuses = [response_map.get(_trial_id(trial)) for trial in trials]
+                success = statuses.count("success")
+                failed = statuses.count("error")
+                print(f"{label:<24} {len(trials):>8} {success:>8} {failed:>8} {statuses.count(None):>8}")
+                if by == "strategy" and len({t["configurationId"] for t in trials}) > 1:
+                    print("  Pools multiple configurations: " + ", ".join(sorted({str(t["configurationId"]) for t in trials})))
         else:
-            print(f"\n(breakdown --by {by} not yet implemented)")
+            raise ValueError(f"Unsupported status grouping: {by}")
 
     return 0

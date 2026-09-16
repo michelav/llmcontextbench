@@ -12,8 +12,9 @@ class RunSelector:
     model: tuple[str, ...] = ()
     instance: tuple[str, ...] = ()
     task: tuple[str, ...] = ()
+    configuration: tuple[str, ...] = ()
     strategy: tuple[str, ...] = ()
-    format: tuple[str, ...] = ()
+    representation: tuple[str, ...] = ()
     repetition: tuple[int, ...] = ()
     status: tuple[str, ...] = ()
     trial_id: tuple[str, ...] = ()
@@ -21,8 +22,9 @@ class RunSelector:
     not_model: tuple[str, ...] = ()
     not_instance: tuple[str, ...] = ()
     not_task: tuple[str, ...] = ()
+    not_configuration: tuple[str, ...] = ()
     not_strategy: tuple[str, ...] = ()
-    not_format: tuple[str, ...] = ()
+    not_representation: tuple[str, ...] = ()
     not_repetition: tuple[int, ...] = ()
     not_status: tuple[str, ...] = ()
 
@@ -53,9 +55,11 @@ def _matches_common(item: Any, selector: RunSelector) -> bool:
         return False
     if selector.task and _field(item, "taskId") not in selector.task:
         return False
+    if selector.configuration and _field(item, "configurationId") not in selector.configuration:
+        return False
     if selector.strategy and _field(item, "strategy") not in selector.strategy:
         return False
-    if selector.format and _field(item, "format") not in selector.format:
+    if selector.representation and _field(item, "representation") not in selector.representation:
         return False
     if selector.repetition and _field(item, "repeatIndex") not in selector.repetition:
         return False
@@ -70,9 +74,11 @@ def _matches_common(item: Any, selector: RunSelector) -> bool:
         return False
     if selector.not_task and _field(item, "taskId") in selector.not_task:
         return False
+    if selector.not_configuration and _field(item, "configurationId") in selector.not_configuration:
+        return False
     if selector.not_strategy and _field(item, "strategy") in selector.not_strategy:
         return False
-    if selector.not_format and _field(item, "format") in selector.not_format:
+    if selector.not_representation and _field(item, "representation") in selector.not_representation:
         return False
     if selector.not_repetition and _field(item, "repeatIndex") in selector.not_repetition:
         return False

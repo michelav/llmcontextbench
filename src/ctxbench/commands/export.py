@@ -68,12 +68,13 @@ def _merge_row(
         "dataset_id": (ans.get("dataset") or {}).get("id"),
         "dataset_version": (ans.get("dataset") or {}).get("version"),
         "instanceId": _ans(ans, "instanceId"),
-        "format": _ans(ans, "format"),
+        "representation": _ans(ans, "representation"),
         "taskId": _ans(ans, "taskId"),
         "modelId": _ans(ans, "modelId"),
         "modelName": _ans(ans, "model") or _ans(ans, "modelName"),
         "tags": ",".join(_ans(ans, "taskTags") or []),
         "index": _ans(ans, "repeatIndex"),
+        "configurationId": _ans(ans, "configurationId"),
         "strategy": _ans(ans, "strategy"),
         "temperature": _params(ans, "temperature"),
         "inputTokens": _usage(ans, "inputTokens"),
@@ -119,7 +120,7 @@ def _merge_row(
 
 
 _CSV_FIELDS = [
-    "experimentId", "trialId", "dataset_id", "dataset_version", "instanceId", "format", "taskId",
+    "experimentId", "trialId", "dataset_id", "dataset_version", "instanceId", "configurationId", "representation", "taskId",
     "modelId", "modelName", "tags", "index", "strategy", "temperature",
     "inputTokens", "outputTokens", "totalTokens", "cachedInputTokens", "cachedReadTokens",
     "status", "modelCalls", "toolCalls", "mcpToolCalls",
@@ -138,8 +139,9 @@ _CSV_FIELDS = [
 
 _BY_KEY_MAP = {
     "model": "model",
+    "configuration": "configurationId",
     "strategy": "strategy",
-    "format": "format",
+    "representation": "representation",
     "instance": "instance",
 }
 
@@ -172,9 +174,11 @@ def _apply_by_filters(
             model_name = row.get("model") or row.get("modelName") or ""
             if not (filters["model"] & {model_id, model_name}):
                 continue
+        if "configuration" in filters and row.get("configurationId") not in filters["configuration"]:
+            continue
         if "strategy" in filters and row.get("strategy") not in filters["strategy"]:
             continue
-        if "format" in filters and row.get("format") not in filters["format"]:
+        if "representation" in filters and row.get("representation") not in filters["representation"]:
             continue
         if "instance" in filters and row.get("instanceId") not in filters["instance"]:
             continue
@@ -241,7 +245,8 @@ def _print_run_detail(
         "instanceId": merged["instanceId"],
         "model": {"id": merged["modelId"], "name": merged["modelName"]},
         "strategy": merged["strategy"],
-        "format": merged["format"],
+        "configurationId": merged["configurationId"],
+        "representation": merged["representation"],
         "index": merged["index"],
         "tags": (response.get("taskTags") or []),
         "status": merged["status"],

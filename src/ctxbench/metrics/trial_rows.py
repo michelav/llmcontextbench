@@ -10,7 +10,7 @@ from ctxbench.util.logging import PhaseLogger
 
 TRIAL_FIELDS = [
     "experimentId", "dataset_id", "dataset_version", "trialId", "instanceId", "taskId", "taskTags",
-    "provider", "modelId", "modelName", "strategy", "format", "configuration", "repeatIndex",
+    "provider", "modelId", "modelName", "strategy", "representation", "configurationId", "repeatIndex",
     "response_present", "execution_status", "evaluation_present", "evaluation_status",
     "evaluation_method", "evaluation_method_consistent", "input_tokens", "output_tokens",
     "total_tokens", "cached_input_tokens", "cached_read_tokens", "reserved_tokens",
@@ -26,7 +26,7 @@ TRIAL_FIELDS = [
 
 SUPPORTED_GROUP_FIELDS = {
     "experimentId", "dataset_id", "dataset_version", "provider", "modelId", "modelName",
-    "strategy", "format", "configuration", "instanceId", "taskId", "taskTags", "repeatIndex",
+    "strategy", "representation", "configurationId", "instanceId", "taskId", "taskTags", "repeatIndex",
     "evaluation_method", "primary_metric_name",
 }
 _warned_evaluation_statuses: set[str] = set()
@@ -66,7 +66,7 @@ def apply_selectors(
 
 
 def parse_group_by(raw: str | None) -> list[str]:
-    fields = [item.strip() for item in (raw or "dataset_id,configuration").split(",") if item.strip()]
+    fields = [item.strip() for item in (raw or "dataset_id,configurationId").split(",") if item.strip()]
     unknown = [field for field in fields if field not in SUPPORTED_GROUP_FIELDS]
     if unknown:
         raise ValueError(f"Unsupported --group-by field(s): {', '.join(unknown)}")
@@ -95,7 +95,7 @@ def _build_row(
     method_consistent = _method_consistent(trial_id, planned_method, actual_method, logger)
     primary_name, primary_success, primary_score = normalize_primary(evaluation, logger)
     strategy = trial.get("strategy")
-    configuration = _configuration(strategy, trial.get("format"), trial_id, logger)
+    configuration = trial["configurationId"]
     task_tags = trial.get("taskTags") if isinstance(trial.get("taskTags"), list) else []
     _validate_tags(task_tags, trial_id)
     duration_ms = _number(metrics.get("totalDurationMs"))
@@ -123,8 +123,8 @@ def _build_row(
         "modelId": trial.get("modelId"),
         "modelName": trial.get("modelName") or trial.get("model"),
         "strategy": strategy,
-        "format": trial.get("format"),
-        "configuration": configuration,
+        "representation": trial.get("representation"),
+        "configurationId": configuration,
         "repeatIndex": trial.get("repeatIndex"),
         "response_present": response is not None,
         "execution_status": response.get("status") if response else None,
@@ -170,13 +170,6 @@ def _build_row(
         "error_message": response.get("errorMessage") if response else None,
         "response_excerpt": _excerpt(response.get("response") if response else None),
     }
-
-
-def _configuration(strategy: Any, fmt: Any, trial_id: str, logger: PhaseLogger) -> str:
-    if isinstance(strategy, str) and strategy:
-        return f"{strategy}_{fmt}" if fmt else strategy
-    logger.warn("METRICS", "metrics.configuration.unknown", "Missing trial strategy", trialId=trial_id)
-    return "unknown"
 
 
 def _validate_tags(tags: list[Any], trial_id: str) -> None:

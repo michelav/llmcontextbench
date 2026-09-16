@@ -39,7 +39,7 @@ AGGREGATE_FIELDS = [
     "duration_sec_per_primary_success", "model_calls_mean", "tool_calls_mean", "function_calls_mean",
     "mcp_tool_calls_mean", "calls_per_primary_success", "primary_success_rate_range_by_task",
     "primary_success_rate_range_by_instance", "primary_success_rate_range_by_repeat",
-    "primary_success_rate_range_by_model", "primary_success_rate_range_by_format",
+    "primary_success_rate_range_by_model", "primary_success_rate_range_by_representation",
     "evaluation_coverage_rate", "evaluation_success_rate", "evaluation_error_rate",
     "judge_agreement_mean", "judge_unanimity_rate", "trace_coverage_rate",
     "tool_call_observability_rate", "usage_observability_rate",
@@ -50,7 +50,7 @@ ROBUSTNESS_AXES = {
     "instance": ("instanceId",),
     "repeat": ("taskId", "instanceId", "repeatIndex"),
     "model": ("modelId",),
-    "format": ("format",),
+    "representation": ("representation",),
 }
 
 
@@ -92,7 +92,7 @@ def compute_all(rows: list[dict[str, Any]], group_fields: list[str]) -> dict[str
 
 def failure_cases(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     fields = [
-        "dataset_id", "experimentId", "trialId", "taskId", "instanceId", "modelId", "configuration",
+        "dataset_id", "experimentId", "trialId", "taskId", "instanceId", "modelId", "configurationId",
         "execution_status", "evaluation_status", "evaluation_method", "primary_metric_name",
         "primary_success", "primary_score", "error_message", "response_excerpt",
     ]
@@ -244,7 +244,7 @@ def _summary(rows: list[dict[str, Any]], aggregate: list[dict[str, Any]]) -> dic
     observability = _observability(rows)
     effectiveness = _effectiveness(rows)
     return {
-        "schemaVersion": "1.0",
+        "schemaVersion": "2.0",
         "experiments": len({row.get("experimentId") for row in rows if row.get("experimentId") is not None}),
         "datasets": sorted({row.get("dataset_id") for row in rows if row.get("dataset_id") is not None}),
         "n_trials": len(rows),
