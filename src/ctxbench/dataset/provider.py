@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ctxbench.benchmark.models import DatasetProvenance, Experiment, ExperimentDataset
 from ctxbench.dataset.capabilities import DatasetCapabilityReport
-from ctxbench.dataset.contexts import artifact_name_for_format
+from ctxbench.dataset.contexts import artifact_name_for_representation
 from ctxbench.dataset.package import DatasetMetadata
 from ctxbench.dataset.payloads import (
     ORACLE_UNAVAILABLE,
@@ -83,7 +83,7 @@ class LocalDatasetPackage:
     def list_instance_ids(self) -> list[str]:
         return [instance.instanceId for instance in self._task_instances.instances]
 
-    def list_context_ids(self, format_name: str | None = None) -> list[str]:
+    def list_context_ids(self, representation: str | None = None) -> list[str]:
         return self.list_instance_ids()
 
     def get_task_model(self, task_id: str) -> Task:
@@ -130,15 +130,15 @@ class LocalDatasetPackage:
             raise FileNotFoundError(f"Missing context directory for instance '{instance_id}': {path}")
         return path
 
-    def get_context_artifact_path(self, instance_id: str, format_name: str) -> Path:
-        filename = artifact_name_for_format(format_name)
+    def get_context_artifact_path(self, instance_id: str, representation: str) -> Path:
+        filename = artifact_name_for_representation(representation)
         path = self.get_instance_dir(instance_id) / filename
         if not path.exists():
             raise FileNotFoundError(f"Missing context artifact: {path}")
         return path
 
-    def _read_context_text(self, context_id: str, format_name: str) -> str:
-        path = self.get_context_artifact_path(context_id, format_name)
+    def _read_context_text(self, context_id: str, representation: str) -> str:
+        path = self.get_context_artifact_path(context_id, representation)
         return path.read_text(encoding="utf-8")
 
     def get_context(
@@ -161,10 +161,10 @@ class LocalDatasetPackage:
         instance_id: str,
         task_id: str,
         strategy: str,
-        format_name: str,
+        representation: str,
     ) -> object:
         del task_id, strategy
-        path = self.get_context_artifact_path(instance_id, format_name)
+        path = self.get_context_artifact_path(instance_id, representation)
         if path.suffix == ".json":
             return load_json(path)
         return path.read_text(encoding="utf-8")

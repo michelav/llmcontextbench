@@ -847,6 +847,7 @@ class EvaluationJudgeInfo(BaseModel):
 
 
 class EvaluationItemResult(BaseModel):
+    metadata: TrialMetadata
     experimentId: str
     trialId: str
     dataset: DatasetProvenance
@@ -859,7 +860,7 @@ class EvaluationItemResult(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
     executionModel: str | None = None
     executionStrategy: str | None = None
-    executionFormat: str | None = None
+    executionRepresentation: str | None = None
     executionInputTokens: int | None = None
     executionOutputTokens: int | None = None
     executionDurationMs: int | None = None
@@ -912,7 +913,10 @@ class EvaluationItemResult(BaseModel):
             "dataset": self.dataset.model_dump(mode="json"),
             "instanceId": self.instanceId,
             "taskId": self.taskId,
-            "strategy": self.executionStrategy,
+            "strategy": self.metadata.strategy,
+            "representation": self.metadata.representation,
+            "configurationId": self.metadata.configurationId,
+            "metadata": self.metadata.model_dump(mode="json"),
             "status": eval_status,
             "evaluationMethod": self.evaluationMethod,
             "judgeCount": judge_success_count,
@@ -997,20 +1001,7 @@ class EvaluationTrialResult(BaseModel):
             raise ValueError("Public EvaluationTrialResult input must use 'trialId', not 'runId'.")
         if "questionId" in payload:
             raise ValueError("Public EvaluationTrialResult input must use 'taskId', not 'questionId'.")
-        if "metadata" not in payload:
-            payload["metadata"] = {
-                "canonicalId": str(payload.get("trialId", "")),
-                "taskId": payload.get("taskId", ""),
-                "instanceId": "",
-                "provider": "",
-                "modelId": None,
-                "modelName": None,
-                "strategy": "",
-                "format": "",
-                "repeatIndex": 1,
-            }
-        else:
-            payload["metadata"] = TrialMetadata.model_validate(payload["metadata"])
+        payload["metadata"] = TrialMetadata.model_validate(payload["metadata"])
         payload = _coerce_dataset_provenance(payload)
         return super().model_validate(payload)
 

@@ -11,13 +11,13 @@ def build_inline_prompt_cache_key(
     *,
     model_name: str,
     instance_id: str,
-    format_name: str,
+    representation: str,
     context: str,
 ) -> str:
     digest = hashlib.sha256(
-        f"{model_name}|{instance_id}|{format_name}|{context_fingerprint(context)}".encode("utf-8")
+        f"{model_name}|{instance_id}|{representation}|{context_fingerprint(context)}".encode("utf-8")
     ).hexdigest()[:32]
-    return f"inl:{format_name}:{digest}"
+    return f"inl:{representation}:{digest}"
 
 
 def build_judge_prompt_cache_key(

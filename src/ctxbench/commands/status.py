@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ctxbench.benchmark.provisioning import validate_artifact_directory
+
 from ctxbench.benchmark.evaluation import judge_identifier
 from ctxbench.benchmark.models import EvaluationModelConfig
 from ctxbench.util.fs import load_json
@@ -133,6 +135,7 @@ def _load_experiment_id(root: Path) -> str:
 def status_command(output_dir: str | None = None, *, by: str | None = None) -> int:
     root = Path(output_dir).resolve() if output_dir else Path(".").resolve()
 
+    validate_artifact_directory(root)
     trials_path = root / "trials.jsonl"
     responses_path = root / "responses.jsonl"
     evals_path = root / "evals.jsonl"

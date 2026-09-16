@@ -16,7 +16,7 @@ from ctxbench.adapters.repoqa.tools import RepoQAToolService
 from ctxbench.util.fs import load_json
 
 
-FORMAT_ARTIFACTS = {
+REPRESENTATION_ARTIFACTS = {
     "code": "code_context.txt",
     "code_context": "code_context.txt",
     "text": "code_context.txt",
@@ -29,7 +29,7 @@ FORMAT_ARTIFACTS = {
 
 
 class RepoQADatasetAdapter(LocalDatasetPackage):
-    FORMAT_ARTIFACTS: dict[str, str] = FORMAT_ARTIFACTS
+    REPRESENTATION_ARTIFACTS: dict[str, str] = REPRESENTATION_ARTIFACTS
 
     def __init__(self, dataset_root: str | Path) -> None:
         root = str(Path(dataset_root).resolve())
@@ -106,7 +106,7 @@ class RepoQADatasetAdapter(LocalDatasetPackage):
     ) -> ContextPayload:
         del task_id
 
-        filename = self.FORMAT_ARTIFACTS.get(representation, representation)
+        filename = self.REPRESENTATION_ARTIFACTS.get(representation, representation)
         path = Path(self.dataset_paths.contexts) / instance_id / filename
 
         if not path.exists():

@@ -63,3 +63,39 @@ def test_identity_encodes_configuration_and_structured_dimensions():
     assert first != canonical_trial_identity(**{**args, 'configuration_id': 'b'})
     assert first != canonical_trial_identity(**{**args, 'representation': 'html'})
     assert first != canonical_trial_identity(**{**args, 'experiment_id': 'e', 'task_id': 'x|t'})
+
+
+def test_planned_lifecycle_uses_configuration_snapshot(tmp_path, monkeypatch):
+    from ctxbench.commands.plan import plan_command
+    from ctxbench.commands.execute import execute_command
+    from ctxbench.commands.eval import eval_command
+    from ctxbench.benchmark.provisioning import validate_artifact_directory
+    payload = experiment_payload()
+    payload['dataset']['root'] = str(Path(payload['dataset']['root']).resolve())
+    payload['factors']['configuration'] = ['i-json']
+    experiment = tmp_path / 'experiment.json'
+    experiment.write_text(json.dumps(payload))
+    output = tmp_path / 'planned'
+    assert plan_command(str(experiment), str(output), cache_dir=tmp_path / 'cache') == 0
+    payload['configurations']['i-json']['representation'] = 'missing'
+    experiment.write_text(json.dumps(payload))
+    assert execute_command(str(output / 'trials.jsonl')) == 0
+    manifest = validate_artifact_directory(output)
+    response = json.loads((output / 'responses.jsonl').read_text())
+    assert manifest['configurations']['i-json']['representation'] == 'json'
+    assert response['configurationId'] == 'i-json'
+    assert response['representation'] == 'json'
+    assert response['status'] == 'success'
+    with pytest.raises(ValueError, match='fresh'):
+        plan_command(str(experiment), str(output), cache_dir=tmp_path / 'cache')
+
+
+def test_legacy_directories_rejected_at_lifecycle_boundaries(tmp_path):
+    from ctxbench.commands.execute import execute_command
+    from ctxbench.commands.eval import eval_command
+    from ctxbench.commands.export import export_command
+    from ctxbench.commands.status import status_command
+    (tmp_path / 'manifest.json').write_text('{}')
+    for command, arg in [(execute_command, tmp_path / 'trials.jsonl'), (eval_command, tmp_path / 'responses.jsonl'), (export_command, tmp_path / 'evals.jsonl'), (status_command, tmp_path)]:
+        with pytest.raises(ValueError, match='previous benchmark version'):
+            command(str(arg))

@@ -22,7 +22,7 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
     dataset_tool_provider: object | None = None
     dataset_mcp_server: object | None = None
     if runspec.strategy == "inline":
-        context_payload = adapter.get_context(runspec.instanceId, runspec.taskId, runspec.format)
+        context_payload = adapter.get_context(runspec.instanceId, runspec.taskId, runspec.representation)
         context = _context_to_text(context_payload.content)
     elif runspec.strategy == "local_function":
         dataset_tool_provider = adapter.tool_provider()
@@ -44,7 +44,7 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
             build_inline_prompt_cache_key(
                 model_name=str(runspec.modelName or runspec.params.get("model_name") or ""),
                 instance_id=runspec.instanceId,
-                format_name=runspec.format,
+                representation=runspec.representation,
                 context=context,
             ),
         )
@@ -56,17 +56,18 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
         "taskId": runspec.taskId,
         "instanceId": runspec.instanceId,
         "phase": "EXECUTE",
-        "format": runspec.format,
+        "representation": runspec.representation,
         "provider": runspec.provider,
         "modelId": runspec.modelId,
         "modelName": runspec.modelName,
+        "configurationId": runspec.configurationId,
         "strategy": runspec.strategy,
         "repeatIndex": runspec.repeatIndex,
         "validationType": runspec.validationType,
         "instance_id": runspec.instanceId,
         "task_tags": list(runspec.taskTags),
         "validation_type": runspec.validationType,
-        "context_representation": runspec.format,
+        "context_representation": runspec.representation,
         "context_obtained": runspec.strategy == "inline",
     }
     dataset_instructions = getattr(adapter, "dataset_instructions", lambda: None)()
@@ -78,7 +79,7 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
         provider_name=runspec.provider,
         model_name=str(runspec.params.get("model_name", "")),
         strategy_name=runspec.strategy,
-        context_format=runspec.format,
+        context_representation=runspec.representation,
         params=request_params,
         metadata=request_metadata,
     )
@@ -145,7 +146,8 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
         modelId=runspec.modelId,
         modelName=runspec.modelName,
         strategy=runspec.strategy,
-        format=runspec.format,
+        representation=runspec.representation,
+        configurationId=runspec.configurationId,
         repeatIndex=runspec.repeatIndex,
         outputRoot=runspec.outputRoot,
         response=ai_result.answer,

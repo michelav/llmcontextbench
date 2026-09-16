@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+
+from ctxbench.benchmark.provisioning import validate_artifact_directory
 from typing import Any
 
 from ctxbench.ai.engine import Engine
@@ -67,6 +69,7 @@ def execute_command(
         logger.event(level, phase, event_name, message, **payload)
 
     logger.info("EXECUTE", "trials.loading", "Loading trials", path=str(source))
+    validate_artifact_directory(source.parent)
     runspecs = _load_runspecs(source)
 
     active_selector = selector or RunSelector()

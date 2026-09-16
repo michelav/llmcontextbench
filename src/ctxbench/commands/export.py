@@ -3,6 +3,8 @@ from __future__ import annotations
 import csv
 import json
 from pathlib import Path
+
+from ctxbench.benchmark.provisioning import validate_artifact_directory
 from typing import Any
 
 from ctxbench.benchmark.selectors import RunSelector, matches_run_result
@@ -295,6 +297,7 @@ def export_command(
 
     source = Path(evals).resolve() if evals else Path("evals.jsonl").resolve()
     source_root = source.parent
+    validate_artifact_directory(source_root)
     logger = PhaseLogger(verbose=verbose)
 
     responses_path = source_root / "responses.jsonl"
