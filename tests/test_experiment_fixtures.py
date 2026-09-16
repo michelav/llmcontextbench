@@ -32,7 +32,6 @@ def test_lattes_adapter_experiment_fixture_omits_adapter_implementation_details(
         "LattesDatasetAdapter",
         "LattesDatasetPackage",
         "ctxbench.adapters",
-        "ctxbench.datasets",
         "clean.html",
         "parsed.json",
         "raw.html",

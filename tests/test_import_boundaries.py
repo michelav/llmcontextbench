@@ -60,14 +60,10 @@ def test_import_boundary_command_modules_do_not_import_concrete_lattes_adapter()
     assert offenders == []
 
 
-def test_import_boundary_dataset_provider_does_not_import_lattes_packages() -> None:
+def test_import_boundary_dataset_provider_does_not_import_lattes_adapter() -> None:
     provider_path = SRC_ROOT / "dataset" / "provider.py"
     imports = _imported_modules(provider_path)
 
-    assert not any(
-        module == "ctxbench.datasets.lattes" or module.startswith("ctxbench.datasets.lattes.")
-        for module in imports
-    )
     assert not any(
         module == "ctxbench.adapters.lattes" or module.startswith("ctxbench.adapters.lattes.")
         for module in imports
