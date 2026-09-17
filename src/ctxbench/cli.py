@@ -435,7 +435,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _metrics_command_string(args: argparse.Namespace) -> str:
-    parts = ["ctxbench", "metrics", *args.inputs]
+    parts = ["llmctxbench", "metrics", *args.inputs]
     if args.output:
         parts.extend(["--output", args.output])
     if args.group_by:

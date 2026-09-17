@@ -285,7 +285,8 @@ The command must not include `--no-plot-data`, because plot-specific outputs are
 
 ## 5. Input Artifacts
 
-For each experiment output directory, the command should attempt to read:
+For each experiment output directory, the command reads the required planning artifacts and attempts
+to read these optional execution/evaluation artifacts:
 
 ```text
 manifest.json
@@ -768,42 +769,34 @@ steps
 
 ### 9.4 Aggregated metrics
 
-For each group:
+For each group, the implementation emits exactly these efficiency columns:
 
 ```text
-input_tokens_sum
-output_tokens_sum
-total_tokens_sum
-
-input_tokens_mean
-output_tokens_mean
+n_trials
+n_responses
+primary_success_count
 total_tokens_mean
-
 total_tokens_median
 total_tokens_p95
-
-cached_input_tokens_sum
-cached_read_tokens_sum
-
+total_tokens_sum
+tokens_per_primary_success
 duration_sec_mean
 duration_sec_median
 duration_sec_p95
 duration_sec_sum
-
-model_duration_ms_mean
-tool_duration_ms_mean
-
+duration_sec_per_primary_success
 model_calls_mean
 tool_calls_mean
 function_calls_mean
 mcp_tool_calls_mean
 steps_mean
 total_calls_sum
-
-tokens_per_primary_success
-duration_sec_per_primary_success
 calls_per_primary_success
 ```
+
+The implementation does not emit aggregate input/output-token means or sums, cached-token sums,
+or model/tool-duration means. Those values remain available only at trial level when reported by
+the response artifact.
 
 Derived rules:
 
@@ -1355,7 +1348,7 @@ metric
 value
 ```
 
-`group_key` is a single string composed of the group field values joined by `|`, used for compact display and to key rows uniquely. The individual `group_fields` columns expand to whatever `--group-by` selected (default: `dataset_id`, `configuration`). This file's columns therefore vary with `--group-by`, and consumers must read the header rather than assume fixed columns.
+`group_key` is a single string composed of the group field values joined by `|`, used for compact display and to key rows uniquely. The individual `group_fields` columns expand to whatever `--group-by` selected (default: `dataset_id`, `configurationId`). This file's columns therefore vary with `--group-by`, and consumers must read the header rather than assume fixed columns.
 
 Example rows:
 
@@ -1442,7 +1435,7 @@ Example:
     "notExecutionStatus": [],
     "notEvaluationStatus": []
   },
-  "groupBy": ["dataset_id", "configuration"],
+  "groupBy": ["dataset_id", "configurationId"],
   "inputs": [
     {
       "experimentDir": "outputs/lattes",

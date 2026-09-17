@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ctxbench.cli import _selector_from_args, build_parser, main
+from ctxbench.cli import _metrics_command_string, _selector_from_args, build_parser, main
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +62,17 @@ def test_metrics_help_exposes_artifact_options(capsys):
     assert "--execution-status" in out
     assert "--evaluation-status" in out
     assert "--force" in out
+
+
+def test_metrics_manifest_provenance_uses_public_command_name():
+    args = argparse.Namespace(
+        inputs=["outputs/example"],
+        output=None,
+        group_by=None,
+        force=False,
+    )
+
+    assert _metrics_command_string(args) == "llmctxbench metrics outputs/example"
 
 
 def test_execute_help_uses_target_public_terms(capsys):

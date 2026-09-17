@@ -327,7 +327,7 @@ matching `--not-*` variants.
 
 ### 6. Export Results
 
-After evaluation artifacts exist:
+After execution has produced `responses.jsonl` (evaluation artifacts are optional):
 
 ```bash
 llmctxbench export outputs/getting-started/evals.jsonl \
@@ -336,12 +336,17 @@ llmctxbench export outputs/getting-started/evals.jsonl \
 ```
 
 `llmctxbench export` is artifact-only. It reads existing benchmark artifacts
-and does not resolve datasets or call providers.
+and does not resolve datasets or call providers. It requires `responses.jsonl` and emits one row
+per response, so planned trials without responses cannot appear in the CSV. `evals.jsonl` and
+`judge_votes.jsonl` are optional enrichments. Use `--id TRIAL_ID` to print detailed JSON for one
+response instead of writing CSV; when judge votes are present, export uses the first non-error vote
+for judge metadata and justifications. Export reads response usage and selected raw execution
+fields, whereas metrics uses `metricsSummary.totalDurationMs` as its canonical execution duration.
 
 ### 7. Compute Metrics
 
-Once responses (and, optionally, evaluations) exist, compute canonical
-metrics from the run artifacts:
+Once planning has produced `trials.jsonl`, compute canonical metrics from the run artifacts;
+responses and evaluations may be missing:
 
 ```bash
 llmctxbench metrics outputs/getting-started
@@ -354,6 +359,8 @@ one CSV per dimension (`effectiveness`, `efficiency`, `robustness`,
 `evaluation_reliability`, `observability`). `--output`, `--group-by`, and the
 usual status/selector flags are supported — see
 `llmctxbench metrics --help`.
+Metrics always include every planned trial and therefore support planned-only, executed-only, and
+evaluated runs.
 
 ## Datasets
 
