@@ -10,7 +10,7 @@ from ctxbench.util.logging import PhaseLogger
 
 TRIAL_FIELDS = [
     "experimentId", "dataset_id", "dataset_version", "trialId", "instanceId", "taskId", "taskTags",
-    "provider", "modelId", "modelName", "strategy", "representation", "configurationId", "repeatIndex",
+    "provider", "modelId", "modelName", "strategy", "representation", "surface", "configurationId", "repeatIndex",
     "response_present", "execution_status", "evaluation_present", "evaluation_status",
     "evaluation_method", "evaluation_method_consistent", "input_tokens", "output_tokens",
     "total_tokens", "cached_input_tokens", "cached_read_tokens", "reserved_tokens",
@@ -26,7 +26,7 @@ TRIAL_FIELDS = [
 
 SUPPORTED_GROUP_FIELDS = {
     "experimentId", "dataset_id", "dataset_version", "provider", "modelId", "modelName",
-    "strategy", "representation", "configurationId", "instanceId", "taskId", "taskTags", "repeatIndex",
+    "strategy", "representation", "surface", "configurationId", "instanceId", "taskId", "taskTags", "repeatIndex",
     "evaluation_method", "primary_metric_name",
 }
 _warned_evaluation_statuses: set[str] = set()
@@ -124,6 +124,7 @@ def _build_row(
         "modelName": trial.get("modelName") or trial.get("model"),
         "strategy": strategy,
         "representation": trial.get("representation"),
+        "surface": trial.get("surface"),
         "configurationId": configuration,
         "repeatIndex": trial.get("repeatIndex"),
         "response_present": response is not None,

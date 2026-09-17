@@ -15,6 +15,7 @@ class TrialIdentity(Protocol):
     modelName: str | None
     strategy: str
     representation: str
+    surface: str
     configurationId: str
     repeatIndex: int
 
@@ -35,7 +36,11 @@ def canonical_trial_identity(
     repetition: int,
     *,
     configuration_id: str,
+    surface: str = "",
 ) -> str:
+    configuration = {"strategy": strategy, "representation": representation}
+    if surface:
+        configuration["surface"] = surface
     return json.dumps({
         "identityVersion": 2,
         "experimentId": experiment_id,
@@ -44,7 +49,7 @@ def canonical_trial_identity(
         "provider": provider,
         "modelName": model_name,
         "configurationId": configuration_id,
-        "configuration": {"strategy": strategy, "representation": representation},
+        "configuration": configuration,
         "repeatIndex": repetition,
     }, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
@@ -59,6 +64,7 @@ def canonical_identity_from_trial(trial: TrialIdentity) -> str:
         model_name=trial.modelName or "",
         strategy=trial.strategy,
         representation=trial.representation,
+        surface=trial.surface,
         configuration_id=trial.configurationId,
         repetition=trial.repeatIndex,
     )

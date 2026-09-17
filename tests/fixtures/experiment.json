@@ -29,11 +29,16 @@
   "configurations": {
     "inline-html": {
       "strategy": "inline",
-      "representation": "html"
+      "representation": "html",
+      "surface": "full"
     },
     "inline-json": {
       "strategy": "inline",
-      "representation": "json"
+      "representation": "json",
+      "surface": "full"
     }
+  },
+  "surfaces": {
+    "full": {"type": "full_context"}
   }
 }

@@ -15,10 +15,12 @@ class LattesMCPServer:
         *,
         contexts_dir: str,
         provider: object | None = None,
+        allowed_operations: list[str] | tuple[str, ...] | None = None,
     ) -> None:
         self._service = LattesToolService(
             contexts_dir=contexts_dir,
             provider=provider,
+            allowed_operations=allowed_operations,
         )
         self.app = FastMCP(
             name="ctxbench-lattes",
@@ -31,69 +33,29 @@ class LattesMCPServer:
         self._tool_specs = self._service.list_tools()
 
     def _register_tools(self) -> None:
-        @self.app.tool(name="get_profile", description="Return the researcher's identification data.")
-        async def get_profile(lattes_id: str) -> object:
-            return self.call_tool("get_profile", {"lattes_id": lattes_id}).content
-
-        @self.app.tool(name="get_expertise", description="Return the researcher's expertise, research lines and awards.")
-        async def get_expertise(lattes_id: str) -> object:
-            return self.call_tool("get_expertise", {"lattes_id": lattes_id}).content
-
-        @self.app.tool(name="get_education", description="Return the researcher's academic background.")
-        async def get_education(lattes_id: str, start_year: int | None = None, end_year: int | None = None) -> object:
-            return self.call_tool(
-                "get_education",
-                {"lattes_id": lattes_id, "start_year": start_year, "end_year": end_year},
-            ).content
-
-        @self.app.tool(name="get_projects", description="Return the researcher's projects.")
-        async def get_projects(lattes_id: str, start_year: int | None = None, end_year: int | None = None) -> object:
-            return self.call_tool(
-                "get_projects",
-                {"lattes_id": lattes_id, "start_year": start_year, "end_year": end_year},
-            ).content
-
-        @self.app.tool(name="get_supervisions", description="Return the researcher's supervision activities.")
-        async def get_supervisions(lattes_id: str, start_year: int | None = None, end_year: int | None = None) -> object:
-            return self.call_tool(
-                "get_supervisions",
-                {"lattes_id": lattes_id, "start_year": start_year, "end_year": end_year},
-            ).content
-
-        @self.app.tool(name="get_experience", description="Return the researcher's professional experience.")
-        async def get_experience(lattes_id: str, start_year: int | None = None, end_year: int | None = None) -> object:
-            return self.call_tool(
-                "get_experience",
-                {"lattes_id": lattes_id, "start_year": start_year, "end_year": end_year},
-            ).content
-
-        @self.app.tool(name="get_academic_activities", description="Return boards, events and academic service activities.")
-        async def get_academic_activities(lattes_id: str, start_year: int | None = None, end_year: int | None = None) -> object:
-            return self.call_tool(
-                "get_academic_activities",
-                {"lattes_id": lattes_id, "start_year": start_year, "end_year": end_year},
-            ).content
-
-        @self.app.tool(name="get_publications", description="Return the researcher's bibliographic production.")
-        async def get_publications(lattes_id: str, start_year: int | None = None, end_year: int | None = None) -> object:
-            return self.call_tool(
-                "get_publications",
-                {"lattes_id": lattes_id, "start_year": start_year, "end_year": end_year},
-            ).content
-
-        @self.app.tool(name="get_technical_output", description="Return the researcher's technical output.")
-        async def get_technical_output(lattes_id: str, start_year: int | None = None, end_year: int | None = None) -> object:
-            return self.call_tool(
-                "get_technical_output",
-                {"lattes_id": lattes_id, "start_year": start_year, "end_year": end_year},
-            ).content
-
-        @self.app.tool(name="get_artistic_output", description="Return the researcher's artistic and cultural output.")
-        async def get_artistic_output(lattes_id: str, start_year: int | None = None, end_year: int | None = None) -> object:
-            return self.call_tool(
-                "get_artistic_output",
-                {"lattes_id": lattes_id, "start_year": start_year, "end_year": end_year},
-            ).content
+        for spec in self._service.list_tools():
+            def make_tool(name: str):
+                if name in {
+                    "get_education", "get_projects", "get_supervisions", "get_experience",
+                    "get_academic_activities", "get_publications", "get_technical_output", "get_artistic_output",
+                }:
+                    async def temporal_tool(
+                        lattes_id: str,
+                        start_year: int | None = None,
+                        end_year: int | None = None,
+                    ) -> object:
+                        return self.call_tool(
+                            name,
+                            {"lattes_id": lattes_id, "start_year": start_year, "end_year": end_year},
+                        ).content
+                    temporal_tool.__name__ = name
+                    return temporal_tool
+                async def selected_tool(lattes_id: str) -> object:
+                    return self.call_tool(name, {"lattes_id": lattes_id}).content
+                selected_tool.__name__ = name
+                return selected_tool
+            selected_tool = make_tool(spec.name)
+            self.app.tool(name=spec.name, description=spec.description)(selected_tool)
 
     def list_tools(self) -> list[ToolSpec]:
         return list(self._tool_specs)
@@ -108,8 +70,8 @@ class LattesMCPServer:
         self._service.close()
 
 
-def build_lattes_mcp_server(*, contexts_dir: str, provider: object | None = None) -> LattesMCPServer:
-    return LattesMCPServer(contexts_dir=contexts_dir, provider=provider)
+def build_lattes_mcp_server(*, contexts_dir: str, provider: object | None = None, allowed_operations: list[str] | tuple[str, ...] | None = None) -> LattesMCPServer:
+    return LattesMCPServer(contexts_dir=contexts_dir, provider=provider, allowed_operations=allowed_operations)
 
 
 def create_mcp(*, contexts_dir: str | None = None) -> FastMCP:

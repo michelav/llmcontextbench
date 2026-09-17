@@ -191,7 +191,7 @@ def status_command(output_dir: str | None = None, *, by: str | None = None) -> i
                 print(
                     f"{judge_id:<24} {total:>8} {success:>8} {failed:>8} {pending:>8}"
                 )
-        elif by in {"configuration", "representation", "strategy", "model", "instance", "task"}:
+        elif by in {"configuration", "representation", "surface", "strategy", "model", "instance", "task"}:
             field = {"configuration": "configurationId", "model": "modelId", "instance": "instanceId", "task": "taskId"}.get(by, by)
             from ctxbench.util.jsonl import read_jsonl
             groups: dict[str, list[dict[str, object]]] = {}

@@ -15,6 +15,7 @@ class RunSelector:
     configuration: tuple[str, ...] = ()
     strategy: tuple[str, ...] = ()
     representation: tuple[str, ...] = ()
+    surface: tuple[str, ...] = ()
     repetition: tuple[int, ...] = ()
     status: tuple[str, ...] = ()
     trial_id: tuple[str, ...] = ()
@@ -25,6 +26,7 @@ class RunSelector:
     not_configuration: tuple[str, ...] = ()
     not_strategy: tuple[str, ...] = ()
     not_representation: tuple[str, ...] = ()
+    not_surface: tuple[str, ...] = ()
     not_repetition: tuple[int, ...] = ()
     not_status: tuple[str, ...] = ()
 
@@ -61,6 +63,8 @@ def _matches_common(item: Any, selector: RunSelector) -> bool:
         return False
     if selector.representation and _field(item, "representation") not in selector.representation:
         return False
+    if selector.surface and _field(item, "surface") not in selector.surface:
+        return False
     if selector.repetition and _field(item, "repeatIndex") not in selector.repetition:
         return False
     if selector.not_provider and _field(item, "provider") in selector.not_provider:
@@ -79,6 +83,8 @@ def _matches_common(item: Any, selector: RunSelector) -> bool:
     if selector.not_strategy and _field(item, "strategy") in selector.not_strategy:
         return False
     if selector.not_representation and _field(item, "representation") in selector.not_representation:
+        return False
+    if selector.not_surface and _field(item, "surface") in selector.not_surface:
         return False
     if selector.not_repetition and _field(item, "repeatIndex") in selector.not_repetition:
         return False

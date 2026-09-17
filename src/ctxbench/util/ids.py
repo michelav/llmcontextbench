@@ -21,6 +21,7 @@ def trialspec_id(
     repetition: int,
     *,
     configuration_id: str,
+    surface: str = "",
 ) -> str:
     return canonical_trial_identity(
         experiment_id=experiment_id,
@@ -32,6 +33,7 @@ def trialspec_id(
         representation=representation,
         repetition=repetition,
         configuration_id=configuration_id,
+        surface=surface,
     )
 
 

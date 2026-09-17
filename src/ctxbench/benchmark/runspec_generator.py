@@ -101,6 +101,8 @@ def generate_runspecs(
                 model_name = model["name"]
                 for configuration_id in configurations:
                     configuration = experiment.configurations[configuration_id]
+                    surface_declaration = experiment.surfaces[configuration.surface]
+                    resolved_surface = dataset_package.resolve_surface(surface_declaration)
                     strategy_name = configuration.strategy
                     representation = configuration.representation
                     params = resolve_params(experiment, model_name, model_id=model_id)
@@ -115,6 +117,7 @@ def generate_runspecs(
                             representation,
                             repeat_index,
                             configuration_id=configuration_id,
+                            surface=configuration.surface,
                         )
                         draft_specs.append(
                             {
@@ -133,6 +136,9 @@ def generate_runspecs(
                                 "modelName": model_name,
                                 "strategy": strategy_name,
                                 "representation": representation,
+                                "surface": configuration.surface,
+                                "surfaceSpec": surface_declaration.model_dump(mode="json"),
+                                "resolvedSurface": resolved_surface,
                                 "configurationId": configuration_id,
                                 "params": params,
                                 "repeatIndex": repeat_index,
@@ -172,6 +178,7 @@ def generate_runspecs(
                 modelName=item["modelName"],
                 strategy=item["strategy"],
                 representation=item["representation"],
+                surface=item["surface"],
                 configurationId=item["configurationId"],
                 params=item["params"],
                 repeatIndex=item["repeatIndex"],
@@ -188,13 +195,16 @@ def generate_runspecs(
                     modelName=item["modelName"],
                     strategy=item["strategy"],
                     representation=item["representation"],
+                    surface=item["surface"],
                     configurationId=item["configurationId"],
                     repeatIndex=item["repeatIndex"],
                     taskTags=item["taskTags"],
                     validationType=item["validationType"],
                     validationConfig=item["validationConfig"],
                     parameters=item["parameters"],
+                    surfaceSpec=item["surfaceSpec"],
                 ),
+                surfaceSpec=item["surfaceSpec"],
             )
         )
     return runspecs

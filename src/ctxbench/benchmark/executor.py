@@ -25,13 +25,13 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
         context_payload = adapter.get_context(runspec.instanceId, runspec.taskId, runspec.representation)
         context = _context_to_text(context_payload.content)
     elif runspec.strategy == "local_function":
-        dataset_tool_provider = adapter.tool_provider()
+        dataset_tool_provider = _resolve_tool_provider(adapter, runspec)
         if dataset_tool_provider is None:
             raise CapabilityUnavailableError(
                 f"Strategy '{runspec.strategy}' requires a dataset tool provider."
             )
     elif runspec.strategy == "local_mcp":
-        dataset_mcp_server = _resolve_mcp_server(adapter)
+        dataset_mcp_server = _resolve_mcp_server(adapter, runspec)
         if dataset_mcp_server is None:
             raise CapabilityUnavailableError("Strategy 'local_mcp' requires a dataset MCP server.")
     elif runspec.strategy == "remote_mcp":
@@ -57,6 +57,7 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
         "instanceId": runspec.instanceId,
         "phase": "EXECUTE",
         "representation": runspec.representation,
+        "surface": runspec.surface,
         "provider": runspec.provider,
         "modelId": runspec.modelId,
         "modelName": runspec.modelName,
@@ -69,6 +70,7 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
         "validation_type": runspec.validationType,
         "context_representation": runspec.representation,
         "context_obtained": runspec.strategy == "inline",
+        "surface_spec": dict(runspec.surfaceSpec),
     }
     dataset_instructions = getattr(adapter, "dataset_instructions", lambda: None)()
     if dataset_instructions:
@@ -147,6 +149,7 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
         modelName=runspec.modelName,
         strategy=runspec.strategy,
         representation=runspec.representation,
+        surface=runspec.surface,
         configurationId=runspec.configurationId,
         repeatIndex=runspec.repeatIndex,
         outputRoot=runspec.outputRoot,
@@ -163,6 +166,7 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
         trace=trace,
         evaluation=EvaluationResult(),
         metadata=runspec.metadata,
+        surfaceSpec=dict(runspec.surfaceSpec),
     )
     return result
 
@@ -201,11 +205,26 @@ def _build_tool_runtime_factories(
     return tool_runtime_factories
 
 
-def _resolve_mcp_server(adapter: DatasetPackage) -> object | None:
+def _resolve_tool_provider(adapter: DatasetPackage, runspec: TrialSpec) -> object | None:
+    provider = getattr(adapter, "tool_provider", None)
+    if not callable(provider):
+        return None
+    operations = runspec.surfaceSpec.get("operations")
+    try:
+        return provider(allowed_operations=operations)
+    except TypeError:
+        return provider()
+
+
+def _resolve_mcp_server(adapter: DatasetPackage, runspec: TrialSpec) -> object | None:
     mcp_server = getattr(adapter, "mcp_server", None)
     if not callable(mcp_server):
         return None
-    server = mcp_server()
+    operations = runspec.surfaceSpec.get("operations")
+    try:
+        server = mcp_server(allowed_operations=operations)
+    except TypeError:
+        server = mcp_server()
     if server is None or not hasattr(server, "app"):
         return None
     return server

@@ -137,7 +137,7 @@ def test_metrics_rejects_pipe_in_task_tags(tmp_path):
 
 def test_metrics_observability_from_trace_and_usage(tmp_path):
     trial = _trial("t1")
-    trial.update(strategy="local_mcp", configurationId="mcp-json")
+    trial.update(strategy="local_mcp", configurationId="mcp-json", surface="ops")
     root = _experiment(
         tmp_path / "exp",
         responses=[
@@ -206,7 +206,7 @@ def _experiment(
     root.mkdir(parents=True)
     trial_rows = trials or [_trial("t1")]
     for trial in trial_rows:
-        trial["metadata"] = {key: trial[key] for key in ("configurationId", "strategy", "representation")}
+        trial["metadata"] = {key: trial[key] for key in ("configurationId", "strategy", "representation", "surface")}
     _write_jsonl(root / "trials.jsonl", trial_rows)
     if responses is None:
         responses = [_response(str(trial_rows[0]["trialId"]))]
@@ -221,7 +221,7 @@ def _experiment(
     if votes:
         _write_jsonl(root / "judge_votes.jsonl", votes)
     (root / "manifest.json").write_text(
-        json.dumps({"provisioningArtifactVersion": 1, "configurations": {t["configurationId"]: {k: t[k] for k in ("strategy", "representation")} for t in trial_rows}, "experimentId": "exp", "dataset": {"contentHash": "sha256:test"}}),
+        json.dumps({"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}, "ops": {"type": "operations", "operations": ["get_evidence"]}}, "configurations": {t["configurationId"]: {k: t[k] for k in ("strategy", "representation", "surface")} for t in trial_rows}, "experimentId": "exp", "dataset": {"contentHash": "sha256:test"}}),
         encoding="utf-8",
     )
     return root
@@ -255,6 +255,7 @@ def _trial(
         "modelName": model_id,
         "strategy": "inline",
         "representation": "json",
+        "surface": "full",
         "configurationId": "inline-json",
         "repeatIndex": 1,
         "validationType": validation_type,
@@ -278,6 +279,7 @@ def _response(
         "usage": {"reasoningTokens": 1},
         "traceRef": trace_ref,
         "strategy": strategy,
+        "surface": "full" if strategy == "inline" else "ops",
     }
 
 
@@ -324,4 +326,3 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
 def _csv_rows(path: Path) -> list[dict[str, str]]:
     with path.open(encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
-

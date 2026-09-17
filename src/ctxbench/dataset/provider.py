@@ -21,6 +21,7 @@ from ctxbench.dataset.tasks import (
     TaskInstanceEntry,
 )
 from ctxbench.util.fs import load_json
+from ctxbench.benchmark.surfaces import ResolvedSurface, SurfaceSpec
 
 
 class LocalDatasetPackage:
@@ -259,6 +260,11 @@ class LocalDatasetPackage:
 
     def strategy_descriptors(self) -> list[object] | None:
         return None
+
+    def resolve_surface(self, surface: SurfaceSpec) -> ResolvedSurface:
+        if surface.type == "full_context":
+            return ResolvedSurface(surface)
+        raise ValueError(f"Dataset '{self.identity()}' does not provide operation surfaces.")
 
     def _load_tasks(self) -> TaskDataset:
         tasks_path = Path(self.dataset_paths.tasks)

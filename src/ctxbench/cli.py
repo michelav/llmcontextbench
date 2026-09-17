@@ -45,6 +45,7 @@ def _add_selector_args(parser: argparse.ArgumentParser, *, include_status: bool 
         "--representation", action="append", default=[], metavar="NAME[,NAME...]",
         help="Filter by context representation (repeatable, comma-separated)",
     )
+    parser.add_argument("--surface", action="append", default=[], metavar="ID[,ID...]", help="Filter by context surface")
     parser.add_argument(
         "--repetition", action="append", default=[], metavar="N[,N...]",
         help="Filter by repetition index (repeatable, comma-separated)",
@@ -73,6 +74,7 @@ def _add_selector_args(parser: argparse.ArgumentParser, *, include_status: bool 
         "--not-representation", action="append", default=[], metavar="NAME",
         help="Exclude by context representation",
     )
+    parser.add_argument("--not-surface", action="append", default=[], metavar="ID", help="Exclude by context surface")
     parser.add_argument(
         "--not-repetition", action="append", default=[], metavar="N",
         help="Exclude by repetition index",
@@ -136,6 +138,7 @@ def _selector_from_args(args: argparse.Namespace, *, include_status: bool = Fals
         not_configuration=_parse_multi_str(getattr(args, "not_configuration", []) or []),
         strategy=_parse_multi_str(getattr(args, "strategy", []) or []),
         representation=_parse_multi_str(getattr(args, "representation", []) or []),
+        surface=_parse_multi_str(getattr(args, "surface", []) or []),
         repetition=_parse_multi_int(getattr(args, "repetition", []) or []),
         status=_parse_multi_str(getattr(args, "status", []) or []) if include_status else (),
         trial_id=_resolve_trial_ids(args),
@@ -145,6 +148,7 @@ def _selector_from_args(args: argparse.Namespace, *, include_status: bool = Fals
         not_task=_parse_multi_str(getattr(args, "not_task", []) or []),
         not_strategy=_parse_multi_str(getattr(args, "not_strategy", []) or []),
         not_representation=_parse_multi_str(getattr(args, "not_representation", []) or []),
+        not_surface=_parse_multi_str(getattr(args, "not_surface", []) or []),
         not_repetition=_parse_multi_int(getattr(args, "not_repetition", []) or []),
         not_status=_parse_multi_str(getattr(args, "not_status", []) or []) if include_status else (),
     )
@@ -163,6 +167,7 @@ def _metrics_selector_from_args(args: argparse.Namespace) -> RunSelector:
         not_configuration=selector.not_configuration,
         strategy=selector.strategy,
         representation=selector.representation,
+        surface=selector.surface,
         repetition=selector.repetition,
         status=(*selector.status, *execution_status),
         trial_id=selector.trial_id,
@@ -172,6 +177,7 @@ def _metrics_selector_from_args(args: argparse.Namespace) -> RunSelector:
         not_task=selector.not_task,
         not_strategy=selector.not_strategy,
         not_representation=selector.not_representation,
+        not_surface=selector.not_surface,
         not_repetition=selector.not_repetition,
         not_status=(*selector.not_status, *not_execution_status),
     )

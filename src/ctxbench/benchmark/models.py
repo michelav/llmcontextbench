@@ -5,6 +5,7 @@ import re
 from typing import Any
 
 from ctxbench._compat import BaseModel, Field, ValidationError
+from ctxbench.benchmark.surfaces import SurfaceSpec, parse_surface
 
 MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
 VALID_STRATEGY_NAMES = {"inline", "local_function", "local_mcp", "remote_mcp"}
@@ -350,9 +351,10 @@ class ExperimentArtifacts(BaseModel):
 class ProvisioningConfiguration(BaseModel):
     strategy: str
     representation: str
+    surface: str
 
     def __init__(self, **data: Any) -> None:
-        extra = set(data) - {"strategy", "representation"}
+        extra = set(data) - {"strategy", "representation", "surface"}
         # Subclasses add identity and artifact fields.
         if type(self) is ProvisioningConfiguration and extra:
             raise ValueError(f"Unexpected configuration fields: {', '.join(sorted(extra))}")
@@ -363,6 +365,9 @@ class ProvisioningConfiguration(BaseModel):
             raise ValueError("Configuration representation must be non-empty.")
         if self.strategy != "inline" and self.representation != "json":
             raise ValueError("Tool strategies support only the json representation.")
+        if self.strategy == "inline":
+            # The referenced declaration is checked by Experiment once all surfaces are parsed.
+            return
 
 
 CONFIGURATION_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]*$")
@@ -379,7 +384,7 @@ class ProvisioningTreatment(ProvisioningConfiguration):
             raise ValueError("Configuration IDs must be lowercase identifiers.")
         metadata = getattr(self, "metadata", None)
         if metadata is not None:
-            for field in ("configurationId", "strategy", "representation"):
+            for field in ("configurationId", "strategy", "representation", "surface"):
                 if getattr(self, field) != getattr(metadata, field):
                     raise ValueError(f"Inconsistent provisioning field: {field}")
 
@@ -392,6 +397,7 @@ class Experiment(BaseModel):
     scope: ExperimentScope = Field(default_factory=ExperimentScope)
     factors: dict[str, list[Any]]
     configurations: dict[str, ProvisioningConfiguration]
+    surfaces: dict[str, SurfaceSpec]
     models: dict[str, ModelEntry] = Field(default_factory=dict)
     params: ExperimentParams = Field(default_factory=ExperimentParams)
     expansion: ExperimentExpansion = Field(default_factory=ExperimentExpansion)
@@ -423,6 +429,10 @@ class Experiment(BaseModel):
             key: ProvisioningConfiguration.model_validate(value)
             for key, value in configurations.items()
         }
+        surfaces = payload.get("surfaces")
+        if not isinstance(surfaces, dict) or not surfaces:
+            raise ValueError("Experiment requires nonempty top-level surfaces.")
+        payload["surfaces"] = {key: parse_surface(value) for key, value in surfaces.items()}
         # New format: top-level "models" section present
         if "models" in payload and isinstance(payload["models"], dict):
             parsed_models: dict[str, ModelEntry] = {
@@ -520,6 +530,19 @@ class Experiment(BaseModel):
         for configuration_id in self.configurations:
             if not CONFIGURATION_ID_PATTERN.fullmatch(configuration_id):
                 raise ValueError("Configuration IDs must be lowercase identifiers.")
+        for surface_id in self.surfaces:
+            if not CONFIGURATION_ID_PATTERN.fullmatch(surface_id):
+                raise ValueError("Surface IDs must be lowercase identifiers.")
+        for configuration_id, configuration in self.configurations.items():
+            surface = self.surfaces.get(configuration.surface)
+            if surface is None:
+                raise ValueError(
+                    f"Configuration '{configuration_id}' references undefined surface: {configuration.surface!r}"
+                )
+            if configuration.strategy == "inline" and surface.type != "full_context":
+                raise ValueError("Inline configurations require a full_context surface.")
+            if configuration.strategy != "inline" and surface.type != "operations":
+                raise ValueError("Tool-mediated configurations require an operations surface.")
         seen: set[str] = set()
         for ref in self.factors["configuration"]:
             if not isinstance(ref, str) or ref not in self.configurations:
@@ -541,6 +564,7 @@ class TrialMetadata(ProvisioningTreatment):
     validationType: str | None = None
     validationConfig: dict[str, Any] = Field(default_factory=dict)
     parameters: dict[str, Any] = Field(default_factory=dict)
+    surfaceSpec: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
     def model_validate(cls, data: Any) -> "TrialMetadata":
@@ -582,6 +606,7 @@ class TrialSpec(ProvisioningTreatment):
     trace: ExperimentTrace = Field(default_factory=ExperimentTrace)
     artifacts: ExperimentArtifacts = Field(default_factory=ExperimentArtifacts)
     metadata: TrialMetadata
+    surfaceSpec: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
     def model_validate(cls, data: Any) -> "TrialSpec":
@@ -618,9 +643,11 @@ class TrialSpec(ProvisioningTreatment):
                 "strategy": payload.get("strategy", ""),
                 "representation": payload.get("representation", ""),
                 "configurationId": payload.get("configurationId", ""),
+                "surface": payload.get("surface", ""),
                 "repeatIndex": payload.get("repeatIndex", 1),
                 "validationConfig": payload.get("validationConfig", {}),
                 "parameters": payload.get("parameters", {}),
+                "surfaceSpec": payload.get("surfaceSpec", {}),
             }
         validated_metadata = TrialMetadata.model_validate(payload["metadata"])
         payload["metadata"] = validated_metadata
@@ -658,6 +685,8 @@ class TrialSpec(ProvisioningTreatment):
             "validationConfig": dict(self.validationConfig),
             "contextBlocks": list(self.contextBlocks),
             "parameters": dict(self.parameters),
+            "surface": self.surface,
+            "surfaceSpec": dict(self.surfaceSpec),
             "metadata": {
                 "canonicalId": self.metadata.canonicalId,
                 "taskId": self.metadata.taskId,
@@ -668,11 +697,13 @@ class TrialSpec(ProvisioningTreatment):
                 "strategy": self.metadata.strategy,
                 "representation": self.metadata.representation,
                 "configurationId": self.metadata.configurationId,
+                "surface": self.metadata.surface,
                 "repeatIndex": self.metadata.repeatIndex,
                 "taskTags": list(self.metadata.taskTags),
                 "validationType": self.metadata.validationType,
                 "validationConfig": dict(self.metadata.validationConfig),
                 "parameters": dict(self.metadata.parameters),
+                "surfaceSpec": dict(self.metadata.surfaceSpec),
             },
         }
 
@@ -734,6 +765,7 @@ class TrialResult(ProvisioningTreatment):
     traceRef: str | None = None
     evaluation: EvaluationResult = Field(default_factory=EvaluationResult)
     metadata: TrialMetadata
+    surfaceSpec: dict[str, Any] = Field(default_factory=dict)
 
     @classmethod
     def model_validate(cls, data: Any) -> "TrialResult":
@@ -770,10 +802,12 @@ class TrialResult(ProvisioningTreatment):
                 "modelName": payload.get("modelName"),
                 "strategy": payload.get("strategy", ""),
                 "representation": payload.get("representation", ""),
+                "surface": payload.get("surface", ""),
                 "configurationId": payload.get("configurationId", ""),
                 "repeatIndex": payload.get("repeatIndex", 1),
                 "validationConfig": payload.get("validationConfig", {}),
                 "parameters": payload.get("parameters", {}),
+                "surfaceSpec": payload.get("surfaceSpec", {}),
             }
         validated_metadata = TrialMetadata.model_validate(payload["metadata"])
         payload["metadata"] = validated_metadata
@@ -799,6 +833,8 @@ class TrialResult(ProvisioningTreatment):
             "model": self.modelName,
             "strategy": self.strategy,
             "representation": self.representation,
+            "surface": self.surface,
+            "surfaceSpec": dict(self.surfaceSpec),
             "configurationId": self.configurationId,
             "repeatIndex": self.repeatIndex,
             "outputRoot": self.outputRoot,
@@ -823,12 +859,14 @@ class TrialResult(ProvisioningTreatment):
                 "modelName": self.metadata.modelName,
                 "strategy": self.metadata.strategy,
                 "representation": self.metadata.representation,
+                "surface": self.metadata.surface,
                 "configurationId": self.metadata.configurationId,
                 "repeatIndex": self.metadata.repeatIndex,
                 "taskTags": list(self.metadata.taskTags),
                 "validationType": self.metadata.validationType,
                 "validationConfig": dict(self.metadata.validationConfig),
                 "parameters": dict(self.metadata.parameters),
+                "surfaceSpec": dict(self.metadata.surfaceSpec),
             },
         }
 
@@ -868,6 +906,7 @@ class EvaluationItemResult(BaseModel):
     executionModel: str | None = None
     executionStrategy: str | None = None
     executionRepresentation: str | None = None
+    executionSurface: str | None = None
     executionInputTokens: int | None = None
     executionOutputTokens: int | None = None
     executionDurationMs: int | None = None
@@ -887,7 +926,7 @@ class EvaluationItemResult(BaseModel):
 
     def __init__(self, **data: Any) -> None:
         super().__init__(**data)
-        for field, metadata_field in (("executionStrategy", "strategy"), ("executionRepresentation", "representation")):
+        for field, metadata_field in (("executionStrategy", "strategy"), ("executionRepresentation", "representation"), ("executionSurface", "surface")):
             value = getattr(self, field)
             if value is not None and value != getattr(self.metadata, metadata_field):
                 raise ValueError(f"Inconsistent evaluation provisioning field: {field}")
@@ -929,6 +968,7 @@ class EvaluationItemResult(BaseModel):
             "taskId": self.taskId,
             "strategy": self.metadata.strategy,
             "representation": self.metadata.representation,
+            "surface": self.metadata.surface,
             "configurationId": self.metadata.configurationId,
             "metadata": self.metadata.model_dump(mode="json"),
             "status": eval_status,
@@ -967,6 +1007,7 @@ class EvaluationItemResult(BaseModel):
                 "instanceId": self.instanceId,
                 "taskId": self.taskId,
                 "strategy": self.executionStrategy,
+                "surface": self.metadata.surface,
                 "judgeId": judge.get("judgeId"),
                 "provider": judge.get("provider"),
                 "model": judge.get("model"),

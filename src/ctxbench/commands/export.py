@@ -69,6 +69,7 @@ def _merge_row(
         "dataset_version": (ans.get("dataset") or {}).get("version"),
         "instanceId": _ans(ans, "instanceId"),
         "representation": _ans(ans, "representation"),
+        "surface": _ans(ans, "surface"),
         "taskId": _ans(ans, "taskId"),
         "modelId": _ans(ans, "modelId"),
         "modelName": _ans(ans, "model") or _ans(ans, "modelName"),
@@ -120,7 +121,7 @@ def _merge_row(
 
 
 _CSV_FIELDS = [
-    "experimentId", "trialId", "dataset_id", "dataset_version", "instanceId", "configurationId", "representation", "taskId",
+    "experimentId", "trialId", "dataset_id", "dataset_version", "instanceId", "configurationId", "representation", "surface", "taskId",
     "modelId", "modelName", "tags", "index", "strategy", "temperature",
     "inputTokens", "outputTokens", "totalTokens", "cachedInputTokens", "cachedReadTokens",
     "status", "modelCalls", "toolCalls", "mcpToolCalls",
@@ -142,6 +143,7 @@ _BY_KEY_MAP = {
     "configuration": "configurationId",
     "strategy": "strategy",
     "representation": "representation",
+    "surface": "surface",
     "instance": "instance",
 }
 
@@ -247,6 +249,7 @@ def _print_run_detail(
         "strategy": merged["strategy"],
         "configurationId": merged["configurationId"],
         "representation": merged["representation"],
+        "surface": merged["surface"],
         "index": merged["index"],
         "tags": (response.get("taskTags") or []),
         "status": merged["status"],

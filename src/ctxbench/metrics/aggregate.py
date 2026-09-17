@@ -39,7 +39,7 @@ AGGREGATE_FIELDS = [
     "duration_sec_per_primary_success", "model_calls_mean", "tool_calls_mean", "function_calls_mean",
     "mcp_tool_calls_mean", "calls_per_primary_success", "primary_success_rate_range_by_task",
     "primary_success_rate_range_by_instance", "primary_success_rate_range_by_repeat",
-    "primary_success_rate_range_by_model", "primary_success_rate_range_by_representation",
+    "primary_success_rate_range_by_model", "primary_success_rate_range_by_representation", "primary_success_rate_range_by_surface",
     "evaluation_coverage_rate", "evaluation_success_rate", "evaluation_error_rate",
     "judge_agreement_mean", "judge_unanimity_rate", "trace_coverage_rate",
     "tool_call_observability_rate", "usage_observability_rate",
@@ -51,6 +51,7 @@ ROBUSTNESS_AXES = {
     "repeat": ("taskId", "instanceId", "repeatIndex"),
     "model": ("modelId",),
     "representation": ("representation",),
+    "surface": ("surface",),
 }
 
 
@@ -358,4 +359,3 @@ def _flag_rate(rows: list[dict[str, Any]], field: str) -> float | None:
 
 def _sort_key(row: dict[str, Any], fields: list[str]) -> tuple[str, ...]:
     return tuple("" if row.get(field) is None else str(row.get(field)) for field in fields)
-

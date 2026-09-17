@@ -36,7 +36,11 @@
   "configurations": {
     "inline-json": {
       "strategy": "inline",
-      "representation": "json"
+      "representation": "json",
+      "surface": "full"
     }
+  },
+  "surfaces": {
+    "full": {"type": "full_context"}
   }
 }

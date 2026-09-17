@@ -42,11 +42,34 @@ def list_lattes_tool_specs() -> list[ToolSpec]:
     ]
 
 
+LATTES_DEFAULT_OPERATIONS = tuple(spec.name for spec in list_lattes_tool_specs())
+
+
+def list_lattes_operation_specs() -> list[ToolSpec]:
+    return [
+        ToolSpec(
+            name="find_research_interests",
+            description="Find the researcher's research interests and expertise.",
+            input_schema=IDENTITY_SCHEMA,
+        ),
+        ToolSpec(
+            name="find_academic_trajectory",
+            description="Find the researcher's academic and professional trajectory.",
+            input_schema=IDENTITY_SCHEMA,
+        ),
+    ]
+
+
 class LattesToolService:
-    def __init__(self, *, contexts_dir: str, provider: LattesProvider | None = None) -> None:
+    def __init__(self, *, contexts_dir: str, provider: LattesProvider | None = None, allowed_operations: list[str] | tuple[str, ...] | None = None) -> None:
         self._contexts_dir = contexts_dir
         self._provider = provider or LattesProvider()
-        self._tools = list_lattes_tool_specs()
+        specs = {spec.name: spec for spec in [*list_lattes_tool_specs(), *list_lattes_operation_specs()]}
+        selected = tuple(allowed_operations) if allowed_operations is not None else LATTES_DEFAULT_OPERATIONS
+        unknown = [name for name in selected if name not in specs]
+        if unknown:
+            raise ValueError(f"Unknown Lattes operations: {', '.join(unknown)}")
+        self._tools = [specs[name] for name in selected]
         self._handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
             "get_profile": self._call_get_profile,
             "get_expertise": self._call_get_expertise,
@@ -58,7 +81,10 @@ class LattesToolService:
             "get_publications": self._call_get_publications,
             "get_technical_output": self._call_get_technical_output,
             "get_artistic_output": self._call_get_artistic_output,
+            "find_research_interests": self._call_find_research_interests,
+            "find_academic_trajectory": self._call_find_academic_trajectory,
         }
+        self._handlers = {name: self._handlers[name] for name in selected}
 
     def list_tools(self) -> list[ToolSpec]:
         return list(self._tools)
@@ -66,7 +92,7 @@ class LattesToolService:
     def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         handler = self._handlers.get(name)
         if handler is None:
-            raise KeyError(f"Unknown Lattes tool: {name}")
+            raise KeyError(f"Unselected or unknown Lattes tool: {name}")
         started_at = perf_counter()
         content = handler(arguments)
         duration_ms = max(0, int((perf_counter() - started_at) * 1000))
@@ -162,6 +188,19 @@ class LattesToolService:
             start_year=_optional_year(arguments, "start_year"),
             end_year=_optional_year(arguments, "end_year"),
         )
+
+    def _call_find_research_interests(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        return self._provider.get_expertise(
+            contexts_dir=self._contexts_dir,
+            lattes_id=_require_lattes_id(arguments),
+        )
+
+    def _call_find_academic_trajectory(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        lattes_id = _require_lattes_id(arguments)
+        return {
+            "education": self._provider.get_education(contexts_dir=self._contexts_dir, lattes_id=lattes_id),
+            "experience": self._provider.get_experience(contexts_dir=self._contexts_dir, lattes_id=lattes_id),
+        }
 
 
 def _require_lattes_id(arguments: dict[str, Any]) -> str:

@@ -21,11 +21,15 @@
   "trace": {
     "writeFiles": false
   },
-  "provisioningArtifactVersion": 1,
+  "provisioningArtifactVersion": 2,
+  "surfaces": {
+    "full": {"type": "full_context"}
+  },
   "configurations": {
     "inline-json": {
       "strategy": "inline",
-      "representation": "json"
+      "representation": "json",
+      "surface": "full"
     }
   }
 }

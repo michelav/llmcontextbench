@@ -19,12 +19,12 @@ def test_analysis_notebook_current_contract(tmp_path, monkeypatch, with_tools):
     root = tmp_path / 'input'
     root.mkdir()
     definitions = {
-        'alpha': {'strategy': 'inline', 'representation': 'json'},
-        'beta': {'strategy': 'inline', 'representation': 'html'},
-        'gamma': {'strategy': 'local_function', 'representation': 'json'},
-        'delta': {'strategy': 'local_function', 'representation': 'json'},
+        'alpha': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'},
+        'beta': {'strategy': 'inline', 'representation': 'html', 'surface': 'full'},
+        'gamma': {'strategy': 'local_function', 'representation': 'json', 'surface': 'ops'},
+        'delta': {'strategy': 'local_function', 'representation': 'json', 'surface': 'ops'},
     }
-    manifest = {'provisioningArtifactVersion': 1, 'configurations': definitions, 'experimentId': 'fixture', 'evaluation': {'judges': []}}
+    manifest = {'provisioningArtifactVersion': 2, 'surfaces': {'full': {'type': 'full_context'}, 'ops': {'type': 'operations', 'operations': ['get_evidence']}}, 'configurations': definitions, 'experimentId': 'fixture', 'evaluation': {'judges': []}}
     (root / 'manifest.json').write_text(json.dumps(manifest))
     trials, responses, evals, votes = [], [], [], []
     for model in ('gpt1', 'gpt2', 'gemini1', 'gemini2'):
@@ -41,7 +41,7 @@ def test_analysis_notebook_current_contract(tmp_path, monkeypatch, with_tools):
                 rating = 'meets' if index else 'misses'
                 evals.append(dict(row, status='evaluated', evaluationMethod='judge', judgeCount=3, judgeErrorCount=0, outcome={criterion: {'rating': rating, 'agreement': True} for criterion in ('correctness', 'completeness')}, evaluationInputTokens=6, evaluationOutputTokens=3, evaluationTotalTokens=9, evaluationDurationMs=300))
                 for judge in ('j1', 'j2', 'j3'):
-                    votes.append(dict(trialId=trial_id, experimentId='fixture', instanceId='i1', taskId=task, judgeId=judge, provider='mock', model=judge, error=None, status='evaluated', criterias={criterion: {'rating': rating, 'justification': 'fixture'} for criterion in ('correctness','completeness')}, inputTokens=2, outputTokens=1, totalTokens=3, durationMs=100))
+                    votes.append(dict(trialId=trial_id, experimentId='fixture', instanceId='i1', taskId=task, surface=definition['surface'], judgeId=judge, provider='mock', model=judge, error=None, status='evaluated', criterias={criterion: {'rating': rating, 'justification': 'fixture'} for criterion in ('correctness','completeness')}, inputTokens=2, outputTokens=1, totalTokens=3, durationMs=100))
     for name, rows in [('trials',trials), ('responses',responses), ('evals',evals), ('judge_votes',votes)]:
         (root / f'{name}.jsonl').write_text(''.join(json.dumps(row)+'\n' for row in rows))
     monkeypatch.setenv('CTXBENCH_ANALYSIS_INPUT', str(root))

@@ -12,11 +12,12 @@ from ctxbench.util.artifacts import canonical_trial_identity
 def experiment_payload():
     return {
         'id': 'provisioning', 'dataset': {'root': 'tests/fixtures/fake_dataset/dataset'},
+        'surfaces': {'full': {'type': 'full_context'}, 'ops': {'type': 'operations', 'operations': ['find_research_interests']}},
         'models': {'m': {'provider': 'mock', 'name': 'mock'}},
         'configurations': {
-            'i-json': {'strategy': 'inline', 'representation': 'json'},
-            'i-html': {'strategy': 'inline', 'representation': 'html'},
-            'f-json': {'strategy': 'local_function', 'representation': 'json'},
+            'i-json': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'},
+            'i-html': {'strategy': 'inline', 'representation': 'html', 'surface': 'full'},
+            'f-json': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'},
         },
         'factors': {'model': ['m'], 'configuration': ['i-json', 'i-html', 'f-json']},
     }
@@ -48,13 +49,15 @@ def test_invalid_configuration_contract(change):
     if change == 'empty': p['factors']['configuration'] = []
     if change == 'unknown': p['configurations']['i-json']['strategy'] = 'mcp'
     if change == 'extra': p['configurations']['i-json']['operationProfile'] = 'future'
-    if change == 'tool-html': p['configurations']['f-json']['representation'] = 'html'
+    if change == 'tool-html':
+        p['configurations']['f-json'] = {'strategy': 'local_function', 'representation': 'html', 'surface': 'ops'}
     if change == 'uppercase': p['configurations']['Bad'] = p['configurations']['i-json']
     with pytest.raises(ValueError): Experiment.model_validate(p)
 
 
 def test_identity_encodes_configuration_and_structured_dimensions():
     args = dict(experiment_id='e|x', task_id='t', instance_id='i', provider='mock', model_name='m', strategy='inline', representation='json', repetition=1, configuration_id='a')
+    args['surface'] = 'full'
     first = canonical_trial_identity(**args)
     assert json.loads(first)['identityVersion'] == 2
     assert first == canonical_trial_identity(**dict(reversed(list(args.items()))))
@@ -107,7 +110,7 @@ def test_reporting_preserves_distinct_ids_and_rejects_conflicts(tmp_path, capsys
     from ctxbench.util.logging import PhaseLogger
     p = experiment_payload()
     p['dataset']['root'] = str(Path(p['dataset']['root']).resolve())
-    p['configurations'] = {key: {'strategy': 'inline', 'representation': 'json'} for key in ['first', 'second']}
+    p['configurations'] = {key: {'strategy': 'inline', 'representation': 'json', 'surface': 'full'} for key in ['first', 'second']}
     p['factors']['configuration'] = ['first', 'second']
     path = tmp_path / 'experiment.json'
     path.write_text(json.dumps(p))
@@ -143,8 +146,8 @@ def test_reporting_preserves_distinct_ids_and_rejects_conflicts(tmp_path, capsys
 @pytest.mark.parametrize("artifact", ["trials", "responses", "evals"])
 def test_artifact_definition_disagreement_rejected(tmp_path, artifact):
     from ctxbench.benchmark.provisioning import validate_artifact_directory
-    definition = {"strategy": "inline", "representation": "json"}
-    (tmp_path / "manifest.json").write_text(json.dumps({"provisioningArtifactVersion": 1, "configurations": {"a": definition}}))
+    definition = {"strategy": "inline", "representation": "json", "surface": "full"}
+    (tmp_path / "manifest.json").write_text(json.dumps({"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}}, "configurations": {"a": definition}}))
     row = {"trialId": "t", "configurationId": "a", **definition, "metadata": {"configurationId": "a", **definition}}
     row["representation"] = "html"
     (tmp_path / f"{artifact}.jsonl").write_text(json.dumps(row) + "\n")
@@ -155,4 +158,4 @@ def test_artifact_definition_disagreement_rejected(tmp_path, artifact):
 def test_direct_experiment_constructor_validates_references():
     from ctxbench.benchmark.models import ExperimentDataset
     with pytest.raises(ValueError, match="Undefined configuration"):
-        Experiment(id="bad", dataset=ExperimentDataset(root="/tmp"), factors={"model": [{"provider": "mock", "name": "mock"}], "configuration": ["unknown"]}, configurations={})
+        Experiment(id="bad", dataset=ExperimentDataset(root="/tmp"), surfaces={"full": {"type": "full_context"}}, factors={"model": [{"provider": "mock", "name": "mock"}], "configuration": ["unknown"]}, configurations={})

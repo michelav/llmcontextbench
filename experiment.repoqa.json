@@ -69,15 +69,25 @@
   "configurations": {
     "inline-code": {
       "strategy": "inline",
-      "representation": "code"
+      "representation": "code",
+      "surface": "full"
     },
     "local-function-json": {
       "strategy": "local_function",
-      "representation": "json"
+      "representation": "json",
+      "surface": "repoqa-default"
     },
     "local-mcp-json": {
       "strategy": "local_mcp",
-      "representation": "json"
+      "representation": "json",
+      "surface": "repoqa-default"
+    }
+  },
+  "surfaces": {
+    "full": {"type": "full_context"},
+    "repoqa-default": {
+      "type": "operations",
+      "operations": ["list_files", "list_symbols", "get_symbol", "read_file"]
     }
   }
 }

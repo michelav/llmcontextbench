@@ -247,7 +247,10 @@ Minimal local-dataset shape:
     "configuration": ["i-json"]
   },
   "configurations": {
-    "i-json": {"strategy": "inline", "representation": "json"}
+    "i-json": {"strategy": "inline", "representation": "json", "surface": "full"}
+  },
+  "surfaces": {
+    "full": {"type": "full_context"}
   },
   "evaluation": {
     "enabled": false,
@@ -260,7 +263,7 @@ Empty `scope.instances` and `scope.tasks` mean all available instances and
 tasks. Use small scopes for exploratory runs.
 
 A configuration ID is an experiment-defined lowercase identifier. Its definition has
-exactly `strategy` and `representation`; its spelling does not select behavior.
+`strategy`, `representation`, and an explicit `surface` reference; its spelling does not select behavior.
 Select IDs through `factors.configuration`. Tools require `json`; inline supports
 representations supplied by the dataset adapter. Planning expands instances × tasks ×
 models × configurations × repeats and snapshots selected definitions in the manifest.
@@ -297,7 +300,7 @@ Before execution, status can still summarize what artifacts exist:
 llmctxbench status outputs/getting-started
 ```
 
-Breakdowns are available by `configuration`, `representation`, `model`, `strategy`, `instance`, `task`, or
+Breakdowns are available by `configuration`, `representation`, `surface`, `model`, `strategy`, `instance`, `task`, or
 `judge`:
 
 ```bash
@@ -322,7 +325,7 @@ llmctxbench eval outputs/getting-started/responses.jsonl --model mock-model --st
 ```
 
 Selectors include `--model`, `--provider`, `--instance`, `--task`,
-`--configuration`, `--strategy`, `--representation`, `--repetition`, `--trial`, and `--trial-file`, plus
+`--configuration`, `--strategy`, `--representation`, `--surface`, `--repetition`, `--trial`, and `--trial-file`, plus
 matching `--not-*` variants.
 
 ### 6. Export Results

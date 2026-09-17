@@ -2,16 +2,18 @@
 
 This document is the authoritative reference for the LLMContextBench artifact set, artifact classification, legacy no-alias policy, and metric provenance taxonomy.
 
-## Provisioning contract v1 (clean break)
+## Provisioning contract v2 (clean break)
 
-Every lifecycle input requires `manifest.json` with `provisioningArtifactVersion: 1`
-and a nonempty `configurations` map of selected IDs to `{strategy, representation}`.
-Trials and responses persist `configurationId`, `strategy`, and `representation`
+Every lifecycle input requires `manifest.json` with `provisioningArtifactVersion: 2`
+and nonempty `surfaces` and `configurations` maps. Each configuration is
+`{strategy, representation, surface}` and references a typed surface declaration.
+Trials and responses persist `configurationId`, `strategy`, `representation`, and `surface`
 both at the root and in shared trial metadata. Evaluations inherit that metadata
 and expose the same fields. Readers reject disagreement with the planned manifest.
 Judge votes continue to link through `trialId`; their voting and cost semantics are unchanged.
 
-IDs match `^[a-z][a-z0-9_.-]*$`. Definitions accept exactly two required fields.
+IDs match `^[a-z][a-z0-9_.-]*$`. Configuration definitions accept exactly three required fields;
+surface declarations are typed by their `type` discriminator and reject unexpected fields.
 Tool strategies require `json`; inline availability is the dataset adapter's
 responsibility. Legacy factor axes and legacy artifacts are rejected, never inferred
 or upgraded in place. Historical files require the previous benchmark version.
@@ -31,8 +33,7 @@ unequal definitions with the same ID cannot be combined. Robustness uses the
 `representation` axis and `primary_success_rate_range_by_representation` column.
 Strategy aggregation discloses when it pools multiple configurations.
 
-Future operation profiles are deferred. Any future typed `operationProfile` must
-include its resolved content in identity; no placeholder fields are accepted now.
+Operation lists are explicit and adapter-owned; resolved handlers and schemas are not artifact identity fields.
 
 ## Artifact lifecycle
 

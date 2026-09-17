@@ -73,7 +73,8 @@ def _write_experiment(path: Path, dataset_root: Path) -> Path:
                 "dataset": {"root": str(dataset_root)},
                 "scope": {"instances": [], "tasks": []},
                 "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['inline-json']},
-                "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json'}},
+                "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'}},
+                "surfaces": {"full": {"type": "full_context"}},
                 "evaluation": {
                     "enabled": True,
                     "judges": [{"id": "judge-a", "provider": "mock", "model": "judge-a", "temperature": 0}],
@@ -105,6 +106,8 @@ def _fake_execute_runspec(runspec, engine) -> TrialResult:
         modelName=runspec.modelName,
         strategy=runspec.strategy,
         representation=runspec.representation,
+        surface=runspec.surface,
+        surfaceSpec=dict(runspec.surfaceSpec),
         configurationId=runspec.configurationId,
         repeatIndex=runspec.repeatIndex,
         outputRoot=runspec.outputRoot,

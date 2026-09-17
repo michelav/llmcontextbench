@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import Any
 
 from ctxbench.benchmark.models import CONFIGURATION_ID_PATTERN, ProvisioningConfiguration
+from ctxbench.benchmark.surfaces import parse_surface
 
-PROVISIONING_ARTIFACT_VERSION = 1
+PROVISIONING_ARTIFACT_VERSION = 2
 LEGACY_MESSAGE = (
     "Unsupported provisioning artifact contract. Historical artifacts require the previous "
     "benchmark version; define configurations and run 'llmctxbench plan' in a fresh directory."
@@ -25,10 +26,21 @@ def validate_manifest(root: Path) -> dict[str, Any]:
     configurations = manifest.get("configurations")
     if not isinstance(configurations, dict) or not configurations:
         raise ValueError("Manifest requires selected configuration definitions.")
+    surfaces = manifest.get("surfaces")
+    if not isinstance(surfaces, dict) or not surfaces:
+        raise ValueError(LEGACY_MESSAGE)
+    parsed_surfaces = {key: parse_surface(value) for key, value in surfaces.items()}
     for key, value in configurations.items():
         if not CONFIGURATION_ID_PATTERN.fullmatch(key):
             raise ValueError(f"Invalid configuration ID: {key}")
-        ProvisioningConfiguration.model_validate(value)
+        configuration = ProvisioningConfiguration.model_validate(value)
+        surface = parsed_surfaces.get(configuration.surface)
+        if surface is None:
+            raise ValueError(f"Undefined surface reference: {configuration.surface}")
+        if configuration.strategy == "inline" and surface.type != "full_context":
+            raise ValueError("Inline configurations require a full_context surface.")
+        if configuration.strategy != "inline" and surface.type != "operations":
+            raise ValueError("Tool-mediated configurations require an operations surface.")
     return manifest
 
 
@@ -36,7 +48,7 @@ def validate_artifact_directory(root: Path) -> dict[str, Any]:
     """Stream canonical rows and check every duplicate treatment against the snapshot."""
     manifest = validate_manifest(root)
     definitions = manifest["configurations"]
-    trials: dict[str, tuple[str, str, str]] = {}
+    trials: dict[str, tuple[str, str, str, str]] = {}
     for filename in ("trials.jsonl", "responses.jsonl", "evals.jsonl"):
         path = root / filename
         if not path.exists():
@@ -57,7 +69,7 @@ def validate_artifact_directory(root: Path) -> dict[str, Any]:
                 for field, value in expected.items():
                     if row.get(field) != value or metadata.get(field) != value:
                         raise ValueError(f"Inconsistent provisioning field {field} in {path}.")
-                treatment = (key, definition["strategy"], definition["representation"])
+                treatment = (key, definition["strategy"], definition["representation"], definition["surface"])
                 trial_id = row.get("trialId")
                 if trial_id in trials and trials[trial_id] != treatment:
                     raise ValueError(f"Conflicting provisioning definition for trialId {trial_id}.")
