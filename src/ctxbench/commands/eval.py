@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+
+from ctxbench.benchmark.provisioning import validate_artifact_directory
 from typing import Any
 
 from ctxbench.adapters.repoqa.evaluation import evaluate_response as evaluate_repoqa_response
@@ -269,6 +271,7 @@ def eval_command(
 
     source = Path(responses).resolve() if responses else Path("responses.jsonl").resolve()
     source_root = source.parent
+    validate_artifact_directory(source_root)
 
     logger.info("EVAL", "responses.loading", "Loading responses", path=str(source))
     results = _load_responses(source)

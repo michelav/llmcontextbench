@@ -4,8 +4,12 @@
   "output": "exoutputs",
   "dataset": "datasets/lattes",
   "scope": {
-    "instances": ["5521922960404236", "5123602572479168", "9674541381385819"],
-    "questions": []
+    "instances": [
+      "5521922960404236",
+      "5123602572479168",
+      "9674541381385819"
+    ],
+    "tasks": []
   },
   "factors": {
     "model": [
@@ -20,8 +24,12 @@
         "name": "gemini-2.5-flash"
       }
     ],
-    "strategy": ["inline", "local_function", "local_mcp", "mcp"],
-    "format": ["json"]
+    "configuration": [
+      "inline-json",
+      "local-function-json",
+      "local-mcp-json",
+      "remote-mcp-json"
+    ]
   },
   "params": {
     "common": {
@@ -120,5 +128,38 @@
   },
   "execution": {
     "repeats": 1
+  },
+  "configurations": {
+    "inline-json": {
+      "strategy": "inline",
+      "representation": "json",
+      "surface": "full"
+    },
+    "local-function-json": {
+      "strategy": "local_function",
+      "representation": "json",
+      "surface": "lattes-default"
+    },
+    "local-mcp-json": {
+      "strategy": "local_mcp",
+      "representation": "json",
+      "surface": "lattes-default"
+    },
+    "remote-mcp-json": {
+      "strategy": "remote_mcp",
+      "representation": "json",
+      "surface": "lattes-default"
+    }
+  },
+  "surfaces": {
+    "full": {"type": "full_context"},
+    "lattes-default": {
+      "type": "operations",
+      "operations": [
+        "get_profile", "get_expertise", "get_education", "get_projects",
+        "get_supervisions", "get_experience", "get_academic_activities",
+        "get_publications", "get_technical_output", "get_artistic_output"
+      ]
+    }
   }
 }

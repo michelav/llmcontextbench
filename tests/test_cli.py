@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from ctxbench.cli import _selector_from_args, build_parser, main
+from ctxbench.cli import _metrics_command_string, _selector_from_args, build_parser, main
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +62,17 @@ def test_metrics_help_exposes_artifact_options(capsys):
     assert "--execution-status" in out
     assert "--evaluation-status" in out
     assert "--force" in out
+
+
+def test_metrics_manifest_provenance_uses_public_command_name():
+    args = argparse.Namespace(
+        inputs=["outputs/example"],
+        output=None,
+        group_by=None,
+        force=False,
+    )
+
+    assert _metrics_command_string(args) == "llmctxbench metrics outputs/example"
 
 
 def test_execute_help_uses_target_public_terms(capsys):
@@ -144,7 +155,7 @@ def test_plan_writes_trials_jsonl_with_target_fields(tmp_path):
     first = rows[0]
     assert {"trialId", "taskId"} <= set(first)
     assert first["metadata"]["taskId"] in {"q_year", "q_summary"}
-    assert {"canonicalId", "taskId", "instanceId", "provider", "modelId", "modelName", "strategy", "format", "repeatIndex"} <= set(first["metadata"])
+    assert {"canonicalId", "taskId", "instanceId", "provider", "modelId", "modelName", "strategy", "representation", "configurationId", "repeatIndex"} <= set(first["metadata"])
 
 
 def test_execute_writes_responses_jsonl_with_target_fields(tmp_path):
@@ -163,7 +174,7 @@ def test_execute_writes_responses_jsonl_with_target_fields(tmp_path):
     first = rows[0]
     assert {"trialId", "taskId", "response"} <= set(first)
     assert first["metadata"]["taskId"] in {"q_year", "q_summary"}
-    assert {"canonicalId", "taskId", "instanceId", "provider", "modelId", "modelName", "strategy", "format", "repeatIndex"} <= set(first["metadata"])
+    assert {"canonicalId", "taskId", "instanceId", "provider", "modelId", "modelName", "strategy", "representation", "configurationId", "repeatIndex"} <= set(first["metadata"])
 
 
 def test_plan_verbose_emits_structured_logs_to_stderr(tmp_path, capsys):
@@ -195,7 +206,7 @@ def test_execute_verbose_emits_trial_context_to_stderr(tmp_path, capsys):
     assert "modelId=mock" in captured.err
     assert "modelName=mock" in captured.err
     assert "strategy=inline" in captured.err
-    assert "format=json" in captured.err
+    assert "representation=json" in captured.err
     assert "repeatIndex=1" in captured.err
 
 
@@ -326,11 +337,9 @@ def write_mock_experiment(path: Path, *, evaluation_enabled: bool = True) -> Pat
                 "output": "outputs",
                 "dataset": str(dataset_root.resolve()),
                 "scope": {"instances": ["cv_demo"], "tasks": ["q_year", "q_summary"]},
-                "factors": {
-                    "model": [{"provider": "mock", "name": "mock"}],
-                    "strategy": ["inline"],
-                    "format": ["json"],
-                },
+                "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['inline-json']},
+                "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'}},
+                "surfaces": {"full": {"type": "full_context"}},
                 "params": {"common": {"temperature": 0}},
                 "evaluation": {
                     "enabled": evaluation_enabled,
@@ -513,11 +522,9 @@ def test_plan_warns_and_uses_empty_string_for_missing_template_parameter(tmp_pat
                 "output": "outputs",
                 "dataset": str(dataset_root.resolve()),
                 "scope": {"instances": ["cv_demo"], "tasks": ["q_missing"]},
-                "factors": {
-                    "model": [{"provider": "mock", "name": "mock"}],
-                    "strategy": ["inline"],
-                    "format": ["json"],
-                },
+                "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['inline-json']},
+                "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'}},
+                "surfaces": {"full": {"type": "full_context"}},
                 "evaluation": {"enabled": False},
                 "trace": {"enabled": False, "writeFiles": True},
                 "artifacts": {
@@ -538,13 +545,21 @@ def test_plan_warns_and_uses_empty_string_for_missing_template_parameter(tmp_pat
     assert payload["parameters"] == {}
 
 
-def test_plan_ignores_format_for_tool_based_strategies(tmp_path):
+def test_plan_expands_explicit_configurations_for_all_strategies(tmp_path, monkeypatch):
+    from ctxbench.benchmark.surfaces import ResolvedSurface
+    from ctxbench.dataset.provider import LocalDatasetPackage
+    monkeypatch.setattr(LocalDatasetPackage, "resolve_surface", lambda self, surface: ResolvedSurface(surface, ("get_evidence",)))
     experiment_path = write_mock_experiment(tmp_path / "experiment.json")
     payload = json.loads(experiment_path.read_text(encoding="utf-8"))
     payload["scope"]["instances"] = ["cv_demo", "cv_alt"]
     add_mock_instance(Path(payload["dataset"]), "cv_alt", researcher_name="CV Alt")
-    payload["factors"]["strategy"] = ["inline", "local_function", "local_mcp", "remote_mcp"]
-    payload["factors"]["format"] = ["json", "html"]
+    payload["configurations"] = {
+            "i-json": {"strategy": "inline", "representation": "json", "surface": "full"},
+            "i-html": {"strategy": "inline", "representation": "html", "surface": "full"},
+            **{name: {"strategy": name, "representation": "json", "surface": "ops"} for name in ("local_function", "local_mcp", "remote_mcp")},
+    }
+    payload["surfaces"] = {"full": {"type": "full_context"}, "ops": {"type": "operations", "operations": ["get_evidence"]}}
+    payload["factors"]["configuration"] = list(payload["configurations"])
     experiment_path.write_text(json.dumps(payload), encoding="utf-8")
 
     trials_path = _plan_to_root(experiment_path, tmp_path / "planned")
@@ -553,11 +568,11 @@ def test_plan_ignores_format_for_tool_based_strategies(tmp_path):
     assert len(rows) == 20
     inline_rows = [row for row in rows if row["strategy"] == "inline"]
     assert len(inline_rows) == 8
-    assert {row["format"] for row in inline_rows} == {"json", "html"}
+    assert {row["representation"] for row in inline_rows} == {"json", "html"}
     for strategy_name in ("local_function", "local_mcp", "remote_mcp"):
         strategy_rows = [row for row in rows if row["strategy"] == strategy_name]
         assert len(strategy_rows) == 4
-        assert {row["format"] for row in strategy_rows} == {"json"}
+        assert {row["representation"] for row in strategy_rows} == {"json"}
 
 
 def test_execute_force_reexecutes_and_overwrites_responses(tmp_path):
@@ -1115,7 +1130,7 @@ def test_eval_repoqa_scorer_does_not_require_judges(tmp_path):
     root = tmp_path / "run"
     root.mkdir()
     (root / "manifest.json").write_text(
-        json.dumps({"trace": {"writeFiles": False}, "evaluation": {"enabled": True}}),
+            json.dumps({"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}}, "configurations": {"inline-code": {"strategy": "inline", "representation": "code", "surface": "full"}}, "trace": {"writeFiles": False}, "evaluation": {"enabled": True}}),
         encoding="utf-8",
     )
     response = {
@@ -1134,7 +1149,9 @@ def test_eval_repoqa_scorer_does_not_require_judges(tmp_path):
         "modelId": "mock",
         "model": "mock",
         "strategy": "inline",
-        "format": "code",
+        "representation": "code",
+        "surface": "full",
+        "configurationId": "inline-code",
         "repeatIndex": 1,
         "status": "success",
         "response": "",
@@ -1155,7 +1172,9 @@ def test_eval_repoqa_scorer_does_not_require_judges(tmp_path):
             "modelId": "mock",
             "modelName": "mock",
             "strategy": "inline",
-            "format": "code",
+            "representation": "code",
+            "surface": "full",
+            "configurationId": "inline-code",
             "repeatIndex": 1,
             "validationType": "repoqa-scorer",
             "validationConfig": {"threshold": 0.75, "ignoreComments": True},
@@ -1184,7 +1203,7 @@ def test_eval_repoqa_scorer_scores_non_empty_response_without_judges(tmp_path, m
     instance_dir.mkdir(parents=True)
     raw_dir.mkdir()
     (root / "manifest.json").write_text(
-        json.dumps({"trace": {"writeFiles": False}, "evaluation": {"enabled": True}}),
+            json.dumps({"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}}, "configurations": {"inline-code": {"strategy": "inline", "representation": "code", "surface": "full"}}, "trace": {"writeFiles": False}, "evaluation": {"enabled": True}}),
         encoding="utf-8",
     )
     (instance_dir / "native_task.json").write_text(
@@ -1216,7 +1235,9 @@ def test_eval_repoqa_scorer_scores_non_empty_response_without_judges(tmp_path, m
         "modelId": "mock",
         "model": "mock",
         "strategy": "inline",
-        "format": "code",
+        "representation": "code",
+        "surface": "full",
+        "configurationId": "inline-code",
         "repeatIndex": 1,
         "status": "success",
         "response": "def target_func(): pass",
@@ -1237,7 +1258,9 @@ def test_eval_repoqa_scorer_scores_non_empty_response_without_judges(tmp_path, m
             "modelId": "mock",
             "modelName": "mock",
             "strategy": "inline",
-            "format": "code",
+            "representation": "code",
+            "surface": "full",
+            "configurationId": "inline-code",
             "repeatIndex": 1,
             "validationType": "repoqa-scorer",
             "validationConfig": {"threshold": 0.75, "ignoreComments": True},
@@ -1280,7 +1303,7 @@ def test_eval_repoqa_scorer_scores_non_empty_response_without_judges(tmp_path, m
 def test_eval_rejects_batch_for_repoqa_scorer(tmp_path):
     root = tmp_path / "run"
     root.mkdir()
-    (root / "manifest.json").write_text(json.dumps({"evaluation": {"enabled": True}}), encoding="utf-8")
+    (root / "manifest.json").write_text(json.dumps({"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}}, "configurations": {"inline-code": {"strategy": "inline", "representation": "code", "surface": "full"}}, "evaluation": {"enabled": True}}), encoding="utf-8")
     response = {
         "trialId": "repoqa-1",
         "experimentId": "exp-repoqa",
@@ -1292,7 +1315,9 @@ def test_eval_rejects_batch_for_repoqa_scorer(tmp_path):
         "modelId": "mock",
         "model": "mock",
         "strategy": "inline",
-        "format": "code",
+        "representation": "code",
+        "surface": "full",
+        "configurationId": "inline-code",
         "repeatIndex": 1,
         "status": "success",
         "response": "",
@@ -1308,7 +1333,9 @@ def test_eval_rejects_batch_for_repoqa_scorer(tmp_path):
             "instanceId": "inst-1",
             "provider": "mock",
             "strategy": "inline",
-            "format": "code",
+            "representation": "code",
+            "surface": "full",
+            "configurationId": "inline-code",
             "repeatIndex": 1,
             "validationType": "repoqa-scorer",
         },

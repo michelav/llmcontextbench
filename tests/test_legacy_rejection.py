@@ -48,11 +48,9 @@ def test_experiment_config_with_legacy_mcp_strategy_is_rejected(
                 "id": "exp_bad_mcp",
                 "dataset": str(tmp_path / "dataset"),
                 "scope": {"instances": ["cv_demo"], "tasks": ["q_year"]},
-                "factors": {
-                    "model": [{"provider": "mock", "name": "mock"}],
-                    "strategy": ["mcp"],
-                    "format": ["json"],
-                },
+                "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['mcp-json']},
+                "surfaces": {"full": {"type": "full_context"}},
+                "configurations": {'mcp-json': {'strategy': 'mcp', 'representation': 'json', 'surface': 'full'}},
                 "execution": {"repeats": 1},
             }
         ),

@@ -37,7 +37,7 @@ def test_metrics_planned_only_writes_canonical_tree(tmp_path):
     assert len(rows) == 1
     assert rows[0]["response_present"] == "false"
     assert rows[0]["evaluation_present"] == "false"
-    assert rows[0]["configuration"] == "inline_json"
+    assert rows[0]["configurationId"] == "inline-json"
     assert _csv_rows(metrics / "failure_cases.csv") == []
 
 
@@ -136,6 +136,8 @@ def test_metrics_rejects_pipe_in_task_tags(tmp_path):
 
 
 def test_metrics_observability_from_trace_and_usage(tmp_path):
+    trial = _trial("t1")
+    trial.update(strategy="local_mcp", configurationId="mcp-json", surface="ops")
     root = _experiment(
         tmp_path / "exp",
         responses=[
@@ -146,6 +148,7 @@ def test_metrics_observability_from_trace_and_usage(tmp_path):
                 strategy="local_mcp",
             )
         ],
+        trials=[trial],
     )
     trace_path = root / "traces" / "executions"
     trace_path.mkdir(parents=True)
@@ -202,22 +205,34 @@ def _experiment(
 ) -> Path:
     root.mkdir(parents=True)
     trial_rows = trials or [_trial("t1")]
+    for trial in trial_rows:
+        trial["metadata"] = {key: trial[key] for key in ("configurationId", "strategy", "representation", "surface")}
     _write_jsonl(root / "trials.jsonl", trial_rows)
     if responses is None:
         responses = [_response(str(trial_rows[0]["trialId"]))]
     if responses:
+        _add_treatments(responses, trial_rows)
         _write_jsonl(root / "responses.jsonl", responses)
     if evals is None:
         evals = [_judge_eval(str(trial_rows[0]["trialId"]))]
     if evals:
+        _add_treatments(evals, trial_rows)
         _write_jsonl(root / "evals.jsonl", evals)
     if votes:
         _write_jsonl(root / "judge_votes.jsonl", votes)
     (root / "manifest.json").write_text(
-        json.dumps({"experimentId": "exp", "dataset": {"contentHash": "sha256:test"}}),
+        json.dumps({"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}, "ops": {"type": "operations", "operations": ["get_evidence"]}}, "configurations": {t["configurationId"]: {k: t[k] for k in ("strategy", "representation", "surface")} for t in trial_rows}, "experimentId": "exp", "dataset": {"contentHash": "sha256:test"}}),
         encoding="utf-8",
     )
     return root
+
+
+def _add_treatments(rows, trials):
+    by_id = {t["trialId"]: t for t in trials}
+    for row in rows:
+        treatment = by_id[row["trialId"]]["metadata"]
+        row.update(treatment)
+        row["metadata"] = dict(treatment)
 
 
 def _trial(
@@ -239,7 +254,9 @@ def _trial(
         "modelId": model_id,
         "modelName": model_id,
         "strategy": "inline",
-        "format": "json",
+        "representation": "json",
+        "surface": "full",
+        "configurationId": "inline-json",
         "repeatIndex": 1,
         "validationType": validation_type,
     }
@@ -262,6 +279,7 @@ def _response(
         "usage": {"reasoningTokens": 1},
         "traceRef": trace_ref,
         "strategy": strategy,
+        "surface": "full" if strategy == "inline" else "ops",
     }
 
 
@@ -308,4 +326,3 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
 def _csv_rows(path: Path) -> list[dict[str, str]]:
     with path.open(encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
-

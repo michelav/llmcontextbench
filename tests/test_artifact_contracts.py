@@ -75,11 +75,9 @@ def _write_plan_fixture(root: Path) -> Path:
                 "id": "exp_artifacts",
                 "dataset": str(dataset_root.resolve()),
                 "scope": {"instances": ["cv_demo"], "tasks": ["q_one"]},
-                "factors": {
-                    "model": [{"provider": "mock", "name": "mock-model"}],
-                    "strategy": ["inline"],
-                    "format": ["json"],
-                },
+                "factors": {"model": [{"provider": "mock", "name": "mock-model"}], "configuration": ['inline-json']},
+                "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'}},
+                "surfaces": {"full": {"type": "full_context"}},
                 "execution": {"repeats": 1},
                 "trace": {"writeFiles": False},
             }
@@ -141,7 +139,7 @@ def _write_eval_fixture(root: Path) -> Path:
 
     (root / "manifest.json").write_text(
         json.dumps(
-            {
+            {"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}}, "configurations": {"inline-json": {"strategy": "inline", "representation": "json", "surface": "full"}},
                 "experimentId": "exp_mock",
                 "trialId": "run-1",
                 "taskId": "q_one",
@@ -167,7 +165,9 @@ def _write_eval_fixture(root: Path) -> Path:
                 "modelId": "model",
                 "modelName": "model",
                 "strategy": "inline",
-                "format": "json",
+                "representation": "json",
+                "surface": "full",
+                "configurationId": "inline-json",
                 "repeatIndex": 1,
                 "dataset": {"root": str(dataset_root.resolve())},
                 "taskStatement": "Task one?",
@@ -179,7 +179,9 @@ def _write_eval_fixture(root: Path) -> Path:
                     "modelId": "model",
                     "modelName": "model",
                     "strategy": "inline",
-                    "format": "json",
+                    "representation": "json",
+                    "surface": "full",
+                    "configurationId": "inline-json",
                     "repeatIndex": 1,
                     "validationType": "judge",
                     "parameters": {},
@@ -204,7 +206,9 @@ def _write_eval_fixture(root: Path) -> Path:
                 "modelId": "model",
                 "modelName": "model",
                 "strategy": "inline",
-                "format": "json",
+                "representation": "json",
+                "surface": "full",
+                "configurationId": "inline-json",
                 "repeatIndex": 1,
                 "validationType": "judge",
                 "outputRoot": str(root.resolve()),
@@ -229,7 +233,9 @@ def _write_eval_fixture(root: Path) -> Path:
                     "modelId": "model",
                     "modelName": "model",
                     "strategy": "inline",
-                    "format": "json",
+                    "representation": "json",
+                    "surface": "full",
+                    "configurationId": "inline-json",
                     "repeatIndex": 1,
                     "validationType": "judge",
                     "parameters": {},
@@ -247,11 +253,9 @@ def test_artifact_path_resolution_uses_target_names() -> None:
         {
             "id": "exp_artifacts",
             "dataset": "/tmp/dataset",
-            "factors": {
-                "model": [{"provider": "mock", "name": "mock-model"}],
-                "strategy": ["inline"],
-                "format": ["json"],
-            },
+            "factors": {"model": [{"provider": "mock", "name": "mock-model"}], "configuration": ['inline-json']},
+                "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'}},
+                "surfaces": {"full": {"type": "full_context"}},
         }
     )
     base_dir = Path("/tmp/base")
@@ -313,12 +317,12 @@ def test_export_and_status_ignore_legacy_files_when_target_files_exist(
     root = _write_eval_fixture(tmp_path)
 
     (root / "queries.jsonl").write_text(
-        json.dumps({"trialId": "legacy-run", "status": "success"}) + "\n",
+        json.dumps({"configurationId": "inline-json", "representation": "json", "strategy": "inline", "metadata": {"configurationId": "inline-json", "strategy": "inline", "representation": "json"}, "trialId": "legacy-run", "status": "success"}) + "\n",
         encoding="utf-8",
     )
     (root / "answers.jsonl").write_text(
         json.dumps(
-            {
+            {"configurationId": "inline-json", "representation": "json", "strategy": "inline", "metadata": {"configurationId": "inline-json", "strategy": "inline", "representation": "json"},
                 "trialId": "legacy-run",
                 "experimentId": "legacy-exp",
                 "instanceId": "legacy-instance",
@@ -334,11 +338,12 @@ def test_export_and_status_ignore_legacy_files_when_target_files_exist(
     )
     (root / "evals.jsonl").write_text(
         json.dumps(
-            {
+            {"configurationId": "inline-json", "representation": "json", "surface": "full", "metadata": {"configurationId": "inline-json", "strategy": "inline", "representation": "json", "surface": "full"},
                 "trialId": "run-1",
                 "experimentId": "exp_mock",
                 "instanceId": "cv_demo",
                 "taskId": "q_one",
+                "surface": "full",
                 "strategy": "inline",
                 "status": "evaluated",
                 "evaluationMethod": "judge",
@@ -364,7 +369,8 @@ def test_export_and_status_ignore_legacy_files_when_target_files_exist(
                 "trialId": "run-1",
                 "experimentId": "exp_mock",
                 "instanceId": "cv_demo",
-                "taskId": "q_one",
+                    "taskId": "q_one",
+                    "surface": "full",
                 "strategy": "inline",
                 "judgeId": "judge-a",
                 "provider": "mock",

@@ -80,8 +80,9 @@ def trial_log_context(source: object) -> dict[str, object]:
         "provider": _first(source, metadata, "provider"),
         "modelId": _first(source, metadata, "modelId"),
         "modelName": _first(source, metadata, "modelName"),
+        "configurationId": _first(source, metadata, "configurationId"),
         "strategy": _first(source, metadata, "strategy"),
-        "format": _first(source, metadata, "format"),
+        "representation": _first(source, metadata, "representation"),
         "repeatIndex": _first(source, metadata, "repeatIndex"),
         "validationType": _first(source, metadata, "validationType", "validation_type"),
     }

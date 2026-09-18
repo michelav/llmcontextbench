@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ctxbench.benchmark.provisioning import validate_artifact_directory
+
 from ctxbench.benchmark.evaluation import judge_identifier
 from ctxbench.benchmark.models import EvaluationModelConfig
 from ctxbench.util.fs import load_json
@@ -133,6 +135,7 @@ def _load_experiment_id(root: Path) -> str:
 def status_command(output_dir: str | None = None, *, by: str | None = None) -> int:
     root = Path(output_dir).resolve() if output_dir else Path(".").resolve()
 
+    validate_artifact_directory(root)
     trials_path = root / "trials.jsonl"
     responses_path = root / "responses.jsonl"
     evals_path = root / "evals.jsonl"
@@ -188,7 +191,21 @@ def status_command(output_dir: str | None = None, *, by: str | None = None) -> i
                 print(
                     f"{judge_id:<24} {total:>8} {success:>8} {failed:>8} {pending:>8}"
                 )
+        elif by in {"configuration", "representation", "surface", "strategy", "model", "instance", "task"}:
+            field = {"configuration": "configurationId", "model": "modelId", "instance": "instanceId", "task": "taskId"}.get(by, by)
+            from ctxbench.util.jsonl import read_jsonl
+            groups: dict[str, list[dict[str, object]]] = {}
+            for trial in read_jsonl(trials_path):
+                groups.setdefault(str(trial.get(field)), []).append(trial)
+            print(f"\n{by:<24} {'Total':>8} {'Success':>8} {'Failed':>8} {'Pending':>8}")
+            for label, trials in sorted(groups.items()):
+                statuses = [response_map.get(_trial_id(trial)) for trial in trials]
+                success = statuses.count("success")
+                failed = statuses.count("error")
+                print(f"{label:<24} {len(trials):>8} {success:>8} {failed:>8} {statuses.count(None):>8}")
+                if by == "strategy" and len({t["configurationId"] for t in trials}) > 1:
+                    print("  Pools multiple configurations: " + ", ".join(sorted({str(t["configurationId"]) for t in trials})))
         else:
-            print(f"\n(breakdown --by {by} not yet implemented)")
+            raise ValueError(f"Unsupported status grouping: {by}")
 
     return 0

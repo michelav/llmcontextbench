@@ -16,11 +16,8 @@
         "name": "mock-model"
       }
     ],
-    "strategy": [
-      "inline"
-    ],
-    "format": [
-      "json"
+    "configuration": [
+      "inline-json"
     ]
   },
   "evaluation": {
@@ -35,5 +32,15 @@
         }
       }
     ]
+  },
+  "configurations": {
+    "inline-json": {
+      "strategy": "inline",
+      "representation": "json",
+      "surface": "full"
+    }
+  },
+  "surfaces": {
+    "full": {"type": "full_context"}
   }
 }

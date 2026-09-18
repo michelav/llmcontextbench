@@ -154,8 +154,7 @@
   },
   "factors": {
     "model": ["gpt1", "gemini1"],
-    "strategy": ["inline", "local_function", "local_mcp", "remote_mcp"],
-    "format": ["json"]
+    "configuration": ["i-json", "f-json", "lm-json"]
   },
   "params": {
     "mcp_server": {
@@ -179,5 +178,38 @@
   },
   "execution": {
     "repeats": 1
+  },
+  "configurations": {
+    "i-json": {
+      "strategy": "inline",
+      "representation": "json",
+      "surface": "full"
+    },
+    "f-json": {
+      "strategy": "local_function",
+      "representation": "json",
+      "surface": "lattes-default"
+    },
+    "lm-json": {
+      "strategy": "local_mcp",
+      "representation": "json",
+      "surface": "lattes-default"
+    },
+    "rm-json": {
+      "strategy": "remote_mcp",
+      "representation": "json",
+      "surface": "lattes-default"
+    }
+  },
+  "surfaces": {
+    "full": {"type": "full_context"},
+    "lattes-default": {
+      "type": "operations",
+      "operations": [
+        "get_profile", "get_expertise", "get_education", "get_projects",
+        "get_supervisions", "get_experience", "get_academic_activities",
+        "get_publications", "get_technical_output", "get_artistic_output"
+      ]
+    }
   }
 }

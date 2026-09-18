@@ -17,16 +17,28 @@
         "name": "mock-model"
       }
     ],
-    "strategy": [
-      "inline"
-    ],
-    "format": [
-      "html",
-      "json"
+    "configuration": [
+      "inline-html",
+      "inline-json"
     ]
   },
   "evaluation": {
     "enabled": false,
     "judges": []
+  },
+  "configurations": {
+    "inline-html": {
+      "strategy": "inline",
+      "representation": "html",
+      "surface": "full"
+    },
+    "inline-json": {
+      "strategy": "inline",
+      "representation": "json",
+      "surface": "full"
+    }
+  },
+  "surfaces": {
+    "full": {"type": "full_context"}
   }
 }

@@ -17,7 +17,9 @@
 | `single-dataset experiment` | Experiment model where one experiment references exactly one dataset package. |
 | `instance` | One concrete dataset unit over which tasks are executed. |
 | `context artifact` | A representation of an instance used by a strategy. |
-| `format` | Context representation request passed unmodified to the adapter as the `representation` parameter of `get_context`. It is not a physical filename or file format. |
+| `configuration` | Named experimental treatment with required strategy, representation, and surface reference; persisted as `configurationId` and its declared definition. |
+| `surface` | Typed context selection declaration. `full_context` selects the complete instance context; `operations` selects an explicit adapter-owned operation list. |
+| `representation` | Context representation request passed unmodified to the adapter as the `representation` parameter of `get_context`. It is not a physical filename or file format. |
 | `task` | Unit of work to be performed over an instance. |
 | `trial` | One planned experimental execution. |
 | `response` | Model output produced by executing a trial. |
@@ -65,7 +67,7 @@ taskId
 A trial is one planned experimental execution:
 
 ```text
-instance × task × model × strategy × format × repetition
+instance × task × model × configuration × repetition
 ```
 
 Recommended field:

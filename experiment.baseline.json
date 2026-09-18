@@ -172,9 +172,19 @@
     ]
   },
   "factors": {
-    "model": ["gpt1", "gpt2", "gemini1", "gemini2"],
-    "strategy": ["inline", "local_function", "local_mcp", "remote_mcp"],
-    "format": ["html", "json"]
+    "model": [
+      "gpt1",
+      "gpt2",
+      "gemini1",
+      "gemini2"
+    ],
+    "configuration": [
+      "inline-html",
+      "inline-json",
+      "local-function-json",
+      "local-mcp-json",
+      "remote-mcp-json"
+    ]
   },
   "params": {
     "mcp_server": {
@@ -186,7 +196,11 @@
   },
   "evaluation": {
     "enabled": true,
-    "judges": ["juiz-gpt", "juiz-gemini", "juiz-claude"]
+    "judges": [
+      "juiz-gpt",
+      "juiz-gemini",
+      "juiz-claude"
+    ]
   },
   "trace": {
     "enabled": true,
@@ -198,5 +212,43 @@
   },
   "execution": {
     "repeats": 1
+  },
+  "configurations": {
+    "inline-html": {
+      "strategy": "inline",
+      "representation": "html",
+      "surface": "full"
+    },
+    "inline-json": {
+      "strategy": "inline",
+      "representation": "json",
+      "surface": "full"
+    },
+    "local-function-json": {
+      "strategy": "local_function",
+      "representation": "json",
+      "surface": "lattes-default"
+    },
+    "local-mcp-json": {
+      "strategy": "local_mcp",
+      "representation": "json",
+      "surface": "lattes-default"
+    },
+    "remote-mcp-json": {
+      "strategy": "remote_mcp",
+      "representation": "json",
+      "surface": "lattes-default"
+    }
+  },
+  "surfaces": {
+    "full": {"type": "full_context"},
+    "lattes-default": {
+      "type": "operations",
+      "operations": [
+        "get_profile", "get_expertise", "get_education", "get_projects",
+        "get_supervisions", "get_experience", "get_academic_activities",
+        "get_publications", "get_technical_output", "get_artistic_output"
+      ]
+    }
   }
 }

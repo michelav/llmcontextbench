@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from ctxbench.benchmark.models import ExperimentDataset
+from ctxbench.benchmark.surfaces import ResolvedSurface, SurfaceSpec
 from ctxbench.dataset.capabilities import DatasetCapabilityReport
 from ctxbench.dataset.errors import UnsupportedRepresentationError
 from ctxbench.dataset.payloads import (
@@ -16,11 +17,11 @@ from ctxbench.dataset.payloads import (
 from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.dataset.validation import validate_package
 from ctxbench.adapters.lattes.mcp_server import build_lattes_mcp_server
-from ctxbench.adapters.lattes.tools import LattesToolService
+from ctxbench.adapters.lattes.tools import LattesToolService, list_lattes_operation_specs, list_lattes_tool_specs
 from ctxbench.util.fs import load_json
 
 
-FORMAT_ARTIFACTS = {
+REPRESENTATION_ARTIFACTS = {
     "html": "clean.html",
     "raw_html": "raw.html",
     "cleaned_html": "clean.html",
@@ -32,7 +33,7 @@ FORMAT_ARTIFACTS = {
 
 
 class LattesDatasetAdapter(LocalDatasetPackage):
-    FORMAT_ARTIFACTS = FORMAT_ARTIFACTS
+    REPRESENTATION_ARTIFACTS = REPRESENTATION_ARTIFACTS
 
     def __init__(self, dataset_root: str | Path) -> None:
         root = str(Path(dataset_root).resolve())
@@ -55,11 +56,20 @@ class LattesDatasetAdapter(LocalDatasetPackage):
     def fixtures(self) -> object:
         return self._root
 
-    def tool_provider(self) -> object | None:
-        return LattesToolService(contexts_dir=self.dataset_paths.contexts)
+    def tool_provider(self, allowed_operations: list[str] | tuple[str, ...] | None = None) -> object | None:
+        return LattesToolService(contexts_dir=self.dataset_paths.contexts, allowed_operations=allowed_operations)
 
-    def mcp_server(self) -> object:
-        return build_lattes_mcp_server(contexts_dir=self.dataset_paths.contexts)
+    def mcp_server(self, allowed_operations: list[str] | tuple[str, ...] | None = None) -> object:
+        return build_lattes_mcp_server(contexts_dir=self.dataset_paths.contexts, allowed_operations=allowed_operations)
+
+    def resolve_surface(self, surface: SurfaceSpec) -> ResolvedSurface:
+        if surface.type == "full_context":
+            return ResolvedSurface(surface)
+        known = {spec.name for spec in [*list_lattes_tool_specs(), *list_lattes_operation_specs()]}
+        unknown = [name for name in surface.operations if name not in known]
+        if unknown:
+            raise ValueError(f"Unknown Lattes operations: {', '.join(unknown)}")
+        return ResolvedSurface(surface, tuple(surface.operations))
 
     def get_task(self, task_id: str) -> TaskPayload:
         task = self.get_task_model(task_id)
@@ -79,7 +89,7 @@ class LattesDatasetAdapter(LocalDatasetPackage):
         representation: str,
     ) -> ContextPayload:
         del task_id
-        filename = self.FORMAT_ARTIFACTS.get(representation, representation)
+        filename = self.REPRESENTATION_ARTIFACTS.get(representation, representation)
         path = Path(self.dataset_paths.contexts) / instance_id / filename
         if not path.exists():
             raise UnsupportedRepresentationError(

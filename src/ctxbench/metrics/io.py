@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ctxbench.util.jsonl import read_jsonl
+from ctxbench.benchmark.provisioning import validate_artifact_directory, validate_configuration_union
 from ctxbench.util.logging import PhaseLogger
 
 
@@ -30,14 +31,7 @@ def load_inputs(inputs: list[str], logger: PhaseLogger) -> list[ExperimentArtifa
                 raise ValueError(message)
             logger.warn("METRICS", "metrics.input.skipped", message, experimentDir=str(root))
             continue
-        manifest = _load_json(root / "manifest.json")
-        if manifest is None:
-            logger.warn(
-                "METRICS",
-                "metrics.manifest.missing",
-                "manifest.json missing; continuing with artifact fields",
-                experimentDir=str(root),
-            )
+        manifest = validate_artifact_directory(root)
         valid.append(
             ExperimentArtifacts(
                 root=root,
@@ -50,6 +44,7 @@ def load_inputs(inputs: list[str], logger: PhaseLogger) -> list[ExperimentArtifa
         )
     if not valid:
         raise ValueError("No valid input directories with trials.jsonl remain.")
+    validate_configuration_union([item.manifest for item in valid])
     _validate_unique_trial_ids(valid)
     return valid
 
@@ -90,13 +85,6 @@ def load_trace(root: Path, trace_ref: Any, fallback: Path) -> dict[str, Any] | N
 
 def _read_optional_jsonl(path: Path) -> list[dict[str, Any]]:
     return read_jsonl(path) if path.exists() else []
-
-
-def _load_json(path: Path) -> dict[str, Any] | None:
-    if not path.exists():
-        return None
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    return payload if isinstance(payload, dict) else None
 
 
 def _validate_unique_trial_ids(inputs: list[ExperimentArtifacts]) -> None:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from ctxbench.util.artifacts import (
     canonical_trial_identity,
     evaluation_filename,
@@ -17,11 +19,13 @@ def test_canonical_trial_identity_uses_target_task_and_repetition_terms():
         provider="mock",
         model_name="mock-a",
         strategy="inline",
-        format_name="json",
+        representation="json",
+        configuration_id="test-config",
         repetition=2,
     )
 
-    assert identity == "exp-1|q_year|cv-demo|mock|mock-a|inline|json|2"
+    assert json.loads(identity)["configuration"] == {"strategy": "inline", "representation": "json"}
+    assert json.loads(identity)["configurationId"] == "test-config"
 
 
 def test_trialspec_id_uses_target_identity_builder():
@@ -32,11 +36,12 @@ def test_trialspec_id_uses_target_identity_builder():
         provider="mock",
         model_name="mock-a",
         strategy="remote_mcp",
-        format_name="json",
+        representation="json",
+        configuration_id="test-config",
         repetition=1,
     )
 
-    assert identity == "exp-1|q_summary|cv-demo|mock|mock-a|remote_mcp|json|1"
+    assert json.loads(identity)["configuration"] == {"strategy": "remote_mcp", "representation": "json"}
 
 
 def test_target_filename_helpers_preserve_existing_prefixes():

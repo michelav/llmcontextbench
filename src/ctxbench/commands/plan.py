@@ -5,6 +5,7 @@ from pathlib import Path
 from ctxbench.adapters.registry import get_default_registry
 from ctxbench.benchmark.experiment_loader import load_experiment
 from ctxbench.benchmark.models import DatasetProvenance
+from ctxbench.benchmark.provisioning import PROVISIONING_ARTIFACT_VERSION, validate_artifact_directory
 from ctxbench.benchmark.paths import resolve_output_root, resolve_trials_path
 from ctxbench.benchmark.runspec_generator import generate_runspecs
 from ctxbench.dataset.cache import DatasetCache
@@ -92,6 +93,11 @@ def plan_command(
     trials_path = resolve_trials_path(experiment, base_dir) if not output else output_root / "trials.jsonl"
     manifest_path = output_root / "manifest.json"
 
+    if output_root.exists() and any(output_root.iterdir()):
+        validate_artifact_directory(output_root)
+        raise ValueError("Planning requires a fresh output directory to preserve existing trial snapshots.")
+    if trials_path.exists():
+        raise ValueError("Planning requires a fresh trials path.")
     ensure_dir(output_root)
 
     progress_tracker = ProgressTracker(total=len(runspecs), enabled=progress)
@@ -108,6 +114,9 @@ def plan_command(
     logger.info("PLAN", "trials.written", "Trials written", path=str(trials_path), total=len(payloads))
 
     manifest = {
+        "provisioningArtifactVersion": PROVISIONING_ARTIFACT_VERSION,
+        "configurations": {key: experiment.configurations[key].model_dump(mode="json") for key in experiment.factors["configuration"]},
+        "surfaces": {key: value.model_dump(mode="json") for key, value in experiment.surfaces.items()},
         "experimentId": experiment.id,
         "experimentPath": str(Path(path).resolve()),
         "dataset": dataset_provenance.model_dump(mode="json"),

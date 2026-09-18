@@ -23,8 +23,9 @@ flowchart LR
     H --> I["llmctxbench execute"]
     I --> J["responses.jsonl<br/>traces/executions/"]
     J --> K["llmctxbench eval"]
+    J --> M["llmctxbench export"]
     K --> L["evals.jsonl<br/>judge_votes.jsonl<br/>evals-summary.json<br/>traces/evals/"]
-    L --> M["llmctxbench export"]
+    L --> M
     M --> N["results.csv"]
     L --> O["llmctxbench metrics"]
     O --> P["metrics/ (dimension CSVs + summary.json)"]
@@ -34,10 +35,12 @@ For `plan`, `execute`, and `eval`, adapter resolution happens once at the start 
 that phase consumes dataset capabilities. The core then calls only the generic `DatasetPackage`
 contract methods required by the phase.
 
-`export` and `status` are artifact-only commands. They read existing `manifest.json`,
-`trials.jsonl`, `responses.jsonl`, `evals.jsonl`, and `judge_votes.jsonl` as available, and they
-must succeed from those artifacts even when the dataset root or materialized path is no longer
-present.
+`export`, `metrics`, and `status` are artifact-only commands. `export` requires
+`responses.jsonl`; it optionally reads `evals.jsonl` and `judge_votes.jsonl` for evaluation and
+judge metadata. It does not require `trials.jsonl` and cannot represent planned trials that have
+no response. `metrics` requires `trials.jsonl` so it can include every planned trial, and treats
+responses and evaluations as optional. These commands must succeed from their required artifacts
+even when the dataset root or materialized path is no longer present.
 
 ## Planning
 
@@ -83,7 +86,7 @@ evals-summary.json
 ## Export
 
 ```bash
-llmctxbench export outputs/lattes_baseline_001/evals.jsonl --format csv --output outputs/lattes_baseline_001/results.csv
+llmctxbench export outputs/lattes_baseline_001/evals.jsonl --to csv --output outputs/lattes_baseline_001/results.csv
 ```
 
 Produces:
@@ -92,8 +95,12 @@ Produces:
 results.csv
 ```
 
-`llmctxbench export` derives rows from response, evaluation, and judge-vote artifacts. It does not
-resolve the dataset, materialize a dataset package, or call provider-backed execution/evaluation.
+`llmctxbench export` requires `responses.jsonl` in the same artifact directory as the optional
+`evals.jsonl` input. It emits one CSV row per response; planned trials without responses are not
+represented. With `--id TRIAL_ID`, it prints detailed JSON for that response instead of writing
+CSV. Evaluation and judge-vote artifacts are optional; when judge votes exist, export selects the
+first non-error vote for judge metadata and justifications. It does not resolve the dataset,
+materialize a dataset package, or call provider-backed execution/evaluation.
 
 ## Metrics
 
@@ -115,7 +122,10 @@ metrics/dimensions/{effectiveness,efficiency,robustness,evaluation_reliability,o
 
 `llmctxbench metrics` is an artifact-only reader like `export` and `status`: it computes the
 canonical metric dimensions from one or more existing run directories and does not resolve the
-dataset or call providers.
+dataset or call providers. It requires `trials.jsonl`, includes every planned trial in
+`trial_metrics.csv`, and supports planned-only, executed-only, and evaluated runs by leaving
+missing response/evaluation-derived values empty. Its execution duration comes from
+`responses.jsonl.metricsSummary.totalDurationMs`.
 
 ## Status
 
@@ -146,7 +156,7 @@ No fetch step is required.
 
 | Strategy | Description |
 |---|---|
-| `inline` | Inserts the selected context representation returned by `adapter.get_context(..., representation=format)` directly into the model input. |
+| `inline` | Inserts the selected context representation returned by `adapter.get_context(..., representation=trial.representation)` directly into the model input. |
 | `local_function` | Exposes local Python functions while LLMContextBench controls the tool loop. |
 | `local_mcp` | Exposes tools through a local MCP runtime while LLMContextBench controls the loop. |
 | `remote_mcp` | Uses a remote MCP server; provider or remote integration may control part of the loop. |

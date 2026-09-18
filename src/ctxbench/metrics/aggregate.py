@@ -39,7 +39,7 @@ AGGREGATE_FIELDS = [
     "duration_sec_per_primary_success", "model_calls_mean", "tool_calls_mean", "function_calls_mean",
     "mcp_tool_calls_mean", "calls_per_primary_success", "primary_success_rate_range_by_task",
     "primary_success_rate_range_by_instance", "primary_success_rate_range_by_repeat",
-    "primary_success_rate_range_by_model", "primary_success_rate_range_by_format",
+    "primary_success_rate_range_by_model", "primary_success_rate_range_by_representation", "primary_success_rate_range_by_surface",
     "evaluation_coverage_rate", "evaluation_success_rate", "evaluation_error_rate",
     "judge_agreement_mean", "judge_unanimity_rate", "trace_coverage_rate",
     "tool_call_observability_rate", "usage_observability_rate",
@@ -50,7 +50,8 @@ ROBUSTNESS_AXES = {
     "instance": ("instanceId",),
     "repeat": ("taskId", "instanceId", "repeatIndex"),
     "model": ("modelId",),
-    "format": ("format",),
+    "representation": ("representation",),
+    "surface": ("surface",),
 }
 
 
@@ -78,6 +79,12 @@ def compute_all(rows: list[dict[str, Any]], group_fields: list[str]) -> dict[str
                     merged[item_key] = value
         merged.update(robustness_by_key.get(key, {}))
         aggregate.append({field: merged.get(field) for field in [*group_fields, *AGGREGATE_FIELDS]})
+    summary = _summary(rows, aggregate)
+    summary["pooledConfigurations"] = [
+        {"group": dict(zip(group_fields, key)), "configurationIds": sorted({row["configurationId"] for row in items})}
+        for key, items in grouped
+        if len({row["configurationId"] for row in items}) > 1
+    ]
     return {
         "effectiveness": effectiveness,
         "efficiency": efficiency,
@@ -86,13 +93,13 @@ def compute_all(rows: list[dict[str, Any]], group_fields: list[str]) -> dict[str
         "observability": observability,
         "aggregate": aggregate,
         "dimension_summary": _dimension_summary(group_fields, effectiveness, efficiency, robustness, evaluation, observability),
-        "summary": _summary(rows, aggregate),
+        "summary": summary,
     }
 
 
 def failure_cases(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     fields = [
-        "dataset_id", "experimentId", "trialId", "taskId", "instanceId", "modelId", "configuration",
+        "dataset_id", "experimentId", "trialId", "taskId", "instanceId", "modelId", "configurationId",
         "execution_status", "evaluation_status", "evaluation_method", "primary_metric_name",
         "primary_success", "primary_score", "error_message", "response_excerpt",
     ]
@@ -244,7 +251,7 @@ def _summary(rows: list[dict[str, Any]], aggregate: list[dict[str, Any]]) -> dic
     observability = _observability(rows)
     effectiveness = _effectiveness(rows)
     return {
-        "schemaVersion": "1.0",
+        "schemaVersion": "2.0",
         "experiments": len({row.get("experimentId") for row in rows if row.get("experimentId") is not None}),
         "datasets": sorted({row.get("dataset_id") for row in rows if row.get("dataset_id") is not None}),
         "n_trials": len(rows),
@@ -352,4 +359,3 @@ def _flag_rate(rows: list[dict[str, Any]], field: str) -> float | None:
 
 def _sort_key(row: dict[str, Any], fields: list[str]) -> tuple[str, ...]:
     return tuple("" if row.get(field) is None else str(row.get(field)) for field in fields)
-

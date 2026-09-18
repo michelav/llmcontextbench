@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 from ctxbench.dataset.package import DatasetPackage
-from ctxbench.datasets.lattes.package import LattesDatasetPackage
 from ctxbench.adapters.lattes.package import LattesDatasetAdapter
 
 
@@ -18,14 +17,14 @@ FIXTURE_ROOT = (
 REAL_DATASET_ROOT = Path(__file__).resolve().parents[1] / "datasets" / "lattes"
 
 
-def test_lattes_dataset_package_satisfies_dataset_package_protocol() -> None:
-    package = LattesDatasetPackage(FIXTURE_ROOT)
+def test_lattes_dataset_adapter_satisfies_dataset_package_protocol() -> None:
+    package = LattesDatasetAdapter(FIXTURE_ROOT)
 
     assert isinstance(package, DatasetPackage)
 
 
-def test_lattes_dataset_package_fixtures_path_contains_instance_and_task_files() -> None:
-    package = LattesDatasetPackage(FIXTURE_ROOT)
+def test_lattes_dataset_adapter_fixtures_path_contains_instance_and_task_files() -> None:
+    package = LattesDatasetAdapter(FIXTURE_ROOT)
 
     fixtures_root = Path(str(package.fixtures()))
     assert (fixtures_root / "tasks.json").exists()
@@ -56,15 +55,15 @@ def test_real_lattes_dataset_uses_canonical_task_payloads() -> None:
     assert "questions" not in raw_instances["instances"][0]
 
 
-def test_lattes_dataset_package_identity_and_version_are_non_empty() -> None:
-    package = LattesDatasetPackage(FIXTURE_ROOT)
+def test_lattes_dataset_adapter_identity_and_version_are_non_empty() -> None:
+    package = LattesDatasetAdapter(FIXTURE_ROOT)
 
     assert package.identity() == "ctxbench/lattes"
     assert package.version() == "2026-04-28"
 
 
-def test_lattes_dataset_package_capability_report_is_conformant() -> None:
-    package = LattesDatasetPackage(FIXTURE_ROOT)
+def test_lattes_dataset_adapter_capability_report_is_conformant() -> None:
+    package = LattesDatasetAdapter(FIXTURE_ROOT)
 
     report = package.capability_report()
 
@@ -87,14 +86,3 @@ def test_lattes_dataset_adapter_evidence_includes_task_instance() -> None:
     evidence = package.get_evidence("1234567890123456", "q_profile")
 
     assert evidence.task_instance == {"parameters": {}}
-
-
-def test_legacy_lattes_dataset_package_aliases_adapter() -> None:
-    from ctxbench.datasets.lattes import LattesDatasetAdapter as LegacyAdapter
-    from ctxbench.datasets.lattes import LattesDatasetPackage as LegacyPackage
-    from ctxbench.datasets.lattes.package import LattesDatasetAdapter as LegacyPackageAdapter
-
-    assert LegacyAdapter is LattesDatasetAdapter
-    assert LegacyPackage is LattesDatasetAdapter
-    assert LegacyPackageAdapter is LattesDatasetAdapter
-    assert LattesDatasetPackage is LattesDatasetAdapter

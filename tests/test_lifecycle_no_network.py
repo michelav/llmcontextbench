@@ -86,11 +86,9 @@ def _write_experiment(path: Path, dataset_ref: object) -> Path:
                 "output": "outputs",
                 "dataset": dataset_ref,
                 "scope": {"instances": [], "tasks": []},
-                "factors": {
-                    "model": [{"provider": "mock", "name": "mock"}],
-                    "strategy": ["inline"],
-                    "format": ["json"],
-                },
+                "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['inline-json']},
+                "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'}},
+                "surfaces": {"full": {"type": "full_context"}},
                 "evaluation": {
                     "enabled": True,
                     "judges": [{"id": "judge-a", "provider": "mock", "model": "judge-a", "temperature": 0}],
@@ -152,7 +150,9 @@ def _write_missing_trials(root: Path) -> Path:
                 "modelId": "mock",
                 "provider": "mock",
                 "strategy": "inline",
-                "format": "json",
+                "representation": "json",
+                "surface": "full",
+                "configurationId": "inline-json",
                 "params": {},
                 "repeatIndex": 1,
                 "outputRoot": str(root.resolve()),
@@ -171,7 +171,9 @@ def _write_missing_trials(root: Path) -> Path:
                     "modelId": "mock",
                     "modelName": "mock",
                     "strategy": "inline",
-                    "format": "json",
+                    "representation": "json",
+                    "surface": "full",
+                    "configurationId": "inline-json",
                     "repeatIndex": 1,
                     "taskTags": ["objective"],
                     "validationType": "judge",
@@ -182,6 +184,7 @@ def _write_missing_trials(root: Path) -> Path:
         + "\n",
         encoding="utf-8",
     )
+    (root / "manifest.json").write_text(json.dumps({"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}}, "configurations": {"inline-json": {"strategy": "inline", "representation": "json", "surface": "full"}}}))
     return trials_path
 
 
@@ -189,7 +192,7 @@ def _write_missing_responses(root: Path) -> Path:
     manifest_path = root / "manifest.json"
     manifest_path.write_text(
         json.dumps(
-            {
+            {"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}}, "configurations": {"inline-json": {"strategy": "inline", "representation": "json", "surface": "full"}},
                 "experimentId": "exp-no-network",
                 "dataset": {
                     "id": "ctxbench/local-fixture",
@@ -229,7 +232,9 @@ def _write_missing_responses(root: Path) -> Path:
                 "modelId": "mock",
                 "modelName": "mock",
                 "strategy": "inline",
-                "format": "json",
+                "representation": "json",
+                "surface": "full",
+                "configurationId": "inline-json",
                 "repeatIndex": 1,
                 "outputRoot": str(root.resolve()),
                 "status": "success",
@@ -256,7 +261,9 @@ def _write_missing_responses(root: Path) -> Path:
                     "modelId": "mock",
                     "modelName": "mock",
                     "strategy": "inline",
-                    "format": "json",
+                    "representation": "json",
+                    "surface": "full",
+                    "configurationId": "inline-json",
                     "repeatIndex": 1,
                     "taskTags": ["objective"],
                     "validationType": "judge",

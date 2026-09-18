@@ -1,3 +1,4 @@
+<!-- Provisioning update: schemas 2.0, required provisioning manifest v1. Historical artifacts require the preceding version. -->
 # Specification: `llmctxbench metrics`
 
 > Design reference for the already-shipped `llmctxbench metrics` command. Relocated
@@ -181,13 +182,13 @@ Merge rules:
 
 ```bash
 llmctxbench metrics outputs/lattes_baseline \
-  --group-by dataset_id,configuration
+  --group-by dataset_id,configurationId
 ```
 
 Default grouping:
 
 ```text
-dataset_id,configuration
+dataset_id,configurationId
 ```
 
 Supported grouping fields for the first implementation:
@@ -200,8 +201,8 @@ provider
 modelId
 modelName
 strategy
-format
-configuration
+representation
+configurationId
 instanceId
 taskId
 taskTags
@@ -221,8 +222,9 @@ Supported selectors:
 --provider
 --instance
 --task
+--configuration
 --strategy
---format
+--representation
 --repetition
 --trial
 --trial-file
@@ -231,8 +233,9 @@ Supported selectors:
 --not-provider
 --not-instance
 --not-task
+--not-configuration
 --not-strategy
---not-format
+--not-representation
 --not-repetition
 ```
 
@@ -250,7 +253,7 @@ The shorter aliases `--status` / `--not-status` must be accepted as synonyms for
 
 Implementation rule:
 
-- Use the existing `RunSelector` for shared fields (`model`, `provider`, `instance`, `task`, `strategy`, `format`, `repetition`, `trial`, and their negations).
+- Use the existing `RunSelector` for shared fields (`model`, `provider`, `instance`, `task`, `strategy`, `representation`, `repetition`, `trial`, and their negations).
 - Represent `--execution-status`, `--not-execution-status`, `--evaluation-status`, and `--not-evaluation-status` in a small metrics-specific selector wrapper.
 - Apply `RunSelector` to the joined trial-row representation, with `status` populated from `execution_status`.
 - Apply evaluation status filters explicitly against `evaluation_status`.
@@ -282,7 +285,8 @@ The command must not include `--no-plot-data`, because plot-specific outputs are
 
 ## 5. Input Artifacts
 
-For each experiment output directory, the command should attempt to read:
+For each experiment output directory, the command reads the required planning artifacts and attempts
+to read these optional execution/evaluation artifacts:
 
 ```text
 manifest.json
@@ -302,13 +306,13 @@ trials.jsonl
 
 Without `trials.jsonl`, the command cannot determine the planned trial universe. The command must follow the single-input and multi-input behavior defined in §4.3.
 
-### 5.2 Recommended artifact
+### 5.2 Required provisioning manifest
 
 ```text
 manifest.json
 ```
 
-If missing, the command should warn and continue when possible.
+The manifest must declare `provisioningArtifactVersion: 1` and selected `configurations`. Missing, legacy or inconsistent provisioning contracts fail with instructions to use the previous benchmark version or re-plan into a fresh directory.
 
 ### 5.3 Optional artifacts
 
@@ -375,7 +379,7 @@ The command transforms artifact fields (mostly camelCase, sometimes nested) into
 | `dataset_version` | `trials.jsonl` | `dataset.version` |
 | `experimentId` | `trials.jsonl` | `experimentId` (unchanged) |
 | `trialId`, `instanceId`, `taskId`, `taskTags` | `trials.jsonl` | top-level (unchanged) |
-| `provider`, `modelId`, `modelName`, `strategy`, `format`, `repeatIndex` | `trials.jsonl` | top-level (unchanged) |
+| `provider`, `modelId`, `modelName`, `configurationId`, `strategy`, `representation`, `repeatIndex` | `trials.jsonl` | top-level (unchanged) |
 | `execution_status` | `responses.jsonl` | `status` |
 | `error_message` | `responses.jsonl` | `errorMessage` |
 | `input_tokens`, `output_tokens`, `total_tokens` | `responses.jsonl` | `metricsSummary.inputTokens`, `metricsSummary.outputTokens`, `metricsSummary.totalTokens` |
@@ -415,8 +419,8 @@ provider
 modelId
 modelName
 strategy
-format
-configuration
+representation
+configurationId
 repeatIndex
 
 response_present
@@ -471,31 +475,16 @@ error_message
 response_excerpt
 ```
 
-### 7.2 `configuration` field
+### 7.2 Persisted configuration identity
 
-The `configuration` field is derived from `strategy` and `format` using:
-
-```text
-configuration = f"{strategy}_{format}"   if both strategy and format are present
-configuration = strategy                 if format is null or empty
-configuration = "unknown"                if strategy is null or empty
-                                         (and the command must warn)
-```
-
-`format` is taken verbatim from the trial. No normalization is applied (e.g., `code`, `json`, `html`, `xml` are all kept as-is).
-
-Examples (using actual values observed in current artifacts):
-
-```text
-inline_code           (RepoQA inline trials)
-inline_json
-inline_html
-local_function_json
-local_function_code
-local_mcp_json
-local_mcp_code
-remote_mcp_json
-```
+`configurationId` is read from the canonical trial, never derived from strategy or
+representation. The required versioned manifest snapshots every selected definition.
+Rows carry `configurationId`, `strategy`, and `representation`; duplicated fields
+must match metadata and the manifest. Combining inputs with conflicting definitions
+for one ID fails. Different IDs remain separate treatments even with equal definitions.
+Strategy-only grouping explicitly warns when it pools multiple configurations.
+`summary.json.pooledConfigurations` records the grouped field values and contributing
+configuration IDs for every group that pools treatments.
 
 ### 7.3 Tags
 
@@ -780,42 +769,34 @@ steps
 
 ### 9.4 Aggregated metrics
 
-For each group:
+For each group, the implementation emits exactly these efficiency columns:
 
 ```text
-input_tokens_sum
-output_tokens_sum
-total_tokens_sum
-
-input_tokens_mean
-output_tokens_mean
+n_trials
+n_responses
+primary_success_count
 total_tokens_mean
-
 total_tokens_median
 total_tokens_p95
-
-cached_input_tokens_sum
-cached_read_tokens_sum
-
+total_tokens_sum
+tokens_per_primary_success
 duration_sec_mean
 duration_sec_median
 duration_sec_p95
 duration_sec_sum
-
-model_duration_ms_mean
-tool_duration_ms_mean
-
+duration_sec_per_primary_success
 model_calls_mean
 tool_calls_mean
 function_calls_mean
 mcp_tool_calls_mean
 steps_mean
 total_calls_sum
-
-tokens_per_primary_success
-duration_sec_per_primary_success
 calls_per_primary_success
 ```
+
+The implementation does not emit aggregate input/output-token means or sums, cached-token sums,
+or model/tool-duration means. Those values remain available only at trial level when reported by
+the response artifact.
 
 Derived rules:
 
@@ -894,7 +875,7 @@ Execution tokens and evaluation tokens must be kept separate. Primary cost metri
 
 ### 10.1 Importance
 
-Robustness / Stability indicates whether a strategy behaves consistently across tasks, instances, formats, models, and repetitions.
+Robustness / Stability indicates whether a strategy behaves consistently across tasks, instances, representations, models, and repetitions.
 
 It adapts HELM's robustness dimension to LLMContextBench's experimental factors.
 
@@ -915,26 +896,26 @@ task
 instance
 repeat
 model
-format
+representation
 ```
 
 Required robustness axes:
 
 ```text
 task:
-  group by dataset_id, configuration, taskId
+  group by dataset_id, configurationId, taskId
 
 instance:
-  group by dataset_id, configuration, instanceId
+  group by dataset_id, configurationId, instanceId
 
 repeat:
-  group by dataset_id, configuration, taskId, instanceId, repeatIndex
+  group by dataset_id, configurationId, taskId, instanceId, repeatIndex
 
 model:
-  group by dataset_id, configuration, modelId
+  group by dataset_id, configurationId, modelId
 
-format:
-  group by dataset_id, strategy, format
+representation:
+  group by dataset_id, strategy, representation
 ```
 
 ### 10.4 Aggregated metrics
@@ -995,7 +976,7 @@ total_tokens_stddev
 
 Low variation indicates stability.
 
-High variation indicates sensitivity to tasks, instances, models, formats, or repetitions.
+High variation indicates sensitivity to tasks, instances, models, representations, or repetitions.
 
 A strategy may have strong average effectiveness but poor stability. This should be interpreted as a trade-off rather than a simple failure.
 
@@ -1298,7 +1279,7 @@ This dimension is especially important when comparing local and remote strategie
 Default group:
 
 ```text
-dataset_id,configuration
+dataset_id,configurationId
 ```
 
 Required columns:
@@ -1334,7 +1315,7 @@ primary_success_rate_range_by_task
 primary_success_rate_range_by_instance
 primary_success_rate_range_by_repeat
 primary_success_rate_range_by_model
-primary_success_rate_range_by_format
+primary_success_rate_range_by_representation
 
 evaluation_coverage_rate
 evaluation_success_rate
@@ -1367,7 +1348,7 @@ metric
 value
 ```
 
-`group_key` is a single string composed of the group field values joined by `|`, used for compact display and to key rows uniquely. The individual `group_fields` columns expand to whatever `--group-by` selected (default: `dataset_id`, `configuration`). This file's columns therefore vary with `--group-by`, and consumers must read the header rather than assume fixed columns.
+`group_key` is a single string composed of the group field values joined by `|`, used for compact display and to key rows uniquely. The individual `group_fields` columns expand to whatever `--group-by` selected (default: `dataset_id`, `configurationId`). This file's columns therefore vary with `--group-by`, and consumers must read the header rather than assume fixed columns.
 
 Example rows:
 
@@ -1391,7 +1372,7 @@ Example:
 
 ```json
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "2.0",
   "experiments": 2,
   "datasets": ["ctxbench/lattes", "ctxbench/repoqa"],
   "n_trials": 1380,
@@ -1418,7 +1399,7 @@ Example:
 
 ```json
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "2.0",
   "generatedAt": "2026-06-04T12:00:00Z",
   "command": "llmctxbench metrics outputs/lattes outputs/repoqa --output outputs/paper_metrics",
   "metricFramework": {
@@ -1437,7 +1418,8 @@ Example:
     "instance": [],
     "task": [],
     "strategy": [],
-    "format": [],
+    "representation": [],
+    "configuration": [],
     "repetition": [],
     "trial": [],
     "executionStatus": [],
@@ -1447,12 +1429,13 @@ Example:
     "notInstance": [],
     "notTask": [],
     "notStrategy": [],
-    "notFormat": [],
+    "notRepresentation": [],
+    "notConfiguration": [],
     "notRepetition": [],
     "notExecutionStatus": [],
     "notEvaluationStatus": []
   },
-  "groupBy": ["dataset_id", "configuration"],
+  "groupBy": ["dataset_id", "configurationId"],
   "inputs": [
     {
       "experimentDir": "outputs/lattes",
@@ -1526,7 +1509,7 @@ trialId
 taskId
 instanceId
 modelId
-configuration
+configurationId
 execution_status
 evaluation_status
 evaluation_method
@@ -1659,9 +1642,9 @@ Given two experiment directories, the command must merge all trials into one `tr
 
 ### AC6. Group-by support
 
-Given `--group-by dataset_id,configuration,modelId`, `aggregate_metrics.csv` and the non-robustness dimension files (`effectiveness.csv`, `efficiency.csv`, `evaluation_reliability.csv`, `observability.csv`) must aggregate by those fields.
+Given `--group-by dataset_id,configurationId,modelId`, `aggregate_metrics.csv` and the non-robustness dimension files (`effectiveness.csv`, `efficiency.csv`, `evaluation_reliability.csv`, `observability.csv`) must aggregate by those fields.
 
-`robustness.csv` uses `--group-by` only for its high-level group fields. The robustness axes themselves (§10.3) remain fixed (`task`, `instance`, `repeat`, `model`, `format`) regardless of `--group-by`, because they exist to measure variation along those experimental factors. Implementations must not re-derive the axes from `--group-by`.
+`robustness.csv` uses `--group-by` only for its high-level group fields. The robustness axes themselves (§10.3) remain fixed (`task`, `instance`, `repeat`, `model`, `representation`) regardless of `--group-by`, because they exist to measure variation along those experimental factors. Implementations must not re-derive the axes from `--group-by`.
 
 ### AC7. Determinism
 

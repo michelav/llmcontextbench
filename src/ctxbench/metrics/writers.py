@@ -33,7 +33,7 @@ OUTPUTS = [
     "dimensions/observability.csv",
 ]
 FAILURE_FIELDS = [
-    "dataset_id", "experimentId", "trialId", "taskId", "instanceId", "modelId", "configuration",
+    "dataset_id", "experimentId", "trialId", "taskId", "instanceId", "modelId", "configurationId",
     "execution_status", "evaluation_status", "evaluation_method", "primary_metric_name",
     "primary_success", "primary_score", "error_message", "response_excerpt",
 ]
@@ -89,7 +89,7 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _manifest(inputs: list[ExperimentArtifacts], selectors: dict[str, Any], group_fields: list[str], command: str) -> dict[str, Any]:
     return {
-        "schemaVersion": "1.0",
+        "schemaVersion": "2.0",
         "generatedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "command": command,
         "metricFramework": {
@@ -115,6 +115,7 @@ def _input_manifest(item: ExperimentArtifacts) -> dict[str, Any]:
     manifest_dataset = (item.manifest or {}).get("dataset") if isinstance((item.manifest or {}).get("dataset"), dict) else {}
     return {
         "experimentDir": str(item.root),
+        "configurations": item.manifest["configurations"],
         "experimentId": first.get("experimentId") or (item.manifest or {}).get("experimentId"),
         "datasetId": dataset.get("id") or manifest_dataset.get("id"),
         "datasetVersion": dataset.get("version") or manifest_dataset.get("version"),
