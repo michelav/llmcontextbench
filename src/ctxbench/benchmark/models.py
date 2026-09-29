@@ -6,9 +6,9 @@ from typing import Any
 
 from ctxbench._compat import BaseModel, Field, ValidationError
 from ctxbench.benchmark.surfaces import SurfaceSpec, parse_surface
+from ctxbench.core.provisioning import ProvisioningConfiguration, VALID_STRATEGY_NAMES
 
 MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
-VALID_STRATEGY_NAMES = {"inline", "local_function", "local_mcp", "remote_mcp"}
 
 
 def _model_dump_value(value: Any, mode: str) -> Any:
@@ -346,28 +346,6 @@ class ExperimentTrace(BaseModel):
 class ExperimentArtifacts(BaseModel):
     writeJsonl: bool = True
     writeIndividualJson: bool = False
-
-
-class ProvisioningConfiguration(BaseModel):
-    strategy: str
-    representation: str
-    surface: str
-
-    def __init__(self, **data: Any) -> None:
-        extra = set(data) - {"strategy", "representation", "surface"}
-        # Subclasses add identity and artifact fields.
-        if type(self) is ProvisioningConfiguration and extra:
-            raise ValueError(f"Unexpected configuration fields: {', '.join(sorted(extra))}")
-        super().__init__(**data)
-        if self.strategy not in VALID_STRATEGY_NAMES:
-            raise ValueError(f"unknown strategy: {self.strategy}")
-        if not self.representation.strip():
-            raise ValueError("Configuration representation must be non-empty.")
-        if self.strategy != "inline" and self.representation != "json":
-            raise ValueError("Tool strategies support only the json representation.")
-        if self.strategy == "inline":
-            # The referenced declaration is checked by Experiment once all surfaces are parsed.
-            return
 
 
 CONFIGURATION_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_.-]*$")

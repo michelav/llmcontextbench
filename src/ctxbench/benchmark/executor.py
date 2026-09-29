@@ -1,30 +1,32 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path
 
 from ctxbench.adapters.registry import get_default_registry
-from ctxbench.ai.cache import build_inline_prompt_cache_key
 from ctxbench.ai.engine import Engine
 from ctxbench.ai.models.base import AIRequest
 from ctxbench.ai.runtime import LocalFunctionRuntime, MCPRuntime
 from ctxbench.benchmark.models import EvaluationResult, TrialResult, RunTiming, TrialTrace, TrialSpec
+from ctxbench.benchmark.runtime_adapter import TrialRuntimeAdapter
 from ctxbench.dataset.errors import AdapterUnavailableError, CapabilityUnavailableError
 from ctxbench.dataset.package import DatasetPackage
 from ctxbench.dataset.provider import LocalDatasetPackage
+from ctxbench.runtime.runtime import ProvisioningRuntime
 from ctxbench.util.clock import utc_now_iso
 from ctxbench.util.logging import trial_log_context
 
 def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
     adapter = _resolve_adapter(runspec)
+    if runspec.strategy == "inline":
+        trial_adapter = TrialRuntimeAdapter()
+        execution = ProvisioningRuntime(engine, adapter).execute(trial_adapter.to_runtime_request(runspec))
+        return trial_adapter.to_trial_result(runspec, execution)
+
     context = ""
     dataset_tool_provider: object | None = None
     dataset_mcp_server: object | None = None
-    if runspec.strategy == "inline":
-        context_payload = adapter.get_context(runspec.instanceId, runspec.taskId, runspec.representation)
-        context = _context_to_text(context_payload.content)
-    elif runspec.strategy == "local_function":
+    if runspec.strategy == "local_function":
         dataset_tool_provider = _resolve_tool_provider(adapter, runspec)
         if dataset_tool_provider is None:
             raise CapabilityUnavailableError(
@@ -38,17 +40,6 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
         if not isinstance(runspec.params.get("mcp_server"), dict):
             raise CapabilityUnavailableError("Strategy 'remote_mcp' requires params['mcp_server'].")
     request_params = dict(runspec.params)
-    if runspec.strategy == "inline" and runspec.provider.lower().startswith("openai"):
-        request_params.setdefault(
-            "prompt_cache_key",
-            build_inline_prompt_cache_key(
-                model_name=str(runspec.modelName or runspec.params.get("model_name") or ""),
-                instance_id=runspec.instanceId,
-                representation=runspec.representation,
-                context=context,
-            ),
-        )
-
     request_metadata = {
         **trial_log_context(runspec),
         "trialId": runspec.trialId,
@@ -179,12 +170,6 @@ def _resolve_adapter(runspec: TrialSpec) -> DatasetPackage:
         if materialized_path and Path(materialized_path).exists():
             return LocalDatasetPackage.from_dataset(runspec.dataset)
         raise AdapterUnavailableError(str(exc)) from exc
-
-
-def _context_to_text(content: object) -> str:
-    if isinstance(content, str):
-        return content
-    return json.dumps(content)
 
 
 def _build_tool_runtime_factories(
