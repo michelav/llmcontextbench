@@ -16,11 +16,13 @@ class RepoQAMCPServer:
         contexts_dir: str | None = None,
         dataset_root: str | None = None,
         provider: object | None = None,
+        allowed_operations: list[str] | None = None,
     ) -> None:
         self._service = RepoQAToolService(
             contexts_dir=contexts_dir,
             dataset_root=dataset_root,
             provider=provider,
+            allowed_operations=allowed_operations,
         )
         self.app = FastMCP(
             name="ctxbench-repoqa",
@@ -33,31 +35,36 @@ class RepoQAMCPServer:
         self._tool_specs = self._service.list_tools()
 
     def _register_tools(self) -> None:
-        @self.app.tool(name="list_files", description="List visible repository files and metadata for a RepoQA workspace.")
-        async def list_files(workspace_id: str) -> object:
-            return self.call_tool("list_files", {"workspace_id": workspace_id}).content
+        selected = {spec.name for spec in self._service.list_tools()}
+        if "list_files" in selected:
+            @self.app.tool(name="list_files", description="List visible repository files and metadata for a RepoQA workspace.")
+            async def list_files(workspace_id: str) -> object:
+                return self.call_tool("list_files", {"workspace_id": workspace_id}).content
 
-        @self.app.tool(
-            name="list_symbols",
-            description=(
-                "List code symbols and metadata for a RepoQA workspace. Optional filters: path and kind. "
-                "kind='function' searches callable code, including methods; exact parser kinds such as "
-                "'method', 'class', and other kinds present in parsed.json may also be used."
-            ),
-        )
-        async def list_symbols(workspace_id: str, path: str | None = None, kind: str | None = None) -> object:
-            return self.call_tool(
-                "list_symbols",
-                {"workspace_id": workspace_id, "path": path, "kind": kind},
-            ).content
+        if "list_symbols" in selected:
+            @self.app.tool(
+                name="list_symbols",
+                description=(
+                    "List code symbols and metadata for a RepoQA workspace. Optional filters: path and kind. "
+                    "kind='function' searches callable code, including methods; exact parser kinds such as "
+                    "'method', 'class', and other kinds present in parsed.json may also be used."
+                ),
+            )
+            async def list_symbols(workspace_id: str, path: str | None = None, kind: str | None = None) -> object:
+                return self.call_tool(
+                    "list_symbols",
+                    {"workspace_id": workspace_id, "path": path, "kind": kind},
+                ).content
 
-        @self.app.tool(name="get_symbol", description="Return one RepoQA symbol, including generated visible code.")
-        async def get_symbol(workspace_id: str, symbol_id: str) -> object:
-            return self.call_tool("get_symbol", {"workspace_id": workspace_id, "symbol_id": symbol_id}).content
+        if "get_symbol" in selected:
+            @self.app.tool(name="get_symbol", description="Return one RepoQA symbol, including generated visible code.")
+            async def get_symbol(workspace_id: str, symbol_id: str) -> object:
+                return self.call_tool("get_symbol", {"workspace_id": workspace_id, "symbol_id": symbol_id}).content
 
-        @self.app.tool(name="read_file", description="Read one generated visible file from a RepoQA workspace.")
-        async def read_file(workspace_id: str, path: str) -> object:
-            return self.call_tool("read_file", {"workspace_id": workspace_id, "path": path}).content
+        if "read_file" in selected:
+            @self.app.tool(name="read_file", description="Read one generated visible file from a RepoQA workspace.")
+            async def read_file(workspace_id: str, path: str) -> object:
+                return self.call_tool("read_file", {"workspace_id": workspace_id, "path": path}).content
 
     def list_tools(self) -> list[ToolSpec]:
         return list(self._tool_specs)
@@ -77,8 +84,9 @@ def build_repoqa_mcp_server(
     contexts_dir: str | None = None,
     dataset_root: str | None = None,
     provider: object | None = None,
+    allowed_operations: list[str] | None = None,
 ) -> RepoQAMCPServer:
-    return RepoQAMCPServer(contexts_dir=contexts_dir, dataset_root=dataset_root, provider=provider)
+    return RepoQAMCPServer(contexts_dir=contexts_dir, dataset_root=dataset_root, provider=provider, allowed_operations=allowed_operations)
 
 
 def create_mcp(*, contexts_dir: str | None = None, dataset_root: str | None = None) -> FastMCP:

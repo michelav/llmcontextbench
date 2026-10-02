@@ -243,6 +243,9 @@ def test_adapter_exposes_tools_mcp_server_and_instruction_fallback(tmp_path: Pat
 
     assert isinstance(service, RepoQAToolService)
     assert isinstance(server, RepoQAMCPServer)
+    assert "inline-only" not in adapter.metadata().limitations
+    assert "operation-mediated context access" in adapter.metadata().description
+    assert "deterministic RepoQA scoring" in adapter.metadata().description
     assert adapter.dataset_instructions() == "Use RepoQA tools to inspect the generated repository context."
 
     md_root = tmp_path / "repoqa-md"

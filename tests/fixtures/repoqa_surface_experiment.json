@@ -1,0 +1,44 @@
+{
+  "id": "repoqa-surface-test",
+  "dataset": {
+    "root": "tests/fixtures/repoqa_tools_dataset"
+  },
+  "scope": {
+    "tasks": ["snf_retrieve_function"],
+    "instances": ["repoqa-workspace-1"]
+  },
+  "factors": {
+    "model": [
+      {
+        "provider": "mock",
+        "name": "mock"
+      }
+    ],
+    "configuration": ["inline-code-full", "local-mcp-repoqa-ops"]
+  },
+  "evaluation": {
+    "enabled": false,
+    "judges": []
+  },
+  "configurations": {
+    "inline-code-full": {
+      "strategy": "inline",
+      "representation": "code",
+      "surface": "full"
+    },
+    "local-mcp-repoqa-ops": {
+      "strategy": "local_mcp",
+      "representation": "json",
+      "surface": "repoqa-ops"
+    }
+  },
+  "surfaces": {
+    "full": {
+      "type": "full_context"
+    },
+    "repoqa-ops": {
+      "type": "operations",
+      "operations": ["list_files", "list_symbols", "get_symbol", "read_file"]
+    }
+  }
+}

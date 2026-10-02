@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import override
 
 from ctxbench.benchmark.models import ExperimentDataset
+from ctxbench.benchmark.surfaces import ResolvedSurface, SurfaceSpec
 from ctxbench.dataset.capabilities import DatasetCapabilityReport
 from ctxbench.dataset.errors import UnsupportedRepresentationError
 from ctxbench.dataset.package import DatasetMetadata
@@ -12,7 +13,7 @@ from ctxbench.dataset.payloads import ContextPayload, EvidencePayload, TaskPaylo
 from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.dataset.validation import validate_package
 from ctxbench.adapters.repoqa.mcp_server import build_repoqa_mcp_server
-from ctxbench.adapters.repoqa.tools import RepoQAToolService
+from ctxbench.adapters.repoqa.tools import REPOQA_OPERATIONS, RepoQAToolService
 from ctxbench.util.fs import load_json
 
 
@@ -47,10 +48,13 @@ class RepoQADatasetAdapter(LocalDatasetPackage):
     def metadata(self) -> DatasetMetadata:
         return DatasetMetadata(
             name="CTXBench RepoQA",
-            description="RepoQA Search Needle Function dataset adapted to CTXBench.",
+            description=(
+                "RepoQA Search Needle Function dataset adapted to CTXBench with operation-mediated "
+                "context access and deterministic RepoQA scoring."
+            ),
             domain="software-repository",
             intended_uses="Evaluate context provisioning strategies for code-context retrieval tasks.",
-            limitations="Initial adapter supports inline context. Deterministic RepoQA scoring is added later.",
+            limitations="Tool access is limited to the declared RepoQA operation surface. Scoring uses the deterministic RepoQA scorer.",
             license_url=None,
             citation_url=None,
         )
@@ -67,11 +71,19 @@ class RepoQADatasetAdapter(LocalDatasetPackage):
     def fixtures(self) -> object:
         return self._root
 
-    def tool_provider(self) -> object | None:
-        return RepoQAToolService(contexts_dir=self.dataset_paths.contexts)
+    def resolve_surface(self, surface: SurfaceSpec) -> ResolvedSurface:
+        if surface.type == "full_context":
+            return ResolvedSurface(declaration=surface)
+        unknown = [name for name in surface.operations if name not in REPOQA_OPERATIONS]
+        if unknown:
+            raise ValueError(f"Unknown RepoQA operations: {', '.join(unknown)}")
+        return ResolvedSurface(declaration=surface, operations=tuple(surface.operations))
 
-    def mcp_server(self) -> object:
-        return build_repoqa_mcp_server(contexts_dir=self.dataset_paths.contexts)
+    def tool_provider(self, *, allowed_operations: list[str] | None = None) -> object | None:
+        return RepoQAToolService(contexts_dir=self.dataset_paths.contexts, allowed_operations=allowed_operations)
+
+    def mcp_server(self, *, allowed_operations: list[str] | None = None) -> object:
+        return build_repoqa_mcp_server(contexts_dir=self.dataset_paths.contexts, allowed_operations=allowed_operations)
 
     def dataset_instructions(
         self,

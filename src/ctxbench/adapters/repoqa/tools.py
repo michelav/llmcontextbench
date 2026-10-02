@@ -47,6 +47,22 @@ READ_FILE_SCHEMA = {
     "additionalProperties": False,
 }
 
+REPOQA_OPERATIONS = ("list_files", "list_symbols", "get_symbol", "read_file")
+
+
+def normalize_allowed_operations(allowed_operations: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
+    if allowed_operations is None:
+        return REPOQA_OPERATIONS
+    selected = tuple(allowed_operations)
+    if not selected:
+        raise ValueError("RepoQA allowed_operations must contain at least one operation.")
+    if len(selected) != len(set(selected)):
+        raise ValueError("RepoQA allowed_operations must not contain duplicate operation names.")
+    unknown = [name for name in selected if name not in REPOQA_OPERATIONS]
+    if unknown:
+        raise ValueError(f"Unknown RepoQA operations: {', '.join(unknown)}")
+    return tuple(name for name in REPOQA_OPERATIONS if name in selected)
+
 
 def list_repoqa_tool_specs() -> list[ToolSpec]:
     return [
@@ -85,15 +101,19 @@ class RepoQAToolService:
         contexts_dir: str | None = None,
         dataset_root: str | None = None,
         provider: RepoQAProvider | None = None,
+        allowed_operations: list[str] | None = None,
     ) -> None:
         self._provider = provider or RepoQAProvider(contexts_dir=contexts_dir, dataset_root=dataset_root)
-        self._tools = list_repoqa_tool_specs()
+        self._allowed_operations = normalize_allowed_operations(allowed_operations)
+        specs = {spec.name: spec for spec in list_repoqa_tool_specs()}
+        self._tools = [specs[name] for name in self._allowed_operations]
         self._handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
             "list_files": self._call_list_files,
             "list_symbols": self._call_list_symbols,
             "get_symbol": self._call_get_symbol,
             "read_file": self._call_read_file,
         }
+        self._handlers = {name: self._handlers[name] for name in self._allowed_operations}
 
     def list_tools(self) -> list[ToolSpec]:
         return list(self._tools)
@@ -101,7 +121,7 @@ class RepoQAToolService:
     def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         handler = self._handlers.get(name)
         if handler is None:
-            raise KeyError(f"Unknown RepoQA tool: {name}")
+            raise KeyError(f"Unselected or unknown RepoQA tool: {name}")
         started_at = perf_counter()
         workspace_id = _require_string(arguments, "workspace_id")
         try:
