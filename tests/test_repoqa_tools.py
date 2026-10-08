@@ -201,6 +201,8 @@ def test_provider_uses_only_allowed_artifacts(monkeypatch) -> None:
     provider = RepoQAProvider(contexts_dir=_contexts_dir())
 
     provider.list_files("repoqa-workspace-1")
+    provider.list_symbols("repoqa-workspace-1")
+    provider.get_symbol("repoqa-workspace-1", "existing-helper-id")
     provider.read_file("repoqa-workspace-1", "src/example.py")
 
     assert any(path.endswith("parsed.json") for path in read_paths)

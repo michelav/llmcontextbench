@@ -130,3 +130,42 @@ def test_repoqa_planning_and_executor_preserve_operation_allow_list(tmp_path: Pa
         assert [tool.name for tool in server.list_tools()] == list(REPOQA_OPERATIONS)
     finally:
         server.close()
+
+
+@pytest.mark.parametrize("operations", [[], ["unknown"]])
+def test_planning_rejects_invalid_operations(tmp_path, operations):
+    import json
+    data = json.loads(EXPERIMENT_FIXTURE.read_text())
+    data["surfaces"]["repoqa-ops"]["operations"] = operations
+    with pytest.raises(ValueError):
+        experiment = Experiment.model_validate(data)
+        generate_runspecs(experiment, tmp_path, RepoQADatasetAdapter(FIXTURE),
+            DatasetProvenance(id="ctxbench/repoqa", version="fixture", materialized_path=str(FIXTURE)))
+
+
+@pytest.mark.parametrize("operation", REPOQA_OPERATIONS)
+def test_fastmcp_single_operation_discovery_invocation_and_rejection(operation):
+    import asyncio
+    from fastmcp import Client
+    server = RepoQAMCPServer(contexts_dir=str(FIXTURE / "context"), allowed_operations=[operation])
+    arguments = {"workspace_id": "repoqa-workspace-1"}
+    if operation == "read_file":
+        arguments["path"] = "src/example.py"
+    if operation == "get_symbol":
+        arguments["symbol_id"] = "existing-helper-id"
+
+    async def check():
+        async with Client(server.app) as client:
+            assert [tool.name for tool in await client.list_tools()] == [operation]
+            result = await client.call_tool(operation, arguments)
+            assert not result.is_error
+            for omitted in set(REPOQA_OPERATIONS) - {operation}:
+                with pytest.raises(KeyError):
+                    server.call_tool(omitted, arguments)
+                # FastMCP owns the transport-specific exception type/message.
+                with pytest.raises(Exception):
+                    await client.call_tool(omitted, arguments)
+    try:
+        asyncio.run(check())
+    finally:
+        server.close()
