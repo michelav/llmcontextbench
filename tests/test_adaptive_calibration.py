@@ -75,7 +75,7 @@ def test_hook_default_and_failed_decoration_cleanup(monkeypatch):
     assert closed == [True]
 
 
-def test_research_cli_provider_gate(tmp_path, monkeypatch):
+def test_research_cli_required_arguments(tmp_path):
     cli = runpy.run_path('tools/repoqa/run_adaptation.py')
     with pytest.raises(SystemExit):
         cli['main'](['prepare', '--output', str(tmp_path)])
@@ -108,3 +108,63 @@ def test_calibration_provenance_rejects_changed_inputs(tmp_path, monkeypatch):
     study['datasetHash'] = 'changed'
     with pytest.raises(ValueError, match='provenance'):
         cli['calibration_packets'](root, study=study)
+
+
+@pytest.mark.parametrize('operation', ['calibrate', 'episode'])
+@pytest.mark.parametrize('scorer_fails', [False, True])
+def test_research_cli_executes_without_authorization_flag(operation, scorer_fails, tmp_path, monkeypatch, capsys):
+    from tests.test_adaptive_runner import episode as episode_fixture
+    from ctxbench.adapters.repoqa.study import digest
+    from ctxbench.adaptive.recovery import sealed_write
+
+    trials, _, _ = episode_fixture.__wrapped__(tmp_path)
+    trials = [t.model_copy(update={'provider': 'openai'}) for t in trials[:2]]
+    sources = {'revision': 'fixture'}
+    study = {'trials': [t.model_dump(mode='json') for t in trials], 'sources': sources,
+             'datasetHash': 'fixture', 'split': {}, 'budget': {},
+             'calibrationOrder': [], 'heldOut': {'20261001': []}, 'requests': {}}
+    prepared = tmp_path / 'prepared.json'
+    sealed_write(prepared, study)
+    sealed_write(tmp_path / 'frozen.json', {
+        'preparedHash': digest(study), 'sources': sources, 'baselineHash': digest([]),
+        'delayHashes': {str(d): digest([]) for d in (100, 250, 500, 1000)},
+        'scenarios': ['stationary'], 'selectedDelayMs': None, 'latencyObjectiveMs': 100})
+    cli = runpy.run_path('tools/repoqa/run_adaptation.py')
+    scope = cli['main'].__globals__
+    events = []
+    monkeypatch.setitem(scope, 'verify_study', lambda study: events.append('verified'))
+    monkeypatch.setitem(scope, 'source_identity', lambda: sources)
+    monkeypatch.setitem(scope, 'frozen_inputs', lambda *args: ([], {d: [] for d in (100, 250, 500, 1000)}))
+    monkeypatch.setitem(scope, 'load_estimates', lambda frozen: {})
+    def scorer():
+        events.append('scored')
+        if scorer_fails:
+            raise RuntimeError('scorer failed')
+    monkeypatch.setitem(scope, 'scorer_smoke', scorer)
+    class Engine:
+        def __init__(self):
+            events.append('engine')
+        def close(self):
+            events.append('closed')
+    monkeypatch.setattr('ctxbench.ai.engine.Engine', Engine)
+    def execute(*args, **kwargs):
+        events.append(args[3])
+        assert kwargs['resume'] is False
+        assert kwargs['retry_uncertain'] is False
+        return []
+    monkeypatch.setitem(scope, 'run_episode', execute)
+    argv = [operation, '--prepared', str(prepared), '--output', str(tmp_path)]
+    if operation == 'episode':
+        argv += ['--policy', 'all', '--scenario', 'stationary']
+    if scorer_fails:
+        with pytest.raises(RuntimeError, match='scorer failed'):
+            cli['main'](argv)
+        assert events == ['verified', 'scored']
+    else:
+        assert cli['main'](argv) == 0
+        arms = list(cli['ARMS']) if operation == 'episode' else list(cli['ARMS'][:2])
+        assert events == ['verified', 'scored', 'engine', *arms, 'closed']
+    assert 'Provider execution spends API tokens' in capsys.readouterr().err
+    with pytest.raises(SystemExit) as exc:
+        cli['main'](argv + ['--execute-providers'])
+    assert exc.value.code == 2

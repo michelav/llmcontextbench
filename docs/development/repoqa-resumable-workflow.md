@@ -29,14 +29,17 @@ preparation, calibration and freezing. Re-prepare if those inputs change; do not
 reuse a frozen calibration across changed settings. `prepared.json`, `frozen.json`
 and recovery packets have schema-1 envelopes and content hashes.
 
-The following provider-backed commands require separate cost authorization.
-The explicit option is mandatory for real providers; the runner never installs
-scorer dependencies. Its scorer smoke check must pass before any paid execution.
+Invoking `calibrate` or `episode` expresses intent to execute, consistent with
+`llmctxbench execute`. Provider execution spends API tokens, including multiple
+local-MCP steps; review the prepared/frozen cost projections before running. The
+runner never installs scorer dependencies, and its scorer smoke check must pass
+before any paid execution. An agent launching paid API calls on your behalf must
+still obtain explicit prompt authorization; that is an agent permission rule, not
+a CLI gate.
 
 ```bash
 python tools/repoqa/run_adaptation.py calibrate \
-  --prepared runs/repoqa-adaptive/prepared.json --output runs/repoqa-adaptive \
-  --execute-providers
+  --prepared runs/repoqa-adaptive/prepared.json --output runs/repoqa-adaptive
 # Repeat calibration with --delay-ms 100, 250, 500 and 1000.
 python tools/repoqa/run_adaptation.py freeze \
   --prepared runs/repoqa-adaptive/prepared.json --output runs/repoqa-adaptive
@@ -60,7 +63,7 @@ Cache keys do not guarantee provider-side cache isolation.
 ```bash
 python tools/repoqa/run_adaptation.py episode \
   --prepared runs/repoqa-adaptive/prepared.json --output runs/repoqa-adaptive \
-  --seed 20261001 --scenario degradation-recovery --policy all --execute-providers
+  --seed 20261001 --scenario degradation-recovery --policy all
 ```
 
 Stationary requests have no delay. Degradation/recovery delays each local-MCP tool
@@ -133,3 +136,9 @@ input/output counts are derived, and mock lexical counts are estimated. Canonica
 usage and trace formats are preserved. Freezing also verifies each calibration
 catalog, workload, dataset, budget, source fingerprint and actual delay schedule against
 the prepared study.
+
+The removed `--execute-providers` option now produces a parsing error; remove it
+from existing commands. This code change invalidates preparation/resume source
+fingerprints. Continue existing studies on their original revision or prepare a
+new study under the updated code; do not bypass fingerprint checks. Existing
+artifacts remain usable for analysis, and artifact schemas are unchanged.

@@ -7,3 +7,4 @@
 {"event":"diff-reviewed","contracts":"preserved","token_provenance":"unavailable"}
 {"event":"audit-run","tests_passed":159,"provider_calls":0,"token_provenance":"unavailable"}
 {"event":"spec-completed","scope":"implementation-only","token_provenance":"unavailable"}
+{"event": "slice-implemented", "scope": "remove-cli-authorization-gate", "tests_passed": 41, "provider_calls": 0, "token_provenance": "unavailable"}

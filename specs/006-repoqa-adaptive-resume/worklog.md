@@ -29,3 +29,14 @@
   across six seed/scenario blocks. Canonical schemas and policy version remain fixed.
 - All implementation slices complete. Paid calibration and held-out study remain
   separately authorized work, not unfinished implementation.
+
+- CLI authorization follow-up (2026-10-08): accepted user plan removes the
+  `--execute-providers` parser option and execution gate in one slice, retaining
+  the informational cost notice, projections, scorer checks, frozen provenance,
+  fingerprints, locking and `--retry-uncertain`. No artifact/schema or policy changes.
+  Updated runner, workflow docs and stubbed CLI regression tests. Removed options
+  fail parsing; changed source fingerprints require original-revision continuation
+  or fresh preparation. Suggested commit: fix: remove RepoQA CLI authorization gate.
+- Follow-up validation: `pytest -q tests/test_adaptive_calibration.py
+  tests/test_adaptive_runner.py` passed all 41 tests; `git diff --check` passed.
+  CLI execution/scoring were stubbed; no paid calls or dependency installs.

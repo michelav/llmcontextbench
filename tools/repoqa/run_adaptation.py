@@ -199,12 +199,10 @@ def execute_operation(args, calibration=False):
     study = sealed_read(Path(args.prepared))
     verify_study(study)
     trials = [TrialSpec.model_validate(t) for t in study['trials']]
-    if any(t.provider not in ('mock', 'echo') for t in trials) and not args.execute_providers:
-        raise ValueError('provider execution requires --execute-providers after cost authorization')
     if any(t.provider not in ('mock', 'echo') for t in trials):
         import sys
         print('Provider execution spends API tokens, including multiple local-MCP steps. '
-              'Use the prepared/frozen cost projections before authorizing runs.', file=sys.stderr)
+              'Review the prepared/frozen cost projections before running.', file=sys.stderr)
         scorer_smoke()
     frozen, estimates = None, {}
     if not calibration:
@@ -278,7 +276,6 @@ def main(argv=None):
         else:
             p.add_argument('--resume', action='store_true')
             p.add_argument('--retry-uncertain', action='store_true')
-            p.add_argument('--execute-providers', action='store_true', help='explicit paid execution opt-in')
             p.add_argument('--seed', type=int, choices=EPISODE_SEEDS, default=EPISODE_SEEDS[0])
             if operation == 'episode':
                 p.add_argument('--policy', choices=ARMS + ('all',), required=True)
