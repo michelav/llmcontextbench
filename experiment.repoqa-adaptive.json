@@ -1,0 +1,79 @@
+{
+  "id": "datasets/repoqa",
+  "name": "RepoQA adaptive research prototype",
+  "output": "outputs",
+  "dataset": {
+    "id": "ctxbench/repoqa",
+    "version": "2026-05-23",
+    "root": "datasets/repoqa"
+  },
+  "models": {
+    "answer": {
+      "provider": "openai",
+      "name": "gpt-5.4-nano"
+    }
+  },
+  "scope": {
+    "instances": [],
+    "tasks": [
+      "snf_retrieve_function"
+    ]
+  },
+  "factors": {
+    "model": [
+      "answer"
+    ],
+    "configuration": [
+      "inline-code-full",
+      "local-mcp-repoqa-ops"
+    ]
+  },
+  "params": {
+    "mcp_server": {
+      "server_url": "https://llmctxbench-repoqa.fastmcp.app/mcp",
+      "server_label": "ctxbench_repoqa",
+      "server_description": "CTXBench RepoQA MCP server",
+      "auth_token": "${REPOQA_MCP_TOKEN}"
+    }
+  },
+  "evaluation": {
+    "enabled": true
+  },
+  "trace": {
+    "enabled": true,
+    "writeFiles": true,
+    "save_raw_response": true,
+    "save_tool_calls": true,
+    "save_usage": true,
+    "save_errors": true
+  },
+  "execution": {
+    "repeats": 2
+  },
+  "configurations": {
+    "inline-code-full": {
+      "strategy": "inline",
+      "representation": "code",
+      "surface": "full"
+    },
+    "local-mcp-repoqa-ops": {
+      "strategy": "local_mcp",
+      "representation": "json",
+      "surface": "repoqa-default"
+    }
+  },
+  "surfaces": {
+    "full": {
+      "type": "full_context"
+    },
+    "repoqa-default": {
+      "type": "operations",
+      "operations": [
+        "list_files",
+        "list_symbols",
+        "get_symbol",
+        "read_file"
+      ]
+    }
+  }
+}
