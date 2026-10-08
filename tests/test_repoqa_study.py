@@ -60,3 +60,19 @@ def test_pair_validation_and_actual_prompt_budget(tmp_path):
     assert candidate.eligible
     assert not initial_budget(trial, adapter, context_limit=tokens + 99, output_reservation=100).eligible
     assert initial_budget(trials[1], adapter, context_limit=200000, output_reservation=100).eligible
+
+
+def test_tokenizer_count_with_allowance_keeps_estimated_provenance(tmp_path):
+    from ctxbench.adapters.repoqa.package import RepoQADatasetAdapter
+    from ctxbench.adapters.repoqa.study import initial_budget
+    from ctxbench.adaptive.types import Provenance
+    from ctxbench.benchmark.models import DatasetProvenance, Experiment
+    from ctxbench.benchmark.runspec_generator import generate_runspecs
+    root = Path('tests/fixtures/repoqa_tools_dataset').resolve()
+    adapter = RepoQADatasetAdapter(root)
+    experiment = Experiment.model_validate(json.loads(Path('tests/fixtures/repoqa_surface_experiment.json').read_text()))
+    trial = generate_runspecs(experiment, tmp_path, adapter,
+                             DatasetProvenance(id='ctxbench/repoqa', version='fixture', materialized_path=str(root)))[0]
+    options = dict(context_limit=200000, output_reservation=100, tokenizer=lambda text: list(text))
+    assert initial_budget(trial, adapter, **options).context_fit.provenance == Provenance.ESTIMATED
+    assert initial_budget(trial, adapter, serialization_allowance=0, **options).context_fit.provenance == Provenance.DERIVED

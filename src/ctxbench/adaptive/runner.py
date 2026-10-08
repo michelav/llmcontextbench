@@ -6,11 +6,14 @@ from pathlib import Path
 from time import perf_counter, time
 from uuid import uuid4
 import subprocess
+import json
+import math
 
 from ctxbench.adapters.repoqa.study import digest, pair_trials, tree_hash
 from ctxbench.benchmark.executor import execute_runspec
-from ctxbench.benchmark.models import TrialResult, TrialSpec, RunTiming
-from ctxbench.benchmark.provisioning import validate_artifact_directory
+from ctxbench.ai.models.usage import account_tokens
+from ctxbench.benchmark.models import TrialResult, TrialSpec, RunTiming, TrialTrace
+from ctxbench.benchmark.provisioning import validate_artifact_directory, validate_manifest
 from .policy import AdaptivePolicy, FixedPolicy, PolicyConfig, RouterPolicy
 from .recovery import episode_lock, project_json, project_rows, read, sealed_read, sealed_write, write
 from .sidecars import DecisionRecord, DecisionSidecar, MetricRecord, RunMetadata, TokenRecord
@@ -51,7 +54,8 @@ def source_identity():
 def error_result(trial, error, started, finished, duration):
     fields = {k: getattr(trial, k) for k in TrialResult.model_fields if hasattr(trial, k) and k != 'trace'}
     return TrialResult(**fields, response='', status='error', errorMessage=str(error),
-                       timing=RunTiming(startedAt=started, finishedAt=finished, durationMs=int(duration)))
+                       timing=RunTiming(startedAt=started, finishedAt=finished, durationMs=int(duration)),
+                       trace=TrialTrace(error=str(error)))
 
 
 def _iso(seconds):
@@ -95,6 +99,9 @@ def run_episode(candidate_trials: list[TrialSpec], workload: list[EpisodeRequest
     catalog = {t.trialId: t for t in candidate_trials}
     if len({r.request_id for r in workload}) != len(workload):
         raise ValueError('duplicate request identity')
+    used_trials = [trial_id for request in workload for trial_id in request.trial_ids]
+    if len(used_trials) != len(set(used_trials)):
+        raise ValueError('candidate trial reused across scheduled requests')
     for index, request in enumerate(workload, 1):
         if request.features.sequence_index != index:
             raise ValueError('noncontiguous workload')
@@ -117,7 +124,6 @@ def run_episode(candidate_trials: list[TrialSpec], workload: list[EpisodeRequest
                 'calibration': sorted([{'key': asdict(k), 'estimate': asdict(v)} for k, v in calibration.items()],
                                       key=lambda r: (r['key']['configuration_id'], r['key']['size_bin']))}
     # Normalize enum/tuple representations before comparing persisted identities.
-    import json
     identity = json.loads(json.dumps(identity))
     if manifest is None:
         manifest = {'provisioningArtifactVersion': 2, 'experimentId': candidate_trials[0].experimentId,
@@ -125,7 +131,13 @@ def run_episode(candidate_trials: list[TrialSpec], workload: list[EpisodeRequest
                     'configurations': {t.configurationId: {'strategy': t.strategy, 'representation': t.representation,
                                                           'surface': t.surface} for t in candidate_trials},
                     'surfaces': {t.surface: t.surfaceSpec for t in candidate_trials},
+                    'trace': candidate_trials[0].trace.model_dump(mode='json'),
+                    'artifacts': candidate_trials[0].artifacts.model_dump(mode='json'),
                     'evaluation': {'enabled': True, 'judges': []}}
+    definitions = {t.configurationId: {'strategy': t.strategy, 'representation': t.representation,
+                                       'surface': t.surface} for t in candidate_trials}
+    if manifest.get('configurations') != definitions:
+        raise ValueError('manifest candidate definitions mismatch')
     identity['manifest'] = manifest
     with episode_lock(root):
         identity_path = root / 'recovery/identity.json'
@@ -139,11 +151,17 @@ def run_episode(candidate_trials: list[TrialSpec], workload: list[EpisodeRequest
                 raise ValueError('missing episode identity or nonempty output')
             sealed_write(identity_path, identity)
         project_json(root / 'manifest.json', manifest)
+        validate_manifest(root)
         project_json(root / 'adaptive-run.json', metadata.model_dump(mode='json'))
         lifecycle_path = root / 'lifecycle.json'
         lifecycle = read(lifecycle_path) if lifecycle_path.exists() else {'schemaVersion': 1, 'sessions': [], 'events': []}
+        if (lifecycle.get('schemaVersion') != 1 or not isinstance(lifecycle.get('sessions'), list)
+                or not isinstance(lifecycle.get('events'), list)):
+            raise ValueError('invalid lifecycle history')
         packets = []
         files = sorted((root / 'recovery').glob('request-*.json'))
+        if files and not lifecycle_path.exists():
+            raise ValueError('missing lifecycle history; interruption provenance cannot be restored')
         if len(files) > len(workload):
             raise ValueError('unexpected request packets')
         pending = None
@@ -194,7 +212,7 @@ def run_episode(candidate_trials: list[TrialSpec], workload: list[EpisodeRequest
             if (timing.get('schemaVersion') != 1 or timing.get('requestId') != request.request_id
                     or timing.get('sequenceIndex') != i or timing.get('provenance') != 'measured'
                     or not isinstance(timing.get('controllerDurationMs'), (int, float))
-                    or not __import__('math').isfinite(timing['controllerDurationMs']) or timing['controllerDurationMs'] < 0):
+                    or not math.isfinite(timing['controllerDurationMs']) or timing['controllerDurationMs'] < 0):
                 raise ValueError('invalid recovered timing')
             packets.append(packet)
         _project(root, packets, checkpoint)
@@ -266,8 +284,11 @@ def run_episode(candidate_trials: list[TrialSpec], workload: list[EpisodeRequest
                 if result.trialId != trial.trialId or result.configurationId != trial.configurationId:
                     raise ValueError('execution returned a different trial')
                 checkpoint('execution_finished', i)
-                token_value = result.usage.get('totalTokens')
-                tokens = TokenUsage(token_value, Provenance.REPORTED if token_value is not None else Provenance.UNAVAILABLE)
+                metrics = result.trace.aiTrace.get('metrics', {})
+                token_value, token_provenance, _ = account_tokens(result.provider, result.usage.get('totalTokens'),
+                    model_calls=metrics.get('modelCalls'), raw_response=result.trace.rawResponse,
+                    partial_total=metrics.get('totalTokens'), missing_total_estimate=metrics.get('totalTokensEstimated'))
+                tokens = TokenUsage(token_value, Provenance(token_provenance))
                 observation = Observation(selected, request.features.size_bin, result.status, duration, tokens)
             else:
                 tokens = TokenUsage(None, Provenance.UNAVAILABLE)

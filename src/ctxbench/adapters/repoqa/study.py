@@ -126,6 +126,8 @@ def initial_budget(trial, adapter, *, context_limit: int, output_reservation: in
             service.close()
     parts = (system, prompt, schemas)
     tokens = sum(len(tokenizer(p)) if tokenizer else len(p.encode('utf-8')) for p in parts)
-    provenance = Provenance.DERIVED if tokenizer else Provenance.ESTIMATED
+    # A conservative serialization allowance is estimated even when text tokens
+    # were counted exactly by a local tokenizer. Preserve that mixed provenance.
+    provenance = Provenance.DERIVED if tokenizer and serialization_allowance == 0 else Provenance.ESTIMATED
     return Candidate(trial.configurationId, True,
                      ContextFit(tokens + serialization_allowance, output_reservation, context_limit, provenance))

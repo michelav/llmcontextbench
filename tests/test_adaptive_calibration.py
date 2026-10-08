@@ -80,3 +80,31 @@ def test_research_cli_provider_gate(tmp_path, monkeypatch):
     with pytest.raises(SystemExit):
         cli['main'](['prepare', '--output', str(tmp_path)])
     assert cli['ARMS'] == ('always-inline', 'always-local-mcp', 'frozen-router', 'adaptive-router')
+
+
+def test_counterbalancing_across_seed_scenario_blocks():
+    from collections import Counter
+    cli = runpy.run_path('tools/repoqa/run_adaptation.py')
+    orders = [cli['policy_order'](seed, scenario) for seed in (20261001, 20261002, 20261003)
+              for scenario in ('stationary', 'degradation-recovery')]
+    for arm in cli['ARMS']:
+        positions = Counter(order.index(arm) for order in orders)
+        assert set(positions) == {0, 1, 2, 3}
+        assert max(positions.values()) - min(positions.values()) <= 1
+
+
+def test_calibration_provenance_rejects_changed_inputs(tmp_path, monkeypatch):
+    from ctxbench.adaptive.recovery import sealed_write
+    cli = runpy.run_path('tools/repoqa/run_adaptation.py')
+    root = tmp_path / 'always-local-mcp'
+    identity = {'catalog': [], 'sources': {}, 'workload': [],
+                'metadata': {'datasetProvenance': {'hash': 'expected', 'split': {}},
+                             'modelProvenance': {'budget': {}}, 'policy': root.name,
+                             'scenario': 'stationary', 'injectionSchedule': [{'start': 1, 'end': 0, 'delayMs': 0}]}}
+    sealed_write(root / 'recovery/identity.json', identity)
+    study = {'trials': [], 'sources': {}, 'datasetHash': 'expected', 'split': {}, 'budget': {},
+             'calibrationOrder': [], 'requests': {}}
+    assert cli['calibration_packets'](root, study=study) == []
+    study['datasetHash'] = 'changed'
+    with pytest.raises(ValueError, match='provenance'):
+        cli['calibration_packets'](root, study=study)

@@ -159,3 +159,64 @@ def test_dataset_and_configuration_changes_rejected(episode, tmp_path):
     (root / 'dataset-instructions.txt').write_text('changed')
     with pytest.raises(ValueError, match='fingerprint'):
         run(episode, output, resume=True)
+
+
+@pytest.mark.parametrize('arm', ['always-inline', 'always-local-mcp', 'frozen-router', 'adaptive-router'])
+@pytest.mark.parametrize('scenario', ['stationary', 'degradation-recovery'])
+def test_provider_free_resumed_gate(episode, tmp_path, arm, scenario):
+    from ctxbench.adaptive.types import Estimate, EstimateKey, PerformanceEstimate
+    trials, workload, base_metadata = episode
+    workload = list(workload)
+    workload[12] = replace(workload[12], candidates=tuple(replace(c, executable=False) for c in workload[12].candidates))
+    calibration = {}
+    for candidate in workload[0].candidates:
+        cid = candidate.configuration_id
+        calibration[EstimateKey(cid, SizeBin.SMALL)] = PerformanceEstimate(
+            Estimate(1000, Provenance.MEASURED, 5),
+            Estimate(5 if cid.startswith('local') else 10, Provenance.REPORTED, 5))
+    metadata = RunMetadata(policy=arm, scenario=scenario, **{**base_metadata, 'latencyObjectiveMs': 1500})
+    def execute_episode(output, resume=False, crash=False):
+        clock = Clock()
+        calls = []
+        def execution(trial, engine, **kwargs):
+            index = trial.repeatIndex
+            calls.append(index)
+            if index == 7:
+                raise RuntimeError('terminal setup error')
+            if scenario == 'degradation-recovery' and 21 <= index <= 44 and trial.strategy == 'local_mcp':
+                clock.value += 2
+            result = execute(trial, engine)
+            return result.model_copy(update={'usage': {'totalTokens': 5 if trial.strategy == 'local_mcp' else 10}})
+        def checkpoint(stage, index):
+            if crash and stage == 'outcome_saved' and index == 32:
+                raise KeyboardInterrupt('process stopped')
+        result = run_episode(trials, workload, calibration, arm, scenario, output, metadata=metadata,
+                             execution=execution, monotonic=clock, resume=resume, checkpoint=checkpoint)
+        return result, calls
+    output = tmp_path / 'resumed'
+    with pytest.raises(KeyboardInterrupt):
+        execute_episode(output, crash=True)
+    resumed, calls = execute_episode(output, resume=True)
+    fresh, _ = execute_episode(tmp_path / 'fresh')
+    assert calls == list(range(33, 65))
+    assert [p['decision'] for p in resumed] == [p['decision'] for p in fresh]
+    assert [p['observation'] for p in resumed] == [p['observation'] for p in fresh]
+    validate_artifact_directory(output)
+
+
+def test_missing_lifecycle_rejected(episode, tmp_path):
+    episode = (episode[0], episode[1][:1], episode[2])
+    output = tmp_path / 'episode'
+    run(episode, output)
+    (output / 'lifecycle.json').unlink()
+    with pytest.raises(ValueError, match='lifecycle'):
+        run(episode, output, resume=True)
+
+
+def test_reused_candidates_and_mismatched_manifest_rejected_before_execution(episode, tmp_path):
+    trials, workload, metadata = episode
+    duplicate = replace(workload[0], request_id='duplicate', features=RequestFeatures(2, 100, SizeBin.SMALL))
+    with pytest.raises(ValueError, match='reused'):
+        run((trials, [workload[0], duplicate], metadata), tmp_path / 'duplicate')
+    with pytest.raises(ValueError, match='manifest'):
+        run((trials, workload[:1], metadata), tmp_path / 'manifest', manifest={'configurations': {}})

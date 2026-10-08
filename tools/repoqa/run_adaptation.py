@@ -23,6 +23,14 @@ from ctxbench.benchmark.runspec_generator import generate_runspecs
 ARMS = ('always-inline', 'always-local-mcp', 'frozen-router', 'adaptive-router')
 
 
+def policy_order(seed, scenario):
+    offset = EPISODE_SEEDS.index(seed) if seed in EPISODE_SEEDS else 0
+    if scenario == 'degradation-recovery':
+        offset += 2
+    offset %= len(ARMS)
+    return list(ARMS[offset:] + ARMS[:offset])
+
+
 def prepare(args):
     experiment_path = Path(args.experiment).resolve()
     payload = json.loads(experiment_path.read_text())
@@ -76,6 +84,8 @@ def prepare(args):
              'heldOut': held, 'calibrationOrder': calibration_order,
              'budget': {'contextLimit': args.context_limit, 'outputReservation': args.output_reservation,
                         'tokenizer': tokenizer_name, 'serializationAllowance': 256,
+                        'tokenCounterProvenance': 'derived' if tokenizer else 'estimated',
+                        'serializationAllowanceProvenance': 'estimated',
                         'scope': 'initial prompt only; tool-loop growth may exceed limit'},
              'sources': source_identity(), 'costProjection': {'heldOutRequests': 1536,
                  'baselineExecutions': 64, 'delayExecutions': 128, 'currency': None, 'provenance': 'unavailable'}}
@@ -110,7 +120,7 @@ def workload_for(study, order, repeats):
     return workload
 
 
-def calibration_packets(root):
+def calibration_packets(root, *, study=None, delay_ms=0):
     packets = []
     for path in sorted(Path(root).glob('recovery/request-*.json')):
         packet = sealed_read(path)
@@ -118,6 +128,23 @@ def calibration_packets(root):
             raise ValueError('calibration episode is incomplete')
         packets.append(packet)
     identity = sealed_read(Path(root) / 'recovery/identity.json')
+    if study is not None:
+        metadata = identity['metadata']
+        catalog = []
+        for trial in identity['catalog']:
+            catalog.append({**trial, 'params': {key: value for key, value in trial['params'].items()
+                                               if key != 'prompt_cache_key'}})
+        expected_workload = json.loads(json.dumps([asdict(r) for r in workload_for(
+            study, study['calibrationOrder'], (1, 2))]))
+        expected_catalog = [{**trial, 'params': {key: value for key, value in trial['params'].items()
+                                                if key != 'prompt_cache_key'}} for trial in study['trials']]
+        if (catalog != expected_catalog or identity['sources'] != study['sources']
+                or identity['workload'] != expected_workload
+                or metadata['datasetProvenance'] != {'hash': study['datasetHash'], 'split': study['split']}
+                or metadata['modelProvenance']['budget'] != study['budget']
+                or metadata['policy'] != Path(root).name or metadata['scenario'] != 'stationary'
+                or metadata['injectionSchedule'] != [{'start': 1, 'end': len(expected_workload), 'delayMs': delay_ms}]):
+            raise ValueError('calibration provenance differs from prepared study')
     if len(packets) != len(identity['workload']):
         raise ValueError('calibration episode is incomplete')
     return packets
@@ -125,8 +152,8 @@ def calibration_packets(root):
 
 def frozen_inputs(study, output):
     base = Path(output) / 'calibration'
-    baseline = calibration_packets(base / 'baseline/always-inline') + calibration_packets(base / 'baseline/always-local-mcp')
-    delayed = {delay: calibration_packets(base / f'delay-{delay}/always-local-mcp') for delay in DELAYS_MS}
+    baseline = calibration_packets(base / 'baseline/always-inline', study=study) + calibration_packets(base / 'baseline/always-local-mcp', study=study)
+    delayed = {delay: calibration_packets(base / f'delay-{delay}/always-local-mcp', study=study, delay_ms=delay) for delay in DELAYS_MS}
     return baseline, delayed
 
 
@@ -194,8 +221,7 @@ def execute_operation(args, calibration=False):
     workload = workload_for(study, order, (1, 2) if calibration else (1,))
     arms = (('always-local-mcp',) if args.delay_ms else ('always-inline', 'always-local-mcp')) if calibration else (args.policy,)
     # Counterbalance policies across seeds for providers without cache-key support.
-    offset = EPISODE_SEEDS.index(args.seed) if args.seed in EPISODE_SEEDS else 0
-    counterbalanced = list(ARMS[offset:] + ARMS[:offset])
+    counterbalanced = policy_order(args.seed, 'stationary' if calibration else args.scenario)
     if not calibration and args.policy == 'all':
         arms = tuple(counterbalanced)
     from ctxbench.ai.engine import Engine
@@ -221,7 +247,8 @@ def execute_operation(args, calibration=False):
                 configurationCatalog={t.configurationId: {'strategy': t.strategy, 'representation': t.representation,
                                                          'surface': t.surface} for t in trials},
                 latencyObjectiveMs=objective, injectionSchedule=({'start': 1 if calibration else 21,
-                    'end': len(workload) if calibration else 44, 'delayMs': delay},), cachePolicy=cache,
+                    'end': len(workload) if calibration else 44,
+                    'delayMs': delay if calibration or scenario == 'degradation-recovery' else 0},), cachePolicy=cache,
                 codeRevision=source_identity()['revision'])
             def decorator(index):
                 amount = delay if calibration else delay_at(index, scenario, delay)

@@ -3,3 +3,7 @@
 {"event":"slice-implemented","slice":"B","tests_passed":20,"token_provenance":"unavailable"}
 {"event":"slice-implemented","slice":"C","tests_passed":13,"token_provenance":"unavailable"}
 {"event":"slice-implemented","slice":"D","tests_passed":33,"scorer_smoke":"passed","token_provenance":"unavailable"}
+{"event":"slice-implemented","slice":"E","token_provenance":"unavailable"}
+{"event":"diff-reviewed","contracts":"preserved","token_provenance":"unavailable"}
+{"event":"audit-run","tests_passed":159,"provider_calls":0,"token_provenance":"unavailable"}
+{"event":"spec-completed","scope":"implementation-only","token_provenance":"unavailable"}
