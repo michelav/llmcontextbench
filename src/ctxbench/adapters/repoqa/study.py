@@ -118,8 +118,12 @@ def initial_budget(trial, adapter, *, context_limit: int, output_reservation: in
         prefix = f'# Dataset Instructions\n{instructions}\n\n' if instructions and instructions.strip() else ''
         prompt = f'{prefix}# Task:\n{trial.taskStatement}\n\n# Instance ID:\n{trial.instanceId}\n\n'
         system = DEFAULT_OPERATION_SYSTEM_INSTRUCTION
-        tools = adapter.tool_provider(allowed_operations=trial.surfaceSpec['operations']).list_tools()
-        schemas = json.dumps([tool.model_dump(mode='json') for tool in tools], sort_keys=True)
+        service = adapter.tool_provider(allowed_operations=trial.surfaceSpec['operations'])
+        try:
+            tools = service.list_tools()
+            schemas = json.dumps([tool.model_dump(mode='json') for tool in tools], sort_keys=True)
+        finally:
+            service.close()
     parts = (system, prompt, schemas)
     tokens = sum(len(tokenizer(p)) if tokenizer else len(p.encode('utf-8')) for p in parts)
     provenance = Provenance.DERIVED if tokenizer else Provenance.ESTIMATED

@@ -30,3 +30,33 @@ def test_tree_hash_covers_content_and_paths(tmp_path):
     before = tree_hash(tmp_path)
     (tmp_path / 'a').write_text('y')
     assert tree_hash(tmp_path) != before
+
+
+def test_pair_validation_and_actual_prompt_budget(tmp_path):
+    from ctxbench.adapters.repoqa.package import RepoQADatasetAdapter
+    from ctxbench.adapters.repoqa.study import initial_budget, pair_trials
+    from ctxbench.benchmark.models import DatasetProvenance, Experiment
+    from ctxbench.benchmark.runspec_generator import generate_runspecs
+    from ctxbench.ai.strategies.inline import DEFAULT_SYSTEM_INSTRUCTION
+    root = Path('tests/fixtures/repoqa_tools_dataset').resolve()
+    adapter = RepoQADatasetAdapter(root)
+    experiment = Experiment.model_validate(json.loads(Path('tests/fixtures/repoqa_surface_experiment.json').read_text()))
+    trials = generate_runspecs(experiment, tmp_path, adapter,
+                              DatasetProvenance(id='ctxbench/repoqa', version='fixture', materialized_path=str(root)))
+    assert len(pair_trials(trials)) == 1
+    with pytest.raises(ValueError, match='missing'):
+        pair_trials(trials[:1])
+    with pytest.raises(ValueError, match='duplicate'):
+        pair_trials(trials + trials[:1])
+    changed = trials[1].model_copy(update={'params': {'different': True}})
+    with pytest.raises(ValueError, match='answering setting'):
+        pair_trials([trials[0], changed])
+    trial = trials[0]
+    context = adapter.get_context(trial.instanceId, trial.taskId, trial.representation).content
+    text = DEFAULT_SYSTEM_INSTRUCTION + f'# Context:\n{context}\n\n# Task:\n{trial.taskStatement}\n'
+    tokens = len(text.encode()) + 256
+    candidate = initial_budget(trial, adapter, context_limit=tokens + 100, output_reservation=100)
+    assert candidate.context_fit.input_tokens == tokens
+    assert candidate.eligible
+    assert not initial_budget(trial, adapter, context_limit=tokens + 99, output_reservation=100).eligible
+    assert initial_budget(trials[1], adapter, context_limit=200000, output_reservation=100).eligible

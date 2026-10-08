@@ -43,6 +43,8 @@ def source_identity():
     root = Path(__file__).resolve().parents[3]
     revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
     paths = sorted(list((root / 'src/ctxbench').rglob('*.py')) + list((root / 'tools/repoqa').glob('*.py')))
+    paths += [root / relative for relative in ('pyproject.toml', 'uv.lock', 'tools/repoqa/pyproject.toml',
+               'tools/repoqa/uv.lock', 'tools/repoqa/repoqa_python') if (root / relative).is_file()]
     return {'revision': revision, 'files': {str(p.relative_to(root)): digest(p.read_text()) for p in paths}}
 
 
@@ -276,17 +278,20 @@ def run_episode(candidate_trials: list[TrialSpec], workload: list[EpisodeRequest
                                           provenance=Provenance.MEASURED if duration is not None else Provenance.UNAVAILABLE,
                                           observationCount=1 if duration is not None else 0),
                                       tokens=TokenRecord(**asdict(tokens)), error=result.errorMessage if result else None)
+            observe_start = monotonic()
+            if observation:
+                controller.observe(observation)
+            observe_duration = max(0, (monotonic() - observe_start) * 1000)
             packet.update(state='completed', trial=trial.model_dump(mode='json') if trial else None,
                           result=result.model_dump(mode='json') if result else None,
                           observation=asdict(observation) if observation else None,
                           decision=sidecar.model_dump(mode='json'),
                           timing={'schemaVersion': 1, 'requestId': request.request_id, 'sequenceIndex': i,
-                                  'controllerDurationMs': overhead, 'provenance': 'measured'},
+                                  'controllerDurationMs': overhead + observe_duration, 'selectionDurationMs': overhead,
+                                  'observationDurationMs': observe_duration, 'provenance': 'measured'},
                           completedAt=wall_clock())
             sealed_write(packet_path, packet)
             checkpoint('outcome_saved', i)
-            if observation:
-                controller.observe(observation)
             packets.append(packet)
             _project(root, packets, checkpoint)
             lifecycle['lastDurableActivity'] = packet['completedAt']

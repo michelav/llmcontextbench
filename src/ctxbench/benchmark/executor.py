@@ -16,7 +16,7 @@ from ctxbench.runtime.runtime import ProvisioningRuntime
 from ctxbench.util.clock import utc_now_iso
 from ctxbench.util.logging import trial_log_context
 
-def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
+def execute_runspec(runspec: TrialSpec, engine: Engine, *, local_mcp_runtime_decorator=None) -> TrialResult:
     adapter = _resolve_adapter(runspec)
     if runspec.strategy == "inline":
         trial_adapter = TrialRuntimeAdapter()
@@ -86,6 +86,7 @@ def execute_runspec(runspec: TrialSpec, engine: Engine) -> TrialResult:
             runspec,
             dataset_tool_provider=dataset_tool_provider,
             dataset_mcp_server=dataset_mcp_server,
+            local_mcp_runtime_decorator=local_mcp_runtime_decorator,
         )
         owned_engine = engine.copy_with_tool_runtime_factories(tool_runtime_factories)
         active_engine = owned_engine
@@ -177,6 +178,7 @@ def _build_tool_runtime_factories(
     *,
     dataset_tool_provider: object | None,
     dataset_mcp_server: object | None,
+    local_mcp_runtime_decorator=None,
 ) -> dict[str, object]:
     tool_runtime_factories: dict[str, object] = {}
     if runspec.strategy == "local_function":
@@ -186,7 +188,16 @@ def _build_tool_runtime_factories(
     if runspec.strategy == "local_mcp":
         if dataset_mcp_server is None:
             raise CapabilityUnavailableError("Strategy 'local_mcp' requires a dataset MCP server.")
-        tool_runtime_factories["local_mcp"] = lambda: MCPRuntime.for_local_server(dataset_mcp_server)
+        def build_local_runtime():
+            runtime = MCPRuntime.for_local_server(dataset_mcp_server)
+            if local_mcp_runtime_decorator is None:
+                return runtime
+            try:
+                return local_mcp_runtime_decorator(runtime)
+            except BaseException:
+                runtime.close()
+                raise
+        tool_runtime_factories["local_mcp"] = build_local_runtime
     return tool_runtime_factories
 
 

@@ -29,12 +29,7 @@
     ]
   },
   "params": {
-    "mcp_server": {
-      "server_url": "https://llmctxbench-repoqa.fastmcp.app/mcp",
-      "server_label": "ctxbench_repoqa",
-      "server_description": "CTXBench RepoQA MCP server",
-      "auth_token": "${REPOQA_MCP_TOKEN}"
-    }
+    "common": {}
   },
   "evaluation": {
     "enabled": true
