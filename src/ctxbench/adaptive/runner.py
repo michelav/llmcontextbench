@@ -7,7 +7,7 @@ from time import perf_counter, time
 from uuid import uuid4
 import subprocess
 
-from ctxbench.adapters.repoqa.study import digest, pair_trials
+from ctxbench.adapters.repoqa.study import digest, pair_trials, tree_hash
 from ctxbench.benchmark.executor import execute_runspec
 from ctxbench.benchmark.models import TrialResult, TrialSpec, RunTiming
 from ctxbench.benchmark.provisioning import validate_artifact_directory
@@ -105,7 +105,11 @@ def run_episode(candidate_trials: list[TrialSpec], workload: list[EpisodeRequest
         raise ValueError('run metadata identity mismatch')
     config = policy_config or PolicyConfig(metadata.latency_objective_ms)
     controller = make_policy(policy, calibration, config)
-    identity = {'metadata': metadata.model_dump(mode='json'), 'sources': source_identity(),
+    dataset_roots = sorted({t.dataset.materialized_path or t.dataset.origin for t in candidate_trials})
+    dataset_hashes = {str(path): tree_hash(Path(path)) for path in dataset_roots if path and Path(path).is_dir()}
+    config_hashes = {t.experimentPath: digest(Path(t.experimentPath).read_text()) for t in candidate_trials
+                     if t.experimentPath and Path(t.experimentPath).is_file()}
+    identity = {'datasetHashes': dataset_hashes, 'configurationFiles': config_hashes, 'metadata': metadata.model_dump(mode='json'), 'sources': source_identity(),
                 'catalog': [t.model_dump(mode='json') for t in candidate_trials],
                 'workload': [asdict(r) for r in workload], 'policyConfig': asdict(config),
                 'calibration': sorted([{'key': asdict(k), 'estimate': asdict(v)} for k, v in calibration.items()],
@@ -148,6 +152,8 @@ def run_episode(candidate_trials: list[TrialSpec], workload: list[EpisodeRequest
             request = workload[i - 1]
             decision = controller.decide(request.features, request.candidates)
             expected = DecisionRecord.from_decision(decision).model_dump(mode='json')
+            if packet['features'] != json.loads(json.dumps(asdict(request.features))) or packet['candidates'] != json.loads(json.dumps([asdict(c) for c in request.candidates])):
+                raise ValueError('invalid saved request features/candidates')
             if packet['sequenceIndex'] != i or packet['requestId'] != request.request_id or packet['selection'] != expected:
                 raise ValueError('saved decision differs from policy replay')
             if packet['state'] == 'started':
@@ -160,13 +166,18 @@ def run_episode(candidate_trials: list[TrialSpec], workload: list[EpisodeRequest
             sidecar = DecisionSidecar.model_validate(packet['decision'])
             if sidecar.status == 'selected' or sidecar.decision.model_dump(mode='json') != expected:
                 raise ValueError('invalid terminal decision')
-            if sidecar.request_id != request.request_id or sidecar.policy != policy:
+            if (sidecar.request_id != request.request_id or sidecar.policy != policy
+                    or sidecar.policy_version != '2' or sidecar.trial_id != (packet['trial']['trialId'] if packet['trial'] else None)):
                 raise ValueError('invalid terminal identity')
             selected = decision.selected_configuration
             expected_trial = next((catalog[t] for t in request.trial_ids if catalog[t].configurationId == selected), None)
             if selected:
                 trial = TrialSpec.model_validate(packet['trial'])
                 result = TrialResult.model_validate(packet['result'])
+                if trial.model_dump(mode='json') != expected_trial.model_copy(update={'outputRoot': str(root)}, deep=True).model_dump(mode='json'):
+                    raise ValueError('recovered trial differs from selected catalog entry')
+                if result.configurationId != selected or result.metadata != trial.metadata:
+                    raise ValueError('recovered result treatment differs')
                 if trial.trialId != expected_trial.trialId or result.trialId != trial.trialId or result.status != sidecar.status:
                     raise ValueError('invalid recovered result')
                 observation = Observation(selected, request.features.size_bin, sidecar.status,
@@ -177,15 +188,30 @@ def run_episode(candidate_trials: list[TrialSpec], workload: list[EpisodeRequest
                 controller.observe(observation)
             elif packet['trial'] is not None or packet['result'] is not None or packet['observation'] is not None:
                 raise ValueError('unserved packet contains execution')
+            timing = packet['timing']
+            if (timing.get('schemaVersion') != 1 or timing.get('requestId') != request.request_id
+                    or timing.get('sequenceIndex') != i or timing.get('provenance') != 'measured'
+                    or not isinstance(timing.get('controllerDurationMs'), (int, float))
+                    or not __import__('math').isfinite(timing['controllerDurationMs']) or timing['controllerDurationMs'] < 0):
+                raise ValueError('invalid recovered timing')
             packets.append(packet)
         _project(root, packets, checkpoint)
         if len(packets) == len(workload):
             validate_artifact_directory(root)
+            lifecycle['completed'] = True
+            lifecycle['lastDurableActivity'] = packets[-1]['completedAt'] if packets else lifecycle.get('lastDurableActivity')
+            write(lifecycle_path, lifecycle)
             return packets
         if pending and pending['executionStarted'] and not retry_uncertain:
             raise ValueError('uncertain provider attempt; use retry_uncertain to permit a possible duplicate call')
         now = wall_clock()
-        previous = lifecycle.get('lastDurableActivity')
+        durable_times = [p['completedAt'] for p in packets]
+        if pending:
+            durable_times.append(pending['startedAt'])
+        previous = max(durable_times, default=lifecycle.get('lastDurableActivity'))
+        if resume:
+            lifecycle['events'].append({'type': 'recovery', 'completedRequests': len(packets),
+                                        'pendingSequenceIndex': pending['sequenceIndex'] if pending else None})
         lifecycle['sessions'].append({'id': str(uuid4()), 'startedAt': now, 'resumed': resume,
                                       'downtimeMs': max(0, (now - previous) * 1000) if previous is not None else None,
                                       'downtimeProvenance': 'estimated' if previous is not None else 'unavailable'})
@@ -205,14 +231,15 @@ def run_episode(candidate_trials: list[TrialSpec], workload: list[EpisodeRequest
                 decision = controller.decide(request.features, request.candidates)
                 decision_record = DecisionRecord.from_decision(decision).model_dump(mode='json')
                 selected = decision.selected_configuration
-            overhead = max(0, (monotonic() - controller_start) * 1000)
+            overhead = (pending['controllerDurationMs'] if pending and i == start_index
+                        else max(0, (monotonic() - controller_start) * 1000))
             trial = next((catalog[t] for t in request.trial_ids if catalog[t].configurationId == selected), None)
             if trial:
                 trial = trial.model_copy(update={'outputRoot': str(root)}, deep=True)
             packet = {'sequenceIndex': i, 'requestId': request.request_id, 'selection': decision_record,
                       'features': asdict(request.features), 'candidates': [asdict(c) for c in request.candidates],
                       'state': 'started', 'executionStarted': bool(pending and pending['executionStarted']),
-                      'startedAt': wall_clock(), 'uncertainRetries': (pending.get('uncertainRetries', 0) + 1
+                      'startedAt': wall_clock(), 'controllerDurationMs': overhead, 'uncertainRetries': (pending.get('uncertainRetries', 0) + 1
                                        if pending and pending['executionStarted'] else 0)}
             packet_path = root / f'recovery/request-{i:04d}.json'
             sealed_write(packet_path, packet)

@@ -1,2 +1,4 @@
 {"event":"plan-reviewed","slices":["A","B","C","D","E"],"token_provenance":"unavailable"}
 {"event":"slice-implemented","slice":"A","tests_passed":64,"token_provenance":"unavailable"}
+{"event":"slice-implemented","slice":"B","tests_passed":20,"token_provenance":"unavailable"}
+{"event":"slice-implemented","slice":"C","tests_passed":13,"token_provenance":"unavailable"}

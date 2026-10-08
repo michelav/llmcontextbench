@@ -139,3 +139,23 @@ def test_completed_projections_repaired_without_execution(episode, tmp_path, mon
     path.write_text(path.read_text() * 2)
     with pytest.raises(ValueError, match='duplicate'):
         run(episode, output, resume=True)
+
+
+def test_dataset_and_configuration_changes_rejected(episode, tmp_path):
+    import shutil
+    trials, workload, metadata = episode
+    root = tmp_path / 'dataset'
+    shutil.copytree(Path(trials[0].dataset.materialized_path), root)
+    config = tmp_path / 'experiment.json'
+    config.write_text('{}')
+    trials = [t.model_copy(update={'experimentPath': str(config), 'dataset': t.dataset.model_copy(update={'materialized_path': str(root)})}) for t in trials]
+    episode = (trials, workload[:1], metadata)
+    output = tmp_path / 'episode'
+    run(episode, output)
+    config.write_text('{"changed":true}')
+    with pytest.raises(ValueError, match='fingerprint'):
+        run(episode, output, resume=True)
+    config.write_text('{}')
+    (root / 'dataset-instructions.txt').write_text('changed')
+    with pytest.raises(ValueError, match='fingerprint'):
+        run(episode, output, resume=True)
