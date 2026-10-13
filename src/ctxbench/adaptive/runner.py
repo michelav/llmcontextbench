@@ -44,7 +44,12 @@ def make_policy(arm, calibration, config):
 
 def source_identity():
     root = Path(__file__).resolve().parents[3]
-    revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+    try:
+        revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True,
+                                           stderr=subprocess.PIPE).strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise RuntimeError('RepoQA adaptation requires Git provenance from a source checkout with a HEAD commit; '
+                           'restore the original checkout to resume an existing study.') from exc
     paths = sorted(list((root / 'src/ctxbench').rglob('*.py')) + list((root / 'tools/repoqa').glob('*.py')))
     paths += [root / relative for relative in ('pyproject.toml', 'uv.lock', 'tools/repoqa/pyproject.toml',
                'tools/repoqa/uv.lock', 'tools/repoqa/repoqa_python') if (root / relative).is_file()]

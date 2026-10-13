@@ -1,5 +1,6 @@
 from dataclasses import asdict
 import runpy
+from ctxbench.adapters.repoqa import workflow
 
 import pytest
 
@@ -79,15 +80,15 @@ def test_research_cli_required_arguments(tmp_path):
     cli = runpy.run_path('tools/repoqa/run_adaptation.py')
     with pytest.raises(SystemExit):
         cli['main'](['prepare', '--output', str(tmp_path)])
-    assert cli['ARMS'] == ('always-inline', 'always-local-mcp', 'frozen-router', 'adaptive-router')
+    assert workflow.ARMS == ('always-inline', 'always-local-mcp', 'frozen-router', 'adaptive-router')
 
 
 def test_counterbalancing_across_seed_scenario_blocks():
     from collections import Counter
     cli = runpy.run_path('tools/repoqa/run_adaptation.py')
-    orders = [cli['policy_order'](seed, scenario) for seed in (20261001, 20261002, 20261003)
+    orders = [workflow.policy_order(seed, scenario) for seed in (20261001, 20261002, 20261003)
               for scenario in ('stationary', 'degradation-recovery')]
-    for arm in cli['ARMS']:
+    for arm in workflow.ARMS:
         positions = Counter(order.index(arm) for order in orders)
         assert set(positions) == {0, 1, 2, 3}
         assert max(positions.values()) - min(positions.values()) <= 1
@@ -104,10 +105,10 @@ def test_calibration_provenance_rejects_changed_inputs(tmp_path, monkeypatch):
     sealed_write(root / 'recovery/identity.json', identity)
     study = {'trials': [], 'sources': {}, 'datasetHash': 'expected', 'split': {}, 'budget': {},
              'calibrationOrder': [], 'requests': {}}
-    assert cli['calibration_packets'](root, study=study) == []
+    assert workflow.calibration_packets(root, study=study) == []
     study['datasetHash'] = 'changed'
     with pytest.raises(ValueError, match='provenance'):
-        cli['calibration_packets'](root, study=study)
+        workflow.calibration_packets(root, study=study)
 
 
 @pytest.mark.parametrize('operation', ['calibrate', 'episode'])
@@ -130,7 +131,7 @@ def test_research_cli_executes_without_authorization_flag(operation, scorer_fail
         'delayHashes': {str(d): digest([]) for d in (100, 250, 500, 1000)},
         'scenarios': ['stationary'], 'selectedDelayMs': None, 'latencyObjectiveMs': 100})
     cli = runpy.run_path('tools/repoqa/run_adaptation.py')
-    scope = cli['main'].__globals__
+    scope = vars(workflow)
     events = []
     monkeypatch.setitem(scope, 'verify_study', lambda study: events.append('verified'))
     monkeypatch.setitem(scope, 'source_identity', lambda: sources)
@@ -162,7 +163,7 @@ def test_research_cli_executes_without_authorization_flag(operation, scorer_fail
         assert events == ['verified', 'scored']
     else:
         assert cli['main'](argv) == 0
-        arms = list(cli['ARMS']) if operation == 'episode' else list(cli['ARMS'][:2])
+        arms = list(workflow.ARMS) if operation == 'episode' else list(workflow.ARMS[:2])
         assert events == ['verified', 'scored', 'engine', *arms, 'closed']
     assert 'Provider execution spends API tokens' in capsys.readouterr().err
     with pytest.raises(SystemExit) as exc:
