@@ -11,6 +11,7 @@ from ctxbench.adaptive.types import Candidate, ContextFit, Provenance
 from ctxbench.benchmark.models import TrialSpec
 
 CONFIGURATIONS = ('inline-code-full', 'local-mcp-repoqa-ops')
+ARMS = ('always-inline', 'always-local-mcp', 'frozen-router', 'adaptive-router')
 SPLIT_SEED = 20260929
 EPISODE_SEEDS = (20261001, 20261002, 20261003)
 

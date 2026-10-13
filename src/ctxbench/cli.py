@@ -191,6 +191,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="llmctxbench", description="LLMContextBench benchmark CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    # Experimental study orchestration
+    from ctxbench.commands.adaptation import register_repoqa_commands
+    adaptation_parser = subparsers.add_parser(
+        "adaptation", help="Experimental adaptation studies",
+        description="Experimental study orchestration; commands run one stage at a time.",
+    )
+    adaptation_sub = adaptation_parser.add_subparsers(dest="adaptation_command", required=True)
+    repoqa_parser = adaptation_sub.add_parser(
+        "repoqa", help="RepoQA adaptation study",
+        description="Experimental RepoQA workflow. Calibration and episodes may spend provider tokens.",
+    )
+    register_repoqa_commands(repoqa_parser)
+
     # ── ctxbench dataset ───────────────────────────────────────────────────
     dataset_parser = subparsers.add_parser(
         "dataset", help="Dataset management"

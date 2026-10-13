@@ -8,7 +8,7 @@ import json
 import subprocess
 
 from ctxbench.adapters.repoqa.package import RepoQADatasetAdapter
-from ctxbench.adapters.repoqa.study import (EPISODE_SEEDS, digest, initial_budget,
+from ctxbench.adapters.repoqa.study import (ARMS, EPISODE_SEEDS, digest, initial_budget,
                                            ordered_workload, pair_trials, split_targets, tree_hash)
 from ctxbench.adapters.repoqa.workload import prepare_request_features
 from ctxbench.adaptive.calibration import DELAYS_MS, DelayedRuntime, delay_at, freeze_calibration, load_estimates
@@ -19,7 +19,6 @@ from ctxbench.adaptive.types import Candidate, ContextFit, Provenance
 from ctxbench.benchmark.models import DatasetProvenance, Experiment, TrialSpec
 from ctxbench.benchmark.runspec_generator import generate_runspecs
 
-ARMS = ('always-inline', 'always-local-mcp', 'frozen-router', 'adaptive-router')
 
 
 def policy_order(seed, scenario):

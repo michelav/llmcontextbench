@@ -158,8 +158,7 @@ def test_research_cli_executes_without_authorization_flag(operation, scorer_fail
     if operation == 'episode':
         argv += ['--policy', 'all', '--scenario', 'stationary']
     if scorer_fails:
-        with pytest.raises(RuntimeError, match='scorer failed'):
-            cli['main'](argv)
+        assert cli['main'](argv) == 1
         assert events == ['verified', 'scored']
     else:
         assert cli['main'](argv) == 0

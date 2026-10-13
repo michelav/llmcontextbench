@@ -45,7 +45,7 @@ def test_public_cli_registers_only_target_subcommands():
         action for action in parser._actions if isinstance(action, argparse._SubParsersAction)
     )
 
-    assert set(subparser_action.choices) == {"dataset", "plan", "execute", "eval", "export", "metrics", "status"}
+    assert set(subparser_action.choices) == {"adaptation", "dataset", "plan", "execute", "eval", "export", "metrics", "status"}
 
 
 def test_metrics_help_exposes_artifact_options(capsys):
