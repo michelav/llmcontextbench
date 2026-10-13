@@ -1,5 +1,8 @@
 # Resumable RepoQA research workflow
 
+For concepts, a complete first-study command sequence, artifact inspection and
+analysis guidance, see the [study reproduction guide](repoqa-first-study-guide.md).
+
 The research runner implements the accepted A–E plan. It leaves policy version 2,
 decision/run schema 1, provisioning artifact version 2 and the deterministic scorer
 unchanged. No paid calibration or held-out study has been run by implementation.
