@@ -85,3 +85,85 @@ assert 'repoqa.compute_score' not in sys.modules
     result = subprocess.run([sys.executable, '-c', code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
     assert 'Experimental' in result.stdout
+
+
+def test_resume_options_reach_workflow(monkeypatch):
+    seen = []
+    monkeypatch.setattr(workflow, 'calibrate', lambda **kwargs: seen.append(kwargs))
+    assert main(['adaptation', 'repoqa', 'calibrate', '--prepared', 'p', '--output', 's',
+                 '--seed', '20261003', '--delay-ms', '250', '--resume', '--retry-uncertain']) == 0
+    assert seen == [dict(prepared='p', output='s', seed=20261003, delay_ms=250,
+                         resume=True, retry_uncertain=True)]
+
+
+def test_mocked_study_entry_point_parity(tmp_path, monkeypatch, capsys):
+    """Real preparation, packets, freeze, replay and analysis; only execution is fake."""
+    from pathlib import Path
+    from ctxbench.adaptive import runner
+    from ctxbench.adaptive.recovery import sealed_read, sealed_write
+    from ctxbench.adapters.repoqa.adaptation_analysis import load_episode
+    from tests.test_adaptive_runner import Clock, execute
+
+    payload = json.loads(Path('tests/fixtures/repoqa_surface_experiment.json').read_text())
+    payload['dataset']['root'] = str(Path('datasets/repoqa').resolve())
+    payload['scope']['instances'] = []
+    payload['execution'] = {'repeats': 2}
+    experiment = tmp_path / 'experiment.json'
+    experiment.write_text(json.dumps(payload))
+    monkeypatch.setitem(sys.modules, 'tiktoken', None)
+    monkeypatch.setitem(sys.modules, 'matplotlib', None)
+    class Engine:
+        def close(self):
+            pass
+    monkeypatch.setattr('ctxbench.ai.engine.Engine', Engine)
+    calls = []
+    def mock_execution(trial, engine, **kwargs):
+        calls.append(trial.trialId)
+        return execute(trial, engine, **kwargs)
+    def run(*args, **kwargs):
+        return runner.run_episode(*args, **kwargs, execution=mock_execution, monotonic=Clock())
+    monkeypatch.setattr(workflow, 'run_episode', run)
+    legacy = runpy.run_path('tools/repoqa/run_adaptation.py')['main']
+    results = []
+    for entry, prefix, name in ((main, ['adaptation', 'repoqa'], 'integrated'), (legacy, [], 'legacy')):
+        output = tmp_path / name
+        def invoke(operation, *args, expected=0):
+            assert entry([*prefix, operation, '--output', str(output), *args]) == expected
+            captured = capsys.readouterr()
+            return json.loads(captured.out) if expected == 0 else captured.err
+        invoke('prepare', '--experiment', str(experiment), '--context-limit', '200000',
+               '--output-reservation', '2048')
+        prepared_args = ['--prepared', str(output / 'prepared.json')]
+        invoke('calibrate', *prepared_args)
+        completed = len(calls)
+        invoke('calibrate', *prepared_args, '--resume')
+        assert len(calls) == completed
+        for delay in (100, 250, 500, 1000):
+            invoke('calibrate', *prepared_args, '--delay-ms', str(delay))
+        frozen = invoke('freeze', *prepared_args)
+        assert frozen['scenarios'] == ['stationary']
+        assert 'stationary results only' in invoke('episode', *prepared_args, '--policy', 'all',
+            '--scenario', 'degradation-recovery', expected=1)
+        episodes = invoke('episode', *prepared_args, '--policy', 'all', '--scenario', 'stationary')
+        assert [Path(row['output']).name for row in episodes] == list(workflow.ARMS)
+        assert [row['completedRequests'] for row in episodes] == [64] * 4
+        completed = len(calls)
+        invoke('episode', *prepared_args, '--policy', 'all', '--scenario', 'stationary', '--resume')
+        assert len(calls) == completed
+        summary = invoke('analyze', '--bootstrap-replicates', '5')
+        assert len(summary['episodes']) == 4
+        assert (output / 'analysis/timeline.csv').is_file()
+        decisions = []
+        for row in episodes:
+            root = Path(row['output'])
+            load_episode(root)  # Validates canonical artifacts against recovery packets.
+            decisions.append([json.loads(line) for line in (root / 'decisions.jsonl').read_text().splitlines()])
+        study = sealed_read(output / 'prepared.json')
+        results.append((study, {key: frozen[key] for key in ('estimates', 'scenarios', 'latencyObjectiveMs',
+                         'selectedDelayMs', 'costProjection')}, decisions, summary['primary']))
+        damaged = dict(frozen, baselineHash='changed')
+        sealed_write(output / 'frozen.json', damaged)
+        assert 'frozen provenance mismatch' in invoke('episode', *prepared_args, '--policy', 'all',
+            '--scenario', 'stationary', '--resume', expected=1)
+        assert len(calls) == completed
+    assert results[0] == results[1]

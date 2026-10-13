@@ -1,3 +1,4 @@
 {"event":"spec-created","token_provenance":"unavailable"}
 {"event":"slice-implemented","slice":1,"token_provenance":"unavailable"}
 {"event":"slice-implemented","slice":2,"token_provenance":"unavailable"}
+{"event":"audit-run","slice":3,"tests_passed":159,"token_provenance":"unavailable"}

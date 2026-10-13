@@ -61,3 +61,18 @@ def test_missing_scorer_helpers_is_actionable(tmp_path, monkeypatch):
     monkeypatch.setattr(evaluation, '_repo_root', lambda: tmp_path)
     with pytest.raises(RuntimeError, match='scorer helpers missing.*source checkout'):
         workflow.scorer_smoke()
+
+
+@pytest.mark.parametrize('changed', ['dataset', 'experiment', 'sources'])
+def test_prepared_fingerprints_remain_required(tmp_path, monkeypatch, changed):
+    experiment = tmp_path / 'experiment.json'
+    experiment.write_text('{}')
+    study = {'datasetRoot': str(tmp_path), 'datasetHash': 'dataset',
+             'experimentPath': str(experiment), 'experimentHash': workflow.digest({}),
+             'sources': {'revision': 'original'}}
+    monkeypatch.setattr(workflow, 'tree_hash', lambda root: 'changed' if changed == 'dataset' else 'dataset')
+    monkeypatch.setattr(workflow, 'source_identity', lambda: {'revision': 'changed' if changed == 'sources' else 'original'})
+    if changed == 'experiment':
+        experiment.write_text('{"changed": true}')
+    with pytest.raises(ValueError, match='fingerprint|source revision'):
+        workflow.verify_study(study)
