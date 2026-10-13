@@ -1,0 +1,56 @@
+"""Study commands; provider execution is explicit."""
+import json
+import sys
+
+
+def register_study_commands(parser):
+    sub = parser.add_subparsers(dest='study_command', required=True)
+    baseline = sub.add_parser('baseline').add_subparsers(dest='baseline_command', required=True)
+    prepare = baseline.add_parser('prepare', help='Prepare reusable calibration episodes')
+    prepare.add_argument('--definition', required=True)
+    prepare.add_argument('--output', required=True)
+    for name in ('execute', 'freeze'):
+        command = baseline.add_parser(name)
+        command.add_argument('--prepared', required=True)
+        if name == 'execute':
+            command.add_argument('--resume', action='store_true')
+            command.add_argument('--retry-uncertain', action='store_true')
+    for command in baseline.choices.values():
+        command.set_defaults(func=study_command)
+    prepare = sub.add_parser('prepare', help='Bind a declarative study to a frozen baseline')
+    prepare.add_argument('--definition', required=True)
+    prepare.add_argument('--output', required=True)
+    episode = sub.add_parser('episode', help='Run one provider-backed study episode')
+    episode.add_argument('--prepared', required=True)
+    episode.add_argument('--policy', required=True)
+    episode.add_argument('--scenario', required=True)
+    episode.add_argument('--seed', type=int, required=True)
+    episode.add_argument('--repeat', type=int, required=True)
+    episode.add_argument('--resume', action='store_true')
+    episode.add_argument('--retry-uncertain', action='store_true')
+    status = sub.add_parser('status', help='Inspect planned and completed episodes')
+    status.add_argument('path')
+    analyze = sub.add_parser('analyze', help='Analyze saved episodes without provider calls')
+    analyze.add_argument('path')
+    analyze.add_argument('--bootstrap-replicates', type=int, default=1000)
+    analyze.add_argument('--bootstrap-seed', type=int, default=42)
+    for command in sub.choices.values():
+        if command.get_default('func') is None and command.prog.rsplit(' ', 1)[-1] != 'baseline':
+            command.set_defaults(func=study_command)
+
+
+def study_command(args):
+    from ctxbench.studies import baseline, study
+    options = vars(args).copy()
+    baseline_operation = options.pop('baseline_command', None)
+    operation = options.pop('study_command')
+    for key in ('command', 'func'):
+        options.pop(key, None)
+    if baseline_operation is not None:
+        target, operation = baseline, baseline_operation
+    else:
+        target = study
+    if operation in ('execute', 'episode'):
+        print('Provider execution may spend API tokens; review the prepared matrix before running.', file=sys.stderr)
+    print(json.dumps(getattr(target, operation)(**options), indent=2))
+    return 0

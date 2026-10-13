@@ -1,6 +1,6 @@
 # Lean RepoQA surface and strategy comparison
 
-Status: planned; not implemented by this document.
+Status: lean operations implemented. The V3 study protocol supersedes the adaptive-candidate restriction below; see `docs/studies.md`.
 
 ## Summary
 
@@ -8,7 +8,7 @@ Add an opt-in `repoqa-lean` operation surface, available through both existing s
 
 Keep the primary adaptation study focused on **inline versus local MCP with the lean surface**. Use local functions in a separate supporting comparison to distinguish operation-payload costs from MCP integration overhead.
 
-Preserve the existing surface, dataset artifacts, and completed study. CLI integration is a separate future change.
+Preserve the existing surface, dataset artifacts, and completed study. Study CLI integration is documented in `docs/studies.md`.
 
 ## Lean operation contract
 
@@ -75,7 +75,7 @@ Hold inputs, model, execution limits, and corresponding operation capabilities c
 
 Measure quality, total execution tokens, latency, tool calls, and execution failures. Report schema/result payload sizes separately from provider-reported usage.
 
-Local functions remain outside the adaptive action set in this iteration. Adding a third candidate would require a separate design for calibration, probing, selection, and analysis.
+For the V3 study protocol, local functions are included in the adaptive candidate set. The historical two-candidate protocol retains its own restriction.
 
 ## Acceptance, compatibility, and limits
 

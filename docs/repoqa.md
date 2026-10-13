@@ -70,3 +70,25 @@ Use `--configuration ID`, `--strategy NAME`, or `--representation NAME` to filte
 `--split` writes separate files per model and persisted configuration ID. Native
 output rows retain `configurationId`, `strategy`, and `representation` in `ctxbench`
 metadata. Historical outputs require the previous benchmark version.
+
+### Historical MCP operation errors
+
+Older RepoQA MCP handlers discarded service error flags. In
+`runs/repoqa-adaptive-001`, 22 error-only tool payloads were recorded with
+`isError: false` (three calibration calls and 19 episode calls). These are
+operation errors, not evidence of transport failure or necessarily failed final
+answers. Historical artifacts remain unchanged; collect fresh compatible baselines
+for corrected reliability measurements. Current handlers preserve the flag and
+normalized content, allowing the model to recover on subsequent steps. Lattes
+currently raises missing-data exceptions in its service rather than returning
+flagged service results; that distinct behavior is unchanged.
+
+### Opt-in lean operations
+
+`experiment.repoqa-five.json` compares inline full context, local MCP default/lean,
+and local function default/lean. The `repoqa-lean` surface declares
+`list_files_lean`, `list_symbols_lean`, `get_symbol_lean`, and `read_file_lean`.
+These return path strings, flat deduplicated symbol records with documentation,
+complete code, and file content respectively. Defaults still expose the original
+four operations. Lean transport schemas and normalized results are equivalent.
+Smaller serialized payloads are measured bytes, not demonstrated token savings.

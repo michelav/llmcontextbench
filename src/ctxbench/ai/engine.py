@@ -54,6 +54,8 @@ class Engine:
                     "provider_name": request.provider_name,
                     "model_name": request.model_name,
                     "strategy_name": request.strategy_name,
+                    "exceptionModule": exc.__class__.__module__,
+                    "exceptionType": exc.__class__.__name__,
                 },
             )
             result = AIResult(answer="", error=str(exc))
@@ -108,6 +110,8 @@ class Engine:
                     "provider_name": request.provider_name,
                     "model_name": request.model_name,
                     "execution_mode": "direct-model-input",
+                    "exceptionModule": exc.__class__.__module__,
+                    "exceptionType": exc.__class__.__name__,
                 },
             )
             result = AIResult(answer="", error=str(exc))

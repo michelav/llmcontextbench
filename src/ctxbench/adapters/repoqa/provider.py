@@ -115,6 +115,40 @@ class RepoQAProvider:
             "content": content,
         }
 
+    def list_files_lean(self, workspace_id: str) -> list[str]:
+        return [item["path"] for item in self.list_files(workspace_id)]
+
+    def list_symbols_lean(self, workspace_id: str, path: str | None = None,
+                          kind: str | None = None) -> list[dict[str, Any]]:
+        result, seen = [], set()
+        wanted_kind = kind.strip() if kind and kind.strip() else None
+
+        def visit(symbol):
+            identity = symbol["symbol_id"]
+            if identity not in seen and (wanted_kind is None or _symbol_kind_matches(symbol["kind"], wanted_kind)):
+                seen.add(identity)
+                item = {"symbol_id": identity, "name": symbol["qualified_name"], "kind": symbol["kind"]}
+                documentation = symbol.get("documentation") or symbol.get("docstring")
+                if documentation:
+                    item["documentation"] = documentation
+                result.append(item)
+            for child in symbol.get("children", []):
+                visit(child)
+
+        for symbol in self.list_symbols(workspace_id, path=path):
+            visit(symbol)
+        return result
+
+    def get_symbol_lean(self, workspace_id: str, symbol_id: str) -> dict[str, str]:
+        symbol = self.get_symbol(workspace_id, symbol_id)
+        code = symbol.get("code")
+        if not isinstance(code, str) or not code.strip():
+            raise ValueError(f"Visible code is unavailable for symbol_id={symbol_id}")
+        return {"code": code}
+
+    def read_file_lean(self, workspace_id: str, path: str) -> dict[str, str]:
+        return {"content": self.read_file(workspace_id, path)["content"]}
+
     def resolve_workspace_dir(self, workspace_id: str) -> str:
         path = self._workspace_dir(workspace_id)
         return str(path.resolve())

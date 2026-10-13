@@ -1,0 +1,342 @@
+{
+  "$defs": {
+    "BudgetPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "budget",
+          "title": "Type",
+          "type": "string"
+        },
+        "probeInterval": {
+          "default": 10,
+          "exclusiveMinimum": 0,
+          "title": "Probeinterval",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "BudgetPolicy",
+      "type": "object"
+    },
+    "Delay": {
+      "additionalProperties": false,
+      "properties": {
+        "configuration": {
+          "title": "Configuration",
+          "type": "string"
+        },
+        "scope": {
+          "enum": [
+            "request",
+            "tool-call"
+          ],
+          "title": "Scope",
+          "type": "string"
+        },
+        "delayMs": {
+          "exclusiveMinimum": 0,
+          "title": "Delayms",
+          "type": "integer"
+        },
+        "firstRequest": {
+          "exclusiveMinimum": 0,
+          "title": "Firstrequest",
+          "type": "integer"
+        },
+        "lastRequest": {
+          "exclusiveMinimum": 0,
+          "title": "Lastrequest",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "configuration",
+        "scope",
+        "delayMs",
+        "firstRequest",
+        "lastRequest"
+      ],
+      "title": "Delay",
+      "type": "object"
+    },
+    "FixedPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "fixed",
+          "title": "Type",
+          "type": "string"
+        },
+        "configuration": {
+          "title": "Configuration",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "configuration"
+      ],
+      "title": "FixedPolicy",
+      "type": "object"
+    },
+    "ReliabilityPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "reliability",
+          "title": "Type",
+          "type": "string"
+        },
+        "failureClasses": {
+          "items": {
+            "enum": [
+              "operation",
+              "transport",
+              "provider",
+              "tool-use",
+              "step-limit",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Failureclasses",
+          "type": "array"
+        },
+        "window": {
+          "exclusiveMinimum": 0,
+          "title": "Window",
+          "type": "integer"
+        },
+        "minimumObservations": {
+          "exclusiveMinimum": 0,
+          "title": "Minimumobservations",
+          "type": "integer"
+        },
+        "failureRateThreshold": {
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "title": "Failureratethreshold",
+          "type": "number"
+        },
+        "cooldownRequests": {
+          "exclusiveMinimum": 0,
+          "title": "Cooldownrequests",
+          "type": "integer"
+        },
+        "probeInterval": {
+          "default": 10,
+          "exclusiveMinimum": 0,
+          "title": "Probeinterval",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "failureClasses",
+        "window",
+        "minimumObservations",
+        "failureRateThreshold",
+        "cooldownRequests"
+      ],
+      "title": "ReliabilityPolicy",
+      "type": "object"
+    },
+    "RouterPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "router",
+          "title": "Type",
+          "type": "string"
+        },
+        "adaptive": {
+          "title": "Adaptive",
+          "type": "boolean"
+        },
+        "probeInterval": {
+          "default": 10,
+          "exclusiveMinimum": 0,
+          "title": "Probeinterval",
+          "type": "integer"
+        },
+        "cooldownRequests": {
+          "default": 5,
+          "minimum": 0,
+          "title": "Cooldownrequests",
+          "type": "integer"
+        },
+        "updateWindow": {
+          "default": 5,
+          "exclusiveMinimum": 0,
+          "title": "Updatewindow",
+          "type": "integer"
+        },
+        "materialImprovement": {
+          "default": 0.1,
+          "exclusiveMaximum": 1,
+          "minimum": 0,
+          "title": "Materialimprovement",
+          "type": "number"
+        }
+      },
+      "required": [
+        "type",
+        "adaptive"
+      ],
+      "title": "RouterPolicy",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "default": 1,
+      "title": "Schemaversion",
+      "type": "integer"
+    },
+    "baseline": {
+      "title": "Baseline",
+      "type": "string"
+    },
+    "configurations": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Configurations"
+    },
+    "seeds": {
+      "items": {
+        "type": "integer"
+      },
+      "minItems": 1,
+      "title": "Seeds",
+      "type": "array"
+    },
+    "repeats": {
+      "exclusiveMinimum": 0,
+      "title": "Repeats",
+      "type": "integer"
+    },
+    "policies": {
+      "additionalProperties": {
+        "discriminator": {
+          "mapping": {
+            "budget": "#/$defs/BudgetPolicy",
+            "fixed": "#/$defs/FixedPolicy",
+            "reliability": "#/$defs/ReliabilityPolicy",
+            "router": "#/$defs/RouterPolicy"
+          },
+          "propertyName": "type"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/FixedPolicy"
+          },
+          {
+            "$ref": "#/$defs/RouterPolicy"
+          },
+          {
+            "$ref": "#/$defs/BudgetPolicy"
+          },
+          {
+            "$ref": "#/$defs/ReliabilityPolicy"
+          }
+        ]
+      },
+      "minProperties": 1,
+      "title": "Policies",
+      "type": "object"
+    },
+    "scenarios": {
+      "additionalProperties": {
+        "items": {
+          "$ref": "#/$defs/Delay"
+        },
+        "type": "array"
+      },
+      "minProperties": 1,
+      "title": "Scenarios",
+      "type": "object"
+    },
+    "comparisons": {
+      "items": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "string"
+          }
+        ],
+        "type": "array"
+      },
+      "title": "Comparisons",
+      "type": "array"
+    },
+    "latencyLimitMs": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Latencylimitms"
+    },
+    "tokenBudget": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Tokenbudget"
+    },
+    "minimumCalibrationPassRate": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Minimumcalibrationpassrate"
+    }
+  },
+  "required": [
+    "baseline",
+    "seeds",
+    "repeats",
+    "policies",
+    "scenarios"
+  ],
+  "title": "Study",
+  "type": "object"
+}

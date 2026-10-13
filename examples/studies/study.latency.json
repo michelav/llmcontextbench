@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "baseline": "../../baselines/repoqa-five/frozen.json",
+  "seeds": [201, 202, 203],
+  "repeats": 1,
+  "latencyLimitMs": 6000,
+  "policies": {
+    "inline": {"type": "fixed", "configuration": "inline-code-full"},
+    "frozen": {"type": "router", "adaptive": false},
+    "adaptive": {"type": "router", "adaptive": true}
+  },
+  "scenarios": {
+    "stationary": [],
+    "inline-delay": [{"configuration": "inline-code-full", "scope": "request", "delayMs": 5000, "firstRequest": 21, "lastRequest": 44}]
+  },
+  "comparisons": [["adaptive", "frozen"], ["adaptive", "inline"]]
+}

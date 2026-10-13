@@ -6,6 +6,7 @@ from pathlib import Path
 from fastmcp import FastMCP
 
 from ctxbench.ai.models.base import ToolResult, ToolSpec
+from ctxbench.ai.mcp_result import mcp_operation_result
 from ctxbench.adapters.repoqa.tools import RepoQAToolService
 
 
@@ -36,10 +37,13 @@ class RepoQAMCPServer:
 
     def _register_tools(self) -> None:
         selected = {spec.name for spec in self._service.list_tools()}
+        for spec in self._service.list_tools():
+            if spec.name.endswith("_lean"):
+                self._register_lean_tool(spec)
         if "list_files" in selected:
             @self.app.tool(name="list_files", description="List visible repository files and metadata for a RepoQA workspace.")
             async def list_files(workspace_id: str) -> object:
-                return self.call_tool("list_files", {"workspace_id": workspace_id}).content
+                return mcp_operation_result(self.call_tool("list_files", {"workspace_id": workspace_id}))
 
         if "list_symbols" in selected:
             @self.app.tool(
@@ -51,20 +55,36 @@ class RepoQAMCPServer:
                 ),
             )
             async def list_symbols(workspace_id: str, path: str | None = None, kind: str | None = None) -> object:
-                return self.call_tool(
+                return mcp_operation_result(self.call_tool(
                     "list_symbols",
                     {"workspace_id": workspace_id, "path": path, "kind": kind},
-                ).content
+                ))
 
         if "get_symbol" in selected:
             @self.app.tool(name="get_symbol", description="Return one RepoQA symbol, including generated visible code.")
             async def get_symbol(workspace_id: str, symbol_id: str) -> object:
-                return self.call_tool("get_symbol", {"workspace_id": workspace_id, "symbol_id": symbol_id}).content
+                return mcp_operation_result(self.call_tool("get_symbol", {"workspace_id": workspace_id, "symbol_id": symbol_id}))
 
         if "read_file" in selected:
             @self.app.tool(name="read_file", description="Read one generated visible file from a RepoQA workspace.")
             async def read_file(workspace_id: str, path: str) -> object:
-                return self.call_tool("read_file", {"workspace_id": workspace_id, "path": path}).content
+                return mcp_operation_result(self.call_tool("read_file", {"workspace_id": workspace_id, "path": path}))
+
+    def _register_lean_tool(self, spec: ToolSpec) -> None:
+        name = spec.name
+        if name == "list_symbols_lean":
+            async def handler(workspace_id: str, path: str | None = None, kind: str | None = None) -> object:
+                return mcp_operation_result(self.call_tool(name, {"workspace_id": workspace_id, "path": path, "kind": kind}))
+        elif name == "get_symbol_lean":
+            async def handler(workspace_id: str, symbol_id: str) -> object:
+                return mcp_operation_result(self.call_tool(name, {"workspace_id": workspace_id, "symbol_id": symbol_id}))
+        elif name == "read_file_lean":
+            async def handler(workspace_id: str, path: str) -> object:
+                return mcp_operation_result(self.call_tool(name, {"workspace_id": workspace_id, "path": path}))
+        else:
+            async def handler(workspace_id: str) -> object:
+                return mcp_operation_result(self.call_tool(name, {"workspace_id": workspace_id}))
+        self.app.tool(name=name, description=spec.description)(handler)
 
     def list_tools(self) -> list[ToolSpec]:
         return list(self._tool_specs)

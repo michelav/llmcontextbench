@@ -1,0 +1,73 @@
+{
+  "$defs": {
+    "Split": {
+      "additionalProperties": false,
+      "properties": {
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        },
+        "calibrationTargetsPerLanguage": {
+          "exclusiveMinimum": 0,
+          "title": "Calibrationtargetsperlanguage",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seed",
+        "calibrationTargetsPerLanguage"
+      ],
+      "title": "Split",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1,
+      "default": 1,
+      "title": "Schemaversion",
+      "type": "integer"
+    },
+    "experiment": {
+      "title": "Experiment",
+      "type": "string"
+    },
+    "split": {
+      "$ref": "#/$defs/Split"
+    },
+    "seeds": {
+      "items": {
+        "type": "integer"
+      },
+      "minItems": 1,
+      "title": "Seeds",
+      "type": "array"
+    },
+    "repeats": {
+      "exclusiveMinimum": 0,
+      "title": "Repeats",
+      "type": "integer"
+    },
+    "contextLimit": {
+      "exclusiveMinimum": 0,
+      "title": "Contextlimit",
+      "type": "integer"
+    },
+    "outputReservation": {
+      "exclusiveMinimum": 0,
+      "title": "Outputreservation",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "experiment",
+    "split",
+    "seeds",
+    "repeats",
+    "contextLimit",
+    "outputReservation"
+  ],
+  "title": "Baseline",
+  "type": "object"
+}

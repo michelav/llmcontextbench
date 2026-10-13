@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "baseline": "../../baselines/repoqa-five/frozen.json",
+  "seeds": [
+    201,
+    202,
+    203
+  ],
+  "repeats": 1,
+  "latencyLimitMs": 6000,
+  "policies": {
+    "reliability": {
+      "type": "reliability",
+      "failureClasses": [
+        "transport",
+        "provider",
+        "step-limit"
+      ],
+      "window": 10,
+      "minimumObservations": 5,
+      "failureRateThreshold": 0.3,
+      "cooldownRequests": 5
+    },
+    "frozen": {
+      "type": "router",
+      "adaptive": false
+    },
+    "mcp-lean": {
+      "type": "fixed",
+      "configuration": "local-mcp-lean"
+    },
+    "function-lean": {
+      "type": "fixed",
+      "configuration": "local-function-lean"
+    }
+  },
+  "scenarios": {
+    "stationary": []
+  },
+  "comparisons": [
+    [
+      "reliability",
+      "frozen"
+    ],
+    [
+      "reliability",
+      "mcp-lean"
+    ],
+    [
+      "reliability",
+      "function-lean"
+    ]
+  ]
+}

@@ -190,6 +190,8 @@ def _metrics_selector_from_args(args: argparse.Namespace) -> RunSelector:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="llmctxbench", description="LLMContextBench benchmark CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    from ctxbench.commands.study import register_study_commands
+    register_study_commands(subparsers.add_parser("study", help="Reusable baselines and adaptation studies"))
 
     # Experimental study orchestration
     from ctxbench.commands.adaptation import register_repoqa_commands

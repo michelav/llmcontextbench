@@ -13,7 +13,7 @@ from ctxbench.dataset.payloads import ContextPayload, EvidencePayload, TaskPaylo
 from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.dataset.validation import validate_package
 from ctxbench.adapters.repoqa.mcp_server import build_repoqa_mcp_server
-from ctxbench.adapters.repoqa.tools import REPOQA_OPERATIONS, RepoQAToolService
+from ctxbench.adapters.repoqa.tools import REPOQA_ALL_OPERATIONS, RepoQAToolService
 from ctxbench.util.fs import load_json
 
 
@@ -74,7 +74,7 @@ class RepoQADatasetAdapter(LocalDatasetPackage):
     def resolve_surface(self, surface: SurfaceSpec) -> ResolvedSurface:
         if surface.type == "full_context":
             return ResolvedSurface(declaration=surface)
-        unknown = [name for name in surface.operations if name not in REPOQA_OPERATIONS]
+        unknown = [name for name in surface.operations if name not in REPOQA_ALL_OPERATIONS]
         if unknown:
             raise ValueError(f"Unknown RepoQA operations: {', '.join(unknown)}")
         return ResolvedSurface(declaration=surface, operations=tuple(surface.operations))
