@@ -3,16 +3,23 @@
 For concepts, a complete first-study command sequence, artifact inspection and
 analysis guidance, see the [study reproduction guide](repoqa-first-study-guide.md).
 
-The research runner implements the accepted A–E plan. It leaves policy version 2,
+The experimental `llmctxbench adaptation repoqa` group implements the accepted A–E plan. It leaves policy version 2,
 decision/run schema 1, provisioning artifact version 2 and the deterministic scorer
 unchanged. No paid calibration or held-out study has been run by implementation.
 
 Run commands from the repository root using the existing benchmark environment.
+Use `llmctxbench adaptation repoqa --help` or append `--help` to any stage for
+argument discovery. Preparation, freezing and analysis are provider-free;
+calibration and episodes execute configured providers. The compatibility wrapper
+`python tools/repoqa/run_adaptation.py <stage> ...` retains its documented arguments
+and delegates to the same CLI handlers. Standard `status`, `eval`, `export` and
+`metrics` still operate per episode; the group adds no study-wide status or batch
+evaluation command.
 Preparation does not call models. Choose the actual model context limit and output
 reservation explicitly; the numbers below are examples, not verified model limits:
 
 ```bash
-python tools/repoqa/run_adaptation.py prepare \
+llmctxbench adaptation repoqa prepare \
   --experiment experiment.repoqa-adaptive.json --output runs/repoqa-adaptive \
   --context-limit 200000 --output-reservation 2048
 ```
@@ -41,10 +48,10 @@ still obtain explicit prompt authorization; that is an agent permission rule, no
 a CLI gate.
 
 ```bash
-python tools/repoqa/run_adaptation.py calibrate \
+llmctxbench adaptation repoqa calibrate \
   --prepared runs/repoqa-adaptive/prepared.json --output runs/repoqa-adaptive
 # Repeat calibration with --delay-ms 100, 250, 500 and 1000.
-python tools/repoqa/run_adaptation.py freeze \
+llmctxbench adaptation repoqa freeze \
   --prepared runs/repoqa-adaptive/prepared.json --output runs/repoqa-adaptive
 ```
 
@@ -64,7 +71,7 @@ arm, seed and scenario; other providers retain their defaults and use that order
 Cache keys do not guarantee provider-side cache isolation.
 
 ```bash
-python tools/repoqa/run_adaptation.py episode \
+llmctxbench adaptation repoqa episode \
   --prepared runs/repoqa-adaptive/prepared.json --output runs/repoqa-adaptive \
   --seed 20261001 --scenario degradation-recovery --policy all
 ```
@@ -109,7 +116,7 @@ llmctxbench eval runs/repoqa-adaptive/episodes/stationary/20261001/adaptive-rout
 llmctxbench export runs/repoqa-adaptive/episodes/stationary/20261001/adaptive-router/evals.jsonl \
   --output runs/repoqa-adaptive/episodes/stationary/20261001/adaptive-router/results.csv
 llmctxbench metrics runs/repoqa-adaptive/episodes/stationary/20261001/adaptive-router
-python tools/repoqa/run_adaptation.py analyze --output runs/repoqa-adaptive
+llmctxbench adaptation repoqa analyze --output runs/repoqa-adaptive
 ```
 
 Analysis validates completed episodes and joins canonical trials/responses/evaluations
@@ -145,3 +152,12 @@ from existing commands. This code change invalidates preparation/resume source
 fingerprints. Continue existing studies on their original revision or prepare a
 new study under the updated code; do not bypass fingerprint checks. Existing
 artifacts remain usable for analysis, and artifact schemas are unchanged.
+
+The CLI migration preserves all resume and uncertain-execution rules above. Prepare
+fresh studies only after committing the migrated source. Existing completed studies
+can still be inspected and analyzed without artifact conversion. To continue an
+existing study, restore its original source revision and fingerprint; a new entry
+point does not authorize resumption under changed code. Scorer helpers remain under
+`tools/repoqa/`, and execution still requires the existing checkout-based scorer
+environment. Missing helpers or Git provenance produce errors rather than disabling
+reproducibility checks.

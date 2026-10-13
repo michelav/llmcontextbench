@@ -5,6 +5,33 @@ Read it alongside [the resumable workflow reference](repoqa-resumable-workflow.m
 It describes implementation behavior, not observed experimental benefits. No paid
 experiment is implied to have been completed by this document.
 
+The preferred entry point is the experimental `llmctxbench adaptation repoqa`
+group, run from the source checkout in the benchmark environment. Discover stages
+and their arguments without initializing the scorer:
+
+```bash
+llmctxbench adaptation --help
+llmctxbench adaptation repoqa --help
+llmctxbench adaptation repoqa prepare --help
+llmctxbench adaptation repoqa calibrate --help
+llmctxbench adaptation repoqa freeze --help
+llmctxbench adaptation repoqa episode --help
+llmctxbench adaptation repoqa analyze --help
+```
+
+Each command runs one stage. Preparation, freezing and analysis are provider-free;
+calibration and episodes call the configured provider. Standard `status`, `eval`,
+`export` and `metrics` operate on individual episode artifacts using the loops
+below. There is no study-wide status or automatic stage execution.
+
+Compatibility: `python tools/repoqa/run_adaptation.py <stage> ...` remains supported
+with the same arguments and shared implementation. Fresh studies should use the
+integrated CLI and be prepared after all source changes and commits are finished.
+Completed pre-migration studies remain inspectable and analyzable without rewriting
+artifacts. Continuing calibration, freezing or episodes from a pre-migration study
+requires its original revision and relevant source files; this refactor changes the
+fingerprint. Do not re-seal old inputs or bypass checks to resume under new code.
+
 The sequence is:
 
 ```text
@@ -111,9 +138,8 @@ A provider-free scorer preflight is:
 
 ```bash
 python - <<'PY'
-import runpy
-cli = runpy.run_path('tools/repoqa/run_adaptation.py')
-print(cli['scorer_smoke']())
+from ctxbench.adapters.repoqa.workflow import scorer_smoke
+print(scorer_smoke())
 PY
 ```
 
@@ -126,7 +152,7 @@ your behalf still needs explicit prompt authorization.
 ## 3. Prepare the immutable inputs
 
 ```bash
-python tools/repoqa/run_adaptation.py prepare \
+llmctxbench adaptation repoqa prepare \
   --experiment experiment.repoqa-adaptive.json \
   --output "$STUDY" \
   --context-limit "$CONTEXT_LIMIT" \
@@ -163,7 +189,7 @@ overwrite an existing prepared study.
 calls per MCP execution.
 
 ```bash
-python tools/repoqa/run_adaptation.py calibrate \
+llmctxbench adaptation repoqa calibrate \
   --prepared "$STUDY/prepared.json" \
   --output "$STUDY"
 ```
@@ -213,7 +239,7 @@ Do not selectively rerun completed failures to improve a calibration history.
 
 ```bash
 for delay in 100 250 500 1000; do
-  python tools/repoqa/run_adaptation.py calibrate \
+  llmctxbench adaptation repoqa calibrate \
     --prepared "$STUDY/prepared.json" \
     --output "$STUDY" \
     --delay-ms "$delay" || break
@@ -253,7 +279,7 @@ Use the default objective if this study has no externally justified application
 latency requirement:
 
 ```bash
-python tools/repoqa/run_adaptation.py freeze \
+llmctxbench adaptation repoqa freeze \
   --prepared "$STUDY/prepared.json" \
   --output "$STUDY"
 ```
@@ -303,7 +329,7 @@ parameters, not parameters selected by this calibration command.
 For one fresh block:
 
 ```bash
-python tools/repoqa/run_adaptation.py episode \
+llmctxbench adaptation repoqa episode \
   --prepared "$STUDY/prepared.json" \
   --output "$STUDY" \
   --seed 20261001 \
@@ -357,7 +383,7 @@ block has been executed yet:
   SCENARIOS=$(jq -r '.payload.scenarios[]' "$STUDY/frozen.json")
   for seed in 20261001 20261002 20261003; do
     for scenario in $SCENARIOS; do
-      python tools/repoqa/run_adaptation.py episode \
+      llmctxbench adaptation repoqa episode \
         --prepared "$STUDY/prepared.json" \
         --output "$STUDY" \
         --seed "$seed" \
@@ -425,7 +451,7 @@ Repeat the exact interrupted calibration/episode command with `--resume`. For
 example:
 
 ```bash
-python tools/repoqa/run_adaptation.py episode \
+llmctxbench adaptation repoqa episode \
   --prepared "$STUDY/prepared.json" \
   --output "$STUDY" \
   --seed 20261001 \
@@ -456,7 +482,10 @@ requires a new study; resume is not another replicate.
 
 ## 10. Evaluate completed answers
 
+Inspect canonical execution status for this episode, then evaluate completed answers:
+
 ```bash
+llmctxbench status "$EPISODE"
 llmctxbench eval "$EPISODE/responses.jsonl"
 ```
 
@@ -518,7 +547,7 @@ The `--force` option replaces the target metrics directory; use it only delibera
 ## 12. Analyze the adaptive study
 
 ```bash
-python tools/repoqa/run_adaptation.py analyze --output "$STUDY"
+llmctxbench adaptation repoqa analyze --output "$STUDY"
 ```
 
 Outputs:

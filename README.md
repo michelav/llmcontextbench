@@ -503,6 +503,28 @@ tools/repoqa/repoqa_build_dataset --help
 See [`docs/repoqa.md`](docs/repoqa.md) for RepoQA-specific setup, Nix runtime
 notes, and local clone overrides.
 
+## Experimental RepoQA adaptation study
+
+Use `llmctxbench adaptation repoqa` to prepare, calibrate, freeze, execute episodes
+and analyze the RepoQA adaptation study:
+
+```bash
+llmctxbench adaptation repoqa --help
+```
+
+Follow the [first-study guide](docs/development/repoqa-first-study-guide.md) for the
+complete command sequence, or the [recovery reference](docs/development/repoqa-resumable-workflow.md)
+for resume rules. Preparation, freezing and analysis are provider-free; calibration
+and episodes execute the configured provider and may spend API tokens. Standard
+`status`, `eval`, `export` and `metrics` continue to operate on each episode.
+
+This experimental workflow uses the source checkout and existing RepoQA scorer
+environment. The legacy `python tools/repoqa/run_adaptation.py <stage> ...` wrapper
+remains supported with the same arguments. Artifact schemas and layouts are
+unchanged: completed studies remain usable, while continuing pre-migration studies
+requires their original revision and source fingerprint. Prepare new studies after
+finalizing and committing source changes.
+
 ## Compatibility Notes
 
 The repository has migrated public terminology to `ctxbench`, `execute`,

@@ -12,10 +12,10 @@ Copy an existing experiment, then edit:
 - scenario-specific settings such as RepoQA `params` and controlled tool delay
   settings used by a research runner.
 
-The standard CLI executes the configurations declared in the experiment file.
+`llmctxbench execute` executes the configurations declared in the experiment file.
 It does not perform per-request adaptive selection. Adaptive policies and
-latency-injection scenarios use `tools/repoqa/run_adaptation.py`; see the
-[resumable workflow](repoqa-resumable-workflow.md) for preparation, calibration,
+latency-injection scenarios use the experimental `llmctxbench adaptation repoqa`
+group; see the [first-study guide](repoqa-first-study-guide.md) for preparation, calibration,
 freezing, resume and analysis.
 
 ## Provider-free CLI smoke check

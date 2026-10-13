@@ -7,10 +7,10 @@ SEAMS deadline. The prototype will compare fixed and feedback-updating choices
 between the existing inline-code and local-MCP RepoQA configurations under
 stationary and controlled local-tool-latency conditions.
 
-This is a research-only adaptation runner around the existing benchmark
-execution path. It does not add a public CLI command, change the canonical
-artifact schemas, introduce a new provisioning strategy, perform mid-request
-fallback, or use learned policies. The existing inline runtime extraction at
+This is an experimental adaptation workflow around the existing benchmark
+execution path, exposed through `llmctxbench adaptation repoqa`. It preserves the
+canonical artifact schemas and existing provisioning strategies, with no mid-request
+fallback or learned policies. The existing inline runtime extraction at
 `fdee3e0` remains the starting point; this work does not expand that extraction
 to other strategies.
 
@@ -66,7 +66,10 @@ unchanged; it remains outside the adaptation loop.
 ### Between-request runner and policies
 
 Add a small `ctxbench.adaptive` package for decision records, policy state, and
-selection rules, plus a RepoQA experiment entry point under `tools/repoqa/`.
+selection rules, plus RepoQA orchestration in
+`src/ctxbench/adapters/repoqa/workflow.py`. CLI registration and output handling live
+in `src/ctxbench/commands/adaptation.py`; `tools/repoqa/run_adaptation.py` is a
+supported compatibility wrapper.
 The entry point consumes a normal planned trial catalog containing both
 candidate configurations. It pairs candidates by task, instance, model, and
 repeat, presents only permitted request features to the policy, selects one
@@ -244,7 +247,10 @@ non-inferiority result without a predeclared margin and adequate evidence.
   model/prompt settings, split and episode seeds, and recorded policy/scenario
   configuration.
 
-## Implementation slices
+## Historical implementation slices
+
+These slices record the original prototype plan. See the current command interface
+below for the implemented entry point and the linked guides for executable commands.
 
 ### Slice 1 — RepoQA surfaces and feasibility (September 29–October 1)
 
@@ -413,7 +419,7 @@ Identity, execution outcome and scenario metadata remain outside policy inputs.
 No sidecar writer or runner is included in slices 1–2. Canonical artifacts need no
 migration; ad hoc consumers must adopt explicit bins and policy-owned observe().
 
-### Slices 1–2 completion
+### Historical milestone: slices 1–2 completion
 
 Completed on 2026-10-02: operation-surface enforcement coverage, explicit policy
 features and eligibility, versioned sidecar types, policy-owned observations,
@@ -431,3 +437,25 @@ separate authorized experiments. See [the executable protocol](repoqa-resumable-
 and [slice tracking](../../specs/006-repoqa-adaptive-resume/worklog.md). Policy version 2,
 decision/run schema 1 and canonical schemas remain unchanged. Recovery is between
 requests, with replay and explicit uncertain-call retries.
+
+## Current command interface
+
+Use the experimental `llmctxbench adaptation repoqa` group for `prepare`,
+`calibrate`, `freeze`, `episode` and `analyze`. Start with:
+
+```bash
+llmctxbench adaptation repoqa --help
+```
+
+The [first-study guide](repoqa-first-study-guide.md) is the authoritative current
+command sequence; the [resumable workflow](repoqa-resumable-workflow.md) details
+recovery. Preparation, freezing and analysis do not call providers. Calibration
+and episodes execute configured providers; scoring and per-episode `status`,
+`eval`, `export` and `metrics` remain outside study orchestration.
+
+The slice descriptions and dated completion notes above record historical plans
+and milestones. The CLI integration changes the preferred interface and code
+location, without changing protocol decisions, policy order or artifact schemas.
+The legacy wrapper remains supported. Completed studies require no rewriting;
+continuation of pre-migration studies requires their original source fingerprint.
+Prepare fresh studies after finalizing the migrated code and revision.
