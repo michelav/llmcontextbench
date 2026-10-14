@@ -344,3 +344,84 @@ def test_checked_in_schemas_match_models(name):
     model = {'study': Study, 'baseline': Baseline}[name]
     expected = json.dumps(model.model_json_schema(), indent=2) + '\n'
     assert Path(f'schemas/studies/{name}.schema.json').read_text() == expected
+
+
+def _router(frozen, tmp_path, name, *, limit=1000, **options):
+    definition = make_study(tmp_path, frozen, latencyLimitMs=limit, comparisons=[],
+        policies={'router': {'type':'router','adaptive':True,'probeInterval':100, **options}})
+    plan = sealed_read(Path(study.prepare(definition=definition, output=tmp_path/name)['prepared']))
+    inline, mcp = plan['configurations']
+    for cid in plan['configurations']:
+        for size in ('small', 'large'):
+            plan['estimates'][cid][size].update(latencyMs=100, tokens=100 if cid == inline else 10)
+            plan['latencyQuantiles'][cid][size] = {'0.5': 100, '0.75': 120, '0.9': 150, '0.95': 200}
+    return plan, inline, mcp
+
+
+def test_pooled_ratio_detects_slowdown_across_bins(frozen, tmp_path):
+    for estimator, detected in (('per-bin-mean', False), ('pooled-ratio', True)):
+        plan, inline, mcp = _router(frozen, tmp_path, f'pooled-{estimator}', estimator=estimator)
+        controller = Controller(plan, plan['episodes'][0])
+        for sequence, size in enumerate(('small', 'large', 'small'), 1):
+            controller.index = sequence
+            controller.observe({'configuration':mcp, 'sizeBin':size, 'status':'success', 'durationMs':200,
+                                'tokens':{'value':10,'knownPartial':None}, 'failures':[], 'sequenceIndex':sequence})
+        assert (controller._estimate(mcp, 'large', 'durationMs') == 200) is detected
+
+
+def test_estimate_ttl_restores_calibration(frozen, tmp_path):
+    plan, inline, mcp = _router(frozen, tmp_path, 'ttl', estimator='pooled-ratio', estimateTtlRequests=5)
+    controller = Controller(plan, plan['episodes'][0])
+    for sequence in (1, 2, 3):
+        _observe(controller, mcp, sequence)
+        controller.observed[(mcp, 'all')][-1]['durationMs'] = 300
+    controller.index = 3
+    assert controller._estimate(mcp, 'small', 'durationMs') == 300
+    controller.index = 9
+    assert controller._estimate(mcp, 'small', 'durationMs') == 100
+
+
+def test_quantile_routing_excludes_heavy_tail(frozen, tmp_path):
+    plan, inline, mcp = _router(frozen, tmp_path, 'quantile', limit=130, latencyQuantile=0.9)
+    controller = Controller(plan, plan['episodes'][0])
+    # Both means (100 ms) meet the limit, but no p90 (150 ms) does; the faster tail wins on latency.
+    plan['latencyQuantiles'][inline]['small']['0.9'] = 140
+    plan['latencyQuantiles'][inline]['large']['0.9'] = 140
+    assert controller.decide(0)['configuration'] == inline
+    mean_plan, inline, mcp = _router(frozen, tmp_path, 'mean', limit=130)
+    assert Controller(mean_plan, mean_plan['episodes'][0]).decide(0)['configuration'] == mcp
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+def test_objective_miss_outranks_token_cost(frozen, tmp_path, enabled):
+    plan, inline, mcp = _router(frozen, tmp_path, f'miss-{enabled}', switchOnObjectiveMiss=enabled,
+                                cooldownRequests=0, estimator='pooled-ratio')
+    controller = Controller(plan, plan['episodes'][0])
+    assert controller.decide(0)['configuration'] == mcp
+    for sequence in (1, 2, 3):
+        _observe(controller, mcp, sequence)
+        controller.observed[(mcp, 'all')][-1]['durationMs'] = 5000
+    assert controller.decide(3)['configuration'] == (inline if enabled else mcp)
+
+
+def test_targeted_probe_returns_to_abandoned_configuration(frozen, tmp_path):
+    plan, inline, mcp = _router(frozen, tmp_path, 'targeted', switchOnObjectiveMiss=True, cooldownRequests=0,
+                                estimator='pooled-ratio', probeMode='targeted', avoidedProbeInterval=3)
+    controller = Controller(plan, plan['episodes'][0])
+    controller.decide(0)
+    for sequence in (1, 2, 3):
+        _observe(controller, mcp, sequence)
+        controller.observed[(mcp, 'all')][-1]['durationMs'] = 5000
+    assert controller.decide(3)['configuration'] == inline
+    assert mcp in controller.avoided
+    decisions = [controller.decide(index) for index in range(4, 8)]
+    assert [d['probe'] for d in decisions] == [False, False, True, False]
+    assert decisions[2]['configuration'] == mcp and decisions[2]['reason'] == 'scheduled_probe'
+
+
+def test_router_probe_options_are_validated(frozen):
+    base = {'baseline':str(frozen), 'seeds':[1], 'repeats':1, 'latencyLimitMs':1, 'scenarios':{'s':[]}}
+    with pytest.raises(ValueError, match='avoidedProbeInterval'):
+        Study.model_validate({**base, 'policies':{'r':{'type':'router','adaptive':True,'probeMode':'targeted'}}})
+    with pytest.raises(ValueError, match='minimumObservations'):
+        Study.model_validate({**base, 'policies':{'r':{'type':'router','adaptive':True,'minimumObservations':6}}})

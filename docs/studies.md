@@ -240,10 +240,16 @@ set them explicitly.
 | `router`, `reliability` | `incumbentScope` | `global`, `bin` | `bin` keeps the incumbent, cooldown and material-improvement test per size bin, so routing small and large requests differently is not blocked by cooldown. |
 | `reliability` | `resetOnRecovery` | `false`, `true` | `true` closes the circuit after a clean recovery probe: failure rates are judged only from that probe onward. With `false`, old failures stay in the window and the configuration is re-excluded immediately. |
 | `budget` | `unknownUsage` | `stop`, `bounded` | `bounded` keeps serving after a request with unknown usage. It charges the known partial count plus an estimated remainder up to the calibration p95 for that configuration and bin; the ledger reports `estimatedTokens` (provenance `estimated`) and `estimatedOvershoot` separately from `knownTokens`. |
+| `router` | `estimator` | `per-bin-mean`, `pooled-ratio` | `pooled-ratio` tracks one observed/calibrated ratio per configuration across all size bins (trailing `updateWindow` successes) and scales each bin's calibration estimate by it, so a slowdown seen in any bin updates every bin. |
+| `router` | `minimumObservations` | `3` | Runtime samples required before a runtime estimate replaces calibration (must not exceed `updateWindow`). |
+| `router` | `estimateTtlRequests` | unset, positive integer | Observations older than this many requests are ignored; an avoided configuration falls back to its calibration estimate. |
+| `router` | `probeMode`, `avoidedProbeInterval` | `round-robin`, `targeted` | `targeted` probes the configuration most recently switched away from every `avoidedProbeInterval` requests while it is avoided, then falls back to the round-robin `probeInterval` schedule. |
+| `router` | `latencyQuantile` | unset, `0.5`, `0.75`, `0.9`, `0.95` | Routes on the calibration latency quantile (scaled by the current/calibrated mean ratio) instead of the mean, matching the per-request deadline. |
+| `router` | `switchOnObjectiveMiss` | `false`, `true` | `true` implements the documented rule that meeting the latency objective outranks token cost: an incumbent predicted to miss the limit is replaced (after cooldown) by an alternative predicted to meet it, even if that alternative uses more tokens. With `false`, such a switch must also save ≥ `materialImprovement` tokens. |
 | `budget` | `forecast` | `lookahead`, `expected` | `expected` forecasts remaining demand as remaining request count × calibration-mix expected tokens, without reading future request sizes. `lookahead` uses the actual remaining workload (a batch-workload assumption). |
 
-Prepared plans also record calibration token quantiles (`tokenQuantiles`) and the
-calibration size-bin mix (`calibrationSizeMix`). Episode IDs now hash the policy
+Prepared plans also record calibration token quantiles (`tokenQuantiles`), latency
+quantiles (`latencyQuantiles`) and the calibration size-bin mix (`calibrationSizeMix`). Episode IDs now hash the policy
 configuration, scenario, workload and study settings (baseline digest,
 configurations, latency limit, token budget, quality floor), so IDs no longer
 collide between studies that reuse policy names and seeds. Previously prepared

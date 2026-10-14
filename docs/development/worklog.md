@@ -96,3 +96,16 @@ behaviour-changing inputs. Only non-fingerprinted files changed
 verifies strictly. Validation: `tests/test_study_protocol.py` 19 passed; new
 `tests/test_study_v1_regression.py` replays every recorded v1 decision identically
 (3 studies, 42 episodes).
+
+## 2026-10-15 — SEAMS v2, S2: router detection and recovery
+
+Opt-in router options: `estimator: pooled-ratio`, `minimumObservations`,
+`estimateTtlRequests`, `probeMode: targeted` + `avoidedProbeInterval`,
+`latencyQuantile`, and `switchOnObjectiveMiss`. The last one fixes a deviation from
+the documented contract (an incumbent missing the objective could only be replaced
+by a cheaper alternative). Replaying v1 shows that bug never triggered there. The v1
+recovery stall came from stale estimates instead: at request 90 of seed 202 the
+adaptive router still estimated inline at 7.0–9.0 s (actual about 2.8 s) after one
+fresh inline observation in 30 requests, because round-robin probes rotated across
+both MCP arms. Validation: `pytest -k "adaptive or study"` 157 passed; v1 decisions
+still replay identically.

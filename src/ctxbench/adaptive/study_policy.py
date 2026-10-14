@@ -17,19 +17,64 @@ class Controller:
         self.unknown = False
         self.excluded_until = {}
         self.window_start = {}
+        self.avoided = {}
+        self.index = 0
         self.stopped = False
 
-    def _estimate(self, cid, size, metric):
-        sample = self.observed[(cid, size)]
-        if self.policy['type'] == 'router' and self.policy['adaptive']:
-            values = [o[metric] for o in sample[-self.policy['updateWindow']:] if o['status'] == 'success' and o[metric] is not None]
-            if len(values) >= 3:
-                return sum(values)/len(values)
+    def _calibration(self, cid, size, metric):
         return self.plan['estimates'][cid][size]['latencyMs' if metric == 'durationMs' else 'tokens']
+
+    def _fresh(self, rows):
+        ttl = self.policy.get('estimateTtlRequests')
+        if not ttl:
+            return rows
+        # Expired observations fall away, so an avoided configuration reverts to calibration.
+        return [o for o in rows if o['sequenceIndex'] > self.index+1-ttl]
+
+    def _estimate(self, cid, size, metric):
+        if self.policy['type'] == 'router' and self.policy['adaptive']:
+            window = self.policy['updateWindow']
+            minimum = self.policy.get('minimumObservations', 3)
+            if self.policy.get('estimator', 'per-bin-mean') == 'pooled-ratio':
+                ratio = self._ratio(cid, metric, window, minimum)
+                base = self._calibration(cid, size, metric)
+                if ratio is not None and base is not None:
+                    return base*ratio
+            else:
+                sample = self._fresh(self.observed[(cid, size)])
+                values = [o[metric] for o in sample[-window:] if o['status'] == 'success' and o[metric] is not None]
+                if len(values) >= minimum:
+                    return sum(values)/len(values)
+        return self._calibration(cid, size, metric)
+
+    def _ratio(self, cid, metric, window, minimum):
+        """Observed/calibrated ratio pooled across size bins for one configuration."""
+        ratios = []
+        for o in self._fresh(self.observed[(cid, 'all')]):
+            base = self._calibration(cid, o['sizeBin'], metric)
+            if o['status'] == 'success' and o[metric] is not None and base:
+                ratios.append(o[metric]/base)
+        ratios = ratios[-window:]
+        return sum(ratios)/len(ratios) if len(ratios) >= minimum else None
+
+    def _routing_latency(self, cid, size):
+        """Mean latency, or the calibration quantile scaled by current/calibrated mean."""
+        estimate = self._estimate(cid, size, 'durationMs')
+        quantile = self.policy.get('latencyQuantile')
+        if quantile is None or estimate is None:
+            return estimate
+        calibrated = self._calibration(cid, size, 'durationMs')
+        tail = self.plan['latencyQuantiles'][cid][size].get(str(quantile))
+        if tail is None or not calibrated:
+            return estimate
+        return tail*estimate/calibrated
+
+    def _value(self, cid, size, criterion):
+        return self._routing_latency(cid, size) if criterion == 'durationMs' else self._estimate(cid, size, 'tokens')
 
     def _rank(self, candidates, size):
         limit = self.plan['definition'].get('latencyLimitMs')
-        latency = {cid: self._estimate(cid, size, 'durationMs') for cid in candidates}
+        latency = {cid: self._routing_latency(cid, size) for cid in candidates}
         tokens = {cid: self._estimate(cid, size, 'tokens') for cid in candidates}
         within = [cid for cid in candidates if limit is not None and latency[cid] is not None and latency[cid] <= limit]
         if within:
@@ -46,6 +91,15 @@ class Controller:
         return result
 
     def _probe(self, index, chosen, eligible):
+        if self.policy.get('probeMode', 'round-robin') == 'targeted':
+            spacing = self.policy['avoidedProbeInterval']
+            due = [cid for cid, last in self.avoided.items()
+                   if cid in eligible and cid != chosen and index+1-last >= spacing]
+            if due:
+                probe = min(due, key=lambda cid: (self.avoided[cid], self.order.index(cid)))
+                self.avoided[probe] = index+1
+                self.probes += 1
+                return probe, True
         interval = self.policy.get('probeInterval')
         if not interval or (index+1) % interval:
             return chosen, False
@@ -152,19 +206,30 @@ class Controller:
         chosen = best
         if current in eligible and best != current:
             cooldown = index+1-self.last_switch_by.get(scope, 0) <= self.policy.get('cooldownRequests', 5)
-            criterion = 'tokens' if self._estimate(best, size, 'durationMs') is not None and self._estimate(best, size, 'durationMs') <= self.plan['definition'].get('latencyLimitMs',float('inf')) else 'durationMs'
-            old = self._estimate(current, size, criterion)
-            new = self._estimate(best, size, criterion)
+            limit = self.plan['definition'].get('latencyLimitMs', float('inf'))
+            best_latency, current_latency = self._routing_latency(best, size), self._routing_latency(current, size)
+            best_meets = best_latency is not None and best_latency <= limit
+            criterion = 'tokens' if best_meets else 'durationMs'
+            old = self._value(current, size, criterion)
+            new = self._value(best, size, criterion)
             material = new is not None and (old is None or new <= old*(1-self.policy.get('materialImprovement', .10)))
+            if (self.policy.get('switchOnObjectiveMiss') and best_meets
+                    and current_latency is not None and current_latency > limit):
+                # The documented contract: meeting the objective outranks token cost.
+                material = True
             if cooldown or not material:
                 chosen = current
         if chosen != current:
             self.current_by[scope] = chosen
             self.last_switch_by[scope] = index+1
+            self.avoided.pop(chosen, None)
+            if current is not None and current not in self.current_by.values():
+                self.avoided[current] = index+1
         actual, probe = self._probe(index, chosen, eligible)
         return actual, 'scheduled_probe' if probe else 'router', probe
 
     def decide(self, index):
+        self.index = index
         instance = self.episode['workload'][index]
         eligible = self._eligible(instance)
         size = self.plan['requests'][instance]['sizeBin']
@@ -189,7 +254,8 @@ class Controller:
         size = observation['sizeBin']
         token = observation['tokens']
         row = {'status': observation['status'], 'durationMs': observation['durationMs'],
-               'tokens': token['value'], 'failures': observation['failures']}
+               'tokens': token['value'], 'failures': observation['failures'],
+               'sizeBin': size, 'sequenceIndex': observation['sequenceIndex']}
         self.observed[(cid,size)].append(row)
         self.observed[(cid,'all')].append(row)
         if token['value'] is None:

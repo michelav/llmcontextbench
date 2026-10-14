@@ -131,6 +131,7 @@ def prepare(*, definition, output):
         'sources': parent['sources'], 'split': parent['split'], 'index': index,
         'configurations': selected, 'requests': requests, 'estimates': estimates, 'quality': quality,
         'tokenQuantiles': _token_quantiles(frozen, selected),
+        'latencyQuantiles': _latency_quantiles(frozen, selected),
         'calibrationSizeMix': _calibration_size_mix(parent),
         'episodes': episodes, 'manifest': manifest, 'budget': parent['budget'], 'phases': phases,
         'resolved': {'protocolVersion': 3, 'estimator': 'all-observations-v1',
@@ -307,6 +308,24 @@ def _token_quantiles(frozen, configurations):
                 sample = sorted(sample)
                 result[cid][size] = {'p95': sample[max(0, -(-95*len(sample)//100)-1)], 'max': sample[-1],
                                      'observations': len(sample), 'provenance': 'derived'}
+    return result
+
+
+LATENCY_QUANTILES = (0.5, 0.75, 0.9, 0.95)
+
+
+def _latency_quantiles(frozen, configurations):
+    """Calibration latency quantiles per configuration and bin (nearest rank; successes only)."""
+    values = defaultdict(list)
+    for row in frozen.get('observations', []):
+        if row.get('status') == 'success' and row.get('durationMs') is not None:
+            values[(row['configuration'], row['sizeBin'])].append(row['durationMs'])
+    result = {cid: {} for cid in configurations}
+    for (cid, size), sample in values.items():
+        if cid in result:
+            sample = sorted(sample)
+            result[cid][size] = {str(q): sample[max(0, -(-int(q*100)*len(sample)//100)-1)] for q in LATENCY_QUANTILES}
+            result[cid][size]['observations'] = len(sample)
     return result
 
 

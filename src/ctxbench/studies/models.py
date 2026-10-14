@@ -45,6 +45,21 @@ class RouterPolicy(Definition):
     updateWindow: PositiveInt = 5
     materialImprovement: Annotated[float, Field(ge=0, lt=1)] = 0.10
     incumbentScope: Literal['global', 'bin'] = 'global'
+    estimator: Literal['per-bin-mean', 'pooled-ratio'] = 'per-bin-mean'
+    minimumObservations: PositiveInt = 3
+    estimateTtlRequests: PositiveInt | None = None
+    probeMode: Literal['round-robin', 'targeted'] = 'round-robin'
+    avoidedProbeInterval: PositiveInt | None = None
+    latencyQuantile: Literal[0.5, 0.75, 0.9, 0.95] | None = None
+    switchOnObjectiveMiss: bool = False
+
+    @model_validator(mode='after')
+    def validate_probing(self):
+        if (self.probeMode == 'targeted') != (self.avoidedProbeInterval is not None):
+            raise ValueError('targeted probing requires avoidedProbeInterval, and only targeted probing uses it')
+        if self.minimumObservations > self.updateWindow:
+            raise ValueError('minimumObservations cannot exceed updateWindow')
+        return self
 
 
 class BudgetPolicy(Definition):
