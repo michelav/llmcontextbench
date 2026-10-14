@@ -34,6 +34,9 @@ def register_study_commands(parser):
     analyze.add_argument('path')
     analyze.add_argument('--bootstrap-replicates', type=int, default=1000)
     analyze.add_argument('--bootstrap-seed', type=int, default=42)
+    for command in (status, analyze):
+        command.add_argument('--allow-source-drift', action='store_true',
+                             help='Read-only: tolerate changed measurement sources; reports list them as sourceDrift')
     for command in sub.choices.values():
         if command.get_default('func') is None and command.prog.rsplit(' ', 1)[-1] != 'baseline':
             command.set_defaults(func=study_command)

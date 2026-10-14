@@ -89,6 +89,33 @@ def test_controller_budget_and_reliability(frozen, tmp_path):
     assert controller.ledger()['unknownConsumption'] is True
 
 
+def test_source_drift_allowed_only_for_read_only_commands(frozen, tmp_path, monkeypatch):
+    definition = make_study(tmp_path, frozen)
+    path = Path(study.prepare(definition=definition, output=tmp_path/'study-drift')['prepared'])
+    original = baseline.measurement_sources()
+    drifted = {**original, 'files': {**original['files'], 'src/ctxbench/adaptive/study_runner.py': 'changed'}}
+    monkeypatch.setattr(baseline, 'measurement_sources', lambda: drifted)
+    with pytest.raises(ValueError, match='measurement source fingerprint mismatch'):
+        study.status(path)
+    with pytest.raises(ValueError, match='measurement source fingerprint mismatch'):
+        study.analyze(path, bootstrap_replicates=10)
+    assert study.status(path, allow_source_drift=True)['sourceDrift'] == ['src/ctxbench/adaptive/study_runner.py']
+    report = study.analyze(path, bootstrap_replicates=10, allow_source_drift=True)
+    assert report['sourceDrift'] == ['src/ctxbench/adaptive/study_runner.py']
+    assert json.loads((path.parent/'analysis.json').read_text())['sourceDrift'] == report['sourceDrift']
+    with pytest.raises(ValueError, match='measurement source fingerprint mismatch'):
+        study.episode(prepared=path, policy='fixed', scenario='stationary', seed=201, repeat=1,
+                      execution=mock_execute)
+    with pytest.raises(ValueError, match='measurement source fingerprint mismatch'):
+        study.prepare(definition=definition, output=tmp_path/'study-drift-new')
+
+
+def test_no_source_drift_key_without_drift(frozen, tmp_path):
+    path = Path(study.prepare(definition=make_study(tmp_path, frozen), output=tmp_path/'study-clean')['prepared'])
+    assert 'sourceDrift' not in study.status(path, allow_source_drift=True)
+    assert 'sourceDrift' not in study.analyze(path, bootstrap_replicates=10)
+
+
 def test_analysis_incomplete_matrix(frozen, tmp_path):
     definition = make_study(tmp_path, frozen)
     path = Path(study.prepare(definition=definition, output=tmp_path/'study-analysis')['prepared'])

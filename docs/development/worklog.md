@@ -68,3 +68,20 @@ best_match with similarity 1.0 after repairing an ignored local venv interpreter
 No provider experiments, dependency installation or lockfile changes were performed.
 Development token usage remains unavailable. Paid calibration and study gates remain
 unexecuted; unknown prior expenditure after uncertain attempts is not imputed.
+
+## 2026-10-15 — SEAMS v2, S0: v1 provenance
+
+Plan: `docs/development/seams2027-plan.md`. The v1 long64 baseline and studies were
+measured with commit `2a97eb6`, now tagged `seams-v1-studies`. Strict
+`llmctxbench study status studies/repoqa-long64-latency` verified against it.
+Untracked v1 artifacts (sha256 prefixes): `baselines/repoqa-long64/frozen.json`
+`9f854dab2215c164`; prepared studies budget `e205d5518a18cee1`, latency
+`2f348d2b66e9476c`, reliability `5f6eae7d756b25d5`.
+
+Added `--allow-source-drift` to `study status`/`analyze` (read-only; experiment,
+dataset and frozen-artifact hashes still checked; drifted sources reported as
+`sourceDrift`). Found and fixed nondeterministic paired-bootstrap intervals
+(set iteration under hash randomisation); v1 `analysis.json` files were
+regenerated deterministically with 1000 replicates, seed 42. Means unchanged;
+intervals shifted slightly (budget vs mcp-lean now [-916, -16] ms).
+Validation: `pytest tests/test_study_protocol.py` 12 passed; `pytest -k cli` 68 passed.

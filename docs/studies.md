@@ -205,3 +205,26 @@ approved collection budget. `prepare`, `freeze`, `status` and `analyze` are prov
 free. The sample definitions do not establish a token, latency or reliability
 benefit; compare individual policies with fixed configurations before considering
 combined policies.
+
+## Re-analysing studies after code changes
+
+`prepare`, `episode`, `status` and `analyze` verify the measurement-source
+fingerprint recorded in the frozen baseline. After a change to any listed source
+(for example `src/ctxbench/adaptive/study_runner.py`), existing studies can still
+be inspected read-only:
+
+```bash
+llmctxbench study status studies/repoqa-long64-latency --allow-source-drift
+llmctxbench study analyze studies/repoqa-long64-latency --allow-source-drift
+```
+
+The flag skips only the source comparison; experiment, dataset and frozen
+artifact hashes are still checked, and the report lists the changed sources under
+`sourceDrift`. `prepare` and `episode` always require matching sources, so new
+collection needs a compatible baseline. The v1 long64 baseline and studies were
+measured at the tag `seams-v1-studies`; check it out to reproduce them exactly.
+
+Paired bootstrap intervals iterate requests and target clusters in sorted order,
+so `analyze` output is deterministic for a given seed. Analyses written before
+this fix depended on Python hash randomisation; their mean differences are
+unchanged but their intervals can differ slightly when regenerated.

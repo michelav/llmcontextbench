@@ -8,13 +8,33 @@ from .baseline import file_hash, prepared_path, verify, VERSION
 from .models import Study
 
 
-def verify_frozen(frozen, path):
+def _verify_inputs(plan, allow_source_drift=False):
+    """Strict by default; read-only callers may tolerate measurement-source drift only."""
+    if not allow_source_drift:
+        verify(plan)
+        return []
+    from ctxbench.adapters.repoqa.study import tree_hash
+    from .baseline import measurement_sources
+    if plan['schemaVersion'] != VERSION:
+        raise ValueError('unsupported study manifest version')
+    if file_hash(plan['experimentPath']) != plan['experimentHash']:
+        raise ValueError('experiment fingerprint mismatch')
+    if tree_hash(Path(plan['datasetRoot'])) != plan['datasetHash']:
+        raise ValueError('dataset fingerprint mismatch')
+    current, recorded = measurement_sources(), plan['sources']
+    drift = sorted(name for name in set(current['files']) | set(recorded['files'])
+                   if current['files'].get(name) != recorded['files'].get(name))
+    drift += [key for key in ('runtime', 'definitionSchema') if current[key] != recorded[key]]
+    return drift
+
+
+def verify_frozen(frozen, path, *, allow_source_drift=False):
     if frozen['schemaVersion'] != VERSION or frozen['kind'] != 'frozen-baseline':
         raise ValueError('unsupported frozen baseline')
     plan = frozen['plan']
     if frozen['preparedDigest'] != digest(plan):
         raise ValueError('baseline plan digest mismatch')
-    verify(plan)
+    _verify_inputs(plan, allow_source_drift)
     for relative, expected in frozen['artifacts'].items():
         artifact = path.parent / relative
         if not artifact.is_file() or file_hash(artifact) != expected:
@@ -116,14 +136,16 @@ def prepare(*, definition, output):
     return {'prepared': str(output / 'prepared.json'), 'episodes': len(episodes), 'baselineDigest': plan['baselineDigest']}
 
 
-def verify_study(plan):
+def verify_study(plan, *, allow_source_drift=False):
+    """Return drifted measurement sources; empty unless drift is explicitly allowed."""
     if plan['kind'] != 'study':
         raise ValueError('expected prepared study')
-    verify(plan)
+    drift = _verify_inputs(plan, allow_source_drift)
     path = Path(plan['baselinePath'])
     if file_hash(path) != plan['baselineDigest']:
         raise ValueError('frozen baseline digest mismatch')
-    verify_frozen(sealed_read(path), path)
+    verify_frozen(sealed_read(path), path, allow_source_drift=allow_source_drift)
+    return drift
 
 
 def episode(*, prepared, policy, scenario, seed, repeat, resume=False, retry_uncertain=False,
@@ -145,11 +167,11 @@ def episode(*, prepared, policy, scenario, seed, repeat, resume=False, retry_unc
     return {'episode': matches[0]['id'], 'completedRequests': len(packets)}
 
 
-def status(path):
+def status(path, *, allow_source_drift=False):
     from ctxbench.adaptive.study_runner import load_packets
     path = prepared_path(path)
     plan = sealed_read(path)
-    verify_study(plan)
+    drift = verify_study(plan, allow_source_drift=allow_source_drift)
     matrix = []
     for e in plan['episodes']:
         packets = load_packets(path.parent / 'episodes' / e['id'])
@@ -157,10 +179,13 @@ def status(path):
                       {'planned': len(e['workload']), 'completed': sum(p['state']=='completed' for p in packets),
                        'failed': sum(p['state']=='completed' and p['observation'] is not None and p['observation']['status']!='success' for p in packets),
                        'unserved': sum(p['state']=='completed' and p['observation'] is None for p in packets)})
-    return {'schemaVersion': VERSION, 'matrix': matrix}
+    report = {'schemaVersion': VERSION, 'matrix': matrix}
+    if drift:
+        report['sourceDrift'] = drift
+    return report
 
 
-def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42):
+def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42, allow_source_drift=False):
     """Paired descriptive analysis. Bootstrap units are targets within language."""
     import json
     import random
@@ -170,7 +195,7 @@ def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42):
     from ctxbench.adaptive.recovery import write
     path = prepared_path(path)
     plan = sealed_read(path)
-    verify_study(plan)
+    drift = verify_study(plan, allow_source_drift=allow_source_drift)
     if type(bootstrap_replicates) is not int or bootstrap_replicates < 1:
         raise ValueError('bootstrap_replicates must be a positive integer')
     summaries, by_arm, complete = [], {}, {}
@@ -221,14 +246,14 @@ def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42):
                 for repeat in range(1,plan['definition']['repeats']+1):
                     a, b = (left,scenario,seed,repeat), (right,scenario,seed,repeat)
                     incomplete |= not (complete.get(a) and complete.get(b))
-                    for instance in set(by_arm.get(a,{})) & set(by_arm.get(b,{})):
+                    for instance in sorted(set(by_arm.get(a,{})) & set(by_arm.get(b,{}))):
                         x, y = by_arm[a][instance], by_arm[b][instance]
                         if x['latencyMs'] is None or y['latencyMs'] is None:
                             continue
                         units[(x['language'],x['target'])].append(x['latencyMs']-y['latencyMs'])
                         pairs += 1
             grouped = defaultdict(list)
-            for (language,_target), values in units.items():
+            for (language,_target), values in sorted(units.items()):
                 grouped[language].append(mean(values))
             mean_difference = mean([mean(values) for values in grouped.values()]) if grouped else None
             interval = None
@@ -246,6 +271,8 @@ def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42):
     report = {'schemaVersion':VERSION,'plannedEpisodes':len(plan['episodes']),'phases':plan['phases'],
               'summaries':summaries,
               'comparisons':comparisons, 'dependence':'Targets and frozen baseline are shared across arms and seeds.'}
+    if drift:
+        report['sourceDrift'] = drift
     report['plots'] = _timeline_plots(path.parent, plan, by_arm)
     write(path.parent / 'analysis.json', report)
     return report
