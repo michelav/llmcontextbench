@@ -336,3 +336,11 @@ def test_budget_overshoot_stops_remaining_requests(frozen, tmp_path):
     packets = run(plan, plan['episodes'][0], path.parent/'episodes'/plan['episodes'][0]['id'], execution=expensive)
     assert packets[0]['ledger']['overshoot'] == 300
     assert all(p['result'] is None for p in packets[1:])
+
+
+@pytest.mark.parametrize('name', ['study', 'baseline'])
+def test_checked_in_schemas_match_models(name):
+    from ctxbench.studies.models import Baseline
+    model = {'study': Study, 'baseline': Baseline}[name]
+    expected = json.dumps(model.model_json_schema(), indent=2) + '\n'
+    assert Path(f'schemas/studies/{name}.schema.json').read_text() == expected

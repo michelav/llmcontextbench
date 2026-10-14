@@ -13,6 +13,24 @@
           "exclusiveMinimum": 0,
           "title": "Probeinterval",
           "type": "integer"
+        },
+        "unknownUsage": {
+          "default": "stop",
+          "enum": [
+            "stop",
+            "bounded"
+          ],
+          "title": "Unknownusage",
+          "type": "string"
+        },
+        "forecast": {
+          "default": "lookahead",
+          "enum": [
+            "lookahead",
+            "expected"
+          ],
+          "title": "Forecast",
+          "type": "string"
         }
       },
       "required": [
@@ -132,6 +150,20 @@
           "exclusiveMinimum": 0,
           "title": "Probeinterval",
           "type": "integer"
+        },
+        "resetOnRecovery": {
+          "default": false,
+          "title": "Resetonrecovery",
+          "type": "boolean"
+        },
+        "incumbentScope": {
+          "default": "global",
+          "enum": [
+            "global",
+            "bin"
+          ],
+          "title": "Incumbentscope",
+          "type": "string"
         }
       },
       "required": [
@@ -181,6 +213,15 @@
           "minimum": 0,
           "title": "Materialimprovement",
           "type": "number"
+        },
+        "incumbentScope": {
+          "default": "global",
+          "enum": [
+            "global",
+            "bin"
+          ],
+          "title": "Incumbentscope",
+          "type": "string"
         }
       },
       "required": [
