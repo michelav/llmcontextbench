@@ -1,0 +1,21 @@
+{
+  "base_id": "java_004",
+  "code_context_ntokens": 16168,
+  "description": "1. **Purpose**: The function is designed to securely transmit a time value in an encrypted form as part of a remote procedure call (RPC) to a SQL Server, ensuring the confidentiality of the data.\n2. **Input**: The function takes a calendar object representing the time to be encrypted, nanoseconds to add precision, a scale to define the precision of the time value, a boolean indicating if the parameter is an output, and a statement object for SQL operations.\n3. **Output**: There is no direct return value; however, the function writes encrypted time data to a network stream or buffer for SQL Server communication.\n4. **Procedure**: \n   - Initially, the function checks if the configuration allows sending time as datetime, throwing an exception if not permitted.\n   - It sets the parameter type for the RPC.\n   - If the calendar object is null, it writes a null value; otherwise, it encrypts the time data (including nanoseconds and scale adjustments) and writes this encrypted data.\n   - Finally, it writes metadata related to the encryption and the time type to the stream or buffer.",
+  "end_byte": 251445,
+  "end_line": 5824,
+  "instance_id": "java_004_ctx16k",
+  "language": "java",
+  "needle_name": "writeEncryptedRPCTime",
+  "needle_token_end": 2535,
+  "needle_token_start": 2311,
+  "normalized_language": "java",
+  "path": "src/main/java/com/microsoft/sqlserver/jdbc/IOBuffer.java",
+  "position_ratio": 0.15,
+  "repo": "microsoft/mssql-jdbc",
+  "repoqa_description": "Function Description:1. **Purpose**: The function is designed to securely transmit a time value in an encrypted form as part of a remote procedure call (RPC) to a SQL Server, ensuring the confidentiality of the data.\n2. **Input**: The function takes a calendar object representing the time to be encrypted, nanoseconds to add precision, a scale to define the precision of the time value, a boolean indicating if the parameter is an output, and a statement object for SQL operations.\n3. **Output**: There is no direct return value; however, the function writes encrypted time data to a network stream or buffer for SQL Server communication.\n4. **Procedure**: \n   - Initially, the function checks if the configuration allows sending time as datetime, throwing an exception if not permitted.\n   - It sets the parameter type for the RPC.\n   - If the calendar object is null, it writes a null value; otherwise, it encrypts the time data (including nanoseconds and scale adjustments) and writes this encrypted data.\n   - Finally, it writes metadata related to the encryption and the time type to the stream or buffer.",
+  "requested_context_tokens": 16384,
+  "sequence": 4,
+  "start_byte": 250655,
+  "start_line": 5807
+}

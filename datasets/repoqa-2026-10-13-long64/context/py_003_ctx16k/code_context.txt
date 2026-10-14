@@ -1,0 +1,1484 @@
+# Repository: pyg-team/pytorch_geometric
+
+# Path: torch_geometric/loader/neighbor_sampler.py
+from typing import Callable, List, NamedTuple, Optional, Tuple, Union
+
+import torch
+from torch import Tensor
+
+from torch_geometric.typing import SparseTensor
+
+
+class EdgeIndex(NamedTuple):
+    edge_index: Tensor
+    e_id: Optional[Tensor]
+    size: Tuple[int, int]
+
+    def to(self, *args, **kwargs):
+        edge_index = self.edge_index.to(*args, **kwargs)
+        e_id = self.e_id.to(*args, **kwargs) if self.e_id is not None else None
+        return EdgeIndex(edge_index, e_id, self.size)
+
+
+class Adj(NamedTuple):
+    adj_t: SparseTensor
+    e_id: Optional[Tensor]
+    size: Tuple[int, int]
+
+    def to(self, *args, **kwargs):
+        adj_t = self.adj_t.to(*args, **kwargs)
+        e_id = self.e_id.to(*args, **kwargs) if self.e_id is not None else None
+        return Adj(adj_t, e_id, self.size)
+
+
+class NeighborSampler(torch.utils.data.DataLoader):
+    r"""The neighbor sampler from the `"Inductive Representation Learning on
+    Large Graphs" <https://arxiv.org/abs/1706.02216>`_ paper, which allows
+...
+# Path: torch_geometric/loader/prefetch.py
+import warnings
+from contextlib import nullcontext
+from functools import partial
+from typing import Any, Optional
+
+import torch
+from torch.utils.data import DataLoader
+
+from torch_geometric.typing import WITH_IPEX
+
+
+class DeviceHelper:
+    def __init__(self, device: Optional[torch.device] = None):
+        with_cuda = torch.cuda.is_available()
+        with_xpu = torch.xpu.is_available() if WITH_IPEX else False
+
+        if device is None:
+            if with_cuda:
+                device = 'cuda'
+            elif with_xpu:
+                device = 'xpu'
+            else:
+                device = 'cpu'
+
+        self.device = torch.device(device)
+        self.is_gpu = self.device.type in ['cuda', 'xpu']
+
+        if ((self.device.type == 'cuda' and not with_cuda)
+                or (self.device.type == 'xpu' and not with_xpu)):
+            warnings.warn(f"Requested device '{self.device.type}' is not "
+                          f"available, falling back to CPU")
+            self.device = torch.device('cpu')
+
+        self.stream = None
+        self.stream_context = nullcontext
+        self.module = getattr(torch, self.device.type) if self.is_gpu else None
+
+    
+def maybe_init_stream(self) -> None:
+        if self.is_gpu:
+            self.stream = self.module.Stream()
+            self.stream_context = partial(
+                self.module.stream,
+                stream=self.stream,
+            )
+
+    def maybe_wait_stream(self) -> None:
+        if self.stream is not None:
+            self.module.current_stream().wait_stream(self.stream)
+
+
+class PrefetchLoader:
+    r"""A GPU prefetcher class for asynchronously transferring data of a
+    :class:`torch.utils.data.DataLoader` from host memory to device memory.
+
+    Args:
+        loader (torch.utils.data.DataLoader): The data loader.
+        device (torch.device, optional): The device to load the data to.
+            (default: :obj:`None`)
+    """
+    def __init__(
+        self,
+        loader: DataLoader,
+        device: Optional[torch.device] = None,
+    ):
+        self.loader = loader
+        self.device_helper = DeviceHelper(device)
+
+    def non_blocking_transfer(self, batch: Any) -> Any:
+        if not self.device_helper.is_gpu:
+            return batch
+        if isinstance(batch, (list, tuple)):
+            return [self.non_blocking_transfer(v) for v in batch]
+        if isinstance(batch, dict):
+            return {k: self.non_blocking_transfer(v) for k, v in batch.items()}
+
+        batch = batch.pin_memory(self.device_helper.device)
+        return batch.to(self.device_helper.device, non_blocking=True)
+
+    def __iter__(self) -> Any:
+        first = True
+        self.device_helper.maybe_init_stream()
+
+        batch = None
+        for next_batch in self.loader:
+
+            with self.device_helper.stream_context():
+                next_batch = self.non_blocking_transfer(next_batch)
+
+            if not first:
+                yield batch
+            else:
+                first = False
+
+            self.device_helper.maybe_wait_stream()
+
+            batch = next_batch
+
+        yield batch
+
+    def __len__(self) -> int:
+        return len(self.loader)
+
+    def __repr__(self) -> str:
+        return f'{self.__class__.__name__}({self.loader})'
+
+# Path: torch_geometric/loader/random_node_loader.py
+import math
+from typing import Union
+
+import torch
+from torch import Tensor
+
+from torch_geometric.data import Data, HeteroData
+from torch_geometric.data.hetero_data import to_homogeneous_edge_index
+
+
+class RandomNodeLoader(torch.utils.data.DataLoader):
+    r"""A data loader that randomly samples nodes within a graph and returns
+    their induced subgraph.
+
+    .. note::
+
+        For an example of using
+        :class:`~torch_geometric.loader.RandomNodeLoader`, see
+        `examples/ogbn_proteins_deepgcn.py
+        <https://github.com/pyg-team/pytorch_geometric/blob/master/examples/
+        ogbn_proteins_deepgcn.py>`_.
+
+    Args:
+        data (torch_geometric.data.Data or torch_geometric.data.HeteroData):
+            The :class:`~torch_geometric.data.Data` or
+            :class:`~torch_geometric.data.HeteroData` graph object.
+        num_parts (int): The number of partitions.
+        **kwargs (optional): Additional arguments of
+            :class:`torch.utils.data.DataLoader`, such as :obj:`num_workers`.
+    """
+    def __init__(
+        self,
+        data: Union[Data, HeteroData],
+        num_parts: int,
+        **kwargs,
+    ):
+        self.data = data
+        self.num_parts = num_parts
+
+        if isinstance(data, HeteroData):
+            edge_index, node_dict, edge_dict = to_homogeneous_edge_index(data)
+            self.node_dict, self.edge_dict = node_dict, edge_dict
+        else:
+            edge_index = data.edge_index
+
+        self.edge_index = edge_index
+        self.num_nodes = data.num_nodes
+
+        super().__init__(
+            range(self.num_nodes),
+            batch_size=math.ceil(self.num_nodes / num_parts),
+            collate_fn=self.collate_fn,
+            **kwargs,
+        )
+
+    def collate_fn(self, index):
+        if not isinstance(index, Tensor):
+            index = torch.tensor(index)
+
+        if isinstance(self.data, Data):
+            return self.data.subgraph(index)
+
+        elif isinstance(self.data, HeteroData):
+            node_dict = {
+                key: index[(index >= start) & (index < end)] - start
+                for key, (start, end) in self.node_dict.items()
+            }
+            return self.data.subgraph(node_dict)
+
+# Path: torch_geometric/loader/shadow.py
+import copy
+from typing import Optional
+
+import torch
+from torch import Tensor
+
+from torch_geometric.data import Batch, Data
+from torch_geometric.typing import WITH_TORCH_SPARSE, SparseTensor
+
+
+class ShaDowKHopSampler(torch.utils.data.DataLoader):
+    r"""The ShaDow :math:`k`-hop sampler from the `"Decoupling the Depth and
+    Scope of Graph Neural Networks" <https://arxiv.org/abs/2201.07858>`_ paper.
+    Given a graph in a :obj:`data` object, the sampler will create shallow,
+    localized subgraphs.
+    A deep GNN on this local graph then smooths the informative local signals.
+
+    .. note::
+
+        For an example of using :class:`ShaDowKHopSampler`, see
+        `examples/shadow.py <https://github.com/pyg-team/
+        pytorch_geometric/blob/master/examples/shadow.py>`_.
+
+    Args:
+        data (torch_geometric.data.Data): The graph data object.
+        depth (int): The depth/number of hops of the localized subgraph.
+        num_neighbors (int): The number of neighbors to sample for each node in
+            each hop.
+        node_idx (LongTensor or BoolTensor, optional): The nodes that should be
+            considered for creating mini-batches.
+            If set to :obj:`None`, all nodes will be
+            considered.
+        replace (bool, optional): If set to :obj:`True`, will sample neighbors
+            with replacement. (default: :obj:`False`)
+        **kwargs (optional): Additional arguments of
+            :class:`torch.utils.data.DataLoader`, such as :obj:`batch_size` or
+            :obj:`num_workers`.
+    """
+    def __init__(self, data: Data, depth: int, num_neighbors: int,
+                 node_idx: Optional[Tensor] = None, replace: bool = False,
+                 **kwargs):
+
+        if not WITH_TORCH_SPARSE:
+            raise ImportError(
+                f"'{self.__class__.__name__}' requires 'torch-sparse'")
+
+        self.data = copy.copy(data)
+        self.depth = depth
+        self.num_neighbors = num_neighbors
+        self.replace = replace
+
+        if data.edge_index is not None:
+            self.is_sparse_tensor = False
+            row, col = data.edge_index.cpu()
+            self.adj_t = SparseTensor(
+                row=row, col=col, value=torch.arange(col.size(0)),
+                sparse_sizes=(data.num_nodes, data.num_nodes)).t()
+        else:
+            self.is_sparse_tensor = True
+            self.adj_t = data.adj_t.cpu()
+
+        if node_idx is None:
+            node_idx = torch.arange(self.adj_t.sparse_size(0))
+        elif node_idx.dtype == torch.bool:
+            node_idx = node_idx.nonzero(as_tuple=False).view(-1)
+        self.node_idx = node_idx
+
+        super().__init__(node_idx.tolist(), collate_fn=self.__collate__,
+                         **kwargs)
+
+    def __collate__(self, n_id):
+        n_id = torch.tensor(n_id)
+
+        rowptr, col, value = self.adj_t.csr()
+        out = torch.ops.torch_sparse.ego_k_hop_sample_adj(
+            rowptr, col, n_id, self.depth, self.num_neighbors, self.replace)
+        rowptr, col, n_id, e_id, ptr, root_n_id = out
+
+        adj_t = SparseTensor(rowptr=rowptr, col=col,
+                             value=value[e_id] if value is not None else None,
+                             sparse_sizes=(n_id.numel(), n_id.numel()),
+                             is_sorted=True, trust_data=True)
+
+        batch = Batch(batch=torch.ops.torch_sparse.ptr2ind(ptr, n_id.numel()),
+                      ptr=ptr)
+        batch.root_n_id = root_n_id
+
+        if self.is_sparse_tensor:
+            batch.adj_t = adj_t
+        else:
+            row, col, e_id = adj_t.t().coo()
+            batch.edge_index = torch.stack([row, col], dim=0)
+
+        for k, v in self.data:
+            if k in ['edge_index', 'adj_t', 'num_nodes', 'batch', 'ptr']:
+                continue
+            if k == 'y' and v.size(0) == self.data.num_nodes:
+                batch[k] = v[n_id][root_n_id]
+            elif isinstance(v, Tensor) and v.size(0) == self.data.num_nodes:
+                batch[k] = v[n_id]
+            elif isinstance(v, Tensor) and v.size(0) == self.data.num_edges:
+                batch[k] = v[e_id]
+            else:
+                batch[k] = v
+
+        return batch
+
+# Path: torch_geometric/loader/temporal_dataloader.py
+from typing import List
+
+import torch
+
+from torch_geometric.data import TemporalData
+
+
+class TemporalDataLoader(torch.utils.data.DataLoader):
+    r"""A data loader which merges succesive events of a
+    :class:`torch_geometric.data.TemporalData` to a mini-batch.
+
+    Args:
+        data (TemporalData): The :obj:`~torch_geometric.data.TemporalData`
+            from which to load the data.
+        batch_size (int, optional): How many samples per batch to load.
+            (default: :obj:`1`)
+        neg_sampling_ratio (float, optional): The ratio of sampled negative
+            destination nodes to the number of postive destination nodes.
+            (default: :obj:`0.0`)
+        **kwargs (optional): Additional arguments of
+            :class:`torch.utils.data.DataLoader`.
+    """
+    def __init__(
+        self,
+        data: TemporalData,
+        batch_size: int = 1,
+        neg_sampling_ratio: float = 0.0,
+        **kwargs,
+    ):
+        # Remove for PyTorch Lightning:
+        kwargs.pop('dataset', None)
+        kwargs.pop('collate_fn', None)
+        kwargs.pop('shuffle', None)
+
+        self.data = data
+        self.events_per_batch = batch_size
+        self.neg_sampling_ratio = neg_sampling_ratio
+
+        if neg_sampling_ratio > 0:
+            self.min_dst = int(data.dst.min())
+            self.max_dst = int(data.dst.max())
+
+        if kwargs.get('drop_last', False) and len(data) % batch_size != 0:
+            arange = range(0, len(data) - batch_size, batch_size)
+        else:
+            arange = range(0, len(data), batch_size)
+
+        super().__init__(arange, 1, shuffle=False, collate_fn=self, **kwargs)
+
+    def __call__(self, arange: List[int]) -> TemporalData:
+        batch = self.data[arange[0]:arange[0] + self.events_per_batch]
+
+        n_ids = [batch.src, batch.dst]
+
+        if self.neg_sampling_ratio > 0:
+            batch.neg_dst = torch.randint(
+                low=self.min_dst,
+                high=self.max_dst + 1,
+                size=(round(self.neg_sampling_ratio * batch.dst.size(0)), ),
+                dtype=batch.dst.dtype,
+                device=batch.dst.device,
+            )
+            n_ids += [batch.neg_dst]
+
+        batch.n_id = torch.cat(n_ids, dim=0).unique()
+
+        return batch
+
+# Path: torch_geometric/loader/zip_loader.py
+from typing import Any, Iterator, List, Optional, Tuple, Union
+
+import torch
+from torch import Tensor
+
+from torch_geometric.data import Data, HeteroData
+from torch_geometric.loader import LinkLoader, NodeLoader
+from torch_geometric.loader.base import DataLoaderIterator
+from torch_geometric.loader.utils import infer_filter_per_worker
+
+
+class ZipLoader(torch.utils.data.DataLoader):
+    r"""A loader that returns a tuple of data objects by sampling from multiple
+    :class:`NodeLoader` or :class:`LinkLoader` instances.
+
+    Args:
+        loaders (List[NodeLoader] or List[LinkLoader]): The loader instances.
+        filter_per_worker (bool, optional): If set to :obj:`True`, will filter
+            the returned data in each worker's subprocess.
+            If set to :obj:`False`, will filter the returned data in the main
+            process.
+            If set to :obj:`None`, will automatically infer the decision based
+            on whether data partially lives on the GPU
+            (:obj:`filter_per_worker=True`) or entirely on the CPU
+            (:obj:`filter_per_worker=False`).
+            There exists different trade-offs for setting this option.
+            Specifically, setting this option to :obj:`True` for in-memory
+            datasets will move all features to shared memory, which may result
+            in too many open file handles. (default: :obj:`None`)
+        **kwargs (optional): Additional arguments of
+            :class:`torch.utils.data.DataLoader`, such as :obj:`batch_size`,
+            :obj:`shuffle`, :obj:`drop_last` or :obj:`num_workers`.
+    """
+    def __init__(
+        self,
+        loaders: Union[List[NodeLoader], List[LinkLoader]],
+        filter_per_worker: Optional[bool] = None,
+        **kwargs,
+    ):
+        if filter_per_worker is None:
+            filter_per_worker = infer_filter_per_worker(loaders[0].data)
+
+        # Remove for PyTorch Lightning:
+        kwargs.pop('dataset', None)
+        kwargs.pop('collate_fn', None)
+
+        for loader in loaders:
+            if not callable(getattr(loader, 'collate_fn', None)):
+                raise ValueError("'{loader.__class__.__name__}' does not have "
+                                 "a 'collate_fn' method")
+            if not callable(getattr(loader, 'filter_fn', None)):
+                raise ValueError("'{loader.__class__.__name__}' does not have "
+                                 "a 'filter_fn' method")
+            loader.filter_per_worker = filter_per_worker
+
+        iterator = range(min([len(loader.dataset) for loader in loaders]))
+        super().__init__(iterator, collate_fn=self.collate_fn, **kwargs)
+
+        self.loaders = loaders
+        self.filter_per_worker = filter_per_worker
+
+    def collate_fn(self, index: List[int]) -> Tuple[Any, ...]:
+        if not isinstance(index, Tensor):
+            index = torch.tensor(index, dtype=torch.long)
+
+        return tuple(loader.collate_fn(index) for loader in self.loaders)
+
+    def filter_fn(
+        self,
+        outs: Tuple[Any, ...],
+    ) -> Tuple[Union[Data, HeteroData], ...]:
+        loaders = self.loaders
+        return tuple(loader.filter_fn(v) for loader, v in zip(loaders, outs))
+
+    def _get_iterator(self) -> Iterator:
+        if self.filter_per_worker:
+            return super()._get_iterator()
+
+        # Execute `filter_fn` in the main process:
+        return DataLoaderIterator(super()._get_iterator(), self.filter_fn)
+
+    def __repr__(self) -> str:
+        return f'{self.__class__.__name__}(loaders={self.loaders})'
+
+# Path: torch_geometric/loader/__init__.py
+from torch_geometric.deprecation import deprecated
+
+from .dataloader import DataLoader
+from .node_loader import NodeLoader
+from .link_loader import LinkLoader
+from .neighbor_loader import NeighborLoader
+from .link_neighbor_loader import LinkNeighborLoader
+from .hgt_loader import HGTLoader
+from .cluster import ClusterData, ClusterLoader
+from .graph_saint import (GraphSAINTSampler, GraphSAINTNodeSampler,
+                          GraphSAINTEdgeSampler, GraphSAINTRandomWalkSampler)
+from .shadow import ShaDowKHopSampler
+from .random_node_loader import RandomNodeLoader
+# from .ibmb_loader import IBMBBatchLoader, IBMBNodeLoader
+from .zip_loader import ZipLoader
+from .data_list_loader import DataListLoader
+from .dense_data_loader import DenseDataLoader
+from .temporal_dataloader import TemporalDataLoader
+from .neighbor_sampler import NeighborSampler
+from .imbalanced_sampler import ImbalancedSampler
+from .dynamic_batch_sampler import DynamicBatchSampler
+from .prefetch import PrefetchLoader
+from .cache import CachedLoader
+from .mixin import AffinityMixin
+
+__all__ = classes = [
+    'DataLoader',
+    'NodeLoader',
+    'LinkLoader',
+    'NeighborLoader',
+    'LinkNeighborLoader',
+    'HGTLoader',
+    'ClusterData',
+    'ClusterLoader',
+    'GraphSAINTSampler',
+    'GraphSAINTNodeSampler',
+    'GraphSAINTEdgeSampler',
+    'GraphSAINTRandomWalkSampler',
+    'ShaDowKHopSampler',
+    'RandomNodeLoader',
+    # 'IBMBBatchLoader',
+    # 'IBMBNodeLoader',
+    'ZipLoader',
+    'DataListLoader',
+    'DenseDataLoader',
+    'TemporalDataLoader',
+    'NeighborSampler',
+    'ImbalancedSampler',
+    'DynamicBatchSampler',
+    'PrefetchLoader',
+    'CachedLoader',
+    'AffinityMixin',
+]
+
+RandomNodeSampler = deprecated(
+    details="use 'loader.RandomNodeLoader' instead",
+    func_name='loader.RandomNodeSampler',
+)(RandomNodeLoader)
+
+# Path: torch_geometric/data/__init__.py
+# flake8: noqa
+
+from .feature_store import FeatureStore, TensorAttr
+from .graph_store import GraphStore, EdgeAttr
+from .data import Data
+from .hetero_data import HeteroData
+from .batch import Batch
+from .temporal import TemporalData
+from .database import Database, SQLiteDatabase, RocksDatabase
+from .dataset import Dataset
+from .in_memory_dataset import InMemoryDataset
+from .on_disk_dataset import OnDiskDataset
+from .makedirs import makedirs
+from .download import download_url, download_google_url
+from .extract import extract_tar, extract_zip, extract_bz2, extract_gz
+
+from torch_geometric.lazy_loader import LazyLoader
+
+data_classes = [
+    'Data',
+    'HeteroData',
+    'Batch',
+    'TemporalData',
+    'Dataset',
+    'InMemoryDataset',
+    'OnDiskDataset',
+]
+
+remote_backend_classes = [
+    'FeatureStore',
+    'GraphStore',
+    'TensorAttr',
+    'EdgeAttr',
+]
+
+database_classes = [
+    'Database',
+    'SQLiteDatabase',
+    'RocksDatabase',
+]
+
+helper_functions = [
+    'makedirs',
+    'download_url',
+    'download_google_url',
+    'extract_tar',
+    'extract_zip',
+    'extract_bz2',
+    'extract_gz',
+]
+
+__all__ = data_classes + remote_backend_classes + helper_functions
+
+lightning = LazyLoader('lightning', globals(),
+                       'torch_geometric.data.lightning')
+
+from torch_geometric.deprecation import deprecated
+from torch_geometric.loader import NeighborSampler
+from torch_geometric.loader import ClusterData
+from torch_geometric.loader import ClusterLoader
+from torch_geometric.loader import GraphSAINTSampler
+from torch_geometric.loader import GraphSAINTNodeSampler
+from torch_geometric.loader import GraphSAINTEdgeSampler
+from torch_geometric.loader import GraphSAINTRandomWalkSampler
+from torch_geometric.loader import ShaDowKHopSampler
+from torch_geometric.loader import RandomNodeLoader
+from torch_geometric.loader import DataLoader
+from torch_geometric.loader import DataListLoader
+from torch_geometric.loader import DenseDataLoader
+
+NeighborSampler = deprecated(  # type: ignore
+    details="use 'loader.NeighborSampler' instead",
+    func_name='data.NeighborSampler',
+)(NeighborSampler)
+ClusterData = deprecated(  # type: ignore
+    details="use 'loader.ClusterData' instead",
+    func_name='data.ClusterData',
+)(ClusterData)
+ClusterLoader = deprecated(  # type: ignore
+    details="use 'loader.ClusterLoader' instead",
+    func_name='data.ClusterLoader',
+)(ClusterLoader)
+GraphSAINTSampler = deprecated(  # type: ignore
+    details="use 'loader.GraphSAINTSampler' instead",
+    func_name='data.GraphSAINTSampler',
+)(GraphSAINTSampler)
+GraphSAINTNodeSampler = deprecated(  # type: ignore
+    details="use 'loader.GraphSAINTNodeSampler' instead",
+    func_name='data.GraphSAINTNodeSampler',
+)(GraphSAINTNodeSampler)
+GraphSAINTEdgeSampler = deprecated(  # type: ignore
+    details="use 'loader.GraphSAINTEdgeSampler' instead",
+    func_name='data.GraphSAINTEdgeSampler',
+)(GraphSAINTEdgeSampler)
+GraphSAINTRandomWalkSampler = deprecated(  # type: ignore
+    details="use 'loader.GraphSAINTRandomWalkSampler' instead",
+    func_name='data.GraphSAINTRandomWalkSampler',
+)(GraphSAINTRandomWalkSampler)
+ShaDowKHopSampler = deprecated(  # type: ignore
+    details="use 'loader.ShaDowKHopSampler' instead",
+    func_name='data.ShaDowKHopSampler',
+)(ShaDowKHopSampler)
+RandomNodeSampler = deprecated(
+    details="use 'loader.RandomNodeLoader' instead",
+    func_name='data.RandomNodeSampler',
+)(RandomNodeLoader)
+DataLoader = deprecated(  # type: ignore
+    details="use 'loader.DataLoader' instead",
+    func_name='data.DataLoader',
+)(DataLoader)
+DataListLoader = deprecated(  # type: ignore
+    details="use 'loader.DataListLoader' instead",
+    func_name='data.DataListLoader',
+)(DataListLoader)
+DenseDataLoader = deprecated(  # type: ignore
+    details="use 'loader.DenseDataLoader' instead",
+    func_name='data.DenseDataLoader',
+)(DenseDataLoader)
+
+# Path: torch_geometric/visualization/graph.py
+from math import sqrt
+from typing import Any, List, Optional
+
+import torch
+from torch import Tensor
+
+BACKENDS = {'graphviz', 'networkx'}
+
+
+def has_graphviz() -> bool:
+    try:
+        import graphviz
+    except ImportError:
+        return False
+
+    try:
+        graphviz.Digraph().pipe()
+    except graphviz.backend.ExecutableNotFound:
+        return False
+
+    return True
+
+
+def visualize_graph(
+    edge_index: Tensor,
+    edge_weight: Optional[Tensor] = None,
+    path: Optional[str] = None,
+    backend: Optional[str] = None,
+    node_labels: Optional[List[str]] = None,
+) -> Any:
+    r"""Visualizes the graph given via :obj:`edge_index` and (optional)
+    :obj:`edge_weight`.
+
+    Args:
+        edge_index (torch.Tensor): The edge indices.
+        edge_weight (torch.Tensor, optional): The edge weights.
+        path (str, optional): The path to where the plot is saved.
+            If set to :obj:`None`, will visualize the plot on-the-fly.
+            (default: :obj:`None`)
+        backend (str, optional): The graph drawing backend to use for
+            visualization (:obj:`"graphviz"`, :obj:`"networkx"`).
+            If set to :obj:`None`, will use the most appropriate
+            visualization backend based on available system packages.
+            (default: :obj:`None`)
+        node_labels (List[str], optional): The labels/IDs of nodes.
+            (default: :obj:`None`)
+    """
+    if edge_weight is not None:  # Normalize edge weights.
+        edge_weight = edge_weight - edge_weight.min()
+        edge_weight = edge_weight / edge_weight.max()
+
+    if edge_weight is not None:  # Discard any edges with zero edge weight:
+        mask = edge_weight > 1e-7
+        edge_index = edge_index[:, mask]
+        edge_weight = edge_weight[mask]
+
+    if edge_weight is None:
+        edge_weight = torch.ones(edge_index.size(1))
+
+    if backend is None:
+        backend = 'graphviz' if has_graphviz() else 'networkx'
+
+    if backend.lower() == 'networkx':
+        return _visualize_graph_via_networkx(edge_index, edge_weight, path,
+                                             node_labels)
+    elif backend.lower() == 'graphviz':
+        return _visualize_graph_via_graphviz(edge_index, edge_weight, path,
+                                             node_labels)
+
+    raise ValueError(f"Expected graph drawing backend to be in "
+                     f"{BACKENDS} (got '{backend}')")
+
+
+def _visualize_graph_via_graphviz(
+    edge_index: Tensor,
+    edge_weight: Tensor,
+    path: Optional[str] = None,
+    node_labels: Optional[List[str]] = None,
+) -> Any:
+    import graphviz
+
+    suffix = path.split('.')[-1] if path is not None else None
+    g = graphviz.Digraph('graph', format=suffix)
+    g.attr('node', shape='circle', fontsize='11pt')
+
+    for node in edge_index.view(-1).unique().tolist():
+        g.node(str(node) if node_labels is None else node_labels[node])
+
+    for (src, dst), w in zip(edge_index.t().tolist(), edge_weight.tolist()):
+        hex_color = hex(255 - round(255 * w))[2:]
+        hex_color = f'{hex_color}0' if len(hex_color) == 1 else hex_color
+        if node_labels is not None:
+            src = node_labels[src]
+            dst = node_labels[dst]
+        g.edge(str(src), str(dst), color=f'#{hex_color}{hex_color}{hex_color}')
+
+    if path is not None:
+        path = '.'.join(path.split('.')[:-1])
+        g.render(path, cleanup=True)
+    else:
+        g.view()
+
+    return g
+
+
+def _visualize_graph_via_networkx(
+    edge_index: Tensor,
+    edge_weight: Tensor,
+    path: Optional[str] = None,
+    node_labels: Optional[List[str]] = None,
+) -> Any:
+    import matplotlib.pyplot as plt
+    import networkx as nx
+
+    g = nx.DiGraph()
+    node_size = 800
+
+    for node in edge_index.view(-1).unique().tolist():
+        g.add_node(node if node_labels is None else node_labels[node])
+
+    for (src, dst), w in zip(edge_index.t().tolist(), edge_weight.tolist()):
+        if node_labels is not None:
+            src = node_labels[src]
+            dst = node_labels[dst]
+        g.add_edge(src, dst, alpha=w)
+
+    ax = plt.gca()
+    pos = nx.spring_layout(g)
+    for src, dst, data in g.edges(data=True):
+        ax.annotate(
+            '',
+            xy=pos[src],
+            xytext=pos[dst],
+            arrowprops=dict(
+                arrowstyle="->",
+                alpha=data['alpha'],
+                shrinkA=sqrt(node_size) / 2.0,
+                shrinkB=sqrt(node_size) / 2.0,
+                connectionstyle="arc3,rad=0.1",
+            ),
+        )
+
+    nodes = nx.draw_networkx_nodes(g, pos, node_size=node_size,
+                                   node_color='white', margins=0.1)
+    nodes.set_edgecolor('black')
+    nx.draw_networkx_labels(g, pos, font_size=10)
+
+    if path is not None:
+        plt.savefig(path)
+    else:
+        plt.show()
+
+    plt.close()
+
+# Path: torch_geometric/visualization/influence.py
+from typing import Any
+
+import torch
+from torch import Tensor
+from torch.autograd import grad
+
+
+def influence(model: torch.nn.Module, src: Tensor, *args: Any) -> Tensor:
+    x = src.clone().requires_grad_()
+    out = model(x, *args).sum(dim=-1)
+
+    influences = []
+    for j in range(src.size(0)):
+        influence = grad([out[j]], [x], retain_graph=True)[0].abs().sum(dim=-1)
+        influences.append(influence / influence.sum())
+
+    return torch.stack(influences, dim=0)
+
+# Path: torch_geometric/visualization/__init__.py
+r"""Visualization package."""
+
+from .graph import visualize_graph
+from .influence import influence
+
+__all__ = [
+    'visualize_graph',
+    'influence',
+]
+
+# Path: torch_geometric/explain/explanation.py
+import copy
+from typing import Dict, List, Optional, Union
+
+import torch
+from torch import Tensor
+
+from torch_geometric.data.data import Data, warn_or_raise
+from torch_geometric.data.hetero_data import HeteroData
+from torch_geometric.explain.config import ThresholdConfig, ThresholdType
+from torch_geometric.typing import EdgeType, NodeType
+from torch_geometric.visualization import visualize_graph
+
+
+class ExplanationMixin:
+    @property
+    def available_explanations(self) -> List[str]:
+        """Returns the available explanation masks."""
+        return [key for key in self.keys() if key.endswith('_mask')]
+
+    def validate_masks(self, raise_on_error: bool = True) -> bool:
+        r"""Validates the correctness of the :class:`Explanation` masks."""
+        status = True
+
+        for store in self.node_stores:
+            if 'node_mask' not in store:
+                continue
+
+            if store.node_mask.dim() != 2:
+                status = False
+                warn_or_raise(
+                    f"Expected a 'node_mask' with two dimensions (got "
+                    f"{store.node_mask.dim()} dimensions)", raise_on_error)
+
+            if store.node_mask.size(0) not in {1, store.num_nodes}:
+                status = False
+                warn_or_raise(
+                    f"Expected a 'node_mask' with {store.num_nodes} nodes "
+                    f"(got {store.node_mask.size(0)} nodes)", raise_on_error)
+
+            if 'x' in store:
+                num_features = store.x.size(-1)
+            else:
+                num_features = store.node_mask.size(-1)
+
+            if store.node_mask.size(1) not in {1, num_features}:
+                status = False
+                warn_or_raise(
+                    f"Expected a 'node_mask' with {num_features} features ("
+                    f"got {store.node_mask.size(1)} features)", raise_on_error)
+
+        for store in self.edge_stores:
+            if 'edge_mask' not in store:
+                continue
+
+            if store.edge_mask.dim() != 1:
+                status = False
+                warn_or_raise(
+                    f"Expected an 'edge_mask' with one dimension (got "
+                    f"{store.edge_mask.dim()} dimensions)", raise_on_error)
+
+            if store.edge_mask.size(0) != store.num_edges:
+                status = False
+                warn_or_raise(
+                    f"Expected an 'edge_mask' with {store.num_edges} edges "
+                    f"(got {store.edge_mask.size(0)} edges)", raise_on_error)
+
+        return status
+
+    def _threshold_mask(
+        self,
+        mask: Optional[Tensor],
+        threshold_config: ThresholdConfig,
+    ) -> Optional[Tensor]:
+
+        if mask is None:
+            return None
+
+        if threshold_config.type == ThresholdType.hard:
+            return (mask > threshold_config.value).float()
+
+        if threshold_config.type in [
+                ThresholdType.topk,
+                ThresholdType.topk_hard,
+        ]:
+            if threshold_config.value >= mask.numel():
+                if threshold_config.type == ThresholdType.topk:
+                    return mask
+                else:
+                    return torch.ones_like(mask)
+
+            value, index = torch.topk(
+                mask.flatten(),
+                k=threshold_config.value,
+            )
+
+            out = torch.zeros_like(mask.flatten())
+            if threshold_config.type == ThresholdType.topk:
+                out[index] = value
+            else:
+                out[index] = 1.0
+            return out.view(mask.size())
+
+        assert False
+
+    def threshold(
+        self,
+        *args,
+        **kwargs,
+    ) -> Union['Explanation', 'HeteroExplanation']:
+        """Thresholds the explanation masks according to the thresholding
+        method.
+
+        Args:
+            *args: Arguments passed to :class:`ThresholdConfig`.
+            **kwargs: Keyword arguments passed to :class:`ThresholdConfig`.
+        """
+        threshold_config = ThresholdConfig.cast(*args, **kwargs)
+
+        if threshold_config is None:
+            return self
+
+        # Avoid modification of the original explanation:
+        out = copy.copy(self)
+
+        for store in out.node_stores:
+            store.node_mask = self._threshold_mask(store.get('node_mask'),
+                                                   threshold_config)
+
+        for store in out.edge_stores:
+            store.edge_mask = self._threshold_mask(store.get('edge_mask'),
+                                                   threshold_config)
+
+        return out
+
+
+class Explanation(Data, ExplanationMixin):
+    r"""Holds all the obtained explanations of a homogeneous graph.
+
+    The explanation object is a :obj:`~torch_geometric.data.Data` object and
+    can hold node attributions and edge attributions.
+    It can also hold the original graph if needed.
+
+    Args:
+        node_mask (Tensor, optional): Node-level mask with shape
+            :obj:`[num_nodes, 1]`, :obj:`[1, num_features]` or
+            :obj:`[num_nodes, num_features]`. (default: :obj:`None`)
+        edge_mask (Tensor, optional): Edge-level mask with shape
+            :obj:`[num_edges]`. (default: :obj:`None`)
+        **kwargs (optional): Additional attributes.
+    """
+    def validate(self, raise_on_error: bool = True) -> bool:
+        r"""Validates the correctness of the :class:`Explanation` object."""
+        status = super().validate(raise_on_error)
+        status &= self.validate_masks(raise_on_error)
+        return status
+
+    def get_explanation_subgraph(self) -> 'Explanation':
+        r"""Returns the induced subgraph, in which all nodes and edges with
+        zero attribution are masked out.
+        """
+        node_mask = self.get('node_mask')
+        if node_mask is not None:
+            node_mask = node_mask.sum(dim=-1) > 0
+        edge_mask = self.get('edge_mask')
+        if edge_mask is not None:
+            edge_mask = edge_mask > 0
+        return self._apply_masks(node_mask, edge_mask)
+
+    def get_complement_subgraph(self) -> 'Explanation':
+        r"""Returns the induced subgraph, in which all nodes and edges with any
+        attribution are masked out.
+        """
+        node_mask = self.get('node_mask')
+        if node_mask is not None:
+            node_mask = node_mask.sum(dim=-1) == 0
+        edge_mask = self.get('edge_mask')
+        if edge_mask is not None:
+            edge_mask = edge_mask == 0
+        return self._apply_masks(node_mask, edge_mask)
+
+    def _apply_masks(
+        self,
+        node_mask: Optional[Tensor] = None,
+        edge_mask: Optional[Tensor] = None,
+    ) -> 'Explanation':
+        out = copy.copy(self)
+
+        if edge_mask is not None:
+            for key, value in self.items():
+                if key == 'edge_index':
+                    out.edge_index = value[:, edge_mask]
+                elif self.is_edge_attr(key):
+                    out[key] = value[edge_mask]
+
+        if node_mask is not None:
+            out = out.subgraph(node_mask)
+
+        return out
+
+    def visualize_feature_importance(
+        self,
+        path: Optional[str] = None,
+        feat_labels: Optional[List[str]] = None,
+        top_k: Optional[int] = None,
+    ):
+        r"""Creates a bar plot of the node feature importances by summing up
+        the node mask across all nodes.
+
+        Args:
+            path (str, optional): The path to where the plot is saved.
+                If set to :obj:`None`, will visualize the plot on-the-fly.
+                (default: :obj:`None`)
+            feat_labels (List[str], optional): The labels of features.
+                (default :obj:`None`)
+            top_k (int, optional): Top k features to plot. If :obj:`None`
+                plots all features. (default: :obj:`None`)
+        """
+        node_mask = self.get('node_mask')
+        if node_mask is None:
+            raise ValueError(f"The attribute 'node_mask' is not available "
+                             f"in '{self.__class__.__name__}' "
+                             f"(got {self.available_explanations})")
+        if node_mask.dim() != 2 or node_mask.size(1) <= 1:
+            raise ValueError(f"Cannot compute feature importance for "
+                             f"object-level 'node_mask' "
+                             f"(got shape {node_mask.size()})")
+
+        if feat_labels is None:
+            feat_labels = range(node_mask.size(1))
+
+        score = node_mask.sum(dim=0)
+
+        return _visualize_score(score, feat_labels, path, top_k)
+
+    def visualize_graph(
+        self,
+        path: Optional[str] = None,
+        backend: Optional[str] = None,
+        node_labels: Optional[List[str]] = None,
+    ) -> None:
+        r"""Visualizes the explanation graph with edge opacity corresponding to
+        edge importance.
+
+        Args:
+            path (str, optional): The path to where the plot is saved.
+                If set to :obj:`None`, will visualize the plot on-the-fly.
+                (default: :obj:`None`)
+            backend (str, optional): The graph drawing backend to use for
+                visualization (:obj:`"graphviz"`, :obj:`"networkx"`).
+                If set to :obj:`None`, will use the most appropriate
+                visualization backend based on available system packages.
+                (default: :obj:`None`)
+            node_labels (list[str], optional): The labels/IDs of nodes.
+                (default: :obj:`None`)
+        """
+        edge_mask = self.get('edge_mask')
+        if edge_mask is None:
+            raise ValueError(f"The attribute 'edge_mask' is not available "
+                             f"in '{self.__class__.__name__}' "
+                             f"(got {self.available_explanations})")
+        visualize_graph(self.edge_index, edge_mask, path, backend, node_labels)
+
+
+class HeteroExplanation(HeteroData, ExplanationMixin):
+    r"""Holds all the obtained explanations of a heterogeneous graph.
+
+    The explanation object is a :obj:`~torch_geometric.data.HeteroData` object
+    and can hold node attributions and edge attributions.
+    It can also hold the original graph if needed.
+    """
+    def validate(self, raise_on_error: bool = True) -> bool:
+        r"""Validates the correctness of the :class:`Explanation` object."""
+        status = super().validate(raise_on_error)
+        status &= self.validate_masks(raise_on_error)
+        return status
+
+    def get_explanation_subgraph(self) -> 'HeteroExplanation':
+        r"""Returns the induced subgraph, in which all nodes and edges with
+        zero attribution are masked out.
+        """
+        return self._apply_masks(
+            node_mask_dict={
+                key: mask.sum(dim=-1) > 0
+                for key, mask in self.collect('node_mask', True).items()
+            },
+            edge_mask_dict={
+                key: mask > 0
+                for key, mask in self.collect('edge_mask', True).items()
+            },
+        )
+
+    def get_complement_subgraph(self) -> 'HeteroExplanation':
+        r"""Returns the induced subgraph, in which all nodes and edges with any
+        attribution are masked out.
+        """
+        return self._apply_masks(
+            node_mask_dict={
+                key: mask.sum(dim=-1) == 0
+                for key, mask in self.collect('node_mask', True).items()
+            },
+            edge_mask_dict={
+                key: mask == 0
+                for key, mask in self.collect('edge_mask', True).items()
+            },
+        )
+
+    def _apply_masks(
+        self,
+        node_mask_dict: Dict[NodeType, Tensor],
+        edge_mask_dict: Dict[EdgeType, Tensor],
+    ) -> 'HeteroExplanation':
+        out = copy.copy(self)
+
+        for edge_type, edge_mask in edge_mask_dict.items():
+            for key, value in self[edge_type].items():
+                if key == 'edge_index':
+                    out[edge_type].edge_index = value[:, edge_mask]
+                elif self[edge_type].is_edge_attr(key):
+                    out[edge_type][key] = value[edge_mask]
+
+        return out.subgraph(node_mask_dict)
+
+    def visualize_feature_importance(
+        self,
+        path: Optional[str] = None,
+        feat_labels: Optional[Dict[NodeType, List[str]]] = None,
+        top_k: Optional[int] = None,
+    ):
+        r"""Creates a bar plot of the node feature importances by summing up
+        node masks across all nodes for each node type.
+
+        Args:
+            path (str, optional): The path to where the plot is saved.
+                If set to :obj:`None`, will visualize the plot on-the-fly.
+                (default: :obj:`None`)
+            feat_labels (Dict[NodeType, List[str]], optional): The labels of
+                features for each node type. (default :obj:`None`)
+            top_k (int, optional): Top k features to plot. If :obj:`None`
+                plots all features. (default: :obj:`None`)
+        """
+        node_mask_dict = self.node_mask_dict
+        for node_mask in node_mask_dict.values():
+            if node_mask.dim() != 2 or node_mask.size(1) <= 1:
+                raise ValueError(f"Cannot compute feature importance for "
+                                 f"object-level 'node_mask' "
+                                 f"(got shape {node_mask_dict.size()})")
+
+        if feat_labels is None:
+            feat_labels = {}
+            for node_type, node_mask in node_mask_dict.items():
+                feat_labels[node_type] = range(node_mask.size(1))
+
+        score = torch.cat(
+            [node_mask.sum(dim=0) for node_mask in node_mask_dict.values()],
+            dim=0)
+
+        all_feat_labels = []
+        for node_type in node_mask_dict.keys():
+            all_feat_labels += [
+                f'{node_type}#{label}' for label in feat_labels[node_type]
+            ]
+
+        return _visualize_score(score, all_feat_labels, path, top_k)
+
+
+def _visualize_score(
+    score: torch.Tensor,
+    labels: List[str],
+    path: Optional[str] = None,
+    top_k: Optional[int] = None,
+):
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    if len(labels) != score.numel():
+        raise ValueError(f"The number of labels (got {len(labels)}) must "
+                         f"match the number of scores (got {score.numel()})")
+
+    score = score.cpu().numpy()
+
+    df = pd.DataFrame({'score': score}, index=labels)
+    df = df.sort_values('score', ascending=False)
+    df = df.round(decimals=3)
+
+    if top_k is not None:
+        df = df.head(top_k)
+        title = f"Feature importance for top {len(df)} features"
+    else:
+        title = f"Feature importance for {len(df)} features"
+
+    ax = df.plot(
+        kind='barh',
+        figsize=(10, 7),
+        title=title,
+        ylabel='Feature label',
+        xlim=[0, float(df['score'].max()) + 0.3],
+        legend=False,
+    )
+    plt.gca().invert_yaxis()
+    ax.bar_label(container=ax.containers[0], label_type='edge')
+
+    if path is not None:
+        plt.savefig(path)
+    else:
+        plt.show()
+
+    plt.close()
+
+# Path: torch_geometric/explain/metric/basic.py
+from typing import List, Optional, Tuple, Union
+
+from torch import Tensor
+
+METRICS = ['accuracy', 'recall', 'precision', 'f1_score', 'auroc']
+
+
+def groundtruth_metrics(
+    pred_mask: Tensor,
+    target_mask: Tensor,
+    metrics: Optional[Union[str, List[str]]] = None,
+    threshold: float = 0.5,
+) -> Union[float, Tuple[float, ...]]:
+    r"""Compares and evaluates an explanation mask with the ground-truth
+    explanation mask.
+
+    Args:
+        pred_mask (torch.Tensor): The prediction mask to evaluate.
+        target_mask (torch.Tensor): The ground-truth target mask.
+        metrics (str or List[str], optional): The metrics to return
+            (:obj:`"accuracy"`, :obj:`"recall"`, :obj:`"precision"`,
+            :obj:`"f1_score"`, :obj:`"auroc"`). (default: :obj:`["accuracy",
+            "recall", "precision", "f1_score", "auroc"]`)
+        threshold (float, optional): The threshold value to perform hard
+            thresholding of :obj:`mask` and :obj:`groundtruth`.
+            (default: :obj:`0.5`)
+    """
+    import torchmetrics
+
+    if metrics is None:
+        metrics = METRICS
+
+    if isinstance(metrics, str):
+        metrics = [metrics]
+
+    if not isinstance(metrics, (tuple, list)):
+        raise ValueError(f"Expected metrics to be a string or a list of "
+                         f"strings (got {type(metrics)})")
+
+    pred_mask = pred_mask.view(-1)
+    target_mask = (target_mask >= threshold).view(-1)
+
+    outs = []
+    for metric in metrics:
+        if metric not in METRICS:
+            raise ValueError(f"Encountered invalid metric {metric}")
+
+        fn = getattr(torchmetrics.functional, metric)
+        if metric in {'auroc'}:
+            out = fn(pred_mask, target_mask, 'binary')
+        else:
+            out = fn(pred_mask, target_mask, 'binary', threshold)
+
+        outs.append(float(out))
+
+    return tuple(outs) if len(outs) > 1 else outs[0]
+
+# Path: torch_geometric/explain/metric/faithfulness.py
+from typing import Optional
+
+import torch
+import torch.nn.functional as F
+
+from torch_geometric.explain import Explainer, Explanation
+from torch_geometric.explain.config import MaskType, ModelMode, ModelReturnType
+
+
+def unfaithfulness(
+    explainer: Explainer,
+    explanation: Explanation,
+    top_k: Optional[int] = None,
+) -> float:
+    r"""Evaluates how faithful an :class:`~torch_geometric.explain.Explanation`
+    is to an underyling GNN predictor, as described in the
+    `"Evaluating Explainability for Graph Neural Networks"
+    <https://arxiv.org/abs/2208.09339>`_ paper.
+
+    In particular, the graph explanation unfaithfulness metric is defined as
+
+    .. math::
+        \textrm{GEF}(y, \hat{y}) = 1 - \exp(- \textrm{KL}(y || \hat{y}))
+
+    where :math:`y` refers to the prediction probability vector obtained from
+    the original graph, and :math:`\hat{y}` refers to the prediction
+    probability vector obtained from the masked subgraph.
+    Finally, the Kullback-Leibler (KL) divergence score quantifies the distance
+    between the two probability distributions.
+
+    Args:
+        explainer (Explainer): The explainer to evaluate.
+        explanation (Explanation): The explanation to evaluate.
+        top_k (int, optional): If set, will only keep the original values of
+            the top-:math:`k` node features identified by an explanation.
+            If set to :obj:`None`, will use :obj:`explanation.node_mask` as it
+            is for masking node features. (default: :obj:`None`)
+    """
+    if explainer.model_config.mode == ModelMode.regression:
+        raise ValueError("Fidelity not defined for 'regression' models")
+
+    if top_k is not None and explainer.node_mask_type == MaskType.object:
+        raise ValueError("Cannot apply top-k feature selection based on a "
+                         "node mask of type 'object'")
+
+    node_mask = explanation.get('node_mask')
+    edge_mask = explanation.get('edge_mask')
+    x, edge_index = explanation.x, explanation.edge_index
+    kwargs = {key: explanation[key] for key in explanation._model_args}
+
+    y = explanation.get('prediction')
+    if y is None:  # == ExplanationType.phenomenon
+        y = explainer.get_prediction(x, edge_index, **kwargs)
+
+    if node_mask is not None and top_k is not None:
+        feat_importance = node_mask.sum(dim=0)
+        _, top_k_index = feat_importance.topk(top_k)
+        node_mask = torch.zeros_like(node_mask)
+        node_mask[:, top_k_index] = 1.0
+
+    y_hat = explainer.get_masked_prediction(x, edge_index, node_mask,
+                                            edge_mask, **kwargs)
+
+    if explanation.get('index') is not None:
+        y, y_hat = y[explanation.index], y_hat[explanation.index]
+
+    if explainer.model_config.return_type == ModelReturnType.raw:
+        y, y_hat = y.softmax(dim=-1), y_hat.softmax(dim=-1)
+    elif explainer.model_config.return_type == ModelReturnType.log_probs:
+        y, y_hat = y.exp(), y_hat.exp()
+
+    kl_div = F.kl_div(y.log(), y_hat, reduction='batchmean')
+    return 1 - float(torch.exp(-kl_div))
+
+# Path: torch_geometric/explain/metric/fidelity.py
+from typing import Tuple
+
+import torch
+from torch import Tensor
+
+from torch_geometric.explain import Explainer, Explanation
+from torch_geometric.explain.config import ExplanationType, ModelMode
+
+
+def fidelity(
+    explainer: Explainer,
+    explanation: Explanation,
+) -> Tuple[float, float]:
+    r"""Evaluates the fidelity of an
+    :class:`~torch_geometric.explain.Explainer` given an
+    :class:`~torch_geometric.explain.Explanation`, as described in the
+    `"GraphFramEx: Towards Systematic Evaluation of Explainability Methods for
+    Graph Neural Networks" <https://arxiv.org/abs/2206.09677>`_ paper.
+
+    Fidelity evaluates the contribution of the produced explanatory subgraph
+    to the initial prediction, either by giving only the subgraph to the model
+    (fidelity-) or by removing it from the entire graph (fidelity+).
+    The fidelity scores capture how good an explainable model reproduces the
+    natural phenomenon or the GNN model logic.
+
+    For **phenomenon** explanations, the fidelity scores are given by:
+
+    .. math::
+        \textrm{fid}_{+} &= \frac{1}{N} \sum_{i = 1}^N
+        \| \mathbb{1}(\hat{y}_i = y_i) -
+        \mathbb{1}( \hat{y}_i^{G_{C \setminus S}} = y_i) \|
+
+        \textrm{fid}_{-} &= \frac{1}{N} \sum_{i = 1}^N
+        \| \mathbb{1}(\hat{y}_i = y_i) -
+        \mathbb{1}( \hat{y}_i^{G_S} = y_i) \|
+
+    For **model** explanations, the fidelity scores are given by:
+
+    .. math::
+        \textrm{fid}_{+} &= 1 - \frac{1}{N} \sum_{i = 1}^N
+        \mathbb{1}( \hat{y}_i^{G_{C \setminus S}} = \hat{y}_i)
+
+        \textrm{fid}_{-} &= 1 - \frac{1}{N} \sum_{i = 1}^N
+        \mathbb{1}( \hat{y}_i^{G_S} = \hat{y}_i)
+
+    Args:
+        explainer (Explainer): The explainer to evaluate.
+        explanation (Explanation): The explanation to evaluate.
+    """
+    if explainer.model_config.mode == ModelMode.regression:
+        raise ValueError("Fidelity not defined for 'regression' models")
+
+    node_mask = explanation.get('node_mask')
+    edge_mask = explanation.get('edge_mask')
+    kwargs = {key: explanation[key] for key in explanation._model_args}
+
+    y = explanation.target
+    if explainer.explanation_type == ExplanationType.phenomenon:
+        y_hat = explainer.get_prediction(
+            explanation.x,
+            explanation.edge_index,
+            **kwargs,
+        )
+        y_hat = explainer.get_target(y_hat)
+
+    explain_y_hat = explainer.get_masked_prediction(
+        explanation.x,
+        explanation.edge_index,
+        node_mask,
+        edge_mask,
+        **kwargs,
+    )
+    explain_y_hat = explainer.get_target(explain_y_hat)
+
+    complement_y_hat = explainer.get_masked_prediction(
+        explanation.x,
+        explanation.edge_index,
+        1. - node_mask if node_mask is not None else None,
+        1. - edge_mask if edge_mask is not None else None,
+        **kwargs,
+    )
+    complement_y_hat = explainer.get_target(complement_y_hat)
+
+    if explanation.get('index') is not None:
+        y = y[explanation.index]
+        if explainer.explanation_type == ExplanationType.phenomenon:
+            y_hat = y_hat[explanation.index]
+        explain_y_hat = explain_y_hat[explanation.index]
+        complement_y_hat = complement_y_hat[explanation.index]
+
+    if explainer.explanation_type == ExplanationType.model:
+        pos_fidelity = 1. - (complement_y_hat == y).float().mean()
+        neg_fidelity = 1. - (explain_y_hat == y).float().mean()
+    else:
+        pos_fidelity = ((y_hat == y).float() -
+                        (complement_y_hat == y).float()).abs().mean()
+        neg_fidelity = ((y_hat == y).float() -
+                        (explain_y_hat == y).float()).abs().mean()
+
+...

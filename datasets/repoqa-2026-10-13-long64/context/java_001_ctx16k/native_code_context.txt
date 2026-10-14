@@ -1,0 +1,1518 @@
+            contains = true;
+            not = raw.charAt(lhsEndPos + 1) == '!';
+            searchPos = lhsEndPos + (not ? 10 : 9);
+            String anyOrOnlyOrDeep = raw.substring(searchPos).trim();
+            if (anyOrOnlyOrDeep.startsWith("only deep")) {
+                int onlyPos = raw.indexOf(" only deep", searchPos);
+                only = true;
+                deep = true;
+                searchPos = onlyPos + 10;
+            } else if (anyOrOnlyOrDeep.startsWith("only")) {
+                int onlyPos = raw.indexOf(" only", searchPos);
+                only = true;
+                searchPos = onlyPos + 5;
+            } else if (anyOrOnlyOrDeep.startsWith("any")) {
+                int anyPos = raw.indexOf(" any", searchPos);
+                any = true;
+                searchPos = anyPos + 4;
+            } else if (anyOrOnlyOrDeep.startsWith("deep")) {
+                int deepPos = raw.indexOf(" deep", searchPos);
+                deep = true;
+                searchPos = deepPos + 5;
+            }
+        } else {
+            int equalPos = raw.indexOf(" ==", searchPos);
+            int notEqualPos = raw.indexOf(" !=", searchPos);
+            if (equalPos == -1 && notEqualPos == -1) {
+                throw new RuntimeException("syntax error, expected '==' for match");
+            }
+            lhsEndPos = min(equalPos, notEqualPos);
+            if (lhsEndPos > spacePos && rightParenPos != -1
+                    && rightParenPos > lhsEndPos && rightParenPos < leftParenPos) {
+                equalPos = raw.indexOf(" ==", rightParenPos);
+                notEqualPos = raw.indexOf(" !=", rightParenPos);
+                if (equalPos == -1 && notEqualPos == -1) {
+                    throw new RuntimeException("syntax error, expected '==' for match");
+                }
+                lhsEndPos = min(equalPos, notEqualPos);
+            }
+            not = lhsEndPos == notEqualPos;
+            searchPos = lhsEndPos + 3;
+        }
+        String lhs = raw.substring(0, lhsEndPos).trim();
+        if (leftParenPos == -1) {
+            leftParenPos = lhs.indexOf('['); // used later to test for json-path
+            char first = lhs.charAt(0);
+            if (first == '[' || first == '{') { // json array or object
+                spacePos = -1; // just use lhs
+                lhs = "(" + lhs + ")";
+            }
+        }
+        if (spacePos != -1 && (leftParenPos > spacePos || leftParenPos == -1)) {
+            name = lhs.substring(0, spacePos);
+            path = StringUtils.trimToNull(lhs.substring(spacePos));
+        } else {
+            name = lhs;
+            path = null;
+        }
+        expected = StringUtils.trimToNull(raw.substring(searchPos));
+        type = getType(each, not, contains, only, any, deep);
+    }
+
+    
+private static int min(int a, int b) {
+        if (a == -1) {
+            return b;
+        }
+        if (b == -1) {
+            return a;
+        }
+        return Math.min(a, b);
+    }
+
+    private static Match.Type getType(boolean each, boolean not, boolean contains, boolean only, boolean any, boolean deep) {
+        if (each) {
+            if (contains) {
+                if (only) {
+                    return Match.Type.EACH_CONTAINS_ONLY;
+                }
+                if (any) {
+                    return Match.Type.EACH_CONTAINS_ANY;
+                }
+                if (deep) {
+                    if (not) {
+                        throw new RuntimeException("'each !contains deep' is not yet supported, use 'each contains deep' instead");
+                    }
+                    return Match.Type.EACH_CONTAINS_DEEP;
+                }
+                return not ? Match.Type.EACH_NOT_CONTAINS : Match.Type.EACH_CONTAINS;
+            }
+            return not ? Match.Type.EACH_NOT_EQUALS : Match.Type.EACH_EQUALS;
+        }
+        if (contains) {
+            if (only) {
+                return deep ? Match.Type.CONTAINS_ONLY_DEEP : Match.Type.CONTAINS_ONLY;
+            }
+            if (any) {
+                return Match.Type.CONTAINS_ANY;
+            }
+            if (deep) {
+                if (not) {
+                    throw new RuntimeException("'!contains deep' is not yet supported, use 'contains deep' instead");
+                }
+                return Match.Type.CONTAINS_DEEP;
+            }
+            return not ? Match.Type.NOT_CONTAINS : Match.Type.CONTAINS;
+        }
+        return not ? Match.Type.NOT_EQUALS : Match.Type.EQUALS;
+    }
+
+}
+
+// Path: karate-core/src/main/java/com/intuit/karate/PerfContext.java
+/*
+ * The MIT License
+ *
+ * Copyright 2022 Karate Labs Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package com.intuit.karate;
+
+/**
+ *
+ * @author pthomas3
+ */
+public interface PerfContext {
+    
+    void capturePerfEvent(String name, long startTime, long endTime);
+    
+}
+
+// Path: karate-core/src/main/java/com/intuit/karate/cli/Main.java
+/*
+ * The MIT License
+ *
+ * Copyright 2022 Karate Labs Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package com.intuit.karate.cli;
+
+/**
+ *
+ * @author pthomas3
+ */
+public class Main { // backwards compatibility for vs-code karate-runner plugin
+
+    public static void main(String[] args) {
+        com.intuit.karate.Main.main(args);
+    }
+
+}
+
+// Path: karate-core/src/main/java/com/intuit/karate/cli/IdeMain.java
+/*
+ * The MIT License
+ *
+ * Copyright 2022 Karate Labs Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package com.intuit.karate.cli;
+
+import com.intuit.karate.Main;
+import com.intuit.karate.Runner;
+import com.intuit.karate.StringUtils;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import com.intuit.karate.shell.Command;
+import picocli.CommandLine;
+
+/**
+ *
+ * @author pthomas3
+ */
+public class IdeMain {
+
+    public static void main(String[] args) {
+        String command;
+        if (args.length > 0) {
+            command = StringUtils.join(args, ' ');
+        } else {
+            command = System.getProperty("sun.java.command");
+        }
+        System.out.println("command: " + command);
+        Main ro = parseIdeCommandLine(command);
+        Runner.Builder rb = Runner.builder();
+        if (command.contains("org.jetbrains")) {
+            rb.hook(new IntellijHook());
+        }
+        rb.path(ro.getPaths())
+                .tags(ro.getTags())
+                .scenarioName(ro.getName())
+                .parallel(ro.getThreads());
+    }
+
+    private static final Pattern CLI_PLUGIN = Pattern.compile("--plugin\\s+[^\\s]+\\s");
+    private static final Pattern CLI_GLUE = Pattern.compile("--glue\\s+[^\\s]+\\s+");
+    private static final Pattern CLI_NAME = Pattern.compile("--name \"?([^$\"]+[^ \"]+)\"?");
+
+    public static Main parseStringArgs(String[] args) {
+        Main options = CommandLine.populateCommand(new Main(), args);
+        List<String> paths = new ArrayList();
+        if (options.getPaths() != null) {
+            for (String s : options.getPaths()) {
+                if (s.startsWith("com.") || s.startsWith("cucumber.") || s.startsWith("org.")) {
+                    continue;
+                }
+                paths.add(s);
+            }
+            options.setPaths(paths.isEmpty() ? null : paths);
+        }
+        return options;
+    }
+    
+    private static final String CLI_MAIN = "cucumber.api.cli.Main";
+
+    public static Main parseIdeCommandLine(String line) {
+        int pos = line.indexOf(CLI_MAIN);
+        if (pos != -1) {
+            line = line.substring(pos + CLI_MAIN.length());
+        }
+        line = line.replace("--monochrome", "");
+        Matcher pluginMatcher = CLI_PLUGIN.matcher(line);
+        if (pluginMatcher.find()) {
+            line = pluginMatcher.replaceFirst("");
+        }
+        Matcher glueMatcher = CLI_GLUE.matcher(line);
+        if (glueMatcher.find()) {
+            line = glueMatcher.replaceFirst("");
+        }
+        Matcher nameMatcher = CLI_NAME.matcher(line);
+        String nameTemp;
+        if (nameMatcher.find()) {
+            nameTemp = nameMatcher.group(1);
+            line = nameMatcher.replaceFirst("");
+        } else {
+            nameTemp = null;
+        }
+        Main options = Main.parseKarateOptionsAndQuotePath(line);
+        options.setName(nameTemp);
+        return options;
+    }
+
+}
+
+// Path: karate-core/src/main/java/com/intuit/karate/cli/IntellijHook.java
+/*
+ * The MIT License
+ *
+ * Copyright 2022 Karate Labs Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package com.intuit.karate.cli;
+
+import com.intuit.karate.RuntimeHook;
+import com.intuit.karate.StringUtils;
+import com.intuit.karate.Suite;
+import com.intuit.karate.core.Feature;
+import com.intuit.karate.core.Scenario;
+import com.intuit.karate.core.FeatureRuntime;
+import com.intuit.karate.core.ScenarioRuntime;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+
+/**
+ *
+ * @author pthomas3
+ */
+public class IntellijHook implements RuntimeHook {
+
+    @Override
+    public void beforeSuite(Suite suite) {
+        log(String.format(TEMPLATE_ENTER_THE_MATRIX, getCurrentTime()));
+    }
+
+    @Override
+    public boolean beforeScenario(ScenarioRuntime sr) {
+        if (sr.caller.depth == 0) {
+            Scenario scenario = sr.scenario;
+            String path = scenario.getFeature().getResource().getUri().toString();
+            log(String.format(TEMPLATE_TEST_STARTED, getCurrentTime(), path + ":" + scenario.getLine(), escape(scenario.getRefIdAndName())));
+            // log(String.format(TEMPLATE_SCENARIO_STARTED, getCurrentTime()));
+        }
+        return true;
+    }
+
+    @Override
+    public void afterScenario(ScenarioRuntime sr) {
+        if (sr.caller.depth == 0) {
+            Scenario scenario = sr.scenario;
+            if (sr.result.isFailed()) {
+                StringUtils.Pair error = details(sr.result.getErrorMessage());
+                log(String.format(TEMPLATE_TEST_FAILED, getCurrentTime(), escape(error.right), escape(error.left), escape(scenario.getRefIdAndName()), ""));
+            }
+            log(String.format(TEMPLATE_TEST_FINISHED, getCurrentTime(), sr.result.getDurationNanos() / 1000000, escape(scenario.getRefIdAndName())));
+        }
+    }
+
+    @Override
+    public boolean beforeFeature(FeatureRuntime fr) {
+        if (fr.caller.depth == 0) {
+            Feature feature = fr.featureCall.feature;
+            String path = feature.getResource().getUri().toString();
+            log(String.format(TEMPLATE_TEST_SUITE_STARTED, getCurrentTime(), path + ":" + feature.getLine(), escape(feature.getNameForReport())));
+        }
+        return true;
+    }
+
+    @Override
+    public void afterFeature(FeatureRuntime fr) {
+        if (fr.caller.depth == 0) {
+            log(String.format(TEMPLATE_TEST_SUITE_FINISHED, getCurrentTime(), escape(fr.featureCall.feature.getNameForReport())));
+        }
+    }
+
+    private static void log(String s) {
+        System.out.println(s);
+    }
+
+    private static String getCurrentTime() {
+        return DATE_FORMAT.format(new Date());
+    }
+
+    private static String escape(String source) {
+        if (source == null) {
+            return "";
+        }
+        return source.replace("|", "||").replace("\n", "|n").replace("\r", "|r").replace("'", "|'").replace("[", "|[").replace("]", "|]");
+    }
+
+    private static StringUtils.Pair details(String errorMessage) {
+        String fullMessage = errorMessage.replace("\r", "").replace("\t", "  ");
+        String[] messageInfo = fullMessage.split("\n", 2);
+        if (messageInfo.length == 2) {
+            return StringUtils.pair(messageInfo[0].trim(), messageInfo[1].trim());
+        } else {
+            return StringUtils.pair(fullMessage, "");
+        }
+    }
+
+    private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd'T'hh:mm:ss.SSSZ");
+
+    private static final String TEAMCITY_PREFIX = "##teamcity";
+    private static final String TEMPLATE_TEST_STARTED = TEAMCITY_PREFIX + "[testStarted timestamp = '%s' locationHint = '%s' captureStandardOutput = 'true' name = '%s']";
+    private static final String TEMPLATE_TEST_FAILED = TEAMCITY_PREFIX + "[testFailed timestamp = '%s' details = '%s' message = '%s' name = '%s' %s]";
+    private static final String TEMPLATE_TEST_FINISHED = TEAMCITY_PREFIX + "[testFinished timestamp = '%s' duration = '%s' name = '%s']";
+    private static final String TEMPLATE_ENTER_THE_MATRIX = TEAMCITY_PREFIX + "[enteredTheMatrix timestamp = '%s']";
+    private static final String TEMPLATE_TEST_SUITE_STARTED = TEAMCITY_PREFIX + "[testSuiteStarted timestamp = '%s' locationHint = 'file://%s' name = '%s']";
+    private static final String TEMPLATE_TEST_SUITE_FINISHED = TEAMCITY_PREFIX + "[testSuiteFinished timestamp = '%s' name = '%s']";
+
+}
+
+// Path: karate-core/src/main/java/com/intuit/karate/core/Channel.java
+/*
+ * The MIT License
+ *
+ * Copyright 2023 Karate Labs Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package com.intuit.karate.core;
+
+import java.util.Map;
+
+/**
+ *
+ * @author peter
+ */
+public interface Channel {
+    
+    void produce(ScenarioRuntime runtime);
+    
+    ChannelSession consume(ScenarioRuntime runtime);
+    
+    void register(ScenarioRuntime runtime, Map<String, Object> data);
+    
+}
+
+// Path: karate-core/src/main/java/com/intuit/karate/core/ChannelFactory.java
+/*
+ * The MIT License
+ *
+ * Copyright 2023 Karate Labs Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package com.intuit.karate.core;
+
+import java.util.Map;
+
+/**
+ *
+ * @author pthomas3
+ */
+public interface ChannelFactory {
+    
+    Channel create(ScenarioRuntime runtime, Map<String, Object> options);
+    
+}
+
+// Path: karate-core/src/main/java/com/intuit/karate/core/ChannelSession.java
+/*
+ * The MIT License
+ *
+ * Copyright 2023 Karate Labs Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package com.intuit.karate.core;
+
+/**
+ *
+ * @author peter
+ */
+public interface ChannelSession {
+    
+}
+
+// Path: karate-core/src/main/java/com/intuit/karate/core/ExamplesTable.java
+/*
+ * The MIT License
+ *
+ * Copyright 2022 Karate Labs Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package com.intuit.karate.core;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ *
+ * @author pthomas3
+ */
+public class ExamplesTable {
+
+    private final ScenarioOutline outline;
+    private final Table table;
+    private List<Tag> tags;
+
+    public ExamplesTable(ScenarioOutline outline, Table table) {
+        this.outline = outline;
+        this.table = table;
+        this.tags = new ArrayList();
+    }
+
+    public ScenarioOutline getOutline() {
+        return outline;
+    }
+
+    public List<Tag> getTags() {
+        return tags;
+    }
+
+    public void setTags(List<Tag> tags) {
+        this.tags = tags;
+    }
+
+    public Table getTable() {
+        return table;
+    }
+
+}
+
+// Path: karate-core/src/main/java/com/intuit/karate/core/FeatureSection.java
+/*
+ * The MIT License
+ *
+ * Copyright 2022 Karate Labs Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package com.intuit.karate.core;
+
+/**
+ *
+ * @author pthomas3
+ */
+public class FeatureSection {
+    
+    private int index;
+    private Scenario scenario;
+    private ScenarioOutline scenarioOutline;
+    
+    public int getLine() {
+        if (scenarioOutline != null) {
+            return scenarioOutline.getLine();
+        } else {
+            return scenario.getLine();
+        }
+    }
+
+    public int getIndex() {
+        return index;
+    }
+
+    public void setIndex(int index) {
+        this.index = index;
+    }        
+    
+    public boolean isOutline() {
+        return scenarioOutline != null;
+    }
+
+    public Scenario getScenario() {
+        return scenario;
+    }
+
+    public void setScenario(Scenario scenario) {
+        this.scenario = scenario;
+    }
+
+    public ScenarioOutline getScenarioOutline() {
+        return scenarioOutline;
+    }
+
+    public void setScenarioOutline(ScenarioOutline scenarioOutline) {
+        this.scenarioOutline = scenarioOutline;
+    }        
+    
+}
+
+// Path: karate-core/src/main/java/com/intuit/karate/core/ParallelProcessor.java
+/*
+ * The MIT License
+ *
+ * Copyright 2022 Karate Labs Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package com.intuit.karate.core;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ *
+ * @author pthomas3
+ */
+public abstract class ParallelProcessor<T> {
+
+    private static final Logger logger = LoggerFactory.getLogger(ParallelProcessor.class);
+
+    private final ExecutorService executor;
+    private final ExecutorService monitor;
+    private final Iterator<T> publisher;
+    private final List<CompletableFuture> futures = new ArrayList();
+
+    public ParallelProcessor(ExecutorService executor, Iterator<T> publisher, ExecutorService monitor) {
+        this.executor = executor;
+        this.publisher = publisher;
+        this.monitor = monitor;
+    }
+
+    private Runnable toRunnable(final CompletableFuture prevFuture, final T next, final CompletableFuture future) {
+        return () -> {
+            if (prevFuture != null) {
+                prevFuture.join();
+            }
+            try {
+                process(next);
+            } catch (Exception e) {
+                logger.error("[parallel] input item failed: {}", e.getMessage());
+            }
+            future.complete(Boolean.TRUE);
+        };
+    }
+
+    public void execute() {
+        CompletableFuture prevFuture = null;
+        while (publisher.hasNext()) {
+            final CompletableFuture future = new CompletableFuture();
+            futures.add(future);
+            T next = publisher.next();
+            boolean sync = shouldRunSynchronously(next);
+            executor.submit(toRunnable(prevFuture, next, future));
+            prevFuture = sync ? future : null;
+        }
+        final CompletableFuture[] futuresArray = futures.toArray(new CompletableFuture[futures.size()]);
+        monitor.submit(() -> {
+            CompletableFuture.allOf(futuresArray).join();
+            onComplete();
+        });
+    }
+
+    public boolean shouldRunSynchronously(T in) {
+        // parallel by default
+        // but allow a per work-item strategy
+        return false;
+    }
+
+    public abstract void process(T in);
+
+    public abstract void onComplete();
+
+}
+
+// Path: karate-core/src/main/java/com/intuit/karate/core/ParserErrorListener.java
+/*
+ * The MIT License
+ *
+ * Copyright 2022 Karate Labs Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package com.intuit.karate.core;
+
+import java.util.BitSet;
+import org.antlr.v4.runtime.ANTLRErrorListener;
+import org.antlr.v4.runtime.Parser;
+import org.antlr.v4.runtime.RecognitionException;
+import org.antlr.v4.runtime.Recognizer;
+import org.antlr.v4.runtime.atn.ATNConfigSet;
+import org.antlr.v4.runtime.dfa.DFA;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ *
+ * @author pthomas3
+ */
+public class ParserErrorListener implements ANTLRErrorListener {
+
+    private static final Logger logger = LoggerFactory.getLogger(FeatureParser.class);
+
+    private String message;
+    private int line = -1;
+    private int position = -1;
+    private Object offendingSymbol;
+
+    public boolean isFail() {
+        return message != null;
+    }
+
+    public String getMessage() {
+        return message;
+    }
+
+    public int getLine() {
+        return line;
+    }
+
+    public int getPosition() {
+        return position;
+    }
+
+    public Object offendingSymbol() {
+        return offendingSymbol;
+    }
+
+    @Override
+    public void syntaxError(Recognizer<?, ?> recognizer, Object offendingSymbol, int line, int position, String message, RecognitionException e) {
+        // logger.error("syntax error: {}", message);
+        this.message = message;
+        this.line = line;
+        this.position = position;
+        this.offendingSymbol = offendingSymbol;
+    }
+
+    @Override
+    public void reportAmbiguity(Parser recognizer, DFA dfa, int startIndex, int stopIndex, boolean exact, BitSet ambigAlts, ATNConfigSet configs) {
+//        if (logger.isTraceEnabled()) {
+//            logger.trace("reportAmbiguity: {} {} {} {} {} {} {}", recognizer, dfa, startIndex, stopIndex, exact, ambigAlts, configs);
+//        }
+    }
+
+    @Override
+    public void reportAttemptingFullContext(Parser recognizer, DFA dfa, int startIndex, int stopIndex, BitSet conflictingAlts, ATNConfigSet configs) {
+//        if (logger.isTraceEnabled()) {
+//            logger.trace("reportAttemptingFullContext: {} {} {} {} {} {}", recognizer, dfa, startIndex, stopIndex, conflictingAlts, configs);
+//        }
+    }
+
+    @Override
+    public void reportContextSensitivity(Parser recognizer, DFA dfa, int startIndex, int stopIndex, int prediction, ATNConfigSet configs) {
+//        if (logger.isTraceEnabled()) {
+//            logger.trace("reportContextSensitivity: {} {} {} {} {} {}", recognizer, dfa, startIndex, stopIndex, prediction, configs);
+//        }
+    }
+
+}
+
+// Path: karate-core/src/main/java/com/intuit/karate/core/PluginFactory.java
+/*
+ * The MIT License
+ *
+ * Copyright 2022 Karate Labs Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package com.intuit.karate.core;
+
+import java.util.Map;
+
+/**
+ *
+ * @author pthomas3
+ */
+public interface PluginFactory {
+    
+    Plugin create(ScenarioRuntime runtime, Map<String, Object> options);
+    
+}
+
+// Path: karate-core/src/main/java/com/intuit/karate/graal/JsList.java
+/*
+ * The MIT License
+ *
+ * Copyright 2022 Karate Labs Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package com.intuit.karate.graal;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.List;
+import java.util.ListIterator;
+import java.util.Set;
+import org.graalvm.polyglot.Value;
+import org.graalvm.polyglot.proxy.ProxyArray;
+
+/**
+ *
+ * @author pthomas3
+ */
+public class JsList implements ProxyArray, List {
+
+    public static final JsList EMPTY = new JsList(Collections.EMPTY_LIST);
+
+    private final List list;
+
+    public JsList(Collection collection) {
+        this(new ArrayList(collection));
+    }
+
+    public JsList(List list) {
+        this.list = list;
+    }
+
+    public List getList() {
+        return list;
+    }
+
+    @Override
+    public Object get(long index) {
+        return JsValue.fromJava(list.get((int) index));
+    }
+
+    @Override
+    public void set(long index, Value value) {
+        if (index >= list.size()) {
+            list.add(null); // support js push()
+        }
+        list.set((int) index, JsValue.toJava(value));
+    }
+
+    @Override
+    public long getSize() {
+        return list.size();
+    }
+
+    @Override
+    public boolean remove(long index) {
+        list.remove((int) index);
+        return true;
+    }
+
+    @Override
+    public String toString() {
+        return list.toString();
+    }
+    
+    //==========================================================================
+    //
+    @Override
+    public int size() {
+        return list.size();
+    }
+
+    @Override
+    public boolean isEmpty() {
+        return list.isEmpty();
+    }
+
+    @Override
+    public boolean contains(Object o) {
+        return list.contains(o);
+    }
+
+    @Override
+    public Iterator iterator() {
+        return list.iterator();
+    }
+
+    @Override
+    public Object[] toArray() {
+        return list.toArray();
+    }
+
+    @Override
+    public Object[] toArray(Object[] a) {
+        return list.toArray(a);
+    }
+
+    @Override
+    public boolean add(Object e) {
+        return list.add(e);
+    }
+
+    @Override
+    public boolean remove(Object o) {
+        return list.remove(o);
+    }
+
+    @Override
+    public boolean containsAll(Collection c) {
+        return list.containsAll(c);
+    }
+
+    @Override
+    public boolean addAll(Collection c) {
+        return list.addAll(c);
+    }
+
+    @Override
+    public boolean addAll(int index, Collection c) {
+        return list.addAll(index, c);
+    }
+
+    @Override
+    public boolean removeAll(Collection c) {
+        return list.removeAll(c);
+    }
+
+    @Override
+    public boolean retainAll(Collection c) {
+        return list.retainAll(c);
+    }
+
+    @Override
+    public void clear() {
+        list.clear();
+    }
+
+    @Override
+    public Object get(int index) {
+        return get(index);
+    }
+
+    @Override
+    public Object set(int index, Object element) {
+        return list.set(index, element);
+    }
+
+    @Override
+    public void add(int index, Object element) {
+        list.add(index, element);
+    }
+
+    @Override
+    public Object remove(int index) {
+        return list.remove(index);
+    }
+
+    @Override
+    public int indexOf(Object o) {
+        return list.indexOf(o);
+    }
+
+    @Override
+    public int lastIndexOf(Object o) {
+        return list.lastIndexOf(o);
+    }
+
+    @Override
+    public ListIterator listIterator() {
+        return list.listIterator();
+    }
+
+    @Override
+    public ListIterator listIterator(int index) {
+        return list.listIterator(index);
+    }
+
+    @Override
+    public List subList(int fromIndex, int toIndex) {
+        return list.subList(fromIndex, toIndex);
+    }
+
+}
+
+// Path: karate-core/src/main/java/com/intuit/karate/graal/JsMap.java
+/*
+ * The MIT License
+ *
+ * Copyright 2022 Karate Labs Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package com.intuit.karate.graal;
+
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Set;
+import org.graalvm.polyglot.Value;
+import org.graalvm.polyglot.proxy.ProxyObject;
+
+/**
+ *
+ * @author pthomas3
+ */
+public class JsMap implements ProxyObject, Map {
+
+    public static final JsMap EMPTY = new JsMap(Collections.EMPTY_MAP);
+
+    private final Map map;
+
+    public JsMap(Map map) {
+        this.map = map;
+    }
+
+    public Map getMap() {
+        return map;
+    }
+
+    @Override
+    public Object getMember(String key) {
+        return JsValue.fromJava(map.get(key));
+    }
+
+    @Override
+    public Object getMemberKeys() {
+        return new JsArray(map.keySet().toArray());
+    }
+
+    @Override
+    public boolean hasMember(String key) {
+        return map.containsKey(key);
+    }
+
+    @Override
+    public void putMember(String key, Value value) {
+        map.put(key, JsValue.toJava(value));
+    }
+
+    @Override
+    public boolean removeMember(String key) { // not supported by graal
+        return map.remove(key) != null;
+    }
+
+    @Override
+    public String toString() {
+        return map.toString();
+    }
+
+    //==========================================================================
+    //
+    @Override
+    public int size() {
+        return map.size();
+    }
+
+    @Override
+    public boolean isEmpty() {
+        return map.isEmpty();
+    }
+
+    @Override
+    public boolean containsKey(Object key) {
+        return map.containsKey(key);
+    }
+
+    @Override
+    public boolean containsValue(Object value) {
+        return map.containsValue(value);
+    }
+
+    @Override
+    public Object get(Object key) {
+        return map.get(key);
+    }
+
+    @Override
+    public Object put(Object key, Object value) {
+        return map.put(key, value);
+    }
+
+    @Override
+    public Object remove(Object key) {
+        return map.remove(key);
+    }
+
+    @Override
+    public void putAll(Map m) {
+        map.putAll(m);
+    }
+
+    @Override
+    public void clear() {
+        map.clear();
+    }
+
+    @Override
+    public Set keySet() {
+        return map.keySet();
+    }
+
+    @Override
+    public Collection values() {
+        return map.values();
+    }
+
+    @Override
+    public Set entrySet() {
+        return map.entrySet();
+    }
+
+}
+
+// Path: karate-core/src/main/java/com/intuit/karate/core/ScenarioBridge.java
+/*
+ * The MIT License
+ *
+ * Copyright 2022 Karate Labs Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+package com.intuit.karate.core;
+
+import com.intuit.karate.FileUtils;
+import com.intuit.karate.Json;
+import com.intuit.karate.JsonUtils;
+import com.intuit.karate.KarateException;
+import com.intuit.karate.Logger;
+import com.intuit.karate.Match;
+import com.intuit.karate.MatchStep;
+import com.intuit.karate.PerfContext;
+import com.intuit.karate.StringUtils;
+import com.intuit.karate.XmlUtils;
+import com.intuit.karate.graal.JsEngine;
+import com.intuit.karate.graal.JsFunction;
+import com.intuit.karate.graal.JsLambda;
+import com.intuit.karate.graal.JsList;
+import com.intuit.karate.graal.JsMap;
+import com.intuit.karate.graal.JsValue;
+import com.intuit.karate.http.HttpClient;
+import com.intuit.karate.http.HttpRequest;
+import com.intuit.karate.http.HttpRequestBuilder;
+import com.intuit.karate.http.ResourceType;
+import com.intuit.karate.http.WebSocketClient;
+import com.intuit.karate.http.WebSocketOptions;
+import com.intuit.karate.shell.Command;
+import java.io.File;
+import java.io.InputStream;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import org.graalvm.polyglot.Value;
+import org.graalvm.polyglot.proxy.ProxyExecutable;
+
+/**
+ *
+ * @author pthomas3
+ */
+public class ScenarioBridge implements PerfContext {
+
+    private final ScenarioEngine ENGINE;
+
+    protected ScenarioBridge(ScenarioEngine engine) {
+        ENGINE = engine;
+    }
+
+    public void abort() {
+        getEngine().setAborted(true);
+    }
+
+    public Object append(Value... vals) {
+        List list = new ArrayList();
+        JsList jsList = new JsList(list);
+        if (vals.length == 0) {
+            return jsList;
+        }
+        Value val = vals[0];
+        if (val.hasArrayElements()) {
+            list.addAll(val.as(List.class));
+        } else {
+            list.add(val.as(Object.class));
+        }
+        if (vals.length == 1) {
+            return jsList;
+        }
+        for (int i = 1; i < vals.length; i++) {
+            Value v = vals[i];
+            if (v.hasArrayElements()) {
+                list.addAll(v.as(List.class));
+            } else {
+                list.add(v.as(Object.class));
+            }
+        }
+        return jsList;
+    }
+
+    private Object appendToInternal(String varName, Value... vals) {
+        ScenarioEngine engine = getEngine();
+        Variable var = engine.vars.get(varName);
+        if (!var.isList()) {
+            return null;
+        }
+        List list = var.getValue();
+        for (Value v : vals) {
+            if (v.hasArrayElements()) {
+                list.addAll(v.as(List.class));
+            } else {
+                Object temp = v.as(Object.class);
+                list.add(temp);
+            }
+        }
+        engine.setVariable(varName, list);
+        return new JsList(list);
+    }
+
+    public Object appendTo(Value ref, Value... vals) {
+        if (ref.isString()) {
+            return appendToInternal(ref.asString(), vals);
+        }
+        List list;
+        if (ref.hasArrayElements()) {
+            list = new JsValue(ref).getAsList(); // make sure we unwrap the "original" list
+        } else {
+            list = new ArrayList();
+        }
+        for (Value v : vals) {
+            if (v.hasArrayElements()) {
+                list.addAll(v.as(List.class));
+            } else {
+                Object temp = v.as(Object.class);
+                list.add(temp);
+            }
+        }
+        return new JsList(list);
+    }
+
+    public Object call(String fileName) {
+        return call(false, fileName, null);
+    }
+
+    public Object call(String fileName, Value arg) {
+        return call(false, fileName, arg);
+    }
+
+    public Object call(boolean sharedScope, String fileName) {
+        return call(sharedScope, fileName, null);
+    }
+
+    public Object call(boolean sharedScope, String fileName, Value arg) {
+        ScenarioEngine engine = getEngine();
+        Variable called = new Variable(engine.fileReader.readFile(fileName));
+        Variable result = engine.call(called, arg == null ? null : new Variable(arg), sharedScope);
+        if (sharedScope) {
+            if (result.isMap()) {
+                engine.setVariables(result.getValue());
+            }
+        }
+        return JsValue.fromJava(result.getValue());
+    }
+
+    private static Object callSingleResult(ScenarioEngine engine, Object o) throws Exception {
+        if (o instanceof Exception) {
+            engine.logger.warn("callSingle() cached result is an exception");
+            throw (Exception) o;
+        }
+        // clone so that threads see the same data snapshot
+        // we also attach js functions
+        o = engine.JS.attachAll(o);
+        return JsValue.fromJava(o);
+    }
+
+    public Object callSingle(String fileName) throws Exception {
+        return callSingle(fileName, null);
+    }
+
+    public Object callSingle(String fileName, Value arg) throws Exception {
+        ScenarioEngine engine = getEngine();
+        final Map<String, Object> CACHE = engine.runtime.featureRuntime.suite.callSingleCache;
+        int minutes = engine.getConfig().getCallSingleCacheMinutes();
+        if ((minutes == 0) && CACHE.containsKey(fileName)) {
+            engine.logger.trace("callSingle cache hit: {}", fileName);
+            return callSingleResult(engine, CACHE.get(fileName));
+        }
+        long startTime = System.currentTimeMillis();
+        engine.logger.trace("callSingle waiting for lock: {}", fileName);
+        synchronized (CACHE) { // lock
+            if ((minutes == 0) && CACHE.containsKey(fileName)) { // retry
+                long endTime = System.currentTimeMillis() - startTime;
+                engine.logger.warn("this thread waited {} milliseconds for callSingle lock: {}", endTime, fileName);
+                return callSingleResult(engine, CACHE.get(fileName));
+            }
+            // this thread is the 'winner'
+            engine.logger.info(">> lock acquired, begin callSingle: {}", fileName);
+            Object result = null;
+            File cacheFile = null;
+            if (minutes > 0) {
+                String cleanedName = StringUtils.toIdString(fileName);
+                String cacheFileName = engine.getConfig().getCallSingleCacheDir() + File.separator + cleanedName + ".txt";
+                cacheFile = new File(cacheFileName);
+                long since = System.currentTimeMillis() - minutes * 60 * 1000;
+                if (cacheFile.exists()) {
+                    long lastModified = cacheFile.lastModified();
+                    if (lastModified > since) {
+                        String json = FileUtils.toString(cacheFile);
+                        result = JsonUtils.fromJson(json);
+                        engine.logger.info("callSingleCache hit: {}", cacheFile);
+                    } else {
+                        engine.logger.info("callSingleCache stale, last modified {} - is before {} (minutes: {})",
+                                lastModified, since, minutes);
+                    }
+                } else {
+                    engine.logger.info("callSingleCache file does not exist, will create: {}", cacheFile);
+                }
+            }
+            if (result == null) {
+                Variable called = new Variable(read(fileName));
+                Variable argVar;
+                if (arg == null || arg.isNull()) {
+                    argVar = null;
+                } else {
+                    argVar = new Variable(arg);
+                }
+                Variable resultVar;
+                try {
+                    resultVar = engine.call(called, argVar, false);
+                } catch (Exception e) {
+                    // don't retain any vestiges of graal-js 
+                    RuntimeException re = new RuntimeException(e.getMessage());
+                    // we do this so that an exception is also "cached"
+                    resultVar = new Variable(re); // will be thrown at end
+                    engine.logger.warn("callSingle() will cache an exception");
+                }
+                if (minutes > 0) { // cacheFile will be not null
+                    if (resultVar.isMapOrList()) {
+                        String json = resultVar.getAsString();
+                        FileUtils.writeToFile(cacheFile, json);
+                        engine.logger.info("callSingleCache write: {}", cacheFile);
+                    } else {
+                        engine.logger.warn("callSingleCache write failed, not json-like: {}", resultVar);
+                    }
+                }
+                result = resultVar.getValue();
+            }
+            CACHE.put(fileName, result);
+...

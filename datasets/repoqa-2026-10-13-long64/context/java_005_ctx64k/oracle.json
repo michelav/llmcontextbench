@@ -1,0 +1,15 @@
+{
+  "baseId": "java_005",
+  "endByte": 7747,
+  "endLine": 201,
+  "instanceId": "java_005_ctx64k",
+  "language": "java",
+  "needleName": "removeSingleQuote",
+  "normalizedLanguage": "java",
+  "path": "src/main/java/com/microsoft/sqlserver/jdbc/SQLServerBulkBatchInsertRecord.java",
+  "repo": "microsoft/mssql-jdbc",
+  "sequence": 5,
+  "startByte": 7570,
+  "startLine": 197,
+  "targetFunction": "private String removeSingleQuote(String s) {\n        int len = s.length();\n        return (s.charAt(0) == '\\'' && s.charAt(len - 1) == '\\'') ? s.substring(1, len - 1) : s;\n    }"
+}

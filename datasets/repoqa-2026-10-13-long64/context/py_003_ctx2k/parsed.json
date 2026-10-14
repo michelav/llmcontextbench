@@ -1,0 +1,215 @@
+{
+  "context_builder": "repoqa-native",
+  "context_type": "repoqa_structured_code_context",
+  "files": [
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/loader/prefetch.py",
+      "symbols": [
+        {
+          "children": [
+            {
+              "children": [],
+              "code": "def maybe_init_stream(self) -> None:\n        if self.is_gpu:\n            self.stream = self.module.Stream()\n            self.stream_context = partial(\n                self.module.stream,\n                stream=self.stream,\n            )",
+              "documentation": null,
+              "end_line": 44,
+              "kind": "method",
+              "name": "maybe_init_stream",
+              "parent_id": "torch_geometric/loader/prefetch.py#class:DeviceHelper:12",
+              "parent_name": "DeviceHelper",
+              "qualified_name": "DeviceHelper.maybe_init_stream",
+              "signature": "def maybe_init_stream(self) -> None",
+              "start_line": 38,
+              "symbol_id": "torch_geometric/loader/prefetch.py#method:DeviceHelper.maybe_init_stream:38"
+            },
+            {
+              "children": [],
+              "code": "def maybe_wait_stream(self) -> None:\n        if self.stream is not None:\n            self.module.current_stream().wait_stream(self.stream)",
+              "documentation": null,
+              "end_line": 48,
+              "kind": "method",
+              "name": "maybe_wait_stream",
+              "parent_id": "torch_geometric/loader/prefetch.py#class:DeviceHelper:12",
+              "parent_name": "DeviceHelper",
+              "qualified_name": "DeviceHelper.maybe_wait_stream",
+              "signature": "def maybe_wait_stream(self) -> None",
+              "start_line": 46,
+              "symbol_id": "torch_geometric/loader/prefetch.py#method:DeviceHelper.maybe_wait_stream:46"
+            }
+          ],
+          "code": null,
+          "documentation": null,
+          "end_line": 48,
+          "kind": "class",
+          "name": "DeviceHelper",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "DeviceHelper",
+          "signature": null,
+          "start_line": 12,
+          "symbol_id": "torch_geometric/loader/prefetch.py#class:DeviceHelper:12"
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "code": "def __init__(\n        self,\n        loader: DataLoader,\n        device: Optional[torch.device] = None,\n    ):\n        self.loader = loader\n        self.device_helper = DeviceHelper(device)",
+              "documentation": null,
+              "end_line": 66,
+              "kind": "method",
+              "name": "__init__",
+              "parent_id": "torch_geometric/loader/prefetch.py#class:PrefetchLoader:51",
+              "parent_name": "PrefetchLoader",
+              "qualified_name": "PrefetchLoader.__init__",
+              "signature": "def __init__(\n        self,\n        loader: DataLoader,\n        device: Optional[torch.device] = None,\n    )",
+              "start_line": 60,
+              "symbol_id": "torch_geometric/loader/prefetch.py#method:PrefetchLoader.__init__:60"
+            },
+            {
+              "children": [],
+              "code": "def non_blocking_transfer(self, batch: Any) -> Any:\n        if not self.device_helper.is_gpu:\n            return batch\n        if isinstance(batch, (list, tuple)):\n            return [self.non_blocking_transfer(v) for v in batch]\n        if isinstance(batch, dict):\n            return {k: self.non_blocking_transfer(v) for k, v in batch.items()}\n\n        batch = batch.pin_memory(self.device_helper.device)\n        return batch.to(self.device_helper.device, non_blocking=True)",
+              "documentation": null,
+              "end_line": 77,
+              "kind": "method",
+              "name": "non_blocking_transfer",
+              "parent_id": "torch_geometric/loader/prefetch.py#class:PrefetchLoader:51",
+              "parent_name": "PrefetchLoader",
+              "qualified_name": "PrefetchLoader.non_blocking_transfer",
+              "signature": "def non_blocking_transfer(self, batch: Any) -> Any",
+              "start_line": 68,
+              "symbol_id": "torch_geometric/loader/prefetch.py#method:PrefetchLoader.non_blocking_transfer:68"
+            },
+            {
+              "children": [],
+              "code": "def __iter__(self) -> Any:\n        first = True\n        self.device_helper.maybe_init_stream()\n\n        batch = None\n        for next_batch in self.loader:\n\n            with self.device_helper.stream_context():\n                next_batch = self.non_blocking_transfer(next_batch)\n\n            if not first:\n                yield batch\n            else:\n                first = False\n\n            self.device_helper.maybe_wait_stream()\n\n            batch = next_batch\n\n        yield batch",
+              "documentation": null,
+              "end_line": 98,
+              "kind": "method",
+              "name": "__iter__",
+              "parent_id": "torch_geometric/loader/prefetch.py#class:PrefetchLoader:51",
+              "parent_name": "PrefetchLoader",
+              "qualified_name": "PrefetchLoader.__iter__",
+              "signature": "def __iter__(self) -> Any",
+              "start_line": 79,
+              "symbol_id": "torch_geometric/loader/prefetch.py#method:PrefetchLoader.__iter__:79"
+            },
+            {
+              "children": [],
+              "code": "def __len__(self) -> int:\n        return len(self.loader)",
+              "documentation": null,
+              "end_line": 101,
+              "kind": "method",
+              "name": "__len__",
+              "parent_id": "torch_geometric/loader/prefetch.py#class:PrefetchLoader:51",
+              "parent_name": "PrefetchLoader",
+              "qualified_name": "PrefetchLoader.__len__",
+              "signature": "def __len__(self) -> int",
+              "start_line": 100,
+              "symbol_id": "torch_geometric/loader/prefetch.py#method:PrefetchLoader.__len__:100"
+            },
+            {
+              "children": [],
+              "code": "def __repr__(self) -> str:\n        return f'{self.__class__.__name__}({self.loader})'",
+              "documentation": null,
+              "end_line": 104,
+              "kind": "method",
+              "name": "__repr__",
+              "parent_id": "torch_geometric/loader/prefetch.py#class:PrefetchLoader:51",
+              "parent_name": "PrefetchLoader",
+              "qualified_name": "PrefetchLoader.__repr__",
+              "signature": "def __repr__(self) -> str",
+              "start_line": 103,
+              "symbol_id": "torch_geometric/loader/prefetch.py#method:PrefetchLoader.__repr__:103"
+            }
+          ],
+          "code": "class PrefetchLoader:\n    r\"\"\"A GPU prefetcher class for asynchronously transferring data of a\n    :class:`torch.utils.data.DataLoader` from host memory to device memory.\n\n    Args:\n        loader (torch.utils.data.DataLoader): The data loader.\n        device (torch.device, optional): The device to load the data to.\n            (default: :obj:`None`)\n    \"\"\"\n    def __init__(\n        self,\n        loader: DataLoader,\n        device: Optional[torch.device] = None,\n    ):\n        self.loader = loader\n        self.device_helper = DeviceHelper(device)\n\n    def non_blocking_transfer(self, batch: Any) -> Any:\n        if not self.device_helper.is_gpu:\n            return batch\n        if isinstance(batch, (list, tuple)):\n            return [self.non_blocking_transfer(v) for v in batch]\n        if isinstance(batch, dict):\n            return {k: self.non_blocking_transfer(v) for k, v in batch.items()}\n\n        batch = batch.pin_memory(self.device_helper.device)\n        return batch.to(self.device_helper.device, non_blocking=True)\n\n    def __iter__(self) -> Any:\n        first = True\n        self.device_helper.maybe_init_stream()\n\n        batch = None\n        for next_batch in self.loader:\n\n            with self.device_helper.stream_context():\n                next_batch = self.non_blocking_transfer(next_batch)\n\n            if not first:\n                yield batch\n            else:\n                first = False\n\n            self.device_helper.maybe_wait_stream()\n\n            batch = next_batch\n\n        yield batch\n\n    def __len__(self) -> int:\n        return len(self.loader)\n\n    def __repr__(self) -> str:\n        return f'{self.__class__.__name__}({self.loader})'",
+          "documentation": "A GPU prefetcher class for asynchronously transferring data of a\n:class:`torch.utils.data.DataLoader` from host memory to device memory.\n\nArgs:\n    loader (torch.utils.data.DataLoader): The data loader.\n    device (torch.device, optional): The device to load the data to.\n        (default: :obj:`None`)",
+          "end_line": 104,
+          "kind": "class",
+          "name": "PrefetchLoader",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "PrefetchLoader",
+          "signature": "class PrefetchLoader",
+          "start_line": 51,
+          "symbol_id": "torch_geometric/loader/prefetch.py#class:PrefetchLoader:51"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/loader/random_node_loader.py",
+      "symbols": [
+        {
+          "children": [
+            {
+              "children": [],
+              "code": "def __init__(\n        self,\n        data: Union[Data, HeteroData],\n        num_parts: int,\n        **kwargs,\n    ):\n        self.data = data\n        self.num_parts = num_parts\n\n        if isinstance(data, HeteroData):\n            edge_index, node_dict, edge_dict = to_homogeneous_edge_index(data)\n            self.node_dict, self.edge_dict = node_dict, edge_dict\n        else:\n            edge_index = data.edge_index\n\n        self.edge_index = edge_index\n        self.num_nodes = data.num_nodes\n\n        super().__init__(\n            range(self.num_nodes),\n            batch_size=math.ceil(self.num_nodes / num_parts),\n            collate_fn=self.collate_fn,\n            **kwargs,\n        )",
+              "documentation": null,
+              "end_line": 54,
+              "kind": "method",
+              "name": "__init__",
+              "parent_id": "torch_geometric/loader/random_node_loader.py#class:RandomNodeLoader:11",
+              "parent_name": "RandomNodeLoader",
+              "qualified_name": "RandomNodeLoader.__init__",
+              "signature": "def __init__(\n        self,\n        data: Union[Data, HeteroData],\n        num_parts: int,\n        **kwargs,\n    )",
+              "start_line": 31,
+              "symbol_id": "torch_geometric/loader/random_node_loader.py#method:RandomNodeLoader.__init__:31"
+            },
+            {
+              "children": [],
+              "code": "def collate_fn(self, index):\n        if not isinstance(index, Tensor):\n            index = torch.tensor(index)\n\n        if isinstance(self.data, Data):\n            return self.data.subgraph(index)\n\n        elif isinstance(self.data, HeteroData):\n            node_dict = {\n                key: index[(index >= start) & (index < end)] - start\n                for key, (start, end) in self.node_dict.items()\n            }\n            return self.data.subgraph(node_dict)",
+              "documentation": null,
+              "end_line": 68,
+              "kind": "method",
+              "name": "collate_fn",
+              "parent_id": "torch_geometric/loader/random_node_loader.py#class:RandomNodeLoader:11",
+              "parent_name": "RandomNodeLoader",
+              "qualified_name": "RandomNodeLoader.collate_fn",
+              "signature": "def collate_fn(self, index)",
+              "start_line": 56,
+              "symbol_id": "torch_geometric/loader/random_node_loader.py#method:RandomNodeLoader.collate_fn:56"
+            }
+          ],
+          "code": "class RandomNodeLoader(torch.utils.data.DataLoader):\n    r\"\"\"A data loader that randomly samples nodes within a graph and returns\n    their induced subgraph.\n\n    .. note::\n\n        For an example of using\n        :class:`~torch_geometric.loader.RandomNodeLoader`, see\n        `examples/ogbn_proteins_deepgcn.py\n        <https://github.com/pyg-team/pytorch_geometric/blob/master/examples/\n        ogbn_proteins_deepgcn.py>`_.\n\n    Args:\n        data (torch_geometric.data.Data or torch_geometric.data.HeteroData):\n            The :class:`~torch_geometric.data.Data` or\n            :class:`~torch_geometric.data.HeteroData` graph object.\n        num_parts (int): The number of partitions.\n        **kwargs (optional): Additional arguments of\n            :class:`torch.utils.data.DataLoader`, such as :obj:`num_workers`.\n    \"\"\"\n    def __init__(\n        self,\n        data: Union[Data, HeteroData],\n        num_parts: int,\n        **kwargs,\n    ):\n        self.data = data\n        self.num_parts = num_parts\n\n        if isinstance(data, HeteroData):\n            edge_index, node_dict, edge_dict = to_homogeneous_edge_index(data)\n            self.node_dict, self.edge_dict = node_dict, edge_dict\n        else:\n            edge_index = data.edge_index\n\n        self.edge_index = edge_index\n        self.num_nodes = data.num_nodes\n\n        super().__init__(\n            range(self.num_nodes),\n            batch_size=math.ceil(self.num_nodes / num_parts),\n            collate_fn=self.collate_fn,\n            **kwargs,\n        )\n\n    def collate_fn(self, index):\n        if not isinstance(index, Tensor):\n            index = torch.tensor(index)\n\n        if isinstance(self.data, Data):\n            return self.data.subgraph(index)\n\n        elif isinstance(self.data, HeteroData):\n            node_dict = {\n                key: index[(index >= start) & (index < end)] - start\n                for key, (start, end) in self.node_dict.items()\n            }\n            return self.data.subgraph(node_dict)",
+          "documentation": "A data loader that randomly samples nodes within a graph and returns\ntheir induced subgraph.\n\n.. note::\n\n    For an example of using\n    :class:`~torch_geometric.loader.RandomNodeLoader`, see\n    `examples/ogbn_proteins_deepgcn.py\n    <https://github.com/pyg-team/pytorch_geometric/blob/master/examples/\n    ogbn_proteins_deepgcn.py>`_.\n\nArgs:\n    data (torch_geometric.data.Data or torch_geometric.data.HeteroData):\n        The :class:`~torch_geometric.data.Data` or\n        :class:`~torch_geometric.data.HeteroData` graph object.\n    num_parts (int): The number of partitions.\n    **kwargs (optional): Additional arguments of\n        :class:`torch.utils.data.DataLoader`, such as :obj:`num_workers`.",
+          "end_line": 68,
+          "kind": "class",
+          "name": "RandomNodeLoader",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "RandomNodeLoader",
+          "signature": "class RandomNodeLoader(torch.utils.data.DataLoader)",
+          "start_line": 11,
+          "symbol_id": "torch_geometric/loader/random_node_loader.py#class:RandomNodeLoader:11"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/loader/shadow.py",
+      "symbols": [],
+      "unparsed_code": "import copy\nfrom typing import Optional\n\nimport torch\nfrom torch import Tensor\n\nfrom torch_geometric.data import Batch, Data\nfrom torch_geometric.typing import WITH_TORCH_SPARSE, SparseTensor\n\n\nclass ShaDowKHopSampler(torch.utils.data.DataLoader):\n    r\"\"\"The ShaDow :math:`k`-hop sampler from the `\"Decoupling the Depth and\n    Scope of Graph Neural Networks\" <https://arxiv.org/abs/2201.07858>`_ paper.\n    Given a graph in a :obj:`data` object, the sampler will create shallow,\n    localized subgraphs.\n    A deep GNN on this local graph then smooths the informative local signals.\n\n    .. note::\n\n        For an example of using :class:`ShaDowKHopSampler`, see\n        `examples/shadow.py <https://github.com/pyg-team/\n        pytorch_geometric/blob/master/examples/shadow.py>`_.\n\n    Args:\n        data (torch_geometric.data.Data): The graph data object.\n        depth (int): The depth/number of hops of the localized subgraph.\n        num_neighbors (int): The number of neighbors to sample for each node in\n            each hop.\n        node_idx (LongTensor or BoolTensor, optional): The nodes that should be\n            considered for creating mini-batches.\n            If set to :obj:`None`, all nodes will be\n            considered.\n        replace (bool, optional): If set to :obj:`True`, will sample neighbors\n            with replacement. (default: :obj:`False`)\n        **kwargs (optional): Additional arguments of\n            :class:`torch.utils.data.DataLoader`, such as :obj:`batch_size` or\n            :obj:`num_workers`.\n    \"\"\"\n    def __init__(self, data: Data, depth: int, num_neighbors: int,\n                 node_idx: Optional[Tensor] = None, replace: bool = False,\n                 **kwargs):\n\n        if not WITH_TORCH_SPARSE:\n            raise ImportError(\n                f\"'{self.__class__.__name__}' requires 'torch-sparse'\")\n\n        self.data = copy.copy(data)\n        self.depth = depth\n        self.num_neighbors = num_neighbors\n        self.replace = replace\n\n        if data.edge_index is not None:\n..."
+    }
+  ],
+  "metadata": {
+    "actual_code_context_tokens": 1996,
+    "base_id": "py_003",
+    "instance_id": "py_003_ctx2k",
+    "language": "python",
+    "normalized_language": "python",
+    "position_ratio": 0.05,
+    "requested_context_tokens": 2048,
+    "sequence": 3
+  },
+  "repository": "pyg-team/pytorch_geometric",
+  "workspace_id": "py_003_ctx2k"
+}

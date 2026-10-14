@@ -1,0 +1,21 @@
+{
+  "base_id": "py_004",
+  "code_context_ntokens": 64517,
+  "description": "1. **Purpose**: The function is designed to randomly select a subset of existing edges from a graph, which can be used to train models that require a sample of positive interactions.\n2. **Input**: It takes a tensor representing the indices of edges in a graph.\n3. **Output**: It returns a tensor containing a subset of the input edge indices, representing the sampled positive edges.\n4. **Procedure**: The function first applies a dropout to the edges based on a predefined sampling ratio, effectively removing a certain percentage of edges randomly. The remaining edges are then output as the sampled positive edges, which are used during the training phase to compare against negative samples.",
+  "end_byte": 11100,
+  "end_line": 283,
+  "instance_id": "py_004_ctx64k",
+  "language": "python",
+  "needle_name": "positive_sampling",
+  "needle_token_end": 9709,
+  "needle_token_start": 9635,
+  "normalized_language": "python",
+  "path": "torch_geometric/nn/conv/supergat_conv.py",
+  "position_ratio": 0.15,
+  "repo": "pyg-team/pytorch_geometric",
+  "repoqa_description": "Function Description:1. **Purpose**: The function is designed to randomly select a subset of existing edges from a graph, which can be used to train models that require a sample of positive interactions.\n2. **Input**: It takes a tensor representing the indices of edges in a graph.\n3. **Output**: It returns a tensor containing a subset of the input edge indices, representing the sampled positive edges.\n4. **Procedure**: The function first applies a dropout to the edges based on a predefined sampling ratio, effectively removing a certain percentage of edges randomly. The remaining edges are then output as the sampled positive edges, which are used during the training phase to compare against negative samples.",
+  "requested_context_tokens": 65536,
+  "sequence": 4,
+  "start_byte": 10822,
+  "start_line": 278
+}

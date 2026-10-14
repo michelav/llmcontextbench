@@ -4,6 +4,8 @@ from __future__ import annotations
 import argparse
 import ast
 import gzip
+import hashlib
+from importlib.metadata import distribution
 import json
 import re
 import shutil
@@ -15,6 +17,17 @@ from typing import Any
 DEFAULT_DATASET_ID = "ctxbench/repoqa"
 DEFAULT_TASK_ID = "snf_retrieve_function"
 DEFAULT_VALIDATION_TYPE = "repoqa-scorer"
+LONG64_VERSION = "2026-10-13-long64.1"
+LONG64_SIZES = [2048, 4096, 8192, 16384, 32768, 65536]
+LONG64_REPOQA_REVISION = "ae876deb1365dbf5a15b0533723c8ed123eee586"
+LONG64_TOKENIZER_REVISION = "22cb240e0292b0b5ab4c17ccd97aa3a2f799cbed"
+# Ordered repository/needle indices are part of the versioned selection contract.
+LONG64_SELECTION = {
+    "java": (("karatelabs/karate", (0, 1)), ("microsoft/mssql-jdbc", (0, 1, 2))),
+    "python": (("locustio/locust", (0, 1)), ("pyg-team/pytorch_geometric", (0, 1, 2))),
+    "rust": (("rust-lang/cargo", (1, 3)), ("AFLplusplus/LibAFL", (0, 1, 2))),
+    "typescript": (("date-fns/date-fns", (0, 1)), ("langchain-ai/langchainjs", (0, 1, 2))),
+}
 
 TASK_STATEMENT = (
     "Based on the function description and code context, retrieve and repeat "
@@ -141,23 +154,29 @@ def main() -> int:
     context_sizes = normalize_context_sizes(args.context_tokens)
     requested_languages = normalize_requested_languages(args.language)
 
+    if args.selection_profile == "long64":
+        if args.version != LONG64_VERSION or context_sizes != LONG64_SIZES:
+            raise SystemExit(f"long64 requires version {LONG64_VERSION} and all six ordered context sizes")
+        if args.language or args.max_base_instances is not None or args.clean_comments != "none":
+            raise SystemExit("long64 selection fixes languages, targets, and comment mode")
+        if not args.input or not args.compress_raw or args.force:
+            raise SystemExit("long64 requires --input, --compress-raw, and immutable output (no --force)")
+        verify_long64_dependencies()
     recreate_output_dir(output_root, force=args.force)
     dataset = load_repoqa_dataset(args.input)
 
     (output_root / "raw").mkdir(parents=True, exist_ok=True)
     (output_root / "context").mkdir(parents=True, exist_ok=True)
 
-    raw_file = write_raw_copy(
-        dataset=dataset,
-        output_root=output_root,
-        version=args.version,
-        compress=args.compress_raw,
-    )
-    base_needles = select_base_needles(
+    raw_file = (copy_raw_archive(Path(args.input), output_root, args.version)
+                if args.selection_profile == "long64" else write_raw_copy(
+                    dataset=dataset, output_root=output_root, version=args.version,
+                    compress=args.compress_raw))
+    base_needles = (select_long64_needles(dataset) if args.selection_profile == "long64" else select_base_needles(
         dataset=dataset,
         requested_languages=requested_languages,
         max_base_instances_per_language=args.max_base_instances,
-    )
+    ))
     if not base_needles:
         raise SystemExit("No RepoQA base needles were selected. Check input data and filters.")
 
@@ -168,6 +187,13 @@ def main() -> int:
     )
     if not prepared:
         raise SystemExit("No RepoQA instances were generated.")
+    if args.selection_profile == "long64":
+        if len(base_needles) != 20 or len(prepared) != 120:
+            raise ValueError("long64 requires 20 targets and 120 instances")
+        short = [p.instance_id for p in prepared if p.requested_context_tokens == 65536
+                 and (p.code_context_ntokens is None or p.code_context_ntokens < 0.95 * 65536)]
+        if short:
+            raise ValueError(f"64k contexts below 95% of budget: {short}")
 
     write_manifest(
         output_root=output_root,
@@ -180,6 +206,9 @@ def main() -> int:
         instance_count=len(prepared),
         validation_threshold=args.validation_threshold,
         ignore_comments=args.ignore_comments,
+        selection_profile=args.selection_profile,
+        base_needles=base_needles,
+        input_path=args.input,
     )
     write_dataset_instructions(output_root)
     write_tasks_json(
@@ -227,6 +256,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", required=True, help="Output LLMContextBench dataset root, e.g. datasets/repoqa.")
     parser.add_argument("--dataset-id", default=DEFAULT_DATASET_ID)
     parser.add_argument("--version", default="2024-06-23-experimental.1")
+    parser.add_argument("--selection-profile", choices=["default", "long64"], default="default")
     parser.add_argument(
         "--context-tokens",
         type=int,
@@ -360,6 +390,52 @@ def write_raw_copy(*, dataset: dict[str, Any], output_root: Path, version: str, 
     else:
         write_json(raw_path, dataset)
     return f"raw/{raw_name}"
+
+
+def copy_raw_archive(source: Path, output_root: Path, version: str) -> str:
+    if source.suffix != ".gz":
+        raise ValueError("long64 source must be the existing compressed raw archive")
+    name = f"raw/repoqa-{version}.json.gz"
+    shutil.copyfile(source, output_root / name)
+    return name
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_long64_dependencies() -> None:
+    from huggingface_hub import try_to_load_from_cache
+
+    direct_url = json.loads(distribution("repoqa").read_text("direct_url.json") or "{}")
+    revision = direct_url.get("vcs_info", {}).get("commit_id")
+    tokenizer_path = try_to_load_from_cache("codellama/CodeLlama-7b-Instruct-hf", "tokenizer.model")
+    tokenizer_revision = Path(tokenizer_path).parent.name if isinstance(tokenizer_path, str) else None
+    if revision != LONG64_REPOQA_REVISION or tokenizer_revision != LONG64_TOKENIZER_REVISION:
+        raise RuntimeError("long64 requires the pinned RepoQA commit and cached CodeLlama tokenizer revision")
+
+
+def select_long64_needles(dataset: dict[str, Any]) -> list[BaseNeedle]:
+    selected = []
+    for language, repositories in LONG64_SELECTION.items():
+        available = {repo.get("repo"): repo for repo in dataset[language]}
+        for repo_name, indices in repositories:
+            if repo_name not in available:
+                raise ValueError(f"missing long64 source repository: {repo_name}")
+            repo = available[repo_name]
+            for index in indices:
+                needle = repo["needles"][index]
+                if not all(needle.get(key) for key in ("name", "path", "description")) or needle["path"] not in repo["content"]:
+                    raise ValueError(f"invalid long64 needle: {repo_name}[{index}]")
+                sequence = 1 + sum(base.normalized_language == language for base in selected)
+                selected.append(BaseNeedle(language, language, sequence,
+                                           make_base_id(language=language, sequence=sequence),
+                                           repo_name, repo, needle, index, len(repo["needles"])))
+    return selected
 
 
 def select_base_needles(
@@ -644,7 +720,27 @@ def write_manifest(
     instance_count: int,
     validation_threshold: float,
     ignore_comments: bool,
+    selection_profile: str = "default",
+    base_needles: list[BaseNeedle] | None = None,
+    input_path: str | None = None,
 ) -> None:
+    provenance = {}
+    if selection_profile == "long64":
+        raw_path = output_root / raw_file
+        provenance = {
+            "selectionProfile": selection_profile,
+            "selection": [{"baseId": base.base_id, "language": base.normalized_language,
+                           "repository": base.repo_name, "needleIndex": base.needle_index,
+                           "needleName": base.needle_raw["name"], "path": base.needle_raw["path"]}
+                          for base in base_needles or []],
+            "sourceSha256": sha256_file(raw_path),
+            "generatorSha256": sha256_file(Path(__file__)),
+            "repoqaRevision": LONG64_REPOQA_REVISION,
+            "tokenizer": {"model": "codellama/CodeLlama-7b-Instruct-hf",
+                          "revision": LONG64_TOKENIZER_REVISION,
+                          "countMethod": "repoqa-native-code_context_ntokens"},
+            "sourceArchive": Path(input_path).name if input_path else None,
+        }
     write_json(
         output_root / "ctxbench.dataset.json",
         {
@@ -662,6 +758,7 @@ def write_manifest(
                 "baseNeedles": base_count,
                 "instances": instance_count,
                 "idScheme": "<language>_<sequence>_ctx<size>",
+                **provenance,
             },
             "validation": {
                 "type": DEFAULT_VALIDATION_TYPE,

@@ -1,0 +1,21 @@
+{
+  "base_id": "rs_002",
+  "code_context_ntokens": 32572,
+  "description": "1. **Purpose**: The function is designed to optimize and adjust a graph of build units by sharing host dependencies where possible, and applying specific transformations to units based on the entire graph's context. This helps in managing dependencies that might conflict due to different required features or compile kinds, and ensures efficient compilation by reducing redundancy.\n\n2. **Input**: The function takes several parameters including an interner for units, the original graph of units, an array of root units, an array of units that need to be scraped, an optional compile kind to transform target dependencies to host dependencies, and target data containing information about the Rust compiler version.\n\n3. **Output**: It returns a tuple containing an updated list of root units, an updated list of units that need scraping, and the newly constructed unit graph which has been optimized and adjusted.\n\n4. **Procedure**: \n   - Initializes a new, empty graph and a memoization map to track already processed units.\n   - Iterates over the root units, transforming each by potentially sharing dependencies and adjusting compile kinds as specified, updating the new graph accordingly.\n   - Ensures that units which require scraping but were not attached as dependencies in the original graph traversal are included by fetching them from the memoization map.\n   - The result is a new graph where shared dependencies are merged safely, compile kinds are adjusted where applicable, and units are optimized for compilation without unnecessary redundancy or conflicts.",
+  "end_byte": 23346,
+  "end_line": 609,
+  "instance_id": "rs_002_ctx32k",
+  "language": "rust",
+  "needle_name": "rebuild_unit_graph_shared",
+  "needle_token_end": 11572,
+  "needle_token_start": 11215,
+  "normalized_language": "rust",
+  "path": "src/cargo/ops/cargo_compile/mod.rs",
+  "position_ratio": 0.35,
+  "repo": "rust-lang/cargo",
+  "repoqa_description": "Function Description:1. **Purpose**: The function is designed to optimize and adjust a graph of build units by sharing host dependencies where possible, and applying specific transformations to units based on the entire graph's context. This helps in managing dependencies that might conflict due to different required features or compile kinds, and ensures efficient compilation by reducing redundancy.\n\n2. **Input**: The function takes several parameters including an interner for units, the original graph of units, an array of root units, an array of units that need to be scraped, an optional compile kind to transform target dependencies to host dependencies, and target data containing information about the Rust compiler version.\n\n3. **Output**: It returns a tuple containing an updated list of root units, an updated list of units that need scraping, and the newly constructed unit graph which has been optimized and adjusted.\n\n4. **Procedure**: \n   - Initializes a new, empty graph and a memoization map to track already processed units.\n   - Iterates over the root units, transforming each by potentially sharing dependencies and adjusting compile kinds as specified, updating the new graph accordingly.\n   - Ensures that units which require scraping but were not attached as dependencies in the original graph traversal are included by fetching them from the memoization map.\n   - The result is a new graph where shared dependencies are merged safely, compile kinds are adjusted where applicable, and units are optimized for compilation without unnecessary redundancy or conflicts.",
+  "requested_context_tokens": 32768,
+  "sequence": 2,
+  "start_byte": 22129,
+  "start_line": 573
+}

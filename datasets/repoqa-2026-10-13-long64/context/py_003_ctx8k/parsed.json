@@ -1,0 +1,486 @@
+{
+  "context_builder": "repoqa-native",
+  "context_type": "repoqa_structured_code_context",
+  "files": [
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/loader/prefetch.py",
+      "symbols": [
+        {
+          "children": [
+            {
+              "children": [],
+              "code": "def __init__(self, device: Optional[torch.device] = None):\n        with_cuda = torch.cuda.is_available()\n        with_xpu = torch.xpu.is_available() if WITH_IPEX else False\n\n        if device is None:\n            if with_cuda:\n                device = 'cuda'\n            elif with_xpu:\n                device = 'xpu'\n            else:\n                device = 'cpu'\n\n        self.device = torch.device(device)\n        self.is_gpu = self.device.type in ['cuda', 'xpu']\n\n        if ((self.device.type == 'cuda' and not with_cuda)\n                or (self.device.type == 'xpu' and not with_xpu)):\n            warnings.warn(f\"Requested device '{self.device.type}' is not \"\n                          f\"available, falling back to CPU\")\n            self.device = torch.device('cpu')\n\n        self.stream = None\n        self.stream_context = nullcontext\n        self.module = getattr(torch, self.device.type) if self.is_gpu else None",
+              "documentation": null,
+              "end_line": 36,
+              "kind": "method",
+              "name": "__init__",
+              "parent_id": "torch_geometric/loader/prefetch.py#class:DeviceHelper:12",
+              "parent_name": "DeviceHelper",
+              "qualified_name": "DeviceHelper.__init__",
+              "signature": "def __init__(self, device: Optional[torch.device] = None)",
+              "start_line": 13,
+              "symbol_id": "torch_geometric/loader/prefetch.py#method:DeviceHelper.__init__:13"
+            },
+            {
+              "children": [],
+              "code": "def maybe_init_stream(self) -> None:\n        if self.is_gpu:\n            self.stream = self.module.Stream()\n            self.stream_context = partial(\n                self.module.stream,\n                stream=self.stream,\n            )",
+              "documentation": null,
+              "end_line": 44,
+              "kind": "method",
+              "name": "maybe_init_stream",
+              "parent_id": "torch_geometric/loader/prefetch.py#class:DeviceHelper:12",
+              "parent_name": "DeviceHelper",
+              "qualified_name": "DeviceHelper.maybe_init_stream",
+              "signature": "def maybe_init_stream(self) -> None",
+              "start_line": 38,
+              "symbol_id": "torch_geometric/loader/prefetch.py#method:DeviceHelper.maybe_init_stream:38"
+            },
+            {
+              "children": [],
+              "code": "def maybe_wait_stream(self) -> None:\n        if self.stream is not None:\n            self.module.current_stream().wait_stream(self.stream)",
+              "documentation": null,
+              "end_line": 48,
+              "kind": "method",
+              "name": "maybe_wait_stream",
+              "parent_id": "torch_geometric/loader/prefetch.py#class:DeviceHelper:12",
+              "parent_name": "DeviceHelper",
+              "qualified_name": "DeviceHelper.maybe_wait_stream",
+              "signature": "def maybe_wait_stream(self) -> None",
+              "start_line": 46,
+              "symbol_id": "torch_geometric/loader/prefetch.py#method:DeviceHelper.maybe_wait_stream:46"
+            }
+          ],
+          "code": null,
+          "documentation": null,
+          "end_line": 48,
+          "kind": "class",
+          "name": "DeviceHelper",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "DeviceHelper",
+          "signature": "class DeviceHelper",
+          "start_line": 12,
+          "symbol_id": "torch_geometric/loader/prefetch.py#class:DeviceHelper:12"
+        },
+        {
+          "children": [
+            {
+              "children": [],
+              "code": "def __init__(\n        self,\n        loader: DataLoader,\n        device: Optional[torch.device] = None,\n    ):\n        self.loader = loader\n        self.device_helper = DeviceHelper(device)",
+              "documentation": null,
+              "end_line": 66,
+              "kind": "method",
+              "name": "__init__",
+              "parent_id": "torch_geometric/loader/prefetch.py#class:PrefetchLoader:51",
+              "parent_name": "PrefetchLoader",
+              "qualified_name": "PrefetchLoader.__init__",
+              "signature": "def __init__(\n        self,\n        loader: DataLoader,\n        device: Optional[torch.device] = None,\n    )",
+              "start_line": 60,
+              "symbol_id": "torch_geometric/loader/prefetch.py#method:PrefetchLoader.__init__:60"
+            },
+            {
+              "children": [],
+              "code": "def non_blocking_transfer(self, batch: Any) -> Any:\n        if not self.device_helper.is_gpu:\n            return batch\n        if isinstance(batch, (list, tuple)):\n            return [self.non_blocking_transfer(v) for v in batch]\n        if isinstance(batch, dict):\n            return {k: self.non_blocking_transfer(v) for k, v in batch.items()}\n\n        batch = batch.pin_memory(self.device_helper.device)\n        return batch.to(self.device_helper.device, non_blocking=True)",
+              "documentation": null,
+              "end_line": 77,
+              "kind": "method",
+              "name": "non_blocking_transfer",
+              "parent_id": "torch_geometric/loader/prefetch.py#class:PrefetchLoader:51",
+              "parent_name": "PrefetchLoader",
+              "qualified_name": "PrefetchLoader.non_blocking_transfer",
+              "signature": "def non_blocking_transfer(self, batch: Any) -> Any",
+              "start_line": 68,
+              "symbol_id": "torch_geometric/loader/prefetch.py#method:PrefetchLoader.non_blocking_transfer:68"
+            },
+            {
+              "children": [],
+              "code": "def __iter__(self) -> Any:\n        first = True\n        self.device_helper.maybe_init_stream()\n\n        batch = None\n        for next_batch in self.loader:\n\n            with self.device_helper.stream_context():\n                next_batch = self.non_blocking_transfer(next_batch)\n\n            if not first:\n                yield batch\n            else:\n                first = False\n\n            self.device_helper.maybe_wait_stream()\n\n            batch = next_batch\n\n        yield batch",
+              "documentation": null,
+              "end_line": 98,
+              "kind": "method",
+              "name": "__iter__",
+              "parent_id": "torch_geometric/loader/prefetch.py#class:PrefetchLoader:51",
+              "parent_name": "PrefetchLoader",
+              "qualified_name": "PrefetchLoader.__iter__",
+              "signature": "def __iter__(self) -> Any",
+              "start_line": 79,
+              "symbol_id": "torch_geometric/loader/prefetch.py#method:PrefetchLoader.__iter__:79"
+            },
+            {
+              "children": [],
+              "code": "def __len__(self) -> int:\n        return len(self.loader)",
+              "documentation": null,
+              "end_line": 101,
+              "kind": "method",
+              "name": "__len__",
+              "parent_id": "torch_geometric/loader/prefetch.py#class:PrefetchLoader:51",
+              "parent_name": "PrefetchLoader",
+              "qualified_name": "PrefetchLoader.__len__",
+              "signature": "def __len__(self) -> int",
+              "start_line": 100,
+              "symbol_id": "torch_geometric/loader/prefetch.py#method:PrefetchLoader.__len__:100"
+            },
+            {
+              "children": [],
+              "code": "def __repr__(self) -> str:\n        return f'{self.__class__.__name__}({self.loader})'",
+              "documentation": null,
+              "end_line": 104,
+              "kind": "method",
+              "name": "__repr__",
+              "parent_id": "torch_geometric/loader/prefetch.py#class:PrefetchLoader:51",
+              "parent_name": "PrefetchLoader",
+              "qualified_name": "PrefetchLoader.__repr__",
+              "signature": "def __repr__(self) -> str",
+              "start_line": 103,
+              "symbol_id": "torch_geometric/loader/prefetch.py#method:PrefetchLoader.__repr__:103"
+            }
+          ],
+          "code": "class PrefetchLoader:\n    r\"\"\"A GPU prefetcher class for asynchronously transferring data of a\n    :class:`torch.utils.data.DataLoader` from host memory to device memory.\n\n    Args:\n        loader (torch.utils.data.DataLoader): The data loader.\n        device (torch.device, optional): The device to load the data to.\n            (default: :obj:`None`)\n    \"\"\"\n    def __init__(\n        self,\n        loader: DataLoader,\n        device: Optional[torch.device] = None,\n    ):\n        self.loader = loader\n        self.device_helper = DeviceHelper(device)\n\n    def non_blocking_transfer(self, batch: Any) -> Any:\n        if not self.device_helper.is_gpu:\n            return batch\n        if isinstance(batch, (list, tuple)):\n            return [self.non_blocking_transfer(v) for v in batch]\n        if isinstance(batch, dict):\n            return {k: self.non_blocking_transfer(v) for k, v in batch.items()}\n\n        batch = batch.pin_memory(self.device_helper.device)\n        return batch.to(self.device_helper.device, non_blocking=True)\n\n    def __iter__(self) -> Any:\n        first = True\n        self.device_helper.maybe_init_stream()\n\n        batch = None\n        for next_batch in self.loader:\n\n            with self.device_helper.stream_context():\n                next_batch = self.non_blocking_transfer(next_batch)\n\n            if not first:\n                yield batch\n            else:\n                first = False\n\n            self.device_helper.maybe_wait_stream()\n\n            batch = next_batch\n\n        yield batch\n\n    def __len__(self) -> int:\n        return len(self.loader)\n\n    def __repr__(self) -> str:\n        return f'{self.__class__.__name__}({self.loader})'",
+          "documentation": "A GPU prefetcher class for asynchronously transferring data of a\n:class:`torch.utils.data.DataLoader` from host memory to device memory.\n\nArgs:\n    loader (torch.utils.data.DataLoader): The data loader.\n    device (torch.device, optional): The device to load the data to.\n        (default: :obj:`None`)",
+          "end_line": 104,
+          "kind": "class",
+          "name": "PrefetchLoader",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "PrefetchLoader",
+          "signature": "class PrefetchLoader",
+          "start_line": 51,
+          "symbol_id": "torch_geometric/loader/prefetch.py#class:PrefetchLoader:51"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/loader/random_node_loader.py",
+      "symbols": [
+        {
+          "children": [
+            {
+              "children": [],
+              "code": "def __init__(\n        self,\n        data: Union[Data, HeteroData],\n        num_parts: int,\n        **kwargs,\n    ):\n        self.data = data\n        self.num_parts = num_parts\n\n        if isinstance(data, HeteroData):\n            edge_index, node_dict, edge_dict = to_homogeneous_edge_index(data)\n            self.node_dict, self.edge_dict = node_dict, edge_dict\n        else:\n            edge_index = data.edge_index\n\n        self.edge_index = edge_index\n        self.num_nodes = data.num_nodes\n\n        super().__init__(\n            range(self.num_nodes),\n            batch_size=math.ceil(self.num_nodes / num_parts),\n            collate_fn=self.collate_fn,\n            **kwargs,\n        )",
+              "documentation": null,
+              "end_line": 54,
+              "kind": "method",
+              "name": "__init__",
+              "parent_id": "torch_geometric/loader/random_node_loader.py#class:RandomNodeLoader:11",
+              "parent_name": "RandomNodeLoader",
+              "qualified_name": "RandomNodeLoader.__init__",
+              "signature": "def __init__(\n        self,\n        data: Union[Data, HeteroData],\n        num_parts: int,\n        **kwargs,\n    )",
+              "start_line": 31,
+              "symbol_id": "torch_geometric/loader/random_node_loader.py#method:RandomNodeLoader.__init__:31"
+            },
+            {
+              "children": [],
+              "code": "def collate_fn(self, index):\n        if not isinstance(index, Tensor):\n            index = torch.tensor(index)\n\n        if isinstance(self.data, Data):\n            return self.data.subgraph(index)\n\n        elif isinstance(self.data, HeteroData):\n            node_dict = {\n                key: index[(index >= start) & (index < end)] - start\n                for key, (start, end) in self.node_dict.items()\n            }\n            return self.data.subgraph(node_dict)",
+              "documentation": null,
+              "end_line": 68,
+              "kind": "method",
+              "name": "collate_fn",
+              "parent_id": "torch_geometric/loader/random_node_loader.py#class:RandomNodeLoader:11",
+              "parent_name": "RandomNodeLoader",
+              "qualified_name": "RandomNodeLoader.collate_fn",
+              "signature": "def collate_fn(self, index)",
+              "start_line": 56,
+              "symbol_id": "torch_geometric/loader/random_node_loader.py#method:RandomNodeLoader.collate_fn:56"
+            }
+          ],
+          "code": "class RandomNodeLoader(torch.utils.data.DataLoader):\n    r\"\"\"A data loader that randomly samples nodes within a graph and returns\n    their induced subgraph.\n\n    .. note::\n\n        For an example of using\n        :class:`~torch_geometric.loader.RandomNodeLoader`, see\n        `examples/ogbn_proteins_deepgcn.py\n        <https://github.com/pyg-team/pytorch_geometric/blob/master/examples/\n        ogbn_proteins_deepgcn.py>`_.\n\n    Args:\n        data (torch_geometric.data.Data or torch_geometric.data.HeteroData):\n            The :class:`~torch_geometric.data.Data` or\n            :class:`~torch_geometric.data.HeteroData` graph object.\n        num_parts (int): The number of partitions.\n        **kwargs (optional): Additional arguments of\n            :class:`torch.utils.data.DataLoader`, such as :obj:`num_workers`.\n    \"\"\"\n    def __init__(\n        self,\n        data: Union[Data, HeteroData],\n        num_parts: int,\n        **kwargs,\n    ):\n        self.data = data\n        self.num_parts = num_parts\n\n        if isinstance(data, HeteroData):\n            edge_index, node_dict, edge_dict = to_homogeneous_edge_index(data)\n            self.node_dict, self.edge_dict = node_dict, edge_dict\n        else:\n            edge_index = data.edge_index\n\n        self.edge_index = edge_index\n        self.num_nodes = data.num_nodes\n\n        super().__init__(\n            range(self.num_nodes),\n            batch_size=math.ceil(self.num_nodes / num_parts),\n            collate_fn=self.collate_fn,\n            **kwargs,\n        )\n\n    def collate_fn(self, index):\n        if not isinstance(index, Tensor):\n            index = torch.tensor(index)\n\n        if isinstance(self.data, Data):\n            return self.data.subgraph(index)\n\n        elif isinstance(self.data, HeteroData):\n            node_dict = {\n                key: index[(index >= start) & (index < end)] - start\n                for key, (start, end) in self.node_dict.items()\n            }\n            return self.data.subgraph(node_dict)",
+          "documentation": "A data loader that randomly samples nodes within a graph and returns\ntheir induced subgraph.\n\n.. note::\n\n    For an example of using\n    :class:`~torch_geometric.loader.RandomNodeLoader`, see\n    `examples/ogbn_proteins_deepgcn.py\n    <https://github.com/pyg-team/pytorch_geometric/blob/master/examples/\n    ogbn_proteins_deepgcn.py>`_.\n\nArgs:\n    data (torch_geometric.data.Data or torch_geometric.data.HeteroData):\n        The :class:`~torch_geometric.data.Data` or\n        :class:`~torch_geometric.data.HeteroData` graph object.\n    num_parts (int): The number of partitions.\n    **kwargs (optional): Additional arguments of\n        :class:`torch.utils.data.DataLoader`, such as :obj:`num_workers`.",
+          "end_line": 68,
+          "kind": "class",
+          "name": "RandomNodeLoader",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "RandomNodeLoader",
+          "signature": "class RandomNodeLoader(torch.utils.data.DataLoader)",
+          "start_line": 11,
+          "symbol_id": "torch_geometric/loader/random_node_loader.py#class:RandomNodeLoader:11"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/loader/shadow.py",
+      "symbols": [
+        {
+          "children": [
+            {
+              "children": [],
+              "code": "def __init__(self, data: Data, depth: int, num_neighbors: int,\n                 node_idx: Optional[Tensor] = None, replace: bool = False,\n                 **kwargs):\n\n        if not WITH_TORCH_SPARSE:\n            raise ImportError(\n                f\"'{self.__class__.__name__}' requires 'torch-sparse'\")\n\n        self.data = copy.copy(data)\n        self.depth = depth\n        self.num_neighbors = num_neighbors\n        self.replace = replace\n\n        if data.edge_index is not None:\n            self.is_sparse_tensor = False\n            row, col = data.edge_index.cpu()\n            self.adj_t = SparseTensor(\n                row=row, col=col, value=torch.arange(col.size(0)),\n                sparse_sizes=(data.num_nodes, data.num_nodes)).t()\n        else:\n            self.is_sparse_tensor = True\n            self.adj_t = data.adj_t.cpu()\n\n        if node_idx is None:\n            node_idx = torch.arange(self.adj_t.sparse_size(0))\n        elif node_idx.dtype == torch.bool:\n            node_idx = node_idx.nonzero(as_tuple=False).view(-1)\n        self.node_idx = node_idx\n\n        super().__init__(node_idx.tolist(), collate_fn=self.__collate__,\n                         **kwargs)",
+              "documentation": null,
+              "end_line": 69,
+              "kind": "method",
+              "name": "__init__",
+              "parent_id": "torch_geometric/loader/shadow.py#class:ShaDowKHopSampler:11",
+              "parent_name": "ShaDowKHopSampler",
+              "qualified_name": "ShaDowKHopSampler.__init__",
+              "signature": "def __init__(self, data: Data, depth: int, num_neighbors: int,\n                 node_idx: Optional[Tensor] = None, replace: bool = False,\n                 **kwargs)",
+              "start_line": 39,
+              "symbol_id": "torch_geometric/loader/shadow.py#method:ShaDowKHopSampler.__init__:39"
+            },
+            {
+              "children": [],
+              "code": "def __collate__(self, n_id):\n        n_id = torch.tensor(n_id)\n\n        rowptr, col, value = self.adj_t.csr()\n        out = torch.ops.torch_sparse.ego_k_hop_sample_adj(\n            rowptr, col, n_id, self.depth, self.num_neighbors, self.replace)\n        rowptr, col, n_id, e_id, ptr, root_n_id = out\n\n        adj_t = SparseTensor(rowptr=rowptr, col=col,\n                             value=value[e_id] if value is not None else None,\n                             sparse_sizes=(n_id.numel(), n_id.numel()),\n                             is_sorted=True, trust_data=True)\n\n        batch = Batch(batch=torch.ops.torch_sparse.ptr2ind(ptr, n_id.numel()),\n                      ptr=ptr)\n        batch.root_n_id = root_n_id\n\n        if self.is_sparse_tensor:\n            batch.adj_t = adj_t\n        else:\n            row, col, e_id = adj_t.t().coo()\n            batch.edge_index = torch.stack([row, col], dim=0)\n\n        for k, v in self.data:\n            if k in ['edge_index', 'adj_t', 'num_nodes', 'batch', 'ptr']:\n                continue\n            if k == 'y' and v.size(0) == self.data.num_nodes:\n                batch[k] = v[n_id][root_n_id]\n            elif isinstance(v, Tensor) and v.size(0) == self.data.num_nodes:\n                batch[k] = v[n_id]\n            elif isinstance(v, Tensor) and v.size(0) == self.data.num_edges:\n                batch[k] = v[e_id]\n            else:\n                batch[k] = v\n\n        return batch",
+              "documentation": null,
+              "end_line": 106,
+              "kind": "method",
+              "name": "__collate__",
+              "parent_id": "torch_geometric/loader/shadow.py#class:ShaDowKHopSampler:11",
+              "parent_name": "ShaDowKHopSampler",
+              "qualified_name": "ShaDowKHopSampler.__collate__",
+              "signature": "def __collate__(self, n_id)",
+              "start_line": 71,
+              "symbol_id": "torch_geometric/loader/shadow.py#method:ShaDowKHopSampler.__collate__:71"
+            }
+          ],
+          "code": "class ShaDowKHopSampler(torch.utils.data.DataLoader):\n    r\"\"\"The ShaDow :math:`k`-hop sampler from the `\"Decoupling the Depth and\n    Scope of Graph Neural Networks\" <https://arxiv.org/abs/2201.07858>`_ paper.\n    Given a graph in a :obj:`data` object, the sampler will create shallow,\n    localized subgraphs.\n    A deep GNN on this local graph then smooths the informative local signals.\n\n    .. note::\n\n        For an example of using :class:`ShaDowKHopSampler`, see\n        `examples/shadow.py <https://github.com/pyg-team/\n        pytorch_geometric/blob/master/examples/shadow.py>`_.\n\n    Args:\n        data (torch_geometric.data.Data): The graph data object.\n        depth (int): The depth/number of hops of the localized subgraph.\n        num_neighbors (int): The number of neighbors to sample for each node in\n            each hop.\n        node_idx (LongTensor or BoolTensor, optional): The nodes that should be\n            considered for creating mini-batches.\n            If set to :obj:`None`, all nodes will be\n            considered.\n        replace (bool, optional): If set to :obj:`True`, will sample neighbors\n            with replacement. (default: :obj:`False`)\n        **kwargs (optional): Additional arguments of\n            :class:`torch.utils.data.DataLoader`, such as :obj:`batch_size` or\n            :obj:`num_workers`.\n    \"\"\"\n    def __init__(self, data: Data, depth: int, num_neighbors: int,\n                 node_idx: Optional[Tensor] = None, replace: bool = False,\n                 **kwargs):\n\n        if not WITH_TORCH_SPARSE:\n            raise ImportError(\n                f\"'{self.__class__.__name__}' requires 'torch-sparse'\")\n\n        self.data = copy.copy(data)\n        self.depth = depth\n        self.num_neighbors = num_neighbors\n        self.replace = replace\n\n        if data.edge_index is not None:\n            self.is_sparse_tensor = False\n            row, col = data.edge_index.cpu()\n            self.adj_t = SparseTensor(\n                row=row, col=col, value=torch.arange(col.size(0)),\n                sparse_sizes=(data.num_nodes, data.num_nodes)).t()\n        else:\n            self.is_sparse_tensor = True\n            self.adj_t = data.adj_t.cpu()\n\n        if node_idx is None:\n            node_idx = torch.arange(self.adj_t.sparse_size(0))\n        elif node_idx.dtype == torch.bool:\n            node_idx = node_idx.nonzero(as_tuple=False).view(-1)\n        self.node_idx = node_idx\n\n        super().__init__(node_idx.tolist(), collate_fn=self.__collate__,\n                         **kwargs)\n\n    def __collate__(self, n_id):\n        n_id = torch.tensor(n_id)\n\n        rowptr, col, value = self.adj_t.csr()\n        out = torch.ops.torch_sparse.ego_k_hop_sample_adj(\n            rowptr, col, n_id, self.depth, self.num_neighbors, self.replace)\n        rowptr, col, n_id, e_id, ptr, root_n_id = out\n\n        adj_t = SparseTensor(rowptr=rowptr, col=col,\n                             value=value[e_id] if value is not None else None,\n                             sparse_sizes=(n_id.numel(), n_id.numel()),\n                             is_sorted=True, trust_data=True)\n\n        batch = Batch(batch=torch.ops.torch_sparse.ptr2ind(ptr, n_id.numel()),\n                      ptr=ptr)\n        batch.root_n_id = root_n_id\n\n        if self.is_sparse_tensor:\n            batch.adj_t = adj_t\n        else:\n            row, col, e_id = adj_t.t().coo()\n            batch.edge_index = torch.stack([row, col], dim=0)\n\n        for k, v in self.data:\n            if k in ['edge_index', 'adj_t', 'num_nodes', 'batch', 'ptr']:\n                continue\n            if k == 'y' and v.size(0) == self.data.num_nodes:\n                batch[k] = v[n_id][root_n_id]\n            elif isinstance(v, Tensor) and v.size(0) == self.data.num_nodes:\n                batch[k] = v[n_id]\n            elif isinstance(v, Tensor) and v.size(0) == self.data.num_edges:\n                batch[k] = v[e_id]\n            else:\n                batch[k] = v\n\n        return batch",
+          "documentation": "The ShaDow :math:`k`-hop sampler from the `\"Decoupling the Depth and\nScope of Graph Neural Networks\" <https://arxiv.org/abs/2201.07858>`_ paper.\nGiven a graph in a :obj:`data` object, the sampler will create shallow,\nlocalized subgraphs.\nA deep GNN on this local graph then smooths the informative local signals.\n\n.. note::\n\n    For an example of using :class:`ShaDowKHopSampler`, see\n    `examples/shadow.py <https://github.com/pyg-team/\n    pytorch_geometric/blob/master/examples/shadow.py>`_.\n\nArgs:\n    data (torch_geometric.data.Data): The graph data object.\n    depth (int): The depth/number of hops of the localized subgraph.\n    num_neighbors (int): The number of neighbors to sample for each node in\n        each hop.\n    node_idx (LongTensor or BoolTensor, optional): The nodes that should be\n        considered for creating mini-batches.\n        If set to :obj:`None`, all nodes will be\n        considered.\n    replace (bool, optional): If set to :obj:`True`, will sample neighbors\n        with replacement. (default: :obj:`False`)\n    **kwargs (optional): Additional arguments of\n        :class:`torch.utils.data.DataLoader`, such as :obj:`batch_size` or\n        :obj:`num_workers`.",
+          "end_line": 106,
+          "kind": "class",
+          "name": "ShaDowKHopSampler",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "ShaDowKHopSampler",
+          "signature": "class ShaDowKHopSampler(torch.utils.data.DataLoader)",
+          "start_line": 11,
+          "symbol_id": "torch_geometric/loader/shadow.py#class:ShaDowKHopSampler:11"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/loader/temporal_dataloader.py",
+      "symbols": [
+        {
+          "children": [
+            {
+              "children": [],
+              "code": "def __init__(\n        self,\n        data: TemporalData,\n        batch_size: int = 1,\n        neg_sampling_ratio: float = 0.0,\n        **kwargs,\n    ):\n        # Remove for PyTorch Lightning:\n        kwargs.pop('dataset', None)\n        kwargs.pop('collate_fn', None)\n        kwargs.pop('shuffle', None)\n\n        self.data = data\n        self.events_per_batch = batch_size\n        self.neg_sampling_ratio = neg_sampling_ratio\n\n        if neg_sampling_ratio > 0:\n            self.min_dst = int(data.dst.min())\n            self.max_dst = int(data.dst.max())\n\n        if kwargs.get('drop_last', False) and len(data) % batch_size != 0:\n            arange = range(0, len(data) - batch_size, batch_size)\n        else:\n            arange = range(0, len(data), batch_size)\n\n        super().__init__(arange, 1, shuffle=False, collate_fn=self, **kwargs)",
+              "documentation": null,
+              "end_line": 48,
+              "kind": "method",
+              "name": "__init__",
+              "parent_id": "torch_geometric/loader/temporal_dataloader.py#class:TemporalDataLoader:8",
+              "parent_name": "TemporalDataLoader",
+              "qualified_name": "TemporalDataLoader.__init__",
+              "signature": "def __init__(\n        self,\n        data: TemporalData,\n        batch_size: int = 1,\n        neg_sampling_ratio: float = 0.0,\n        **kwargs,\n    )",
+              "start_line": 23,
+              "symbol_id": "torch_geometric/loader/temporal_dataloader.py#method:TemporalDataLoader.__init__:23"
+            },
+            {
+              "children": [],
+              "code": "def __call__(self, arange: List[int]) -> TemporalData:\n        batch = self.data[arange[0]:arange[0] + self.events_per_batch]\n\n        n_ids = [batch.src, batch.dst]\n\n        if self.neg_sampling_ratio > 0:\n            batch.neg_dst = torch.randint(\n                low=self.min_dst,\n                high=self.max_dst + 1,\n                size=(round(self.neg_sampling_ratio * batch.dst.size(0)), ),\n                dtype=batch.dst.dtype,\n                device=batch.dst.device,\n            )\n            n_ids += [batch.neg_dst]\n\n        batch.n_id = torch.cat(n_ids, dim=0).unique()\n\n        return batch",
+              "documentation": null,
+              "end_line": 67,
+              "kind": "method",
+              "name": "__call__",
+              "parent_id": "torch_geometric/loader/temporal_dataloader.py#class:TemporalDataLoader:8",
+              "parent_name": "TemporalDataLoader",
+              "qualified_name": "TemporalDataLoader.__call__",
+              "signature": "def __call__(self, arange: List[int]) -> TemporalData",
+              "start_line": 50,
+              "symbol_id": "torch_geometric/loader/temporal_dataloader.py#method:TemporalDataLoader.__call__:50"
+            }
+          ],
+          "code": "class TemporalDataLoader(torch.utils.data.DataLoader):\n    r\"\"\"A data loader which merges succesive events of a\n    :class:`torch_geometric.data.TemporalData` to a mini-batch.\n\n    Args:\n        data (TemporalData): The :obj:`~torch_geometric.data.TemporalData`\n            from which to load the data.\n        batch_size (int, optional): How many samples per batch to load.\n            (default: :obj:`1`)\n        neg_sampling_ratio (float, optional): The ratio of sampled negative\n            destination nodes to the number of postive destination nodes.\n            (default: :obj:`0.0`)\n        **kwargs (optional): Additional arguments of\n            :class:`torch.utils.data.DataLoader`.\n    \"\"\"\n    def __init__(\n        self,\n        data: TemporalData,\n        batch_size: int = 1,\n        neg_sampling_ratio: float = 0.0,\n        **kwargs,\n    ):\n        # Remove for PyTorch Lightning:\n        kwargs.pop('dataset', None)\n        kwargs.pop('collate_fn', None)\n        kwargs.pop('shuffle', None)\n\n        self.data = data\n        self.events_per_batch = batch_size\n        self.neg_sampling_ratio = neg_sampling_ratio\n\n        if neg_sampling_ratio > 0:\n            self.min_dst = int(data.dst.min())\n            self.max_dst = int(data.dst.max())\n\n        if kwargs.get('drop_last', False) and len(data) % batch_size != 0:\n            arange = range(0, len(data) - batch_size, batch_size)\n        else:\n            arange = range(0, len(data), batch_size)\n\n        super().__init__(arange, 1, shuffle=False, collate_fn=self, **kwargs)\n\n    def __call__(self, arange: List[int]) -> TemporalData:\n        batch = self.data[arange[0]:arange[0] + self.events_per_batch]\n\n        n_ids = [batch.src, batch.dst]\n\n        if self.neg_sampling_ratio > 0:\n            batch.neg_dst = torch.randint(\n                low=self.min_dst,\n                high=self.max_dst + 1,\n                size=(round(self.neg_sampling_ratio * batch.dst.size(0)), ),\n                dtype=batch.dst.dtype,\n                device=batch.dst.device,\n            )\n            n_ids += [batch.neg_dst]\n\n        batch.n_id = torch.cat(n_ids, dim=0).unique()\n\n        return batch",
+          "documentation": "A data loader which merges succesive events of a\n:class:`torch_geometric.data.TemporalData` to a mini-batch.\n\nArgs:\n    data (TemporalData): The :obj:`~torch_geometric.data.TemporalData`\n        from which to load the data.\n    batch_size (int, optional): How many samples per batch to load.\n        (default: :obj:`1`)\n    neg_sampling_ratio (float, optional): The ratio of sampled negative\n        destination nodes to the number of postive destination nodes.\n        (default: :obj:`0.0`)\n    **kwargs (optional): Additional arguments of\n        :class:`torch.utils.data.DataLoader`.",
+          "end_line": 67,
+          "kind": "class",
+          "name": "TemporalDataLoader",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "TemporalDataLoader",
+          "signature": "class TemporalDataLoader(torch.utils.data.DataLoader)",
+          "start_line": 8,
+          "symbol_id": "torch_geometric/loader/temporal_dataloader.py#class:TemporalDataLoader:8"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/loader/zip_loader.py",
+      "symbols": [
+        {
+          "children": [
+            {
+              "children": [],
+              "code": "def __init__(\n        self,\n        loaders: Union[List[NodeLoader], List[LinkLoader]],\n        filter_per_worker: Optional[bool] = None,\n        **kwargs,\n    ):\n        if filter_per_worker is None:\n            filter_per_worker = infer_filter_per_worker(loaders[0].data)\n\n        # Remove for PyTorch Lightning:\n        kwargs.pop('dataset', None)\n        kwargs.pop('collate_fn', None)\n\n        for loader in loaders:\n            if not callable(getattr(loader, 'collate_fn', None)):\n                raise ValueError(\"'{loader.__class__.__name__}' does not have \"\n                                 \"a 'collate_fn' method\")\n            if not callable(getattr(loader, 'filter_fn', None)):\n                raise ValueError(\"'{loader.__class__.__name__}' does not have \"\n                                 \"a 'filter_fn' method\")\n            loader.filter_per_worker = filter_per_worker\n\n        iterator = range(min([len(loader.dataset) for loader in loaders]))\n        super().__init__(iterator, collate_fn=self.collate_fn, **kwargs)\n\n        self.loaders = loaders\n        self.filter_per_worker = filter_per_worker",
+              "documentation": null,
+              "end_line": 60,
+              "kind": "method",
+              "name": "__init__",
+              "parent_id": "torch_geometric/loader/zip_loader.py#class:ZipLoader:12",
+              "parent_name": "ZipLoader",
+              "qualified_name": "ZipLoader.__init__",
+              "signature": "def __init__(\n        self,\n        loaders: Union[List[NodeLoader], List[LinkLoader]],\n        filter_per_worker: Optional[bool] = None,\n        **kwargs,\n    )",
+              "start_line": 34,
+              "symbol_id": "torch_geometric/loader/zip_loader.py#method:ZipLoader.__init__:34"
+            },
+            {
+              "children": [],
+              "code": "def collate_fn(self, index: List[int]) -> Tuple[Any, ...]:\n        if not isinstance(index, Tensor):\n            index = torch.tensor(index, dtype=torch.long)\n\n        return tuple(loader.collate_fn(index) for loader in self.loaders)",
+              "documentation": null,
+              "end_line": 66,
+              "kind": "method",
+              "name": "collate_fn",
+              "parent_id": "torch_geometric/loader/zip_loader.py#class:ZipLoader:12",
+              "parent_name": "ZipLoader",
+              "qualified_name": "ZipLoader.collate_fn",
+              "signature": "def collate_fn(self, index: List[int]) -> Tuple[Any, ...]",
+              "start_line": 62,
+              "symbol_id": "torch_geometric/loader/zip_loader.py#method:ZipLoader.collate_fn:62"
+            },
+            {
+              "children": [],
+              "code": "def filter_fn(\n        self,\n        outs: Tuple[Any, ...],\n    ) -> Tuple[Union[Data, HeteroData], ...]:\n        loaders = self.loaders\n        return tuple(loader.filter_fn(v) for loader, v in zip(loaders, outs))",
+              "documentation": null,
+              "end_line": 73,
+              "kind": "method",
+              "name": "filter_fn",
+              "parent_id": "torch_geometric/loader/zip_loader.py#class:ZipLoader:12",
+              "parent_name": "ZipLoader",
+              "qualified_name": "ZipLoader.filter_fn",
+              "signature": "def filter_fn(\n        self,\n        outs: Tuple[Any, ...],\n    ) -> Tuple[Union[Data, HeteroData], ...]",
+              "start_line": 68,
+              "symbol_id": "torch_geometric/loader/zip_loader.py#method:ZipLoader.filter_fn:68"
+            },
+            {
+              "children": [],
+              "code": "def _get_iterator(self) -> Iterator:\n        if self.filter_per_worker:\n            return super()._get_iterator()\n\n        # Execute `filter_fn` in the main process:\n        return DataLoaderIterator(super()._get_iterator(), self.filter_fn)",
+              "documentation": null,
+              "end_line": 80,
+              "kind": "method",
+              "name": "_get_iterator",
+              "parent_id": "torch_geometric/loader/zip_loader.py#class:ZipLoader:12",
+              "parent_name": "ZipLoader",
+              "qualified_name": "ZipLoader._get_iterator",
+              "signature": "def _get_iterator(self) -> Iterator",
+              "start_line": 75,
+              "symbol_id": "torch_geometric/loader/zip_loader.py#method:ZipLoader._get_iterator:75"
+            },
+            {
+              "children": [],
+              "code": "def __repr__(self) -> str:\n        return f'{self.__class__.__name__}(loaders={self.loaders})'",
+              "documentation": null,
+              "end_line": 83,
+              "kind": "method",
+              "name": "__repr__",
+              "parent_id": "torch_geometric/loader/zip_loader.py#class:ZipLoader:12",
+              "parent_name": "ZipLoader",
+              "qualified_name": "ZipLoader.__repr__",
+              "signature": "def __repr__(self) -> str",
+              "start_line": 82,
+              "symbol_id": "torch_geometric/loader/zip_loader.py#method:ZipLoader.__repr__:82"
+            }
+          ],
+          "code": "class ZipLoader(torch.utils.data.DataLoader):\n    r\"\"\"A loader that returns a tuple of data objects by sampling from multiple\n    :class:`NodeLoader` or :class:`LinkLoader` instances.\n\n    Args:\n        loaders (List[NodeLoader] or List[LinkLoader]): The loader instances.\n        filter_per_worker (bool, optional): If set to :obj:`True`, will filter\n            the returned data in each worker's subprocess.\n            If set to :obj:`False`, will filter the returned data in the main\n            process.\n            If set to :obj:`None`, will automatically infer the decision based\n            on whether data partially lives on the GPU\n            (:obj:`filter_per_worker=True`) or entirely on the CPU\n            (:obj:`filter_per_worker=False`).\n            There exists different trade-offs for setting this option.\n            Specifically, setting this option to :obj:`True` for in-memory\n            datasets will move all features to shared memory, which may result\n            in too many open file handles. (default: :obj:`None`)\n        **kwargs (optional): Additional arguments of\n            :class:`torch.utils.data.DataLoader`, such as :obj:`batch_size`,\n            :obj:`shuffle`, :obj:`drop_last` or :obj:`num_workers`.\n    \"\"\"\n    def __init__(\n        self,\n        loaders: Union[List[NodeLoader], List[LinkLoader]],\n        filter_per_worker: Optional[bool] = None,\n        **kwargs,\n    ):\n        if filter_per_worker is None:\n            filter_per_worker = infer_filter_per_worker(loaders[0].data)\n\n        # Remove for PyTorch Lightning:\n        kwargs.pop('dataset', None)\n        kwargs.pop('collate_fn', None)\n\n        for loader in loaders:\n            if not callable(getattr(loader, 'collate_fn', None)):\n                raise ValueError(\"'{loader.__class__.__name__}' does not have \"\n                                 \"a 'collate_fn' method\")\n            if not callable(getattr(loader, 'filter_fn', None)):\n                raise ValueError(\"'{loader.__class__.__name__}' does not have \"\n                                 \"a 'filter_fn' method\")\n            loader.filter_per_worker = filter_per_worker\n\n        iterator = range(min([len(loader.dataset) for loader in loaders]))\n        super().__init__(iterator, collate_fn=self.collate_fn, **kwargs)\n\n        self.loaders = loaders\n        self.filter_per_worker = filter_per_worker\n\n    def collate_fn(self, index: List[int]) -> Tuple[Any, ...]:\n        if not isinstance(index, Tensor):\n            index = torch.tensor(index, dtype=torch.long)\n\n        return tuple(loader.collate_fn(index) for loader in self.loaders)\n\n    def filter_fn(\n        self,\n        outs: Tuple[Any, ...],\n    ) -> Tuple[Union[Data, HeteroData], ...]:\n        loaders = self.loaders\n        return tuple(loader.filter_fn(v) for loader, v in zip(loaders, outs))\n\n    def _get_iterator(self) -> Iterator:\n        if self.filter_per_worker:\n            return super()._get_iterator()\n\n        # Execute `filter_fn` in the main process:\n        return DataLoaderIterator(super()._get_iterator(), self.filter_fn)\n\n    def __repr__(self) -> str:\n        return f'{self.__class__.__name__}(loaders={self.loaders})'",
+          "documentation": "A loader that returns a tuple of data objects by sampling from multiple\n:class:`NodeLoader` or :class:`LinkLoader` instances.\n\nArgs:\n    loaders (List[NodeLoader] or List[LinkLoader]): The loader instances.\n    filter_per_worker (bool, optional): If set to :obj:`True`, will filter\n        the returned data in each worker's subprocess.\n        If set to :obj:`False`, will filter the returned data in the main\n        process.\n        If set to :obj:`None`, will automatically infer the decision based\n        on whether data partially lives on the GPU\n        (:obj:`filter_per_worker=True`) or entirely on the CPU\n        (:obj:`filter_per_worker=False`).\n        There exists different trade-offs for setting this option.\n        Specifically, setting this option to :obj:`True` for in-memory\n        datasets will move all features to shared memory, which may result\n        in too many open file handles. (default: :obj:`None`)\n    **kwargs (optional): Additional arguments of\n        :class:`torch.utils.data.DataLoader`, such as :obj:`batch_size`,\n        :obj:`shuffle`, :obj:`drop_last` or :obj:`num_workers`.",
+          "end_line": 83,
+          "kind": "class",
+          "name": "ZipLoader",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "ZipLoader",
+          "signature": "class ZipLoader(torch.utils.data.DataLoader)",
+          "start_line": 12,
+          "symbol_id": "torch_geometric/loader/zip_loader.py#class:ZipLoader:12"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/loader/__init__.py",
+      "symbols": [],
+      "unparsed_code": "from torch_geometric.deprecation import deprecated\n\nfrom .dataloader import DataLoader\nfrom .node_loader import NodeLoader\nfrom .link_loader import LinkLoader\nfrom .neighbor_loader import NeighborLoader\nfrom .link_neighbor_loader import LinkNeighborLoader\nfrom .hgt_loader import HGTLoader\nfrom .cluster import ClusterData, ClusterLoader\nfrom .graph_saint import (GraphSAINTSampler, GraphSAINTNodeSampler,\n                          GraphSAINTEdgeSampler, GraphSAINTRandomWalkSampler)\nfrom .shadow import ShaDowKHopSampler\nfrom .random_node_loader import RandomNodeLoader\n# from .ibmb_loader import IBMBBatchLoader, IBMBNodeLoader\nfrom .zip_loader import ZipLoader\nfrom .data_list_loader import DataListLoader\nfrom .dense_data_loader import DenseDataLoader\nfrom .temporal_dataloader import TemporalDataLoader\nfrom .neighbor_sampler import NeighborSampler\nfrom .imbalanced_sampler import ImbalancedSampler\nfrom .dynamic_batch_sampler import DynamicBatchSampler\nfrom .prefetch import PrefetchLoader\nfrom .cache import CachedLoader\nfrom .mixin import AffinityMixin\n\n__all__ = classes = [\n    'DataLoader',\n    'NodeLoader',\n    'LinkLoader',\n    'NeighborLoader',\n    'LinkNeighborLoader',\n    'HGTLoader',\n    'ClusterData',\n    'ClusterLoader',\n    'GraphSAINTSampler',\n    'GraphSAINTNodeSampler',\n    'GraphSAINTEdgeSampler',\n    'GraphSAINTRandomWalkSampler',\n    'ShaDowKHopSampler',\n    'RandomNodeLoader',\n    # 'IBMBBatchLoader',\n    # 'IBMBNodeLoader',\n    'ZipLoader',\n    'DataListLoader',\n    'DenseDataLoader',\n    'TemporalDataLoader',\n    'NeighborSampler',\n    'ImbalancedSampler',\n    'DynamicBatchSampler',\n    'PrefetchLoader',\n    'CachedLoader',\n    'AffinityMixin',\n]\n\nRandomNodeSampler = deprecated(\n    details=\"use 'loader.RandomNodeLoader' instead\",\n    func_name='loader.RandomNodeSampler',\n)(RandomNodeLoader)"
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/data/__init__.py",
+      "symbols": [],
+      "unparsed_code": "# flake8: noqa\n\nfrom .feature_store import FeatureStore, TensorAttr\nfrom .graph_store import GraphStore, EdgeAttr\nfrom .data import Data\nfrom .hetero_data import HeteroData\nfrom .batch import Batch\nfrom .temporal import TemporalData\nfrom .database import Database, SQLiteDatabase, RocksDatabase\nfrom .dataset import Dataset\nfrom .in_memory_dataset import InMemoryDataset\nfrom .on_disk_dataset import OnDiskDataset\nfrom .makedirs import makedirs\nfrom .download import download_url, download_google_url\nfrom .extract import extract_tar, extract_zip, extract_bz2, extract_gz\n\nfrom torch_geometric.lazy_loader import LazyLoader\n\ndata_classes = [\n    'Data',\n    'HeteroData',\n    'Batch',\n    'TemporalData',\n    'Dataset',\n    'InMemoryDataset',\n    'OnDiskDataset',\n]\n\nremote_backend_classes = [\n    'FeatureStore',\n    'GraphStore',\n    'TensorAttr',\n    'EdgeAttr',\n]\n\ndatabase_classes = [\n    'Database',\n    'SQLiteDatabase',\n    'RocksDatabase',\n]\n\nhelper_functions = [\n    'makedirs',\n    'download_url',\n    'download_google_url',\n    'extract_tar',\n    'extract_zip',\n    'extract_bz2',\n    'extract_gz',\n]\n\n__all__ = data_classes + remote_backend_classes + helper_functions\n\nlightning = LazyLoader('lightning', globals(),\n                       'torch_geometric.data.lightning')\n\nfrom torch_geometric.deprecation import deprecated\nfrom torch_geometric.loader import NeighborSampler\nfrom torch_geometric.loader import ClusterData\nfrom torch_geometric.loader import ClusterLoader\nfrom torch_geometric.loader import GraphSAINTSampler\nfrom torch_geometric.loader import GraphSAINTNodeSampler\nfrom torch_geometric.loader import GraphSAINTEdgeSampler\nfrom torch_geometric.loader import GraphSAINTRandomWalkSampler\nfrom torch_geometric.loader import ShaDowKHopSampler\nfrom torch_geometric.loader import RandomNodeLoader\nfrom torch_geometric.loader import DataLoader\nfrom torch_geometric.loader import DataListLoader\nfrom torch_geometric.loader import DenseDataLoader\n\nNeighborSampler = deprecated(  # type: ignore\n    details=\"use 'loader.NeighborSampler' instead\",\n    func_name='data.NeighborSampler',\n)(NeighborSampler)\nClusterData = deprecated(  # type: ignore\n    details=\"use 'loader.ClusterData' instead\",\n    func_name='data.ClusterData',\n)(ClusterData)\nClusterLoader = deprecated(  # type: ignore\n    details=\"use 'loader.ClusterLoader' instead\",\n    func_name='data.ClusterLoader',\n)(ClusterLoader)\nGraphSAINTSampler = deprecated(  # type: ignore\n    details=\"use 'loader.GraphSAINTSampler' instead\",\n    func_name='data.GraphSAINTSampler',\n)(GraphSAINTSampler)\nGraphSAINTNodeSampler = deprecated(  # type: ignore\n    details=\"use 'loader.GraphSAINTNodeSampler' instead\",\n    func_name='data.GraphSAINTNodeSampler',\n)(GraphSAINTNodeSampler)\nGraphSAINTEdgeSampler = deprecated(  # type: ignore\n    details=\"use 'loader.GraphSAINTEdgeSampler' instead\",\n    func_name='data.GraphSAINTEdgeSampler',\n)(GraphSAINTEdgeSampler)\nGraphSAINTRandomWalkSampler = deprecated(  # type: ignore\n    details=\"use 'loader.GraphSAINTRandomWalkSampler' instead\",\n    func_name='data.GraphSAINTRandomWalkSampler',\n)(GraphSAINTRandomWalkSampler)\nShaDowKHopSampler = deprecated(  # type: ignore\n    details=\"use 'loader.ShaDowKHopSampler' instead\",\n    func_name='data.ShaDowKHopSampler',\n)(ShaDowKHopSampler)\nRandomNodeSampler = deprecated(\n    details=\"use 'loader.RandomNodeLoader' instead\",\n    func_name='data.RandomNodeSampler',\n)(RandomNodeLoader)\nDataLoader = deprecated(  # type: ignore\n    details=\"use 'loader.DataLoader' instead\",\n    func_name='data.DataLoader',\n)(DataLoader)\nDataListLoader = deprecated(  # type: ignore\n    details=\"use 'loader.DataListLoader' instead\",\n    func_name='data.DataListLoader',\n)(DataListLoader)\nDenseDataLoader = deprecated(  # type: ignore\n    details=\"use 'loader.DenseDataLoader' instead\",\n    func_name='data.DenseDataLoader',\n)(DenseDataLoader)"
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/visualization/graph.py",
+      "symbols": [
+        {
+          "children": [],
+          "code": "def has_graphviz() -> bool:\n    try:\n        import graphviz\n    except ImportError:\n        return False\n\n    try:\n        graphviz.Digraph().pipe()\n    except graphviz.backend.ExecutableNotFound:\n        return False\n\n    return True",
+          "documentation": null,
+          "end_line": 21,
+          "kind": "function",
+          "name": "has_graphviz",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "has_graphviz",
+          "signature": "def has_graphviz() -> bool",
+          "start_line": 10,
+          "symbol_id": "torch_geometric/visualization/graph.py#function:has_graphviz:10"
+        },
+        {
+          "children": [],
+          "code": "def visualize_graph(\n    edge_index: Tensor,\n    edge_weight: Optional[Tensor] = None,\n    path: Optional[str] = None,\n    backend: Optional[str] = None,\n    node_labels: Optional[List[str]] = None,\n) -> Any:\n    r\"\"\"Visualizes the graph given via :obj:`edge_index` and (optional)\n    :obj:`edge_weight`.\n\n    Args:\n        edge_index (torch.Tensor): The edge indices.\n        edge_weight (torch.Tensor, optional): The edge weights.\n        path (str, optional): The path to where the plot is saved.\n            If set to :obj:`None`, will visualize the plot on-the-fly.\n            (default: :obj:`None`)\n        backend (str, optional): The graph drawing backend to use for\n            visualization (:obj:`\"graphviz\"`, :obj:`\"networkx\"`).\n            If set to :obj:`None`, will use the most appropriate\n            visualization backend based on available system packages.\n            (default: :obj:`None`)\n        node_labels (List[str], optional): The labels/IDs of nodes.\n            (default: :obj:`None`)\n    \"\"\"\n    if edge_weight is not None:  # Normalize edge weights.\n        edge_weight = edge_weight - edge_weight.min()\n        edge_weight = edge_weight / edge_weight.max()\n\n    if edge_weight is not None:  # Discard any edges with zero edge weight:\n        mask = edge_weight > 1e-7\n        edge_index = edge_index[:, mask]\n        edge_weight = edge_weight[mask]\n\n    if edge_weight is None:\n        edge_weight = torch.ones(edge_index.size(1))\n\n    if backend is None:\n        backend = 'graphviz' if has_graphviz() else 'networkx'\n\n    if backend.lower() == 'networkx':\n        return _visualize_graph_via_networkx(edge_index, edge_weight, path,\n                                             node_labels)\n    elif backend.lower() == 'graphviz':\n        return _visualize_graph_via_graphviz(edge_index, edge_weight, path,\n                                             node_labels)\n\n    raise ValueError(f\"Expected graph drawing backend to be in \"\n                     f\"{BACKENDS} (got '{backend}')\")",
+          "documentation": "Visualizes the graph given via :obj:`edge_index` and (optional)\n:obj:`edge_weight`.\n\nArgs:\n    edge_index (torch.Tensor): The edge indices.\n    edge_weight (torch.Tensor, optional): The edge weights.\n    path (str, optional): The path to where the plot is saved.\n        If set to :obj:`None`, will visualize the plot on-the-fly.\n        (default: :obj:`None`)\n    backend (str, optional): The graph drawing backend to use for\n        visualization (:obj:`\"graphviz\"`, :obj:`\"networkx\"`).\n        If set to :obj:`None`, will use the most appropriate\n        visualization backend based on available system packages.\n        (default: :obj:`None`)\n    node_labels (List[str], optional): The labels/IDs of nodes.\n        (default: :obj:`None`)",
+          "end_line": 71,
+          "kind": "function",
+          "name": "visualize_graph",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "visualize_graph",
+          "signature": "def visualize_graph(\n    edge_index: Tensor,\n    edge_weight: Optional[Tensor] = None,\n    path: Optional[str] = None,\n    backend: Optional[str] = None,\n    node_labels: Optional[List[str]] = None,\n) -> Any",
+          "start_line": 24,
+          "symbol_id": "torch_geometric/visualization/graph.py#function:visualize_graph:24"
+        },
+        {
+          "children": [],
+          "code": "def _visualize_graph_via_graphviz(\n    edge_index: Tensor,\n    edge_weight: Tensor,\n    path: Optional[str] = None,\n    node_labels: Optional[List[str]] = None,\n) -> Any:\n    import graphviz\n\n    suffix = path.split('.')[-1] if path is not None else None\n    g = graphviz.Digraph('graph', format=suffix)\n    g.attr('node', shape='circle', fontsize='11pt')\n\n    for node in edge_index.view(-1).unique().tolist():\n        g.node(str(node) if node_labels is None else node_labels[node])\n\n    for (src, dst), w in zip(edge_index.t().tolist(), edge_weight.tolist()):\n        hex_color = hex(255 - round(255 * w))[2:]\n        hex_color = f'{hex_color}0' if len(hex_color) == 1 else hex_color\n        if node_labels is not None:\n            src = node_labels[src]\n            dst = node_labels[dst]\n        g.edge(str(src), str(dst), color=f'#{hex_color}{hex_color}{hex_color}')\n\n    if path is not None:\n        path = '.'.join(path.split('.')[:-1])\n        g.render(path, cleanup=True)\n    else:\n        g.view()\n\n    return g",
+          "documentation": null,
+          "end_line": 103,
+          "kind": "function",
+          "name": "_visualize_graph_via_graphviz",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "_visualize_graph_via_graphviz",
+          "signature": "def _visualize_graph_via_graphviz(\n    edge_index: Tensor,\n    edge_weight: Tensor,\n    path: Optional[str] = None,\n    node_labels: Optional[List[str]] = None,\n) -> Any",
+          "start_line": 74,
+          "symbol_id": "torch_geometric/visualization/graph.py#function:_visualize_graph_via_graphviz:74"
+        }
+      ],
+      "unparsed_code": null
+    }
+  ],
+  "metadata": {
+    "actual_code_context_tokens": 8046,
+    "base_id": "py_003",
+    "instance_id": "py_003_ctx8k",
+    "language": "python",
+    "normalized_language": "python",
+    "position_ratio": 0.05,
+    "requested_context_tokens": 8192,
+    "sequence": 3
+  },
+  "repository": "pyg-team/pytorch_geometric",
+  "workspace_id": "py_003_ctx8k"
+}

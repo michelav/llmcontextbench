@@ -1,0 +1,21 @@
+{
+  "base_id": "java_003",
+  "code_context_ntokens": 3967,
+  "description": "1. **Purpose**: To enhance an error message by appending a unique connection identifier if the connection is active and the identifier is available.\n2. **Input**: A string representing an error message and a connection object.\n3. **Output**: A string which is either the original error message or the error message appended with a unique connection identifier.\n4. **Procedure**: The function first checks if the connection object is not null and is active. If so, it retrieves the unique connection identifier. If the identifier is available, it appends this identifier to the original error message using a specific format. If the connection is not active or the identifier is not available, it returns the original error message.",
+  "end_byte": 16407,
+  "end_line": 409,
+  "instance_id": "java_003_ctx4k",
+  "language": "java",
+  "needle_name": "checkAndAppendClientConnId",
+  "needle_token_end": 291,
+  "needle_token_start": 102,
+  "normalized_language": "java",
+  "path": "src/main/java/com/microsoft/sqlserver/jdbc/SQLServerException.java",
+  "position_ratio": 0.05,
+  "repo": "microsoft/mssql-jdbc",
+  "repoqa_description": "Function Description:1. **Purpose**: To enhance an error message by appending a unique connection identifier if the connection is active and the identifier is available.\n2. **Input**: A string representing an error message and a connection object.\n3. **Output**: A string which is either the original error message or the error message appended with a unique connection identifier.\n4. **Procedure**: The function first checks if the connection object is not null and is active. If so, it retrieves the unique connection identifier. If the identifier is available, it appends this identifier to the original error message using a specific format. If the connection is not active or the identifier is not available, it returns the original error message.",
+  "requested_context_tokens": 4096,
+  "sequence": 3,
+  "start_byte": 15632,
+  "start_line": 394
+}

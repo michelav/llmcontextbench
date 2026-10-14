@@ -1,0 +1,340 @@
+            to the console. (default: :obj:`True`)
+        avg_time_divisor (int, optional): If set to a value greater than
+            :obj:`1`, will divide the total time by this value. Useful for
+            calculating the average of runtimes within a for-loop.
+            (default: :obj:`0`)
+    """
+    def __init__(self, log: bool = True, avg_time_divisor: int = 0):
+        self.log = log
+        self.avg_time_divisor = avg_time_divisor
+
+    def __enter__(self):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self.t_start = time.time()
+        return self
+
+    def __exit__(self, *args):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        self.t_end = time.time()
+        self.duration = self.t_end - self.t_start
+        if self.avg_time_divisor > 1:
+            self.duration = self.duration / self.avg_time_divisor
+        if self.log:  # pragma: no cover
+            print(f'Time: {self.duration:.8f}s', flush=True)
+
+    def reset(self):
+        r"""Prints the duration and resets current timer."""
+        if self.t_start is None:
+            raise RuntimeError("Timer wasn't started.")
+        else:
+            self.__exit__()
+            self.__enter__()
+
+
+def get_stats_summary(
+    stats_list: Union[List[GPUStats], List[CUDAStats]]
+) -> Union[GPUStatsSummary, CUDAStatsSummary]:  # pragma: no cover
+    r"""Creates a summary of collected runtime and memory statistics.
+    Returns a :obj:`GPUStatsSummary` if list of :obj:`GPUStats` was passed,
+    otherwise (list of :obj:`CUDAStats` was passed),
+    returns a :obj:`CUDAStatsSummary`.
+
+    Args:
+        stats_list (Union[List[GPUStats], List[CUDAStats]]): A list of
+            :obj:`GPUStats` or :obj:`CUDAStats` objects, as returned by
+            :meth:`~torch_geometric.profile.profileit`.
+    """
+    # calculate common statistics
+    kwargs = dict(
+        time_mean=float(torch.tensor([s.time for s in stats_list]).mean()),
+        time_std=float(torch.tensor([s.time for s in stats_list]).std()),
+        max_allocated_gpu=max([s.max_allocated_gpu for s in stats_list]),
+        max_reserved_gpu=max([s.max_reserved_gpu for s in stats_list]),
+        max_active_gpu=max([s.max_active_gpu for s in stats_list]))
+
+    if all(isinstance(s, CUDAStats) for s in stats_list):
+        return CUDAStatsSummary(
+            **kwargs,
+            min_nvidia_smi_free_cuda=min(
+                [s.nvidia_smi_free_cuda for s in stats_list]),
+            max_nvidia_smi_used_cuda=max(
+                [s.nvidia_smi_used_cuda for s in stats_list]),
+        )
+    else:
+        return GPUStatsSummary(**kwargs)
+
+
+###############################################################################
+
+
+
+def read_from_memlab(line_profiler: Any) -> List[float]:  # pragma: no cover
+    from pytorch_memlab.line_profiler.line_records import LineRecords
+
+    # See: https://pytorch.org/docs/stable/cuda.html#torch.cuda.memory_stats
+
+    track_stats = [  # Different statistic can be collected as needed.
+        'allocated_bytes.all.peak',
+        'reserved_bytes.all.peak',
+        'active_bytes.all.peak',
+    ]
+
+    records = LineRecords(line_profiler._raw_line_records,
+                          line_profiler._code_infos)
+    stats = records.display(None, track_stats)._line_records
+    return [byte_to_megabyte(x) for x in stats.values.max(axis=0).tolist()]
+
+
+def trace_handler(p):
+    print_time_total(p)
+    profile_dir = str(pathlib.Path.cwd()) + '/'
+    timeline_file = profile_dir + 'timeline' + '.json'
+    p.export_chrome_trace(timeline_file)
+
+
+def print_time_total(p):
+    if torch.cuda.is_available():
+        profile_sort = 'self_cuda_time_total'
+    else:
+        profile_sort = 'self_cpu_time_total'
+    output = p.key_averages().table(sort_by=profile_sort)
+    print(output)
+
+
+def rename_profile_file(*args):
+    profile_dir = str(pathlib.Path.cwd()) + '/'
+    timeline_file = profile_dir + 'profile'
+    for arg in args:
+        timeline_file += '-' + arg
+    timeline_file += '.json'
+    os.rename('timeline.json', timeline_file)
+
+
+@contextmanager
+def torch_profile(export_chrome_trace=True, csv_data=None, write_csv=None):
+    use_cuda = torch.cuda.is_available()
+
+    activities = [ProfilerActivity.CPU]
+    if use_cuda:
+        activities.append(ProfilerActivity.CUDA)
+
+    if export_chrome_trace:
+        p_trace_handler = trace_handler
+    else:
+        p_trace_handler = print_time_total
+
+    p = profile(activities=activities, on_trace_ready=p_trace_handler)
+
+    with p:
+        yield
+        p.step()
+
+    if csv_data is not None and write_csv == 'prof':
+        if use_cuda:
+            profile_sort = 'self_cuda_time_total'
+        else:
+            profile_sort = 'self_cpu_time_total'
+        events = EventList(
+            sorted(
+                p.key_averages(),
+                key=lambda evt: getattr(evt, profile_sort),
+                reverse=True,
+            ), use_cuda=use_cuda)
+
+        save_profile_data(csv_data, events, use_cuda)
+
+
+@contextmanager
+def xpu_profile(export_chrome_trace=True):
+    with torch.autograd.profiler_legacy.profile(use_xpu=True) as profile:
+        yield
+    print(profile.key_averages().table(sort_by='self_xpu_time_total'))
+    if export_chrome_trace:
+        profile.export_chrome_trace('timeline.json')
+
+
+def format_prof_time(time):
+    # Profile time is in micro seconds, so format it appropriately:
+    return round(time / 1e6, 3)
+
+
+def save_profile_data(csv_data, events, use_cuda):
+    sum_self_cpu_time_total = sum(
+        [event.self_cpu_time_total for event in events])
+    sum_cpu_time_total = sum([event.self_cpu_time_total for event in events])
+    sum_self_cuda_time_total = sum(
+        [event.self_cuda_time_total for event in events]) if use_cuda else 0
+
+    for e in events[:5]:  # Save top 5 most time consuming operations:
+        csv_data['NAME'].append(e.key)
+        csv_data['SELF CPU %'].append(
+            round(e.self_cpu_time_total * 100.0 / sum_self_cpu_time_total, 3))
+        csv_data['SELF CPU'].append(format_prof_time(e.self_cpu_time_total))
+        csv_data['CPU TOTAL %'].append(
+            round(e.cpu_time_total * 100.0 / sum_cpu_time_total, 3))
+        csv_data['CPU TOTAL'].append(format_prof_time(e.cpu_time_total))
+        csv_data['CPU TIME AVG'].append(format_prof_time(e.cpu_time_total))
+        if use_cuda:
+            csv_data['SELF CUDA %'].append(e.self_cuda_time_total * 100.0 /
+                                           sum_self_cuda_time_total)
+            csv_data['SELF CUDA'].append(
+                format_prof_time(e.self_cuda_time_total))
+            csv_data['CUDA TOTAL'].append(format_prof_time(e.cpu_time_total))
+            csv_data['CUDA TIME AVG'].append(format_prof_time(
+                e.cpu_time_total))
+        csv_data['# OF CALLS'].append(e.count)
+
+# Path: torch_geometric/profile/__init__.py
+r"""GNN profiling package."""
+
+from .benchmark import benchmark
+from .profile import (
+    get_stats_summary,
+    print_time_total,
+    profileit,
+    rename_profile_file,
+    timeit,
+    torch_profile,
+    trace_handler,
+    xpu_profile,
+)
+from .utils import (
+    count_parameters,
+    get_cpu_memory_from_gc,
+    get_data_size,
+    get_gpu_memory_from_gc,
+    get_gpu_memory_from_ipex,
+    get_gpu_memory_from_nvidia_smi,
+    get_model_size,
+)
+
+__all__ = [
+    'profileit',
+    'timeit',
+    'get_stats_summary',
+    'trace_handler',
+    'print_time_total',
+    'rename_profile_file',
+    'torch_profile',
+    'xpu_profile',
+    'count_parameters',
+    'get_model_size',
+    'get_data_size',
+    'get_cpu_memory_from_gc',
+    'get_gpu_memory_from_gc',
+    'get_gpu_memory_from_nvidia_smi',
+    'get_gpu_memory_from_ipex',
+    'benchmark',
+]
+
+classes = __all__
+
+# Path: torch_geometric/seed.py
+import random
+
+import numpy as np
+import torch
+
+
+def seed_everything(seed: int) -> None:
+    r"""Sets the seed for generating random numbers in :pytorch:`PyTorch`,
+    :obj:`numpy` and :python:`Python`.
+
+    Args:
+        seed (int): The desired seed.
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+# Path: torch_geometric/transforms/add_metapaths.py
+import warnings
+from typing import List, Optional, Tuple, Union, cast
+
+import torch
+from torch import Tensor
+
+from torch_geometric import EdgeIndex
+from torch_geometric.data import HeteroData
+from torch_geometric.data.datapipes import functional_transform
+from torch_geometric.transforms import BaseTransform
+from torch_geometric.typing import EdgeType
+from torch_geometric.utils import coalesce, degree
+
+
+@functional_transform('add_metapaths')
+class AddMetaPaths(BaseTransform):
+    r"""Adds additional edge types to a
+    :class:`~torch_geometric.data.HeteroData` object between the source node
+    type and the destination node type of a given :obj:`metapath`, as described
+    in the `"Heterogenous Graph Attention Networks"
+    <https://arxiv.org/abs/1903.07293>`_ paper
+    (functional name: :obj:`add_metapaths`).
+
+    Meta-path based neighbors can exploit different aspects of structure
+    information in heterogeneous graphs.
+    Formally, a metapath is a path of the form
+
+    .. math::
+
+        \mathcal{V}_1 \xrightarrow{R_1} \mathcal{V}_2 \xrightarrow{R_2} \ldots
+        \xrightarrow{R_{\ell-1}} \mathcal{V}_{\ell}
+
+    in which :math:`\mathcal{V}_i` represents node types, and :math:`R_j`
+    represents the edge type connecting two node types.
+    The added edge type is given by the sequential multiplication  of
+    adjacency matrices along the metapath, and is added to the
+    :class:`~torch_geometric.data.HeteroData` object as edge type
+    :obj:`(src_node_type, "metapath_*", dst_node_type)`, where
+    :obj:`src_node_type` and :obj:`dst_node_type` denote :math:`\mathcal{V}_1`
+    and :math:`\mathcal{V}_{\ell}`, repectively.
+
+    In addition, a :obj:`metapath_dict` object is added to the
+    :class:`~torch_geometric.data.HeteroData` object which maps the
+    metapath-based edge type to its original metapath.
+
+    .. code-block:: python
+
+        from torch_geometric.datasets import DBLP
+        from torch_geometric.data import HeteroData
+        from torch_geometric.transforms import AddMetaPaths
+
+        data = DBLP(root)[0]
+        # 4 node types: "paper", "author", "conference", and "term"
+        # 6 edge types: ("paper","author"), ("author", "paper"),
+        #               ("paper, "term"), ("paper", "conference"),
+        #               ("term, "paper"), ("conference", "paper")
+
+        # Add two metapaths:
+        # 1. From "paper" to "paper" through "conference"
+        # 2. From "author" to "conference" through "paper"
+        metapaths = [[("paper", "conference"), ("conference", "paper")],
+                     [("author", "paper"), ("paper", "conference")]]
+        data = AddMetaPaths(metapaths)(data)
+
+        print(data.edge_types)
+        >>> [("author", "to", "paper"), ("paper", "to", "author"),
+             ("paper", "to", "term"), ("paper", "to", "conference"),
+             ("term", "to", "paper"), ("conference", "to", "paper"),
+             ("paper", "metapath_0", "paper"),
+             ("author", "metapath_1", "conference")]
+
+        print(data.metapath_dict)
+        >>> {("paper", "metapath_0", "paper"): [("paper", "conference"),
+                                                ("conference", "paper")],
+             ("author", "metapath_1", "conference"): [("author", "paper"),
+                                                      ("paper", "conference")]}
+
+    Args:
+        metapaths (List[List[Tuple[str, str, str]]]): The metapaths described
+            by a list of lists of
+            :obj:`(src_node_type, rel_type, dst_node_type)` tuples.
+        drop_orig_edge_types (bool, optional): If set to :obj:`True`, existing
+            edge types will be dropped. (default: :obj:`False`)
+        keep_same_node_type (bool, optional): If set to :obj:`True`, existing
+            edge types between the same node type are not dropped even in case
+            :obj:`drop_orig_edge_types` is set to :obj:`True`.
+...

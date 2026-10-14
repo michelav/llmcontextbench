@@ -1,0 +1,21 @@
+{
+  "base_id": "rs_004",
+  "code_context_ntokens": 16272,
+  "description": "1. **Purpose**: The function initializes a new instance of a manager that handles events and state restoration in a system that monitors and manages stateful operations.\n2. **Input**: It takes two parameters: a monitoring object that tracks system activities and a state restorer object that manages the saving and restoring of system state.\n3. **Output**: Returns a new instance of the event manager equipped with the provided monitoring and state restoration capabilities.\n4. **Procedure**: The function creates a new event manager by first initializing an internal simple event manager with the provided monitor. It then sets up the state restorer to manage the system state across different operational phases.",
+  "end_byte": 13620,
+  "end_line": 454,
+  "instance_id": "rs_004_ctx16k",
+  "language": "rust",
+  "needle_name": "launched",
+  "needle_token_end": 2478,
+  "needle_token_start": 2420,
+  "normalized_language": "rust",
+  "path": "libafl/src/events/simple.rs",
+  "position_ratio": 0.15,
+  "repo": "AFLplusplus/LibAFL",
+  "repoqa_description": "Function Description:1. **Purpose**: The function initializes a new instance of a manager that handles events and state restoration in a system that monitors and manages stateful operations.\n2. **Input**: It takes two parameters: a monitoring object that tracks system activities and a state restorer object that manages the saving and restoring of system state.\n3. **Output**: Returns a new instance of the event manager equipped with the provided monitoring and state restoration capabilities.\n4. **Procedure**: The function creates a new event manager by first initializing an internal simple event manager with the provided monitor. It then sets up the state restorer to manage the system state across different operational phases.",
+  "requested_context_tokens": 16384,
+  "sequence": 4,
+  "start_byte": 13430,
+  "start_line": 448
+}

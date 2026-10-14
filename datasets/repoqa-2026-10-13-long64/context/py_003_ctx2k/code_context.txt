@@ -1,0 +1,201 @@
+# Repository: pyg-team/pytorch_geometric
+
+            self.device = torch.device('cpu')
+
+        self.stream = None
+        self.stream_context = nullcontext
+        self.module = getattr(torch, self.device.type) if self.is_gpu else None
+
+    
+def maybe_init_stream(self) -> None:
+        if self.is_gpu:
+            self.stream = self.module.Stream()
+            self.stream_context = partial(
+                self.module.stream,
+                stream=self.stream,
+            )
+
+    def maybe_wait_stream(self) -> None:
+        if self.stream is not None:
+            self.module.current_stream().wait_stream(self.stream)
+
+
+class PrefetchLoader:
+    r"""A GPU prefetcher class for asynchronously transferring data of a
+    :class:`torch.utils.data.DataLoader` from host memory to device memory.
+
+    Args:
+        loader (torch.utils.data.DataLoader): The data loader.
+        device (torch.device, optional): The device to load the data to.
+            (default: :obj:`None`)
+    """
+    def __init__(
+        self,
+        loader: DataLoader,
+        device: Optional[torch.device] = None,
+    ):
+        self.loader = loader
+        self.device_helper = DeviceHelper(device)
+
+    def non_blocking_transfer(self, batch: Any) -> Any:
+        if not self.device_helper.is_gpu:
+            return batch
+        if isinstance(batch, (list, tuple)):
+            return [self.non_blocking_transfer(v) for v in batch]
+        if isinstance(batch, dict):
+            return {k: self.non_blocking_transfer(v) for k, v in batch.items()}
+
+        batch = batch.pin_memory(self.device_helper.device)
+        return batch.to(self.device_helper.device, non_blocking=True)
+
+    def __iter__(self) -> Any:
+        first = True
+        self.device_helper.maybe_init_stream()
+
+        batch = None
+        for next_batch in self.loader:
+
+            with self.device_helper.stream_context():
+                next_batch = self.non_blocking_transfer(next_batch)
+
+            if not first:
+                yield batch
+            else:
+                first = False
+
+            self.device_helper.maybe_wait_stream()
+
+            batch = next_batch
+
+        yield batch
+
+    def __len__(self) -> int:
+        return len(self.loader)
+
+    def __repr__(self) -> str:
+        return f'{self.__class__.__name__}({self.loader})'
+
+# Path: torch_geometric/loader/random_node_loader.py
+import math
+from typing import Union
+
+import torch
+from torch import Tensor
+
+from torch_geometric.data import Data, HeteroData
+from torch_geometric.data.hetero_data import to_homogeneous_edge_index
+
+
+class RandomNodeLoader(torch.utils.data.DataLoader):
+    r"""A data loader that randomly samples nodes within a graph and returns
+    their induced subgraph.
+
+    .. note::
+
+        For an example of using
+        :class:`~torch_geometric.loader.RandomNodeLoader`, see
+        `examples/ogbn_proteins_deepgcn.py
+        <https://github.com/pyg-team/pytorch_geometric/blob/master/examples/
+        ogbn_proteins_deepgcn.py>`_.
+
+    Args:
+        data (torch_geometric.data.Data or torch_geometric.data.HeteroData):
+            The :class:`~torch_geometric.data.Data` or
+            :class:`~torch_geometric.data.HeteroData` graph object.
+        num_parts (int): The number of partitions.
+        **kwargs (optional): Additional arguments of
+            :class:`torch.utils.data.DataLoader`, such as :obj:`num_workers`.
+    """
+    def __init__(
+        self,
+        data: Union[Data, HeteroData],
+        num_parts: int,
+        **kwargs,
+    ):
+        self.data = data
+        self.num_parts = num_parts
+
+        if isinstance(data, HeteroData):
+            edge_index, node_dict, edge_dict = to_homogeneous_edge_index(data)
+            self.node_dict, self.edge_dict = node_dict, edge_dict
+        else:
+            edge_index = data.edge_index
+
+        self.edge_index = edge_index
+        self.num_nodes = data.num_nodes
+
+        super().__init__(
+            range(self.num_nodes),
+            batch_size=math.ceil(self.num_nodes / num_parts),
+            collate_fn=self.collate_fn,
+            **kwargs,
+        )
+
+    def collate_fn(self, index):
+        if not isinstance(index, Tensor):
+            index = torch.tensor(index)
+
+        if isinstance(self.data, Data):
+            return self.data.subgraph(index)
+
+        elif isinstance(self.data, HeteroData):
+            node_dict = {
+                key: index[(index >= start) & (index < end)] - start
+                for key, (start, end) in self.node_dict.items()
+            }
+            return self.data.subgraph(node_dict)
+
+# Path: torch_geometric/loader/shadow.py
+import copy
+from typing import Optional
+
+import torch
+from torch import Tensor
+
+from torch_geometric.data import Batch, Data
+from torch_geometric.typing import WITH_TORCH_SPARSE, SparseTensor
+
+
+class ShaDowKHopSampler(torch.utils.data.DataLoader):
+    r"""The ShaDow :math:`k`-hop sampler from the `"Decoupling the Depth and
+    Scope of Graph Neural Networks" <https://arxiv.org/abs/2201.07858>`_ paper.
+    Given a graph in a :obj:`data` object, the sampler will create shallow,
+    localized subgraphs.
+    A deep GNN on this local graph then smooths the informative local signals.
+
+    .. note::
+
+        For an example of using :class:`ShaDowKHopSampler`, see
+        `examples/shadow.py <https://github.com/pyg-team/
+        pytorch_geometric/blob/master/examples/shadow.py>`_.
+
+    Args:
+        data (torch_geometric.data.Data): The graph data object.
+        depth (int): The depth/number of hops of the localized subgraph.
+        num_neighbors (int): The number of neighbors to sample for each node in
+            each hop.
+        node_idx (LongTensor or BoolTensor, optional): The nodes that should be
+            considered for creating mini-batches.
+            If set to :obj:`None`, all nodes will be
+            considered.
+        replace (bool, optional): If set to :obj:`True`, will sample neighbors
+            with replacement. (default: :obj:`False`)
+        **kwargs (optional): Additional arguments of
+            :class:`torch.utils.data.DataLoader`, such as :obj:`batch_size` or
+            :obj:`num_workers`.
+    """
+    def __init__(self, data: Data, depth: int, num_neighbors: int,
+                 node_idx: Optional[Tensor] = None, replace: bool = False,
+                 **kwargs):
+
+        if not WITH_TORCH_SPARSE:
+            raise ImportError(
+                f"'{self.__class__.__name__}' requires 'torch-sparse'")
+
+        self.data = copy.copy(data)
+        self.depth = depth
+        self.num_neighbors = num_neighbors
+        self.replace = replace
+
+        if data.edge_index is not None:
+...

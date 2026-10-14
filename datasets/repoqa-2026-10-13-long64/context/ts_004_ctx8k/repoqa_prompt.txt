@@ -1,0 +1,839 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:// Path: langchain/src/chains/query_constructor/index.ts
+import type { BaseLanguageModelInterface } from "@langchain/core/language_models/base";
+import { z } from "zod";
+import {
+  Example,
+  interpolateFString,
+  FewShotPromptTemplate,
+} from "@langchain/core/prompts";
+import { InputValues } from "@langchain/core/utils/types";
+import { QueryTransformer, TraverseType } from "./parser.js";
+import {
+  Comparator,
+  Comparators,
+  Operator,
+  Operators,
+  StructuredQuery,
+} from "./ir.js";
+import {
+  DEFAULT_EXAMPLES,
+  DEFAULT_PREFIX,
+  DEFAULT_SCHEMA,
+  DEFAULT_SUFFIX,
+  EXAMPLE_PROMPT,
+} from "./prompt.js";
+import { LLMChain } from "../llm_chain.js";
+import { AsymmetricStructuredOutputParser } from "../../output_parsers/structured.js";
+import { AttributeInfo } from "../../schema/query_constructor.js";
+
+export { QueryTransformer, type TraverseType };
+export {
+  DEFAULT_EXAMPLES,
+  DEFAULT_PREFIX,
+  DEFAULT_SCHEMA,
+  DEFAULT_SUFFIX,
+  EXAMPLE_PROMPT,
+};
+
+const queryInputSchema = /* #__PURE__ */ z.object({
+  query: /* #__PURE__ */ z
+    .string()
+    .describe("text string to compare to document contents"),
+  filter: /* #__PURE__ */ z
+    .string()
+    .optional()
+    .describe("logical condition statement for filtering documents"),
+});
+
+/**
+ * A class that extends AsymmetricStructuredOutputParser to parse
+ * structured query output.
+ */
+export class StructuredQueryOutputParser extends AsymmetricStructuredOutputParser<
+  typeof queryInputSchema,
+  StructuredQuery
+> {
+  lc_namespace = ["langchain", "chains", "query_constructor"];
+
+  queryTransformer: QueryTransformer;
+
+  constructor(fields: {
+    allowedComparators: Comparator[];
+    allowedOperators: Operator[];
+  }) {
+    super({ ...fields, inputSchema: queryInputSchema });
+
+    const { allowedComparators, allowedOperators } = fields;
+    this.queryTransformer = new QueryTransformer(
+      allowedComparators,
+      allowedOperators
+    );
+  }
+
+  /**
+   * Processes the output of a structured query.
+   * @param query The query string.
+   * @param filter The filter condition.
+   * @returns A Promise that resolves to a StructuredQuery instance.
+   */
+  async outputProcessor({
+    query,
+    filter,
+  }: z.infer<typeof queryInputSchema>): Promise<StructuredQuery> {
+    let myQuery = query;
+    if (myQuery.length === 0) {
+      myQuery = " ";
+    }
+    if (filter === "NO_FILTER" || filter === undefined) {
+      return new StructuredQuery(query);
+    } else {
+      const parsedFilter = await this.queryTransformer.parse(filter);
+      return new StructuredQuery(query, parsedFilter);
+    }
+  }
+
+  /**
+   * Creates a new StructuredQueryOutputParser instance from the provided
+   * components.
+   * @param allowedComparators An array of allowed Comparator instances.
+   * @param allowedOperators An array of allowed Operator instances.
+   * @returns A new StructuredQueryOutputParser instance.
+   */
+  static fromComponents(
+    allowedComparators: Comparator[] = [],
+    allowedOperators: Operator[] = []
+  ) {
+    return new StructuredQueryOutputParser({
+      allowedComparators,
+      allowedOperators,
+    });
+  }
+}
+
+export function formatAttributeInfo(info: AttributeInfo[]) {
+  const infoObj = info.reduce((acc, attr) => {
+    acc[attr.name] = {
+      type: attr.type,
+      description: attr.description,
+    };
+    return acc;
+...
+// Path: langchain/src/retrievers/self_query/utils.ts
+/**
+ * Checks if the provided argument is an object and not an array.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function isObject(obj: any): obj is object {
+  return obj && typeof obj === "object" && !Array.isArray(obj);
+}
+
+/**
+ * Checks if a provided filter is empty. The filter can be a function, an
+ * object, a string, or undefined.
+ */
+export 
+function isFilterEmpty(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  filter: ((q: any) => any) | object | string | undefined
+): filter is undefined {
+  if (!filter) return true;
+  // for Milvus
+  if (typeof filter === "string" && filter.length > 0) {
+    return false;
+  }
+  if (typeof filter === "function") {
+    return false;
+  }
+  return isObject(filter) && Object.keys(filter).length === 0;
+}
+
+/**
+ * Checks if the provided value is an integer.
+ */
+export function isInt(value: unknown): boolean {
+  if (typeof value === "number") {
+    return value % 1 === 0;
+  } else if (typeof value === "string") {
+    const numberValue = parseInt(value, 10);
+    return (
+      !Number.isNaN(numberValue) &&
+      numberValue % 1 === 0 &&
+      numberValue.toString() === value
+    );
+  }
+
+  return false;
+}
+
+/**
+ * Checks if the provided value is a floating-point number.
+ */
+export function isFloat(value: unknown): boolean {
+  if (typeof value === "number") {
+    return value % 1 !== 0;
+  } else if (typeof value === "string") {
+    const numberValue = parseFloat(value);
+    return (
+      !Number.isNaN(numberValue) &&
+      numberValue % 1 !== 0 &&
+      numberValue.toString() === value
+    );
+  }
+
+  return false;
+}
+
+/**
+ * Checks if the provided value is a string that cannot be parsed into a
+ * number.
+ */
+export function isString(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    (Number.isNaN(parseFloat(value)) || parseFloat(value).toString() !== value)
+  );
+}
+
+/**
+ * Casts a value that might be string or number to actual string or number.
+ * Since LLM might return back an integer/float as a string, we need to cast
+ * it back to a number, as many vector databases can't handle number as string
+ * values as a comparator.
+ */
+export function castValue(input: unknown): string | number {
+  let value;
+  if (isString(input)) {
+    value = input as string;
+  } else if (isInt(input)) {
+    value = parseInt(input as string, 10);
+  } else if (isFloat(input)) {
+    value = parseFloat(input as string);
+  } else {
+    throw new Error("Unsupported value type");
+  }
+
+  return value;
+}
+
+// Path: langchain/src/retrievers/self_query/base.ts
+import { VectorStore } from "@langchain/core/vectorstores";
+import {
+  Comparator,
+  Comparators,
+  Comparison,
+  Operation,
+  Operator,
+  Operators,
+  StructuredQuery,
+  Visitor,
+  VisitorComparisonResult,
+  VisitorOperationResult,
+  VisitorResult,
+  VisitorStructuredQueryResult,
+} from "../../chains/query_constructor/ir.js";
+import { isFilterEmpty, castValue } from "./utils.js";
+
+/**
+ * Options object for the BasicTranslator class. Specifies the allowed
+ * operators and comparators.
+ */
+export type TranslatorOpts = {
+  allowedOperators: Operator[];
+  allowedComparators: Comparator[];
+};
+
+/**
+ * Abstract class that provides a blueprint for creating specific
+ * translator classes. Defines two abstract methods: formatFunction and
+ * mergeFilters.
+ */
+export abstract class BaseTranslator<
+  T extends VectorStore = VectorStore
+> extends Visitor<T> {
+  /**
+   * Formats a given function (either an operator or a comparator) into a
+   * string.
+   * @param func The function to format.
+   * @returns Formatted string representation of the function.
+   */
+  abstract formatFunction(func: Operator | Comparator): string;
+
+  /**
+   * Merges two filters into one, using a specified merge type.
+   * @param defaultFilter The default filter.
+   * @param generatedFilter The generated filter.
+   * @param mergeType The type of merge to perform. Can be 'and', 'or', or 'replace'.
+   * @param forceDefaultFilter If true, the default filter will be used even if the generated filter is not empty.
+   * @returns The merged filter, or undefined if both filters are empty.
+   */
+  abstract mergeFilters(
+    defaultFilter: this["VisitStructuredQueryOutput"]["filter"] | undefined,
+    generatedFilter: this["VisitStructuredQueryOutput"]["filter"] | undefined,
+    mergeType?: "and" | "or" | "replace",
+    forceDefaultFilter?: boolean
+  ): this["VisitStructuredQueryOutput"]["filter"] | undefined;
+}
+
+/**
+ * Class that extends the BaseTranslator class and provides concrete
+ * implementations for the abstract methods. Also declares three types:
+ * VisitOperationOutput, VisitComparisonOutput, and
+ * VisitStructuredQueryOutput, which are used as the return types for the
+ * visitOperation, visitComparison, and visitStructuredQuery methods
+ * respectively.
+ */
+export class BasicTranslator<
+  T extends VectorStore = VectorStore
+> extends BaseTranslator<T> {
+  declare VisitOperationOutput: VisitorOperationResult;
+
+  declare VisitComparisonOutput: VisitorComparisonResult;
+
+  declare VisitStructuredQueryOutput: VisitorStructuredQueryResult;
+
+  allowedOperators: Operator[];
+
+  allowedComparators: Comparator[];
+
+  constructor(opts?: TranslatorOpts) {
+    super();
+    this.allowedOperators = opts?.allowedOperators ?? [
+      Operators.and,
+      Operators.or,
+    ];
+    this.allowedComparators = opts?.allowedComparators ?? [
+      Comparators.eq,
+      Comparators.ne,
+      Comparators.gt,
+      Comparators.gte,
+      Comparators.lt,
+      Comparators.lte,
+    ];
+  }
+
+  formatFunction(func: Operator | Comparator): string {
+    if (func in Comparators) {
+      if (
+        this.allowedComparators.length > 0 &&
+        this.allowedComparators.indexOf(func as Comparator) === -1
+      ) {
+        throw new Error(
+          `Comparator ${func} not allowed. Allowed operators: ${this.allowedComparators.join(
+            ", "
+          )}`
+        );
+      }
+    } else if (func in Operators) {
+      if (
+        this.allowedOperators.length > 0 &&
+        this.allowedOperators.indexOf(func as Operator) === -1
+      ) {
+        throw new Error(
+          `Operator ${func} not allowed. Allowed operators: ${this.allowedOperators.join(
+            ", "
+          )}`
+        );
+      }
+    } else {
+      throw new Error("Unknown comparator or operator");
+    }
+    return `$${func}`;
+  }
+
+  /**
+   * Visits an operation and returns a result.
+   * @param operation The operation to visit.
+   * @returns The result of visiting the operation.
+   */
+  visitOperation(operation: Operation): this["VisitOperationOutput"] {
+    const args = operation.args?.map((arg) =>
+      arg.accept(this)
+    ) as VisitorResult[];
+    return {
+      [this.formatFunction(operation.operator)]: args,
+    };
+  }
+
+  /**
+   * Visits a comparison and returns a result.
+   * @param comparison The comparison to visit.
+   * @returns The result of visiting the comparison.
+   */
+  visitComparison(comparison: Comparison): this["VisitComparisonOutput"] {
+    return {
+      [comparison.attribute]: {
+        [this.formatFunction(comparison.comparator)]: castValue(
+          comparison.value
+        ),
+      },
+    };
+  }
+
+  /**
+   * Visits a structured query and returns a result.
+   * @param query The structured query to visit.
+   * @returns The result of visiting the structured query.
+   */
+  visitStructuredQuery(
+    query: StructuredQuery
+  ): this["VisitStructuredQueryOutput"] {
+    let nextArg = {};
+    if (query.filter) {
+      nextArg = {
+        filter: query.filter.accept(this),
+      };
+    }
+    return nextArg;
+  }
+
+  mergeFilters(
+    defaultFilter: VisitorStructuredQueryResult["filter"] | undefined,
+    generatedFilter: VisitorStructuredQueryResult["filter"] | undefined,
+    mergeType = "and",
+    forceDefaultFilter = false
+  ): VisitorStructuredQueryResult["filter"] | undefined {
+    if (isFilterEmpty(defaultFilter) && isFilterEmpty(generatedFilter)) {
+      return undefined;
+    }
+    if (isFilterEmpty(defaultFilter) || mergeType === "replace") {
+      if (isFilterEmpty(generatedFilter)) {
+        return undefined;
+      }
+      return generatedFilter;
+    }
+    if (isFilterEmpty(generatedFilter)) {
+      if (forceDefaultFilter) {
+        return defaultFilter;
+      }
+      if (mergeType === "and") {
+        return undefined;
+      }
+      return defaultFilter;
+    }
+    if (mergeType === "and") {
+      return {
+        $and: [defaultFilter, generatedFilter],
+      };
+    } else if (mergeType === "or") {
+      return {
+        $or: [defaultFilter, generatedFilter],
+      };
+    } else {
+      throw new Error("Unknown merge type");
+    }
+  }
+}
+
+// Path: langchain/src/chains/query_constructor/tests/query_chain.int.test.ts
+import { test } from "@jest/globals";
+import { OpenAI } from "@langchain/openai";
+import { loadQueryConstructorChain } from "../index.js";
+import {
+  Comparators,
+  Comparison,
+  Operation,
+  Operators,
+  StructuredQuery,
+} from "../ir.js";
+import { AttributeInfo } from "../../../schema/query_constructor.js";
+import { BasicTranslator } from "../../../retrievers/self_query/base.js";
+
+test("Query Chain Test", async () => {
+  const sq1 = new StructuredQuery(
+    "",
+    new Comparison(Comparators.lt, "length", 90)
+  );
+  const sq3 = new StructuredQuery(
+    "",
+    new Comparison(Comparators.gt, "rating", 8.5)
+  );
+  const sq4 = new StructuredQuery(
+    "",
+    new Comparison(Comparators.eq, "director", "Greta Gerwig")
+  );
+  const sq5 = new StructuredQuery(
+    "",
+    new Operation(Operators.and, [
+      new Operation(Operators.or, [
+        new Comparison(Comparators.eq, "genre", "comedy"),
+        new Comparison(Comparators.eq, "genre", "drama"),
+      ]),
+      new Comparison(Comparators.lt, "length", 90),
+    ])
+  );
+
+  const filter1 = { length: { $lt: 90 } };
+  const filter3 = { rating: { $gt: 8.5 } };
+  const filter4 = { director: { $eq: "Greta Gerwig" } };
+  const filter5 = {
+    $and: [
+      { $or: [{ genre: { $eq: "comedy" } }, { genre: { $eq: "drama" } }] },
+      { length: { $lt: 90 } },
+    ],
+  };
+
+  const attributeInfo: AttributeInfo[] = [
+    {
+      name: "genre",
+      description: "The genre of the movie",
+      type: "string or array of strings",
+    },
+    {
+      name: "year",
+      description: "The year the movie was released",
+      type: "number",
+    },
+    {
+      name: "director",
+      description: "The director of the movie",
+      type: "string",
+    },
+    {
+      name: "rating",
+      description: "The rating of the movie (1-10)",
+      type: "number",
+    },
+    {
+      name: "length",
+      description: "The length of the movie in minutes",
+      type: "number",
+    },
+  ];
+  const documentContents = "Brief summary of a movie";
+
+  const allowedComparators = Object.values(Comparators);
+  const allowedOperators = Object.values(Operators);
+  const llm = new OpenAI({ modelName: "gpt-3.5-turbo", temperature: 0 });
+  const queryChain = loadQueryConstructorChain({
+    llm,
+    documentContents,
+    attributeInfo,
+    allowedComparators,
+    allowedOperators,
+  });
+
+  const c1 = queryChain.call({
+    query: "Which movies are less than 90 minutes?",
+  });
+  const c3 = queryChain.call({
+    query: "Which movies are rated higher than 8.5?",
+  });
+  const c4 = queryChain.call({
+    query: "Which movies are directed by Greta Gerwig?",
+  });
+  const c5 = queryChain.call({
+    query:
+      "Which movies are either comedy or drama and are less than 90 minutes?",
+  });
+
+  const [
+    { [queryChain.outputKey]: r1 },
+    { [queryChain.outputKey]: r3 },
+    { [queryChain.outputKey]: r4 },
+    { [queryChain.outputKey]: r5 },
+  ] = await Promise.all([c1, c3, c4, c5]);
+
+  expect(r1).toMatchObject(sq1);
+  expect(r3).toMatchObject(sq3);
+  expect(r4).toMatchObject(sq4);
+  expect(r5).toMatchObject(sq5);
+  const testTranslator = new BasicTranslator();
+
+  const { filter: parsedFilter1 } = testTranslator.visitStructuredQuery(
+    r1 as StructuredQuery
+  );
+  const { filter: parsedFilter3 } = testTranslator.visitStructuredQuery(
+    r3 as StructuredQuery
+  );
+  const { filter: parsedFilter4 } = testTranslator.visitStructuredQuery(
+    r4 as StructuredQuery
+  );
+  const { filter: parsedFilter5 } = testTranslator.visitStructuredQuery(
+    r5 as StructuredQuery
+  );
+
+  expect(parsedFilter1).toMatchObject(filter1);
+  expect(parsedFilter3).toMatchObject(filter3);
+  expect(parsedFilter4).toMatchObject(filter4);
+  expect(parsedFilter5).toMatchObject(filter5);
+});
+
+// Path: langchain/src/chains/query_constructor/tests/query_parser.test.ts
+import { test } from "@jest/globals";
+import { StructuredQueryOutputParser } from "../index.js";
+import {
+  Comparators,
+  Comparison,
+  Operation,
+  Operators,
+  StructuredQuery,
+} from "../ir.js";
+
+const correctQuery = new StructuredQuery(
+  "teenager love",
+  new Operation(Operators.and, [
+    new Operation(Operators.or, [
+      new Comparison(Comparators.eq, "artist", "Taylor Swift"),
+      new Comparison(Comparators.eq, "artist", "Katy Perry"),
+    ]),
+    new Comparison(Comparators.lt, "length", 180),
+    new Comparison(Comparators.eq, "genre", "pop"),
+  ])
+);
+
+test("StructuredQueryOutputParser test", async () => {
+  const queryParser = StructuredQueryOutputParser.fromComponents(
+    [
+      Comparators.eq,
+      Comparators.gte,
+      Comparators.gt,
+      Comparators.lte,
+      Comparators.lt,
+    ],
+    [Operators.and, Operators.or, Operators.not]
+  );
+
+  const exampleOutput = `json\`\`\`
+{
+    "query": "teenager love",
+    "filter": "and(or(eq(\\"artist\\", \\"Taylor Swift\\"), eq(\\"artist\\", \\"Katy Perry\\")), lt(\\"length\\", 180), eq(\\"genre\\", \\"pop\\"))"
+}
+\`\`\``;
+
+  const parsedOutput = await queryParser.parse(exampleOutput);
+  expect(parsedOutput).toMatchObject(correctQuery);
+});
+
+// Path: langchain/src/chains/question_answering/tests/load.int.test.ts
+import { test } from "@jest/globals";
+import { OpenAI } from "@langchain/openai";
+import { Document } from "@langchain/core/documents";
+import {
+  loadQAMapReduceChain,
+  loadQARefineChain,
+  loadQAStuffChain,
+} from "../load.js";
+
+test("Test loadQAStuffChain", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const chain = loadQAStuffChain(model);
+  const docs = [
+    new Document({ pageContent: "foo" }),
+    new Document({ pageContent: "bar" }),
+    new Document({ pageContent: "baz" }),
+  ];
+  const res = await chain.call({ input_documents: docs, question: "Whats up" });
+  console.log({ res });
+});
+
+test("Test loadQAMapReduceChain", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const chain = loadQAMapReduceChain(model);
+  const docs = [
+    new Document({ pageContent: "foo" }),
+    new Document({ pageContent: "bar" }),
+    new Document({ pageContent: "baz" }),
+  ];
+  const res = await chain.call({ input_documents: docs, question: "Whats up" });
+  console.log({ res });
+});
+
+test("Test loadQARefineChain", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const chain = loadQARefineChain(model);
+  const docs = [
+    new Document({ pageContent: "Harrison went to Harvard." }),
+    new Document({ pageContent: "Ankush went to Princeton." }),
+  ];
+  const res = await chain.call({
+    input_documents: docs,
+    question: "Where did Harrison go to college?",
+  });
+  console.log({ res });
+});
+
+// Path: langchain/src/chains/router/tests/multi_prompt.int.test.ts
+import { test } from "@jest/globals";
+import { ConsoleCallbackHandler } from "@langchain/core/tracers/console";
+import { OpenAIChat } from "@langchain/openai";
+import { MultiPromptChain } from "../multi_prompt.js";
+
+test("Test MultiPromptChain", async () => {
+  const llm = new OpenAIChat({
+    callbacks: [new ConsoleCallbackHandler()],
+  });
+  const promptNames = ["physics", "math", "history"];
+  const promptDescriptions = [
+    "Good for answering questions about physics",
+    "Good for answering math questions",
+    "Good for answering questions about history",
+  ];
+  const physicsTemplate = `You are a very smart physics professor. You are great at answering questions about physics in a concise and easy to understand manner. When you don't know the answer to a question you admit that you don't know.
+
+Here is a question:
+{input}
+`;
+  const mathTemplate = `You are a very good mathematician. You are great at answering math questions. You are so good because you are able to break down hard problems into their component parts, answer the component parts, and then put them together to answer the broader question.
+
+Here is a question:
+{input}`;
+
+  const historyTemplate = `You are a very smart history professor. You are great at answering questions about history in a concise and easy to understand manner. When you don't know the answer to a question you admit that you don't know.
+
+Here is a question:
+{input}`;
+
+  const promptTemplates = [physicsTemplate, mathTemplate, historyTemplate];
+
+  const multiPromptChain = MultiPromptChain.fromLLMAndPrompts(llm, {
+    promptNames,
+    promptDescriptions,
+    promptTemplates,
+  });
+
+  const testPromise1 = multiPromptChain.call({
+    input: "What is the speed of light?",
+  });
+
+  const testPromise2 = multiPromptChain.call({
+    input: "What is the derivative of x^2?",
+  });
+
+  const testPromise3 = multiPromptChain.call({
+    input: "Who was the first president of the United States?",
+  });
+
+  const [{ text: result1 }, { text: result2 }, { text: result3 }] =
+    await Promise.all([testPromise1, testPromise2, testPromise3]);
+
+  console.log(result1, result2, result3);
+});
+
+// Path: langchain/src/chains/router/tests/multi_prompt.test.ts
+import { test, expect } from "@jest/globals";
+import { BaseLLM } from "@langchain/core/language_models/llms";
+import { LLMResult } from "@langchain/core/outputs";
+import { MultiPromptChain } from "../multi_prompt.js";
+
+let pickedPrompt: string;
+
+class FakeLLM extends BaseLLM {
+  _llmType(): string {
+    return "fake";
+  }
+
+  async _generate(
+    prompts: string[],
+    _: this["ParsedCallOptions"]
+  ): Promise<LLMResult> {
+    function buildResponse(name: string) {
+      return `\`\`\`\n{\n\t"destination": "${name}",\n\t"next_inputs": {\n\t\t"input": "<from ${name}>"\n\t}\n}\n\`\`\``;
+    }
+    const flatPrompt = prompts.join("\n");
+
+    let response: string;
+    if (flatPrompt.includes("prompt template")) {
+      const splitted = flatPrompt.split(" ");
+      response = `${splitted[splitted.length - 2]} ${
+        splitted[splitted.length - 1]
+      }`;
+    } else {
+      // randomly choose 1 out of three responses
+      const random = Math.random();
+      if (random < 0.33) {
+        pickedPrompt = "prompt1";
+      } else if (random < 0.66) {
+        pickedPrompt = "prompt2";
+      } else {
+        pickedPrompt = "prompt3";
+      }
+      response = buildResponse(pickedPrompt);
+    }
+
+    return {
+      generations: [
+        [
+          {
+            text: response,
+          },
+        ],
+      ],
+    };
+  }
+}
+
+test("Test MultiPromptChain", async () => {
+  const llm = new FakeLLM({});
+  const promptNames = ["prompt1", "prompt2", "prompt3"];
+  const promptDescriptions = ["description1", "description2", "description3"];
+  const promptTemplates = [
+    "prompt template1 {input}",
+    "prompt template2 {input}",
+    "prompt template3 {input}",
+  ];
+
+  const multiPromptChain = MultiPromptChain.fromLLMAndPrompts(llm, {
+    promptNames,
+    promptDescriptions,
+    promptTemplates,
+  });
+
+  const { text: result } = await multiPromptChain.call({ input: "Test input" });
+
+  expect(result).toEqual(`<from ${pickedPrompt}>`);
+});
+
+// Path: langchain/src/chains/router/tests/multi_retrieval_qa.int.test.ts
+import { test } from "@jest/globals";
+import { OpenAIEmbeddings, OpenAIChat } from "@langchain/openai";
+import { ConsoleCallbackHandler } from "@langchain/core/tracers/console";
+import { MultiRetrievalQAChain } from "../multi_retrieval_qa.js";
+import { MemoryVectorStore } from "../../../vectorstores/memory.js";
+
+test("Test MultiPromptChain", async () => {
+  const embeddings = new OpenAIEmbeddings();
+  const aquaTeen = await MemoryVectorStore.fromTexts(
+    [
+      "My name is shake zula, the mike rula, the old schoola, you want a trip I'll bring it to ya",
+      "Frylock and I'm on top rock you like a cop meatwad you're up next with your knock knock",
+      "Meatwad make the money see meatwad get the honeys g drivin' in my car livin' like a star",
+      "Ice on my fingers and my toes and I'm a taurus uh check-check it yeah",
+      "Cause we are the Aqua Teens make the homies say ho and the girlies wanna scream",
+      "Aqua Teen Hunger Force number one in the hood G",
+    ],
+    { series: "Aqua Teen Hunger Force" },
+    embeddings
+  );
+  const mst3k = await MemoryVectorStore.fromTexts(
+    [
+      "In the not too distant future next Sunday A.D. There was a guy named Joel not too different from you or me. He worked at Gizmonic Institute, just another face in a red jumpsuit",
+      "He did a good job cleaning up the place but his bosses didn't like him so they shot him into space. We'll send him cheesy movies the worst we can find He'll have to sit and watch them all and we'll monitor his mind",
+      "Now keep in mind Joel can't control where the movies begin or end Because he used those special parts to make his robot friends. Robot Roll Call Cambot Gypsy Tom Servo Croooow",
+      "If you're wondering how he eats and breathes and other science facts La la la just repeat to yourself it's just a show I should really just relax. For Mystery Science Theater 3000",
+    ],
+    { series: "Mystery Science Theater 3000" },
+    embeddings
+  );
+  const animaniacs = await MemoryVectorStore.fromTexts(
+    [
+      "It's time for Animaniacs And we're zany to the max So just sit back and relax You'll laugh 'til you collapse We're Animaniacs",
+      "Come join the Warner Brothers And the Warner Sister Dot Just for fun we run around the Warner movie lot",
+      "They lock us in the tower whenever we get caught But we break loose and then vamoose And now you know the plot",
+      "We're Animaniacs, Dot is cute, and Yakko yaks, Wakko packs away the snacks While Bill Clinton plays the sax",
+      "We're Animaniacs Meet Pinky and the Brain who want to rule the universe Goodfeathers flock together Slappy whacks 'em with her purse",
+      "Buttons chases Mindy while Rita sings a verse The writers flipped we have no script Why bother to rehearse",
+      "We're Animaniacs We have pay-or-play contracts We're zany to the max There's baloney in our slacks",
+      "We're Animanie Totally insaney Here's the show's namey",
+      "Animaniacs Those are the facts",
+    ],
+    { series: "Animaniacs" },
+    embeddings
+  );
+
+...
+
+Function Description:1. **Purpose**: To determine if a given argument, which can be a function, object, string, or undefined, lacks meaningful content or definition.
+2. **Input**: A single argument that can be of various types including a function, an object, a string, or undefined.
+3. **Output**: A boolean value; `true` if the argument is undefined, an empty string, an empty object, or simply not provided, and `false` otherwise.
+4. **Procedure**: The function first checks if the argument is falsy (e.g., undefined or an empty string). If it is a string and not empty, it returns `false`. If it is a function, it also returns `false`. For objects, it checks if the object is not an array and if it has no properties, returning `true` if both conditions are met. Otherwise, it returns `false`.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

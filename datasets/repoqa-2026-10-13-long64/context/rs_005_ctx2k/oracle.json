@@ -1,0 +1,15 @@
+{
+  "baseId": "rs_005",
+  "endByte": 6201,
+  "endLine": 216,
+  "instanceId": "rs_005_ctx2k",
+  "language": "rust",
+  "needleName": "with_max_stack_pow",
+  "normalizedLanguage": "rust",
+  "path": "libafl/src/mutators/scheduled.rs",
+  "repo": "AFLplusplus/LibAFL",
+  "sequence": 5,
+  "startByte": 5917,
+  "startLine": 208,
+  "targetFunction": "pub fn with_max_stack_pow(mutations: MT, max_stack_pow: u64) -> Self {\n        StdScheduledMutator {\n            name: format!(\"StdScheduledMutator[{}]\", mutations.names().join(\", \")),\n            mutations,\n            max_stack_pow,\n            phantom: PhantomData,\n        }\n    }"
+}

@@ -503,7 +503,17 @@ tools/repoqa/repoqa_build_dataset --help
 See [`docs/repoqa.md`](docs/repoqa.md) for RepoQA-specific setup, Nix runtime
 notes, and local clone overrides.
 
-## Experimental RepoQA adaptation study
+## Reusable RepoQA studies
+
+The long64 dataset has a five-configuration baseline and separate budget,
+latency-degradation, and reliability definitions under `examples/studies/`.
+The current study definitions select the inline and local-MCP configurations.
+Follow [the study guide](docs/studies.md) to prepare the baseline, evaluate and
+freeze calibration episodes, then run held-out studies with `llmctxbench study`.
+Baseline execution and study episodes call the configured answer provider; the
+guide lists the planned request counts before those steps.
+
+## Earlier RepoQA adaptation study
 
 Use `llmctxbench adaptation repoqa` to prepare, calibrate, freeze, execute episodes
 and analyze the RepoQA adaptation study:

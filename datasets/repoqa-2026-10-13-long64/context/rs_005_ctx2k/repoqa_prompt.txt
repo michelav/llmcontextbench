@@ -1,0 +1,200 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:        &self.mutations
+    }
+
+    // Get the mutations (mutable)
+    #[inline]
+    fn mutations_mut(&mut self) -> &mut MT {
+        &mut self.mutations
+    }
+}
+
+impl<I, MT, S> ScheduledMutator<I, MT, S> for StdScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand,
+{
+    /// Compute the number of iterations used to apply stacked mutations
+    fn iterations(&self, state: &mut S, _: &I) -> u64 {
+        1 << (1 + state.rand_mut().below(self.max_stack_pow))
+    }
+
+    /// Get the next mutation to apply
+    fn schedule(&self, state: &mut S, _: &I) -> MutationId {
+        debug_assert!(self.mutations.len() != 0);
+        state.rand_mut().below(self.mutations.len() as u64).into()
+    }
+}
+
+impl<I, MT, S> StdScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand,
+{
+    /// Create a new [`StdScheduledMutator`] instance specifying mutations
+    pub fn new(mutations: MT) -> Self {
+        StdScheduledMutator {
+            name: format!("StdScheduledMutator[{}]", mutations.names().join(", ")),
+            mutations,
+            max_stack_pow: 7,
+            phantom: PhantomData,
+        }
+    }
+
+    /// Create a new [`StdScheduledMutator`] instance specifying mutations and the maximun number of iterations
+    
+pub fn with_max_stack_pow(mutations: MT, max_stack_pow: u64) -> Self {
+        StdScheduledMutator {
+            name: format!("StdScheduledMutator[{}]", mutations.names().join(", ")),
+            mutations,
+            max_stack_pow,
+            phantom: PhantomData,
+        }
+    }
+}
+
+/// Tuple type of the mutations that compose the Havoc mutator without crossover mutations
+pub type HavocMutationsNoCrossoverType = tuple_list_type!(
+    BitFlipMutator,
+    ByteFlipMutator,
+    ByteIncMutator,
+    ByteDecMutator,
+    ByteNegMutator,
+    ByteRandMutator,
+    ByteAddMutator,
+    WordAddMutator,
+    DwordAddMutator,
+    QwordAddMutator,
+    ByteInterestingMutator,
+    WordInterestingMutator,
+    DwordInterestingMutator,
+    BytesDeleteMutator,
+    BytesDeleteMutator,
+    BytesDeleteMutator,
+    BytesDeleteMutator,
+    BytesExpandMutator,
+    BytesInsertMutator,
+    BytesRandInsertMutator,
+    BytesSetMutator,
+    BytesRandSetMutator,
+    BytesCopyMutator,
+    BytesInsertCopyMutator,
+    BytesSwapMutator,
+);
+
+/// Tuple type of the mutations that compose the Havoc mutator's crossover mutations
+pub type HavocCrossoverType<I> =
+    tuple_list_type!(CrossoverInsertMutator<I>, CrossoverReplaceMutator<I>);
+
+/// Tuple type of the mutations that compose the Havoc mutator
+pub type HavocMutationsType<I> = tuple_list_type!(
+    BitFlipMutator,
+    ByteFlipMutator,
+    ByteIncMutator,
+    ByteDecMutator,
+    ByteNegMutator,
+    ByteRandMutator,
+    ByteAddMutator,
+    WordAddMutator,
+    DwordAddMutator,
+    QwordAddMutator,
+    ByteInterestingMutator,
+    WordInterestingMutator,
+    DwordInterestingMutator,
+    BytesDeleteMutator,
+    BytesDeleteMutator,
+    BytesDeleteMutator,
+    BytesDeleteMutator,
+    BytesExpandMutator,
+    BytesInsertMutator,
+    BytesRandInsertMutator,
+    BytesSetMutator,
+    BytesRandSetMutator,
+    BytesCopyMutator,
+    BytesInsertCopyMutator,
+    BytesSwapMutator,
+    CrossoverInsertMutator<I>,
+    CrossoverReplaceMutator<I>,
+);
+
+/// Get the mutations that compose the Havoc mutator (only applied to single inputs)
+#[must_use]
+pub fn havoc_mutations_no_crossover() -> HavocMutationsNoCrossoverType {
+    tuple_list!(
+        BitFlipMutator::new(),
+        ByteFlipMutator::new(),
+        ByteIncMutator::new(),
+        ByteDecMutator::new(),
+        ByteNegMutator::new(),
+        ByteRandMutator::new(),
+        ByteAddMutator::new(),
+        WordAddMutator::new(),
+        DwordAddMutator::new(),
+        QwordAddMutator::new(),
+        ByteInterestingMutator::new(),
+        WordInterestingMutator::new(),
+        DwordInterestingMutator::new(),
+        BytesDeleteMutator::new(),
+        BytesDeleteMutator::new(),
+        BytesDeleteMutator::new(),
+        BytesDeleteMutator::new(),
+        BytesExpandMutator::new(),
+        BytesInsertMutator::new(),
+        BytesRandInsertMutator::new(),
+        BytesSetMutator::new(),
+        BytesRandSetMutator::new(),
+        BytesCopyMutator::new(),
+        BytesInsertCopyMutator::new(),
+        BytesSwapMutator::new(),
+    )
+}
+
+/// Get the mutations that compose the Havoc mutator's crossover strategy
+#[must_use]
+pub fn havoc_crossover<I>() -> HavocCrossoverType<I> {
+    tuple_list!(
+        CrossoverInsertMutator::new(),
+        CrossoverReplaceMutator::new(),
+    )
+}
+
+/// Get the mutations that compose the Havoc mutator
+#[must_use]
+pub fn havoc_mutations<I>() -> HavocMutationsType<I> {
+    havoc_mutations_no_crossover().merge(havoc_crossover())
+}
+
+/// Get the mutations that uses the Tokens metadata
+#[must_use]
+pub fn tokens_mutations() -> tuple_list_type!(TokenInsert, TokenReplace) {
+    tuple_list!(TokenInsert::new(), TokenReplace::new())
+}
+
+/// A logging [`Mutator`] that wraps around a [`StdScheduledMutator`].
+pub struct LoggerScheduledMutator<I, MT, S, SM>
+where
+    MT: MutatorsTuple<I, S> + NamedTuple,
+    S: HasRand + HasCorpus,
+    SM: ScheduledMutator<I, MT, S>,
+{
+    name: String,
+    scheduled: SM,
+    mutation_log: Vec<MutationId>,
+    phantom: PhantomData<(I, MT, S)>,
+}
+
+impl<I, MT, S, SM> Debug for LoggerScheduledMutator<I, MT, S, SM>
+where
+    MT: MutatorsTuple<I, S> + NamedTuple,
+    S: HasRand + HasCorpus,
+    SM: ScheduledMutator<I, MT, S>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+...
+
+Function Description:1. **Purpose**: The function is designed to create a new instance of a mutator with a specified set of mutations and a configurable maximum limit for the number of iterations used in mutation stacking.
+2. **Input**: It accepts a tuple of mutations and a numerical value representing the maximum power for calculating the stack depth.
+3. **Output**: It returns a new instance of the mutator configured with the provided mutations and maximum stack depth limit.
+4. **Procedure**: The function initializes a new mutator instance by setting its name, mutations, and the maximum stack depth based on the input values. The name is formatted to include the names of the mutations, and the maximum stack depth is set to the provided numerical limit.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

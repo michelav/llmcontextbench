@@ -1,0 +1,384 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:            wait_time = constant(0)
+
+            @task
+            def my_task(self):
+                pass
+
+        class MyUser2(User):
+            wait_time = constant(0)
+
+            @task
+            def my_task(self):
+                pass
+
+        environment = Environment(user_classes=[MyUser1, MyUser2])
+
+        self.assertDictEqual({"MyUser1": MyUser1, "MyUser2": MyUser2}, environment.user_classes_by_name)
+
+    
+def test_user_classes_with_same_name_is_error(self):
+        with self.assertRaises(ValueError) as e:
+            environment = Environment(user_classes=[MyUserWithSameName1, MyUserWithSameName2])
+
+        self.assertEqual(
+            e.exception.args[0],
+            "The following user classes have the same class name: locust.test.fake_module1_for_env_test.MyUserWithSameName, locust.test.fake_module2_for_env_test.MyUserWithSameName",
+        )
+
+    def test_assign_equal_weights(self):
+        def verify_tasks(u, target_tasks):
+            self.assertEqual(len(u.tasks), len(target_tasks))
+            tasks = [t.__name__ for t in u.tasks]
+            self.assertEqual(len(tasks), len(set(tasks)))
+            self.assertEqual(set(tasks), set(target_tasks))
+
+        # Base case
+        class MyUser1(User):
+            wait_time = constant(0)
+
+            @task(4)
+            def my_task(self):
+                pass
+
+            @task(1)
+            def my_task_2(self):
+                pass
+
+        environment = Environment(user_classes=[MyUser1])
+        environment.assign_equal_weights()
+        u = environment.user_classes[0]
+        verify_tasks(u, ["my_task", "my_task_2"])
+
+        # Testing nested task sets
+        class MyUser2(User):
+            @task
+            class TopLevelTaskSet(TaskSet):
+                @task
+                class IndexTaskSet(TaskSet):
+                    @task(10)
+                    def index(self):
+                        self.client.get("/")
+
+                    @task
+                    def stop(self):
+                        self.client.get("/hi")
+
+                @task(2)
+                def stats(self):
+                    self.client.get("/stats/requests")
+
+        environment = Environment(user_classes=[MyUser2])
+        environment.assign_equal_weights()
+        u = environment.user_classes[0]
+        verify_tasks(u, ["index", "stop", "stats"])
+
+        # Testing task assignment via instance variable
+        def outside_task():
+            pass
+
+        def outside_task_2():
+            pass
+
+        class SingleTaskSet(TaskSet):
+            tasks = [outside_task, outside_task, outside_task_2]
+
+        class MyUser3(User):
+            tasks = [SingleTaskSet, outside_task]
+
+        environment = Environment(user_classes=[MyUser3])
+        environment.assign_equal_weights()
+        u = environment.user_classes[0]
+        verify_tasks(u, ["outside_task", "outside_task_2"])
+
+        # Testing task assignment via dict
+        class DictTaskSet(TaskSet):
+            def dict_task_1():
+                pass
+
+            def dict_task_2():
+                pass
+
+            def dict_task_3():
+                pass
+
+            tasks = {
+                dict_task_1: 5,
+                dict_task_2: 3,
+                dict_task_3: 1,
+            }
+
+        class MyUser4(User):
+            tasks = [DictTaskSet, SingleTaskSet, SingleTaskSet]
+
+        # Assign user tasks in dict
+        environment = Environment(user_classes=[MyUser4])
+        environment.assign_equal_weights()
+        u = environment.user_classes[0]
+        verify_tasks(u, ["outside_task", "outside_task_2", "dict_task_1", "dict_task_2", "dict_task_3"])
+
+        class MyUser5(User):
+            tasks = {
+                DictTaskSet: 5,
+                SingleTaskSet: 3,
+                outside_task: 6,
+            }
+
+        environment = Environment(user_classes=[MyUser5])
+        environment.assign_equal_weights()
+        u = environment.user_classes[0]
+        verify_tasks(u, ["outside_task", "outside_task_2", "dict_task_1", "dict_task_2", "dict_task_3"])
+
+    def test_user_classes_with_zero_weight_are_removed(self):
+        class MyUser1(User):
+            wait_time = constant(0)
+            weight = 0
+
+            @task
+            def my_task(self):
+                pass
+
+        class MyUser2(User):
+            wait_time = constant(0)
+            weight = 1
+
+            @task
+            def my_task(self):
+                pass
+
+        environment = Environment(user_classes=[MyUser1, MyUser2])
+
+        self.assertEqual(len(environment.user_classes), 1)
+        self.assertIs(environment.user_classes[0], MyUser2)
+
+    def test_all_user_classes_with_zero_weight_raises_exception(self):
+        class MyUser1(User):
+            wait_time = constant(0)
+            weight = 0
+
+            @task
+            def my_task(self):
+                pass
+
+        class MyUser2(User):
+            wait_time = constant(0)
+            weight = 0
+
+            @task
+            def my_task(self):
+                pass
+
+        with self.assertRaises(ValueError) as e:
+            environment = Environment(user_classes=[MyUser1, MyUser2])
+
+        self.assertEqual(
+            e.exception.args[0],
+            "There are no users with weight > 0.",
+        )
+
+    def test_shape_class_attribute(self):
+        class SubLoadTestShape(LoadTestShape):
+            """Inherited from locust.env.LoadTestShape"""
+
+        with self.assertRaisesRegex(
+            ValueError, r"instance of LoadTestShape or subclass LoadTestShape", msg="exception message is mismatching"
+        ):
+            Environment(user_classes=[MyUserWithSameName1], shape_class=SubLoadTestShape)
+
+    def test_dispatcher_class_attribute(self):
+        environment = Environment(user_classes=[MyUserWithSameName1])
+
+        self.assertEqual(environment.dispatcher_class, UsersDispatcher)
+
+        class MyUsersDispatcher(UsersDispatcher):
+            pass
+
+        environment = Environment(user_classes=[MyUserWithSameName1], dispatcher_class=MyUsersDispatcher)
+
+        self.assertEqual(environment.dispatcher_class, MyUsersDispatcher)
+
+    def test_update_user_class(self):
+        class MyUser1(User):
+            @task
+            def my_task(self):
+                pass
+
+            @task
+            def my_task_2(self):
+                pass
+
+        class MyUser2(User):
+            @task
+            def my_task(self):
+                pass
+
+        environment = Environment(
+            user_classes=[MyUser1, MyUser2],
+            available_user_classes={"User1": MyUser1, "User2": MyUser2},
+            available_user_tasks={"User1": MyUser1.tasks, "User2": MyUser2.tasks},
+        )
+
+        environment.update_user_class({"user_class_name": "User1", "host": "http://localhost", "tasks": ["my_task_2"]})
+
+        self.assertEqual(
+            environment.available_user_classes["User1"].json(),
+            {"host": "http://localhost", "tasks": ["my_task_2"], "fixed_count": 0, "weight": 1},
+        )
+
+# Path: locust/test/test_fasthttp.py
+from locust import FastHttpUser
+from locust.argument_parser import parse_options
+from locust.contrib.fasthttp import FastHttpSession
+from locust.exception import CatchResponseError, InterruptTaskSet, LocustError, ResponseError
+from locust.user import TaskSet, task
+from locust.util.load_locustfile import is_user_class
+
+import socket
+import time
+from tempfile import NamedTemporaryFile
+
+import gevent
+from geventhttpclient.client import HTTPClientPool
+
+from .testcases import LocustTestCase, WebserverTestCase
+from .util import create_tls_cert
+
+
+class TestFastHttpSession(WebserverTestCase):
+    def get_client(self):
+        return FastHttpSession(self.environment, base_url="http://127.0.0.1:%i" % self.port, user=None)
+
+    def test_get(self):
+        s = self.get_client()
+        r = s.get("/ultra_fast")
+        self.assertEqual(200, r.status_code)
+
+    def test_connection_error(self):
+        s = FastHttpSession(self.environment, "http://localhost:1", user=None)
+        r = s.get("/", headers={"X-Test-Headers": "hello"})
+        self.assertEqual(r.status_code, 0)
+        self.assertEqual(None, r.content)
+        self.assertEqual(1, len(self.runner.stats.errors))
+        self.assertTrue(isinstance(r.error, ConnectionRefusedError))
+        self.assertTrue(isinstance(next(iter(self.runner.stats.errors.values())).error, ConnectionRefusedError))
+        self.assertEqual(r.url, "http://localhost:1/")
+        self.assertEqual(r.request.url, r.url)
+        self.assertEqual(r.request.headers.get("X-Test-Headers", ""), "hello")
+
+    def test_404(self):
+        s = self.get_client()
+        r = s.get("/does_not_exist")
+        self.assertEqual(404, r.status_code)
+        self.assertEqual(1, self.runner.stats.get("/does_not_exist", "GET").num_failures)
+
+    def test_204(self):
+        s = self.get_client()
+        r = s.get("/status/204")
+        self.assertEqual(204, r.status_code)
+        self.assertEqual(1, self.runner.stats.get("/status/204", "GET").num_requests)
+        self.assertEqual(0, self.runner.stats.get("/status/204", "GET").num_failures)
+        self.assertEqual(r.url, "http://127.0.0.1:%i/status/204" % self.port)
+        self.assertEqual(r.request.url, r.url)
+
+    def test_streaming_response(self):
+        """
+        Test a request to an endpoint that returns a streaming response
+        """
+        s = self.get_client()
+        r = s.get("/streaming/30")
+
+        # verify that the time reported includes the download time of the whole streamed response
+        self.assertGreater(self.runner.stats.get("/streaming/30", method="GET").avg_response_time, 250)
+        self.runner.stats.clear_all()
+
+        # verify that response time does NOT include whole download time, when using stream=True
+        r = s.get("/streaming/30", stream=True)
+        self.assertGreaterEqual(self.runner.stats.get("/streaming/30", method="GET").avg_response_time, 0)
+        self.assertLess(self.runner.stats.get("/streaming/30", method="GET").avg_response_time, 250)
+
+        # download the content of the streaming response (so we don't get an ugly exception in the log)
+        _ = r.content
+
+    def test_slow_redirect(self):
+        s = self.get_client()
+        url = "/redirect?url=/redirect&delay=0.5"
+        r = s.get(url)
+        stats = self.runner.stats.get(url, method="GET")
+        self.assertEqual(1, stats.num_requests)
+        self.assertGreater(stats.avg_response_time, 500)
+
+    def test_post_redirect(self):
+        s = self.get_client()
+        url = "/redirect"
+        r = s.post(url)
+        self.assertEqual(200, r.status_code)
+        post_stats = self.runner.stats.get(url, method="POST")
+        get_stats = self.runner.stats.get(url, method="GET")
+        self.assertEqual(1, post_stats.num_requests)
+        self.assertEqual(0, get_stats.num_requests)
+
+    def test_cookie(self):
+        s = self.get_client()
+        r = s.post("/set_cookie?name=testcookie&value=1337")
+        self.assertEqual(200, r.status_code)
+        r = s.get("/get_cookie?name=testcookie")
+        self.assertEqual("1337", r.content.decode())
+        self.assertEqual("1337", r.text)
+
+    def test_head(self):
+        s = self.get_client()
+        r = s.head("/request_method")
+        self.assertEqual(200, r.status_code)
+        self.assertEqual("", r.content.decode())
+
+    def test_delete(self):
+        s = self.get_client()
+        r = s.delete("/request_method")
+        self.assertEqual(200, r.status_code)
+        self.assertEqual("DELETE", r.content.decode())
+
+    def test_patch(self):
+        s = self.get_client()
+        r = s.patch("/request_method")
+        self.assertEqual(200, r.status_code)
+        self.assertEqual("PATCH", r.content.decode())
+
+    def test_options(self):
+        s = self.get_client()
+        r = s.options("/request_method")
+        self.assertEqual(200, r.status_code)
+        self.assertEqual("", r.content.decode())
+        self.assertEqual(
+            {"OPTIONS", "DELETE", "PUT", "GET", "POST", "HEAD", "PATCH"},
+            set(r.headers["allow"].split(", ")),
+        )
+
+    def test_json_payload(self):
+        s = self.get_client()
+        r = s.post("/request_method", json={"foo": "bar"})
+        self.assertEqual(200, r.status_code)
+        self.assertEqual(r.request.body, '{"foo": "bar"}')
+        self.assertEqual(r.request.headers.get("Content-Type"), "application/json")
+
+    def test_catch_response_fail_successful_request(self):
+        s = self.get_client()
+        with s.get("/ultra_fast", catch_response=True) as r:
+            r.failure("nope")
+        self.assertEqual(1, self.environment.stats.get("/ultra_fast", "GET").num_requests)
+        self.assertEqual(1, self.environment.stats.get("/ultra_fast", "GET").num_failures)
+
+    def test_catch_response_pass_failed_request(self):
+        s = self.get_client()
+        with s.get("/fail", catch_response=True) as r:
+            r.success()
+        self.assertEqual(1, self.environment.stats.total.num_requests)
+        self.assertEqual(0, self.environment.stats.total.num_failures)
+
+    def test_catch_response_multiple_failure_and_success(self):
+        s = self.get_client()
+...
+
+Function Description:1. **Purpose**: To verify that an error is raised when two user classes with identical names are used in the same environment, ensuring unique identification of user classes.
+2. **Input**: Two user classes imported from different modules but with the same class name.
+3. **Output**: A `ValueError` exception indicating that user classes with duplicate names cannot be used together.
+4. **Procedure**: The test attempts to create an environment with the two conflicting user classes. It checks that the correct exception is raised and that the error message specifies the exact issue with the class names and their originating modules.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

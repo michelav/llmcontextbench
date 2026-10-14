@@ -1,0 +1,2704 @@
+// Repository: date-fns/date-fns
+
+// Path: src/isSaturday/index.ts
+import { toDate } from "../toDate/index.js";
+
+/**
+ * @name isSaturday
+ * @category Weekday Helpers
+ * @summary Is the given date Saturday?
+ *
+ * @description
+ * Is the given date Saturday?
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The date to check
+ *
+ * @returns The date is Saturday
+ *
+ * @example
+ * // Is 27 September 2014 Saturday?
+ * const result = isSaturday(new Date(2014, 8, 27))
+ * //=> true
+ */
+...
+// Path: src/isSunday/index.ts
+import { toDate } from "../toDate/index.js";
+
+/**
+ * @name isSunday
+ * @category Weekday Helpers
+ * @summary Is the given date Sunday?
+ *
+ * @description
+ * Is the given date Sunday?
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The date to check
+ *
+ * @returns The date is Sunday
+ *
+ * @example
+ * // Is 21 September 2014 Sunday?
+ * const result = isSunday(new Date(2014, 8, 21))
+ * //=> true
+ */
+export function isSunday<DateType extends Date>(
+  date: DateType | number | string,
+): boolean {
+  return toDate(date).getDay() === 0;
+}
+
+// Path: src/isWeekend/index.ts
+import { toDate } from "../toDate/index.js";
+
+/**
+ * @name isWeekend
+ * @category Weekday Helpers
+ * @summary Does the given date fall on a weekend?
+ *
+ * @description
+ * Does the given date fall on a weekend?
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The date to check
+ *
+ * @returns The date falls on a weekend
+ *
+ * @example
+ * // Does 5 October 2014 fall on a weekend?
+ * const result = isWeekend(new Date(2014, 9, 5))
+ * //=> true
+ */
+export function isWeekend<DateType extends Date>(
+  date: DateType | number | string,
+): boolean {
+  const day = toDate(date).getDay();
+  return day === 0 || day === 6;
+}
+
+// Path: src/addBusinessDays/index.ts
+import { constructFrom } from "../constructFrom/index.js";
+import { isSaturday } from "../isSaturday/index.js";
+import { isSunday } from "../isSunday/index.js";
+import { isWeekend } from "../isWeekend/index.js";
+import { toDate } from "../toDate/index.js";
+
+/**
+ * @name addBusinessDays
+ * @category Day Helpers
+ * @summary Add the specified number of business days (mon - fri) to the given date.
+ *
+ * @description
+ * Add the specified number of business days (mon - fri) to the given date, ignoring weekends.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The date to be changed
+ * @param amount - The amount of business days to be added.
+ *
+ * @returns The new date with the business days added
+ *
+ * @example
+ * // Add 10 business days to 1 September 2014:
+ * const result = addBusinessDays(new Date(2014, 8, 1), 10)
+ * //=> Mon Sep 15 2014 00:00:00 (skipped weekend days)
+ */
+export function addBusinessDays<DateType extends Date>(
+  date: DateType | number | string,
+  amount: number,
+): DateType {
+  const _date = toDate(date);
+  const startedOnWeekend = isWeekend(_date);
+
+  if (isNaN(amount)) return constructFrom(date, NaN);
+
+  const hours = _date.getHours();
+  const sign = amount < 0 ? -1 : 1;
+  const fullWeeks = Math.trunc(amount / 5);
+
+  _date.setDate(_date.getDate() + fullWeeks * 7);
+
+  // Get remaining days not part of a full week
+  let restDays = Math.abs(amount % 5);
+
+  // Loops over remaining days
+  while (restDays > 0) {
+    _date.setDate(_date.getDate() + sign);
+    if (!isWeekend(_date)) restDays -= 1;
+  }
+
+  // If the date is a weekend day and we reduce a dividable of
+  // 5 from it, we land on a weekend date.
+  // To counter this, we add days accordingly to land on the next business day
+  if (startedOnWeekend && isWeekend(_date) && amount !== 0) {
+    // If we're reducing days, we want to add days until we land on a weekday
+    // If we're adding days we want to reduce days until we land on a weekday
+    if (isSaturday(_date)) _date.setDate(_date.getDate() + (sign < 0 ? 2 : -1));
+    if (isSunday(_date)) _date.setDate(_date.getDate() + (sign < 0 ? 1 : -2));
+  }
+
+  // Restore hours to avoid DST lag
+  _date.setHours(hours);
+
+  return _date;
+}
+
+// Path: src/addBusinessDays/test.ts
+import { describe, expect, it } from "vitest";
+import { addBusinessDays } from "./index.js";
+
+describe("addBusinessDays", () => {
+  it("adds the given number of business days", () => {
+    const result = addBusinessDays(new Date(2014, 8 /* Sep */, 1), 10);
+    expect(result).toEqual(new Date(2014, 8 /* Sep */, 15));
+  });
+
+  it("handles negative amount", () => {
+    const result = addBusinessDays(new Date(2014, 8 /* Sep */, 15), -10);
+    expect(result).toEqual(new Date(2014, 8 /* Sep */, 1));
+  });
+
+  it("returns the Monday when 1 day is added on the Friday", () => {
+    expect(addBusinessDays(new Date(2020, 0 /* Jan */, 10), 1)).toEqual(// Friday
+    // Monday
+    new Date(2020, 0 /* Jan */, 13));
+  });
+
+  it("returns the Monday when 1 day is added on the Satuday", () => {
+    expect(addBusinessDays(new Date(2020, 0 /* Jan */, 11), 1)).toEqual(// Saturday
+    // Monday
+    new Date(2020, 0 /* Jan */, 13));
+  });
+
+  it("returns the Monday when 1 day is added on the Sunday", () => {
+    expect(addBusinessDays(new Date(2020, 0 /* Jan */, 12), 1)).toEqual(// Sunday
+    // Monday
+    new Date(2020, 0 /* Jan */, 13));
+  });
+
+  it("can handle a large number of business days", () => {
+    const result = addBusinessDays(new Date(2014, 0 /* Jan */, 1), 3387885);
+    expect(result).toEqual(new Date(15000, 0 /* Jan */, 1));
+  });
+
+  it("accepts a timestamp", () => {
+    const result = addBusinessDays(
+      new Date(2014, 8 /* Sep */, 1).getTime(),
+      10,
+    );
+    expect(result).toEqual(new Date(2014, 8 /* Sep */, 15));
+  });
+
+  it("does not mutate the original date", () => {
+    const date = new Date(2014, 8 /* Sep */, 1);
+    addBusinessDays(date, 11);
+    expect(date).toEqual(new Date(2014, 8 /* Sep */, 1));
+  });
+
+  it("returns `Invalid Date` if the given date is invalid", () => {
+    const result = addBusinessDays(new Date(NaN), 10);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+
+  it("returns `Invalid Date` if the given amount is NaN", () => {
+    const result = addBusinessDays(new Date(2014, 8 /* Sep */, 1), NaN);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+
+  it("starting from a weekend day should land on a weekday when reducing a divisible by 5", () => {
+    const substractResult = addBusinessDays(new Date(2019, 7, 18), -5);
+    expect(substractResult).toEqual(new Date(2019, 7, 12));
+
+    const subtractResultWeekend = addBusinessDays(new Date(2019, 7, 17), -5);
+    expect(subtractResultWeekend).toEqual(new Date(2019, 7, 12));
+
+    const addResult = addBusinessDays(new Date(2019, 7, 18), 5);
+    expect(addResult).toEqual(new Date(2019, 7, 23));
+
+    const addResultWeekend = addBusinessDays(new Date(2019, 7, 17), 5);
+    expect(addResultWeekend).toEqual(new Date(2019, 7, 23));
+  });
+});
+
+// Path: src/addDays/test.ts
+import { describe, expect, it } from "vitest";
+import { addDays } from "./index.js";
+import { getDstTransitions } from "../../test/dst/tzOffsetTransitions.js";
+
+describe("addDays", () => {
+  it("adds the given number of days", () => {
+    const result = addDays(new Date(2014, 8 /* Sep */, 1), 10);
+    expect(result).toEqual(new Date(2014, 8 /* Sep */, 11));
+  });
+
+  it("accepts a timestamp", () => {
+    const result = addDays(new Date(2014, 8 /* Sep */, 1).getTime(), 10);
+    expect(result).toEqual(new Date(2014, 8 /* Sep */, 11));
+  });
+
+  it("does not mutate the original date", () => {
+    const date = new Date(2014, 8 /* Sep */, 1);
+    addDays(date, 11);
+    expect(date).toEqual(new Date(2014, 8 /* Sep */, 1));
+  });
+
+  it("returns `Invalid Date` if the given date is invalid", () => {
+    const result = addDays(new Date(NaN), 10);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+
+  it("returns `Invalid Date` if the given amount is NaN", () => {
+    const result = addDays(new Date(2014, 8 /* Sep */, 1), NaN);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+
+  const dstTransitions = getDstTransitions(2017);
+  const dstOnly = dstTransitions.start && dstTransitions.end ? it : it.skip;
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || process.env.tz;
+  const HOUR = 1000 * 60 * 60;
+  const MINUTE = 1000 * 60;
+  // It's usually 1 hour, but for some timezones, e.g. Australia/Lord_Howe, it is 30 minutes
+  const dstOffset =
+    dstTransitions.start && dstTransitions.end
+      ? (dstTransitions.end.getTimezoneOffset() -
+          dstTransitions.start.getTimezoneOffset()) *
+        MINUTE
+      : NaN;
+
+  dstOnly(
+    `works at DST-start boundary in local timezone: ${tz || "(unknown)"}`,
+    () => {
+      const date = dstTransitions.start;
+      const result = addDays(date!, 1);
+      expect(result).toEqual(new Date(date!.getTime() + 24 * HOUR));
+    },
+  );
+
+  dstOnly(
+    `works at DST-start - 30 mins in local timezone: ${tz || "(unknown)"}`,
+    () => {
+      const date = new Date(dstTransitions.start!.getTime() - 0.5 * HOUR);
+      const result = addDays(date, 1);
+      // started before the transition so will only be 23 hours later in local time
+      expect(result).toEqual(new Date(date.getTime() + 24 * HOUR - dstOffset));
+    },
+  );
+
+  dstOnly(
+    `works at DST-start - 60 mins in local timezone: ${tz || "(unknown)"}`,
+    () => {
+      const date = new Date(dstTransitions.start!.getTime() - 1 * HOUR);
+      const result = addDays(date, 1);
+      // started before the transition so will only be 23 hours later in local time
+      expect(result).toEqual(new Date(date.getTime() + 24 * HOUR - dstOffset));
+    },
+  );
+
+  dstOnly(
+    `works at DST-end boundary in local timezone: ${tz || "(unknown)"}`,
+    () => {
+      const date = dstTransitions.end;
+      const result = addDays(date!, 1);
+      expect(result).toEqual(new Date(date!.getTime() + 24 * HOUR));
+    },
+  );
+
+  dstOnly(
+    `works at DST-end - 30 mins in local timezone: ${tz || "(unknown)"}`,
+    () => {
+      const date = new Date(dstTransitions.end!.getTime() - 0.5 * HOUR);
+      const result = addDays(date, 1);
+      // started before the transition so will be 25 hours later in local
+      // time because one hour repeats after DST ends.
+      expect(result).toEqual(new Date(date.getTime() + 24 * HOUR + dstOffset));
+    },
+  );
+
+  dstOnly(
+    `works at DST-end - 60 mins in local timezone: ${tz || "(unknown)"}`,
+    () => {
+      const date = new Date(dstTransitions.end!.getTime() - 1 * HOUR);
+      const result = addDays(date, 1);
+      // started before the transition so will be 25 hours later in local
+      // time because one hour repeats after DST ends.
+      expect(result).toEqual(new Date(date.getTime() + 24 * HOUR + dstOffset));
+    },
+  );
+
+  dstOnly(
+    `doesn't mutate if zero increment is used: ${tz || "(unknown)"}`,
+    () => {
+      const date = new Date(dstTransitions.end!);
+      const result = addDays(date, 0);
+      expect(result).toEqual(date);
+    },
+  );
+});
+
+// Path: src/addMilliseconds/index.ts
+import { toDate } from "../toDate/index.js";
+import { constructFrom } from "../constructFrom/index.js";
+
+/**
+ * @name addMilliseconds
+ * @category Millisecond Helpers
+ * @summary Add the specified number of milliseconds to the given date.
+ *
+ * @description
+ * Add the specified number of milliseconds to the given date.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The date to be changed
+ * @param amount - The amount of milliseconds to be added.
+ *
+ * @returns The new date with the milliseconds added
+ *
+ * @example
+ * // Add 750 milliseconds to 10 July 2014 12:45:30.000:
+ * const result = addMilliseconds(new Date(2014, 6, 10, 12, 45, 30, 0), 750)
+ * //=> Thu Jul 10 2014 12:45:30.750
+ */
+export function addMilliseconds<DateType extends Date>(
+  date: DateType | number | string,
+  amount: number,
+): DateType {
+  const timestamp = +toDate(date);
+  return constructFrom(date, timestamp + amount);
+}
+
+// Path: src/addHours/index.ts
+import { addMilliseconds } from "../addMilliseconds/index.js";
+import { millisecondsInHour } from "../constants/index.js";
+
+/**
+ * @name addHours
+ * @category Hour Helpers
+ * @summary Add the specified number of hours to the given date.
+ *
+ * @description
+ * Add the specified number of hours to the given date.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The date to be changed
+ * @param amount - The amount of hours to be added.
+ *
+ * @returns The new date with the hours added
+ *
+ * @example
+ * // Add 2 hours to 10 July 2014 23:00:00:
+ * const result = addHours(new Date(2014, 6, 10, 23, 0), 2)
+ * //=> Fri Jul 11 2014 01:00:00
+ */
+export 
+function addHours<DateType extends Date>(
+  date: DateType | number | string,
+  amount: number,
+): DateType {
+  return addMilliseconds(date, amount * millisecondsInHour);
+}
+
+// Path: src/addHours/test.ts
+import { describe, expect, it } from "vitest";
+import { addHours } from "./index.js";
+
+describe("addHours", () => {
+  it("adds the given numbers of hours", () => {
+    const result = addHours(new Date(2014, 6 /* Jul */, 10, 23, 0), 2);
+    expect(result).toEqual(new Date(2014, 6 /* Jul */, 11, 1, 0));
+  });
+
+  it("accepts a timestamp", () => {
+    const result = addHours(
+      new Date(2014, 6 /* Jul */, 10, 23, 0).getTime(),
+      26,
+    );
+    expect(result).toEqual(new Date(2014, 6 /* Jul */, 12, 1, 0));
+  });
+
+  it("does not mutate the original date", () => {
+    const date = new Date(2014, 6 /* Jul */, 10, 23, 0);
+    addHours(date, 10);
+    expect(date).toEqual(new Date(2014, 6 /* Jul */, 10, 23, 0));
+  });
+
+  it("returns `Invalid Date` if the given date is invalid", () => {
+    const result = addHours(new Date(NaN), 2);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+
+  it("returns `Invalid Date` if the given amount is NaN", () => {
+    const result = addHours(new Date(2014, 6 /* Jul */, 10, 23, 0), NaN);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+});
+
+// Path: src/setISOWeekYear/index.ts
+import { constructFrom } from "../constructFrom/index.js";
+import { differenceInCalendarDays } from "../differenceInCalendarDays/index.js";
+import { startOfISOWeekYear } from "../startOfISOWeekYear/index.js";
+import { toDate } from "../toDate/index.js";
+
+/**
+ * @name setISOWeekYear
+ * @category ISO Week-Numbering Year Helpers
+ * @summary Set the ISO week-numbering year to the given date.
+ *
+ * @description
+ * Set the ISO week-numbering year to the given date,
+ * saving the week number and the weekday number.
+ *
+ * ISO week-numbering year: http://en.wikipedia.org/wiki/ISO_week_date
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The date to be changed
+ * @param weekYear - The ISO week-numbering year of the new date
+ *
+ * @returns The new date with the ISO week-numbering year set
+ *
+ * @example
+ * // Set ISO week-numbering year 2007 to 29 December 2008:
+ * const result = setISOWeekYear(new Date(2008, 11, 29), 2007)
+ * //=> Mon Jan 01 2007 00:00:00
+ */
+export function setISOWeekYear<DateType extends Date>(
+  date: DateType | number | string,
+  weekYear: number,
+): DateType {
+  let _date = toDate(date);
+  const diff = differenceInCalendarDays(_date, startOfISOWeekYear(_date));
+  const fourthOfJanuary = constructFrom(date, 0);
+  fourthOfJanuary.setFullYear(weekYear, 0, 4);
+  fourthOfJanuary.setHours(0, 0, 0, 0);
+  _date = startOfISOWeekYear(fourthOfJanuary);
+  _date.setDate(_date.getDate() + diff);
+  return _date;
+}
+
+// Path: src/addISOWeekYears/index.ts
+import { getISOWeekYear } from "../getISOWeekYear/index.js";
+import { setISOWeekYear } from "../setISOWeekYear/index.js";
+
+/**
+ * @name addISOWeekYears
+ * @category ISO Week-Numbering Year Helpers
+ * @summary Add the specified number of ISO week-numbering years to the given date.
+ *
+ * @description
+ * Add the specified number of ISO week-numbering years to the given date.
+ *
+ * ISO week-numbering year: http://en.wikipedia.org/wiki/ISO_week_date
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The date to be changed
+ * @param amount - The amount of ISO week-numbering years to be added.
+ *
+ * @returns The new date with the ISO week-numbering years added
+ *
+ * @example
+ * // Add 5 ISO week-numbering years to 2 July 2010:
+ * const result = addISOWeekYears(new Date(2010, 6, 2), 5)
+ * //=> Fri Jn 26 2015 00:00:00
+ */
+export function addISOWeekYears<DateType extends Date>(
+  date: DateType | number | string,
+  amount: number,
+): DateType {
+  return setISOWeekYear(date, getISOWeekYear(date) + amount);
+}
+
+// Path: src/addISOWeekYears/test.ts
+import { describe, expect, it } from "vitest";
+import { addISOWeekYears } from "./index.js";
+
+describe("addISOWeekYears", () => {
+  it("adds the given number of ISO week-numbering years", () => {
+    const result = addISOWeekYears(new Date(2010, 6 /* Jul */, 2), 5);
+    expect(result).toEqual(new Date(2015, 5 /* Jun */, 26));
+  });
+
+  it("accepts a timestamp", () => {
+    const result = addISOWeekYears(
+      new Date(2014, 8 /* Sep */, 1).getTime(),
+      12,
+    );
+    expect(result).toEqual(new Date(2026, 7 /* Aug */, 31));
+  });
+
+  it("does not mutate the original date", () => {
+    const date = new Date(2014, 8 /* Sep */, 1);
+    addISOWeekYears(date, 12);
+    expect(date).toEqual(new Date(2014, 8 /* Sep */, 1));
+  });
+
+  it("handles dates before 100 AD", () => {
+    const initialDate = new Date(0);
+    initialDate.setFullYear(10, 6 /* Jul */, 2);
+    initialDate.setHours(0, 0, 0, 0);
+    const expectedResult = new Date(0);
+    expectedResult.setFullYear(15, 5 /* Jun */, 26);
+    expectedResult.setHours(0, 0, 0, 0);
+    const result = addISOWeekYears(initialDate, 5);
+    expect(result).toEqual(expectedResult);
+  });
+
+  it("returns `Invalid Date` if the given date is invalid", () => {
+    const result = addISOWeekYears(new Date(NaN), 5);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+
+  it("returns `Invalid Date` if the given amount is NaN", () => {
+    const result = addISOWeekYears(new Date(2010, 6 /* Jul */, 2), NaN);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+});
+
+// Path: src/addMilliseconds/test.ts
+import { describe, expect, it } from "vitest";
+import { addMilliseconds } from "./index.js";
+
+describe("addMilliseconds", () => {
+  it("adds the given number of milliseconds", () => {
+    const result = addMilliseconds(
+      new Date(2014, 6 /* Jul */, 10, 12, 45, 30, 0),
+      750,
+    );
+    expect(result).toEqual(new Date(2014, 6 /* Jul */, 10, 12, 45, 30, 750));
+  });
+
+  it("accepts a timestamp", () => {
+    const result = addMilliseconds(
+      new Date(2014, 6 /* Jul */, 10, 12, 45, 30, 0).getTime(),
+      500,
+    );
+    expect(result).toEqual(new Date(2014, 6 /* Jul */, 10, 12, 45, 30, 500));
+  });
+
+  it("does not mutate the original date", () => {
+    const date = new Date(2014, 6 /* Jul */, 10, 12, 45, 30, 0);
+    addMilliseconds(date, 250);
+    expect(date).toEqual(new Date(2014, 6 /* Jul */, 10, 12, 45, 30, 0));
+  });
+
+  it("returns `Invalid Date` if the given date is invalid", () => {
+    const result = addMilliseconds(new Date(NaN), 750);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+
+  it("returns `Invalid Date` if the given amount is NaN", () => {
+    const result = addMilliseconds(
+      new Date(2014, 6 /* Jul */, 10, 12, 45, 30, 0),
+      NaN,
+    );
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+});
+
+// Path: src/addMinutes/index.ts
+import { addMilliseconds } from "../addMilliseconds/index.js";
+import { millisecondsInMinute } from "../constants/index.js";
+
+/**
+ * @name addMinutes
+ * @category Minute Helpers
+ * @summary Add the specified number of minutes to the given date.
+ *
+ * @description
+ * Add the specified number of minutes to the given date.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The date to be changed
+ * @param amount - The amount of minutes to be added.
+ *
+ * @returns The new date with the minutes added
+ *
+ * @example
+ * // Add 30 minutes to 10 July 2014 12:00:00:
+ * const result = addMinutes(new Date(2014, 6, 10, 12, 0), 30)
+ * //=> Thu Jul 10 2014 12:30:00
+ */
+export function addMinutes<DateType extends Date>(
+  date: DateType | number | string,
+  amount: number,
+): DateType {
+  return addMilliseconds(date, amount * millisecondsInMinute);
+}
+
+// Path: src/addMinutes/test.ts
+import { describe, expect, it } from "vitest";
+import { addMinutes } from "./index.js";
+
+describe("addMinutes", () => {
+  it("adds the given number of minutes", () => {
+    const result = addMinutes(new Date(2014, 6 /* Jul */, 10, 12, 0), 30);
+    expect(result).toEqual(new Date(2014, 6 /* Jul */, 10, 12, 30));
+  });
+
+  it("accepts a timestamp", () => {
+    const result = addMinutes(
+      new Date(2014, 6 /* Jul */, 10, 12, 0).getTime(),
+      20,
+    );
+    expect(result).toEqual(new Date(2014, 6 /* Jul */, 10, 12, 20));
+  });
+
+  it("does not mutate the original date", () => {
+    const date = new Date(2014, 6 /* Jul */, 10, 12, 0);
+    addMinutes(date, 25);
+    expect(date).toEqual(new Date(2014, 6 /* Jul */, 10, 12, 0));
+  });
+
+  it("returns `Invalid Date` if the given date is invalid", () => {
+    const result = addMinutes(new Date(NaN), 30);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+
+  it("returns `Invalid Date` if the given amount is NaN", () => {
+    const result = addMinutes(new Date(2014, 6 /* Jul */, 10, 12, 0), NaN);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+});
+
+// Path: src/addMonths/test.ts
+import { describe, expect, it } from "vitest";
+import { addMonths } from "./index.js";
+import { getDstTransitions } from "../../test/dst/tzOffsetTransitions.js";
+
+describe("addMonths", () => {
+  it("adds the given number of months", () => {
+    const result = addMonths(new Date(2014, 8 /* Sep */, 1), 5);
+    expect(result).toEqual(new Date(2015, 1 /* Feb */, 1));
+  });
+
+  it("accepts a timestamp", () => {
+    const result = addMonths(new Date(2014, 8 /* Sep */, 1).getTime(), 12);
+    expect(result).toEqual(new Date(2015, 8 /* Sep */, 1));
+  });
+
+  it("does not mutate the original date", () => {
+    const date = new Date(2014, 8 /* Sep */, 1);
+    addMonths(date, 12);
+    expect(date).toEqual(new Date(2014, 8 /* Sep */, 1));
+  });
+
+  it("works well if the desired month has fewer days and the provided date is in the last day of a month", () => {
+    const date = new Date(2014, 11 /* Dec */, 31);
+    const result = addMonths(date, 2);
+    expect(result).toEqual(new Date(2015, 1 /* Feb */, 28));
+  });
+
+  it("handles dates before 100 AD", () => {
+    const initialDate = new Date(0);
+    initialDate.setFullYear(0, 0 /* Jan */, 31);
+    initialDate.setHours(0, 0, 0, 0);
+    const expectedResult = new Date(0);
+    expectedResult.setFullYear(0, 1 /* Feb */, 29);
+    expectedResult.setHours(0, 0, 0, 0);
+    const result = addMonths(initialDate, 1);
+    expect(result).toEqual(expectedResult);
+  });
+
+  it("returns `Invalid Date` if the given date is invalid", () => {
+    const result = addMonths(new Date(NaN), 5);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+
+  it("returns `Invalid Date` if the given amount is NaN", () => {
+    const result = addMonths(new Date(2014, 8 /* Sep */, 1), NaN);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+
+  const dstTransitions = getDstTransitions(2017);
+  const dstOnly = dstTransitions.start && dstTransitions.end ? it : it.skip;
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || process.env.tz;
+  const HOUR = 1000 * 60 * 60;
+  const override = (
+    base: Date,
+    year = base.getFullYear(),
+    month = base.getMonth(),
+    day = base.getDate(),
+    hour = base.getHours(),
+    minute = base.getMinutes(),
+  ) => new Date(year, month, day, hour, minute);
+
+  dstOnly(
+    `works at DST-start boundary in local timezone: ${tz || "(unknown)"}`,
+    () => {
+      const date = dstTransitions.start;
+      const result = addMonths(date!, 2);
+      expect(result).toEqual(override(date!, date!.getFullYear(), date!.getMonth() + 2));
+    },
+  );
+
+  dstOnly(
+    `works at DST-start - 30 mins in local timezone: ${tz || "(unknown)"}`,
+    () => {
+      const date = new Date(dstTransitions.start!.getTime() - 0.5 * HOUR);
+      const result = addMonths(date, 2);
+      const expected = override(date, date.getFullYear(), date.getMonth() + 2);
+      expect(result).toEqual(expected);
+    },
+  );
+
+  dstOnly(
+    `works at DST-start - 60 mins in local timezone: ${tz || "(unknown)"}`,
+    () => {
+      const date = new Date(dstTransitions.start!.getTime() - 1 * HOUR);
+      const result = addMonths(date, 2);
+      const expected = override(date, date.getFullYear(), date.getMonth() + 2);
+      expect(result).toEqual(expected);
+    },
+  );
+
+  dstOnly(
+    `works at DST-end boundary in local timezone: ${tz || "(unknown)"}`,
+    () => {
+      const date = dstTransitions.end;
+      const result = addMonths(date!, 2);
+      expect(result).toEqual(override(
+        date!,
+        date!.getFullYear() + (date!.getMonth() >= 10 ? 1 : 0),
+        (date!.getMonth() + 2) % 12, // protect against wrap for Nov.
+      ));
+    },
+  );
+
+  dstOnly(
+    `works at DST-end - 30 mins in local timezone: ${tz || "(unknown)"}`,
+    () => {
+      const date = new Date(dstTransitions.end!.getTime() - 0.5 * HOUR);
+      const result = addMonths(date, 2);
+      expect(result).toEqual(override(
+        date,
+        date.getFullYear() + (date.getMonth() >= 10 ? 1 : 0),
+        (date.getMonth() + 2) % 12, // protect against wrap for Nov.
+      ));
+    },
+  );
+
+  dstOnly(
+    `works at DST-end - 60 mins in local timezone: ${tz || "(unknown)"}`,
+    () => {
+      const date = new Date(dstTransitions.end!.getTime() - 1 * HOUR);
+      const result = addMonths(date, 2);
+      expect(result).toEqual(override(
+        date,
+        date.getFullYear() + (date.getMonth() >= 10 ? 1 : 0),
+        (date.getMonth() + 2) % 12, // protect against wrap for Nov.
+      ));
+    },
+  );
+
+  dstOnly(
+    `doesn't mutate if zero increment is used: ${tz || "(unknown)"}`,
+    () => {
+      const date = new Date(dstTransitions.end!);
+      const result = addMonths(date, 0);
+      expect(result).toEqual(date);
+    },
+  );
+});
+
+// Path: src/addQuarters/index.ts
+import { addMonths } from "../addMonths/index.js";
+
+/**
+ * @name addQuarters
+ * @category Quarter Helpers
+ * @summary Add the specified number of year quarters to the given date.
+ *
+ * @description
+ * Add the specified number of year quarters to the given date.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The date to be changed
+ * @param amount - The amount of quarters to be added.
+ *
+ * @returns The new date with the quarters added
+ *
+ * @example
+ * // Add 1 quarter to 1 September 2014:
+ * const result = addQuarters(new Date(2014, 8, 1), 1)
+ * //=> Mon Dec 01 2014 00:00:00
+ */
+export function addQuarters<DateType extends Date>(
+  date: DateType | number | string,
+  amount: number,
+): DateType {
+  const months = amount * 3;
+  return addMonths(date, months);
+}
+
+// Path: src/addQuarters/test.ts
+import { describe, expect, it } from "vitest";
+import { addQuarters } from "./index.js";
+
+describe("addQuarters", () => {
+  it("adds the given number of quarters", () => {
+    const result = addQuarters(new Date(2014, 8 /* Sep */, 1), 1);
+    expect(result).toEqual(new Date(2014, 11 /* Dec */, 1));
+  });
+
+  it("accepts a timestamp", () => {
+    const result = addQuarters(new Date(2014, 8 /* Sep */, 1).getTime(), 4);
+    expect(result).toEqual(new Date(2015, 8 /* Sep */, 1));
+  });
+
+  it("does not mutate the original date", () => {
+    const date = new Date(2014, 8 /* Sep */, 1);
+    addQuarters(date, 4);
+    expect(date).toEqual(new Date(2014, 8 /* Sep */, 1));
+  });
+
+  it("works well if the desired month has fewer days and the provided date is in the last day of a month", () => {
+    const date = new Date(2014, 11 /* Dec */, 31);
+    const result = addQuarters(date, 3);
+    expect(result).toEqual(new Date(2015, 8 /* Sep */, 30));
+  });
+
+  it("handles dates before 100 AD", () => {
+    const initialDate = new Date(0);
+    initialDate.setFullYear(-1, 10 /* Nov */, 30);
+    initialDate.setHours(0, 0, 0, 0);
+    const expectedResult = new Date(0);
+    expectedResult.setFullYear(0, 1 /* Feb */, 29);
+    expectedResult.setHours(0, 0, 0, 0);
+    const result = addQuarters(initialDate, 1);
+    expect(result).toEqual(expectedResult);
+  });
+
+  it("returns `Invalid Date` if the given date is invalid", () => {
+    const result = addQuarters(new Date(NaN), 1);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+
+  it("returns `Invalid Date` if the given amount is NaN", () => {
+    const result = addQuarters(new Date(2014, 8 /* Sep */, 1), NaN);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+});
+
+// Path: src/addSeconds/index.ts
+import { addMilliseconds } from "../addMilliseconds/index.js";
+
+/**
+ * @name addSeconds
+ * @category Second Helpers
+ * @summary Add the specified number of seconds to the given date.
+ *
+ * @description
+ * Add the specified number of seconds to the given date.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The date to be changed
+ * @param amount - The amount of seconds to be added.
+ *
+ * @returns The new date with the seconds added
+ *
+ * @example
+ * // Add 30 seconds to 10 July 2014 12:45:00:
+ * const result = addSeconds(new Date(2014, 6, 10, 12, 45, 0), 30)
+ * //=> Thu Jul 10 2014 12:45:30
+ */
+export function addSeconds<DateType extends Date>(
+  date: DateType | number | string,
+  amount: number,
+): DateType {
+  return addMilliseconds(date, amount * 1000);
+}
+
+// Path: src/addSeconds/test.ts
+import { describe, expect, it } from "vitest";
+import { addSeconds } from "./index.js";
+
+describe("addSeconds", () => {
+  it("adds the given number of seconds", () => {
+    const result = addSeconds(new Date(2014, 6 /* Jul */, 10, 12, 45, 0), 30);
+    expect(result).toEqual(new Date(2014, 6 /* Jul */, 10, 12, 45, 30));
+  });
+
+  it("accepts a timestamp", () => {
+    const result = addSeconds(
+      new Date(2014, 6 /* Jul */, 10, 12, 45, 0).getTime(),
+      20,
+    );
+    expect(result).toEqual(new Date(2014, 6 /* Jul */, 10, 12, 45, 20));
+  });
+
+  it("does not mutate the original date", () => {
+    const date = new Date(2014, 6 /* Jul */, 10, 12, 45, 0);
+    addSeconds(date, 15);
+    expect(date).toEqual(new Date(2014, 6 /* Jul */, 10, 12, 45, 0));
+  });
+
+  it("returns `Invalid Date` if the given date is invalid", () => {
+    const result = addSeconds(new Date(NaN), 30);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+
+  it("returns `Invalid Date` if the given amount is NaN", () => {
+    const result = addSeconds(new Date(2014, 6 /* Jul */, 10, 12, 45, 0), NaN);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+});
+
+// Path: src/addWeeks/index.ts
+import { addDays } from "../addDays/index.js";
+
+/**
+ * @name addWeeks
+ * @category Week Helpers
+ * @summary Add the specified number of weeks to the given date.
+ *
+ * @description
+ * Add the specified number of week to the given date.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The date to be changed
+ * @param amount - The amount of weeks to be added.
+ *
+ * @returns The new date with the weeks added
+ *
+ * @example
+ * // Add 4 weeks to 1 September 2014:
+ * const result = addWeeks(new Date(2014, 8, 1), 4)
+ * //=> Mon Sep 29 2014 00:00:00
+ */
+export function addWeeks<DateType extends Date>(
+  date: DateType | number | string,
+  amount: number,
+): DateType {
+  const days = amount * 7;
+  return addDays(date, days);
+}
+
+// Path: src/addWeeks/test.ts
+import { describe, expect, it } from "vitest";
+import { addWeeks } from "./index.js";
+
+describe("addWeeks", () => {
+  it("adds the given number of weeks", () => {
+    const result = addWeeks(new Date(2014, 8 /* Sep */, 1), 4);
+    expect(result).toEqual(new Date(2014, 8 /* Sep */, 29));
+  });
+
+  it("accepts a timestamp", () => {
+    const result = addWeeks(new Date(2014, 8 /* Sep */, 1).getTime(), 1);
+    expect(result).toEqual(new Date(2014, 8 /* Sep */, 8));
+  });
+
+  it("does not mutate the original date", () => {
+    const date = new Date(2014, 8 /* Sep */, 1);
+    addWeeks(date, 2);
+    expect(date).toEqual(new Date(2014, 8 /* Sep */, 1));
+  });
+
+  it("returns `Invalid Date` if the given date is invalid", () => {
+    const result = addWeeks(new Date(NaN), 4);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+
+  it("returns `Invalid Date` if the given amount is NaN", () => {
+    const result = addWeeks(new Date(2014, 8 /* Sep */, 1), NaN);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+});
+
+// Path: src/addYears/index.ts
+import { addMonths } from "../addMonths/index.js";
+
+/**
+ * @name addYears
+ * @category Year Helpers
+ * @summary Add the specified number of years to the given date.
+ *
+ * @description
+ * Add the specified number of years to the given date.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The date to be changed
+ * @param amount - The amount of years to be added.
+ *
+ * @returns The new date with the years added
+ *
+ * @example
+ * // Add 5 years to 1 September 2014:
+ * const result = addYears(new Date(2014, 8, 1), 5)
+ * //=> Sun Sep 01 2019 00:00:00
+ */
+export function addYears<DateType extends Date>(
+  date: DateType | number | string,
+  amount: number,
+): DateType {
+  return addMonths(date, amount * 12);
+}
+
+// Path: src/addYears/test.ts
+import { describe, expect, it } from "vitest";
+import { addYears } from "./index.js";
+
+describe("addYears", () => {
+  it("adds the given number of years", () => {
+    const result = addYears(new Date(2014, 8 /* Sep */, 1), 5);
+    expect(result).toEqual(new Date(2019, 8 /* Sep */, 1));
+  });
+
+  it("accepts a timestamp", () => {
+    const result = addYears(new Date(2014, 8 /* Sep */, 1).getTime(), 12);
+    expect(result).toEqual(new Date(2026, 8 /* Sep */, 1));
+  });
+
+  it("does not mutate the original date", () => {
+    const date = new Date(2014, 8 /* Sep */, 1);
+    addYears(date, 12);
+    expect(date).toEqual(new Date(2014, 8 /* Sep */, 1));
+  });
+
+  it("handles the leap years properly", () => {
+    const result = addYears(new Date(2016, 1 /* Feb */, 29), 1);
+    expect(result).toEqual(new Date(2017, 1 /* Feb */, 28));
+  });
+
+  it("handles dates before 100 AD", () => {
+    const initialDate = new Date(0);
+    initialDate.setFullYear(0, 1 /* Feb */, 29);
+    initialDate.setHours(0, 0, 0, 0);
+    const expectedResult = new Date(0);
+    expectedResult.setFullYear(1, 1 /* Feb */, 28);
+    expectedResult.setHours(0, 0, 0, 0);
+    const result = addYears(initialDate, 1);
+    expect(result).toEqual(expectedResult);
+  });
+
+  it("returns `Invalid Date` if the given date is invalid", () => {
+    const result = addYears(new Date(NaN), 5);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+
+  it("returns `Invalid Date` if the given amount is NaN", () => {
+    const result = addYears(new Date(2014, 8 /* Sep */, 1), NaN);
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+});
+
+// Path: src/areIntervalsOverlapping/index.ts
+import { toDate } from "../toDate/index.js";
+import type { Interval } from "../types.js";
+
+/**
+ * The {@link areIntervalsOverlapping} function options.
+ */
+export interface AreIntervalsOverlappingOptions {
+  /** Whether the comparison is inclusive or not */
+  inclusive?: boolean;
+}
+
+/**
+ * @name areIntervalsOverlapping
+ * @category Interval Helpers
+ * @summary Is the given time interval overlapping with another time interval?
+ *
+ * @description
+ * Is the given time interval overlapping with another time interval? Adjacent intervals do not count as overlapping unless `inclusive` is set to `true`.
+ *
+ * @param intervalLeft - The first interval to compare.
+ * @param intervalRight - The second interval to compare.
+ * @param options - The object with options
+ *
+ * @returns Whether the time intervals are overlapping
+ *
+ * @example
+ * // For overlapping time intervals:
+ * areIntervalsOverlapping(
+ *   { start: new Date(2014, 0, 10), end: new Date(2014, 0, 20) },
+ *   { start: new Date(2014, 0, 17), end: new Date(2014, 0, 21) }
+ * )
+ * //=> true
+ *
+ * @example
+ * // For non-overlapping time intervals:
+ * areIntervalsOverlapping(
+ *   { start: new Date(2014, 0, 10), end: new Date(2014, 0, 20) },
+ *   { start: new Date(2014, 0, 21), end: new Date(2014, 0, 22) }
+ * )
+ * //=> false
+ *
+ * @example
+ * // For adjacent time intervals:
+ * areIntervalsOverlapping(
+ *   { start: new Date(2014, 0, 10), end: new Date(2014, 0, 20) },
+ *   { start: new Date(2014, 0, 20), end: new Date(2014, 0, 30) }
+ * )
+ * //=> false
+ *
+ * @example
+ * // Using the inclusive option:
+ * areIntervalsOverlapping(
+ *   { start: new Date(2014, 0, 10), end: new Date(2014, 0, 20) },
+ *   { start: new Date(2014, 0, 20), end: new Date(2014, 0, 24) }
+ * )
+ * //=> false
+ *
+ * @example
+ * areIntervalsOverlapping(
+ *   { start: new Date(2014, 0, 10), end: new Date(2014, 0, 20) },
+ *   { start: new Date(2014, 0, 20), end: new Date(2014, 0, 24) },
+ *   { inclusive: true }
+ * )
+ * //=> true
+ */
+export function areIntervalsOverlapping(
+  intervalLeft: Interval,
+  intervalRight: Interval,
+  options?: AreIntervalsOverlappingOptions,
+): boolean {
+  const [leftStartTime, leftEndTime] = [
+    +toDate(intervalLeft.start),
+    +toDate(intervalLeft.end),
+  ].sort((a, b) => a - b);
+  const [rightStartTime, rightEndTime] = [
+    +toDate(intervalRight.start),
+    +toDate(intervalRight.end),
+  ].sort((a, b) => a - b);
+
+  if (options?.inclusive)
+    return leftStartTime <= rightEndTime && rightStartTime <= leftEndTime;
+
+  return leftStartTime < rightEndTime && rightStartTime < leftEndTime;
+}
+
+// Path: src/areIntervalsOverlapping/test.ts
+import { describe, expect, it } from "vitest";
+import { areIntervalsOverlapping } from "./index.js";
+
+describe("areIntervalsOverlapping", () => {
+  const initialIntervalStart = new Date(2016, 10, 10, 13, 0, 0);
+  const initialIntervalEnd = new Date(2016, 11, 3, 15, 0, 0);
+
+  describe("when the time intervals don't overlap", () => {
+    it("returns false for a valid non overlapping interval before another interval", () => {
+      const earlierIntervalStart = new Date(2016, 9, 25);
+      const earlierIntervalEnd = new Date(2016, 10, 9);
+
+      const isOverlapping = areIntervalsOverlapping(
+        { start: initialIntervalStart, end: initialIntervalEnd },
+        { start: earlierIntervalStart, end: earlierIntervalEnd },
+      );
+      expect(!isOverlapping).toBe(true);
+    });
+
+    it("returns false for a valid non overlapping interval after another interval", () => {
+      const laterIntervalStart = new Date(2016, 11, 4);
+      const laterIntervalEnd = new Date(2016, 11, 9);
+
+      const isOverlapping = areIntervalsOverlapping(
+        { start: initialIntervalStart, end: initialIntervalEnd },
+        { start: laterIntervalStart, end: laterIntervalEnd },
+      );
+      expect(!isOverlapping).toBe(true);
+    });
+
+    it("returns false for a non overlapping same-day interval", () => {
+      const sameDayIntervalStart = new Date(2016, 11, 4, 9, 0, 0);
+      const sameDayIntervalEnd = new Date(2016, 11, 4, 18, 0, 0);
+
+      const isOverlapping = areIntervalsOverlapping(
+        { start: initialIntervalStart, end: initialIntervalEnd },
+        { start: sameDayIntervalStart, end: sameDayIntervalEnd },
+      );
+      expect(!isOverlapping).toBe(true);
+    });
+
+    it("returns false for an interval differing by a few hours", () => {
+      const oneDayOverlappingIntervalStart = new Date(2016, 11, 3, 18, 0, 0);
+      const oneDayOverlappingIntervalEnd = new Date(2016, 11, 14, 13, 0, 0);
+
+      const isOverlapping = areIntervalsOverlapping(
+        { start: initialIntervalStart, end: initialIntervalEnd },
+        {
+          start: oneDayOverlappingIntervalStart,
+          end: oneDayOverlappingIntervalEnd,
+        },
+      );
+      expect(!isOverlapping).toBe(true);
+    });
+
+    it("returns false for an interval with the same startDateTime as the initial time intervals's endDateTime", () => {
+      const oneDayOverlapIntervalStart = new Date(2016, 11, 3, 15, 0, 0);
+      const oneDayOverlapIntervalEnd = new Date(2016, 11, 14, 13, 0, 0);
+
+      const isOverlapping = areIntervalsOverlapping(
+        { start: initialIntervalStart, end: initialIntervalEnd },
+        { start: oneDayOverlapIntervalStart, end: oneDayOverlapIntervalEnd },
+      );
+      expect(!isOverlapping).toBe(true);
+    });
+
+    it("returns false for an interval with the same endDateTime as the initial time interval's startDateTime", () => {
+      const oneDayOverlapIntervalStart = new Date(2016, 10, 3, 15, 0, 0);
+      const oneDayOverlapIntervalEnd = new Date(2016, 10, 10, 13, 0, 0);
+
+      const isOverlapping = areIntervalsOverlapping(
+        { start: initialIntervalStart, end: initialIntervalEnd },
+        { start: oneDayOverlapIntervalStart, end: oneDayOverlapIntervalEnd },
+      );
+      expect(!isOverlapping).toBe(true);
+    });
+  });
+
+  describe("when the time intervals overlap", () => {
+    it("returns true for an interval included within another interval", () => {
+      const includedIntervalStart = new Date(2016, 10, 14);
+      const includedIntervalEnd = new Date(2016, 10, 14);
+
+      const isOverlapping = areIntervalsOverlapping(
+        { start: initialIntervalStart, end: initialIntervalEnd },
+        { start: includedIntervalStart, end: includedIntervalEnd },
+      );
+      expect(isOverlapping).toBe(true);
+    });
+
+    it("returns true for an interval overlapping at the end", () => {
+      const endOverlappingIntervalStart = new Date(2016, 10, 5);
+      const endOverlappingIntervalEnd = new Date(2016, 10, 14);
+
+      const isOverlapping = areIntervalsOverlapping(
+        { start: initialIntervalStart, end: initialIntervalEnd },
+        { start: endOverlappingIntervalStart, end: endOverlappingIntervalEnd },
+      );
+      expect(isOverlapping).toBe(true);
+    });
+
+    it("returns true for an interval overlapping at the beginning", () => {
+      const startOverlappingIntervalStart = new Date(2016, 10, 20);
+      const startOverlappingIntervalEnd = new Date(2016, 11, 14);
+
+      const isOverlapping = areIntervalsOverlapping(
+        { start: initialIntervalStart, end: initialIntervalEnd },
+        {
+          start: startOverlappingIntervalStart,
+          end: startOverlappingIntervalEnd,
+        },
+      );
+      expect(isOverlapping).toBe(true);
+    });
+
+    it("returns true for an interval including another interval", () => {
+      const includingIntervalStart = new Date(2016, 10, 5);
+      const includingIntervalEnd = new Date(2016, 11, 15);
+
+      const isOverlapping = areIntervalsOverlapping(
+        { start: initialIntervalStart, end: initialIntervalEnd },
+        { start: includingIntervalStart, end: includingIntervalEnd },
+      );
+      expect(isOverlapping).toBe(true);
+    });
+  });
+
+  it("accepts timestamp", () => {
+    const initialIntervalStart = new Date(2016, 10, 10, 13, 0, 0).getTime();
+    const initialIntervalEnd = new Date(2016, 11, 3, 15, 0, 0).getTime();
+
+    const endOverlappingIntervalStart = new Date(2016, 10, 5).getTime();
+    const endOverlappingIntervalEnd = new Date(2016, 10, 14).getTime();
+
+    const isOverlapping = areIntervalsOverlapping(
+      { start: initialIntervalStart, end: initialIntervalEnd },
+      { start: endOverlappingIntervalStart, end: endOverlappingIntervalEnd },
+    );
+    expect(isOverlapping).toBe(true);
+  });
+
+  it("sort timestamp", () => {
+    const result = areIntervalsOverlapping(
+      { start: "1970-01-01T02:00:00.000Z", end: "1970-01-01T03:00:00.000Z" },
+      { start: "1969-12-31T23:30:00.000Z", end: "1970-01-01T02:30:00.000Z" },
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns result for the normalized intervals if the start date of the initial time interval is after the end date", () => {
+    const includedIntervalStart = new Date(2016, 10, 14);
+    const includedIntervalEnd = new Date(2016, 10, 14);
+
+    const isOverlapping = areIntervalsOverlapping(
+      { start: initialIntervalEnd, end: initialIntervalStart },
+      { start: includedIntervalStart, end: includedIntervalEnd },
+    );
+    expect(isOverlapping).toBe(true);
+  });
+
+  it("returns result for the normalized intervals if the start date of the compared time interval is after the end date", () => {
+    const includedIntervalStart = new Date(2016, 10, 14);
+    const includedIntervalEnd = new Date(2016, 10, 14);
+
+    const isOverlapping = areIntervalsOverlapping(
+      { start: initialIntervalStart, end: initialIntervalEnd },
+      { start: includedIntervalEnd, end: includedIntervalStart },
+    );
+    expect(isOverlapping).toBe(true);
+  });
+
+  describe("when the inclusive option is true", () => {
+    it("returns true for an interval with the same startDateTime as the initial time interval's endDateTime", () => {
+      const oneDayOverlapIntervalStart = new Date(2016, 11, 3, 15, 0, 0);
+      const oneDayOverlapIntervalEnd = new Date(2016, 11, 14, 13, 0, 0);
+
+      const isOverlapping = areIntervalsOverlapping(
+        { start: initialIntervalStart, end: initialIntervalEnd },
+        { start: oneDayOverlapIntervalStart, end: oneDayOverlapIntervalEnd },
+        { inclusive: true },
+      );
+      expect(isOverlapping).toBe(true);
+    });
+
+    it("returns true for an interval with the same endDateTime as the initial time interval's startDateTime", () => {
+      const oneDayOverlapIntervalStart = new Date(2016, 10, 3, 15, 0, 0);
+      const oneDayOverlapIntervalEnd = new Date(2016, 10, 10, 13, 0, 0);
+
+      const isOverlapping = areIntervalsOverlapping(
+        { start: initialIntervalStart, end: initialIntervalEnd },
+        { start: oneDayOverlapIntervalStart, end: oneDayOverlapIntervalEnd },
+        { inclusive: true },
+      );
+      expect(isOverlapping).toBe(true);
+    });
+  });
+
+  describe("one of the dates is `Invalid Date`", () => {
+    it("returns false if the start date of the initial time interval is `Invalid Date`", () => {
+      const result = areIntervalsOverlapping(
+        { start: new Date(NaN), end: new Date(2016, 10, 3) },
+        { start: new Date(2016, 10, 5), end: new Date(2016, 10, 15) },
+      );
+      expect(!result).toBe(true);
+    });
+
+    it("returns false if the end date of the initial time interval is `Invalid Date`", () => {
+      const result = areIntervalsOverlapping(
+        { start: new Date(2016, 10, 3), end: new Date(NaN) },
+        { start: new Date(2016, 10, 5), end: new Date(2016, 10, 15) },
+      );
+      expect(!result).toBe(true);
+    });
+
+    it("returns false if the start date of the compared time interval is `Invalid Date`", () => {
+      const result = areIntervalsOverlapping(
+        { start: new Date(2016, 10, 3), end: new Date(2016, 10, 7) },
+        { start: new Date(NaN), end: new Date(2016, 10, 5) },
+      );
+      expect(!result).toBe(true);
+    });
+
+    it("returns false if the end date of the compared time interval is `Invalid Date`", () => {
+      const result = areIntervalsOverlapping(
+        { start: new Date(2016, 10, 3), end: new Date(2016, 10, 7) },
+        { start: new Date(2016, 10, 5), end: new Date(NaN) },
+      );
+      expect(!result).toBe(true);
+    });
+  });
+});
+
+// Path: src/max/index.ts
+import { toDate } from "../toDate/index.js";
+
+/**
+ * @name max
+ * @category Common Helpers
+ * @summary Return the latest of the given dates.
+ *
+ * @description
+ * Return the latest of the given dates.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param dates - The dates to compare
+ *
+ * @returns The latest of the dates
+ *
+ * @example
+ * // Which of these dates is the latest?
+ * const result = max([
+ *   new Date(1989, 6, 10),
+ *   new Date(1987, 1, 11),
+ *   new Date(1995, 6, 2),
+ *   new Date(1990, 0, 1)
+ * ])
+ * //=> Sun Jul 02 1995 00:00:00
+ */
+export function max<DateType extends Date>(
+  dates: Array<DateType | number | string>,
+): DateType | Date {
+  let result: Date | undefined;
+  dates.forEach(function (dirtyDate) {
+    const currentDate = toDate(dirtyDate);
+
+    if (
+      result === undefined ||
+      result < currentDate ||
+      isNaN(Number(currentDate))
+    ) {
+      result = currentDate;
+    }
+  });
+
+  return result || new Date(NaN);
+}
+
+// Path: src/min/index.ts
+import { toDate } from "../toDate/index.js";
+
+/**
+ * @name min
+ * @category Common Helpers
+ * @summary Returns the earliest of the given dates.
+ *
+ * @description
+ * Returns the earliest of the given dates.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param dates - The dates to compare
+ *
+ * @returns The earliest of the dates
+ *
+ * @example
+ * // Which of these dates is the earliest?
+ * const result = min([
+ *   new Date(1989, 6, 10),
+ *   new Date(1987, 1, 11),
+ *   new Date(1995, 6, 2),
+ *   new Date(1990, 0, 1)
+ * ])
+ * //=> Wed Feb 11 1987 00:00:00
+ */
+export function min<DateType extends Date>(
+  dates: Array<DateType | number | string>,
+): DateType | Date {
+  let result: Date | undefined;
+
+  dates.forEach((dirtyDate) => {
+    const date = toDate(dirtyDate);
+    if (!result || result > date || isNaN(+date)) {
+      result = date;
+    }
+  });
+
+  return result || new Date(NaN);
+}
+
+// Path: src/clamp/index.ts
+import { max } from "../max/index.js";
+import { min } from "../min/index.js";
+import type { Interval } from "../types.js";
+
+/**
+ * @name clamp
+ * @category Interval Helpers
+ * @summary Return a date bounded by the start and the end of the given interval
+ *
+ * @description
+ * Clamps a date to the lower bound with the start of the interval and the upper
+ * bound with the end of the interval.
+ *
+ * - When the date is less than the start of the interval, the start is returned.
+ * - When the date is greater than the end of the interval, the end is returned.
+ * - Otherwise the date is returned.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The date to be bounded
+ * @param interval - The interval to bound to
+ *
+ * @returns The date bounded by the start and the end of the interval
+ *
+ * @example
+ * // What is Mar, 21, 2021 bounded to an interval starting at Mar, 22, 2021 and ending at Apr, 01, 2021
+ * const result = clamp(new Date(2021, 2, 21), {
+ *   start: new Date(2021, 2, 22),
+ *   end: new Date(2021, 3, 1),
+ * })
+ * //=> Mon Mar 22 2021 00:00:00
+ */
+export function clamp<DateType extends Date>(
+  date: DateType | number | string,
+  interval: Interval,
+): DateType | Date {
+  return min([max([date, interval.start]), interval.end]);
+}
+
+// Path: src/clamp/test.ts
+import { describe, expect, it } from "vitest";
+import { clamp } from "./index.js";
+
+describe("clamp", () => {
+  it("accepts timestamps", () => {
+    const start = new Date(2000, 1, 1).getTime();
+    const date = new Date(2000, 1, 2).getTime();
+    const end = new Date(2000, 1, 3).getTime();
+    const result = clamp(date, { start, end });
+    expect(result).toEqual(new Date(2000, 1, 2));
+  });
+
+  it("returns the start date when the date is less than start", () => {
+    const start = new Date(2001, 1, 1);
+    const date = new Date(2000, 1, 1);
+    const end = new Date(2020, 1, 1);
+    const result = clamp(date, { start, end });
+    expect(result).toEqual(new Date(2001, 1, 1));
+  });
+
+  it("returns the end date when the date is greater than the end date", () => {
+    const start = new Date(2000, 1, 1);
+    const date = new Date(2003, 1, 1);
+    const end = new Date(2001, 1, 1);
+    const result = clamp(date, { start, end });
+    expect(result).toEqual(new Date(2001, 1, 1));
+  });
+
+  it("returns the date when the date is within the bound of start and end", () => {
+    const start = new Date(2000, 1, 1);
+    const date = new Date(2001, 1, 1);
+    const end = new Date(2003, 1, 1);
+    const result = clamp(date, { start, end });
+    expect(result).toEqual(new Date(2001, 1, 1));
+  });
+});
+
+// Path: src/closestIndexTo/index.ts
+import { toDate } from "../toDate/index.js";
+
+/**
+ * @name closestIndexTo
+ * @category Common Helpers
+ * @summary Return an index of the closest date from the array comparing to the given date.
+ *
+ * @description
+ * Return an index of the closest date from the array comparing to the given date.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param dateToCompare - The date to compare with
+ * @param dates - The array to search
+ *
+ * @returns An index of the date closest to the given date or undefined if no valid value is given
+ *
+ * @example
+ * // Which date is closer to 6 September 2015?
+ * const dateToCompare = new Date(2015, 8, 6)
+ * const datesArray = [
+ *   new Date(2015, 0, 1),
+ *   new Date(2016, 0, 1),
+ *   new Date(2017, 0, 1)
+ * ]
+ * const result = closestIndexTo(dateToCompare, datesArray)
+ * //=> 1
+ */
+export function closestIndexTo<DateType extends Date>(
+  dateToCompare: DateType | number | string,
+  dates: Array<DateType | number | string>,
+): number | undefined {
+  const date = toDate(dateToCompare);
+
+  if (isNaN(Number(date))) return NaN;
+
+  const timeToCompare = date.getTime();
+
+  let result: number | undefined;
+  let minDistance: number;
+  dates.forEach(function (dirtyDate, index) {
+    const currentDate = toDate(dirtyDate);
+
+    if (isNaN(Number(currentDate))) {
+      result = NaN;
+      minDistance = NaN;
+      return;
+    }
+
+    const distance = Math.abs(timeToCompare - currentDate.getTime());
+    if (result == null || distance < minDistance) {
+      result = index;
+      minDistance = distance;
+    }
+  });
+
+  return result;
+}
+
+// Path: src/closestIndexTo/test.ts
+import { describe, expect, it } from "vitest";
+import { closestIndexTo } from "./index.js";
+
+describe("closestIndexTo", () => {
+  it("returns the date index from the given array closest to the given date", () => {
+    const date = new Date(2014, 6 /* Jul */, 2);
+    const result = closestIndexTo(date, [
+      new Date(2015, 7 /* Aug */, 31),
+      new Date(2012, 6 /* Jul */, 2),
+    ]);
+    expect(result).toBe(0);
+  });
+
+  it("works if the closest date from the given array is before the given date", () => {
+    const date = new Date(2014, 6 /* Jul */, 2, 6, 30, 4, 500);
+    const result = closestIndexTo(date, [
+      new Date(2014, 6 /* Jul */, 2, 6, 30, 5, 900),
+      new Date(2014, 6 /* Jul */, 2, 6, 30, 3, 900),
+      new Date(2014, 6 /* Jul */, 2, 6, 30, 10),
+    ]);
+    expect(result).toBe(1);
+  });
+
+  it("accepts timestamps", () => {
+    const date = new Date(2014, 6 /* Jul */, 2).getTime();
+    const result = closestIndexTo(date, [
+      new Date(2015, 7 /* Aug */, 31).getTime(),
+      new Date(2012, 6 /* Jul */, 2).getTime(),
+    ]);
+    expect(result).toBe(0);
+  });
+
+  it("returns undefined if the given array is empty", () => {
+    const date = new Date(2014, 6 /* Jul */, 2).getTime();
+    const result = closestIndexTo(date, []);
+    expect(result).toBe(undefined);
+  });
+
+  it("returns NaN if the given date is `Invalid Date`", () => {
+    const date = new Date(NaN);
+    const result = closestIndexTo(date, [
+      new Date(2015, 7 /* Aug */, 31),
+      new Date(2012, 6 /* Jul */, 2),
+    ]);
+    expect(result != null && isNaN(result)).toBe(true);
+  });
+
+  it("returns NaN if any date in the given array is `Invalid Date`", () => {
+    const date = new Date(2014, 6 /* Jul */, 2);
+    const result = closestIndexTo(date, [
+      new Date(2015, 7 /* Aug */, 31),
+      new Date(NaN),
+      new Date(2012, 6 /* Jul */, 2),
+    ]);
+    expect(result != null && isNaN(result)).toBe(true);
+  });
+});
+
+// Path: src/closestTo/index.ts
+import { constructFrom } from "../constructFrom/index.js";
+import { toDate } from "../toDate/index.js";
+
+/**
+ * @name closestTo
+ * @category Common Helpers
+ * @summary Return a date from the array closest to the given date.
+ *
+ * @description
+ * Return a date from the array closest to the given date.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param dateToCompare - The date to compare with
+ * @param dates - The array to search
+ *
+ * @returns The date from the array closest to the given date or undefined if no valid value is given
+ *
+ * @example
+ * // Which date is closer to 6 September 2015: 1 January 2000 or 1 January 2030?
+ * const dateToCompare = new Date(2015, 8, 6)
+ * const result = closestTo(dateToCompare, [
+ *   new Date(2000, 0, 1),
+ *   new Date(2030, 0, 1)
+ * ])
+ * //=> Tue Jan 01 2030 00:00:00
+ */
+export function closestTo<DateType extends Date>(
+  dateToCompare: DateType | number | string,
+  dates: Array<DateType | number | string>,
+): DateType | undefined {
+  const date = toDate(dateToCompare);
+
+  if (isNaN(Number(date))) return constructFrom(dateToCompare, NaN);
+
+  const timeToCompare = date.getTime();
+
+  let result: DateType | undefined;
+  let minDistance: number;
+  dates.forEach((dirtyDate) => {
+    const currentDate = toDate(dirtyDate);
+
+    if (isNaN(Number(currentDate))) {
+      result = constructFrom(dateToCompare, NaN);
+      minDistance = NaN;
+      return;
+    }
+
+    const distance = Math.abs(timeToCompare - currentDate.getTime());
+    if (result == null || distance < minDistance) {
+      result = currentDate;
+      minDistance = distance;
+    }
+  });
+
+  return result;
+}
+
+// Path: src/closestTo/test.ts
+import { describe, expect, it } from "vitest";
+import { closestTo } from "./index.js";
+
+describe("closestTo", () => {
+  it("returns the date from the given array closest to the given date", () => {
+    const date = new Date(2014, 6 /* Jul */, 2);
+    const result = closestTo(date, [
+      new Date(2015, 7 /* Aug */, 31),
+      new Date(2012, 6 /* Jul */, 2),
+    ]);
+    expect(result).toEqual(new Date(2015, 7 /* Aug */, 31));
+  });
+
+  it("works if the closest date from the given array is before the given date", () => {
+    const date = new Date(2014, 6 /* Jul */, 2, 6, 30, 4, 500);
+    const result = closestTo(date, [
+      new Date(2014, 6 /* Jul */, 2, 6, 30, 5, 900),
+      new Date(2014, 6 /* Jul */, 2, 6, 30, 3, 900),
+      new Date(2014, 6 /* Jul */, 2, 6, 30, 10),
+    ]);
+    expect(result).toEqual(new Date(2014, 6 /* Jul */, 2, 6, 30, 3, 900));
+  });
+
+  it("accepts timestamps", () => {
+    const date = new Date(2014, 6 /* Jul */, 2).getTime();
+    const result = closestTo(date, [
+      new Date(2015, 7 /* Aug */, 31).getTime(),
+      new Date(2012, 6 /* Jul */, 2).getTime(),
+    ]);
+    expect(result).toEqual(new Date(2015, 7 /* Aug */, 31));
+  });
+
+  it("returns undefined if the given array is empty", () => {
+    const date = new Date(2014, 6 /* Jul */, 2).getTime();
+    const result = closestTo(date, []);
+    expect(result).toEqual(undefined);
+  });
+
+  it("returns `Invalid Date` if the given date is `Invalid Date`", () => {
+    const date = new Date(NaN);
+    const result = closestTo(date, [
+      new Date(2015, 7 /* Aug */, 31),
+      new Date(2012, 6 /* Jul */, 2),
+    ]);
+
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+
+  it("returns `Invalid Date` if any date in the given array is `Invalid Date`", () => {
+    const date = new Date(2014, 6 /* Jul */, 2);
+    const result = closestTo(date, [
+      new Date(2015, 7 /* Aug */, 31),
+      new Date(NaN),
+      new Date(2012, 6 /* Jul */, 2),
+    ]);
+
+    expect(result instanceof Date && isNaN(result.getTime())).toBe(true);
+  });
+});
+
+// Path: src/compareAsc/index.ts
+import { toDate } from "../toDate/index.js";
+
+/**
+ * @name compareAsc
+ * @category Common Helpers
+ * @summary Compare the two dates and return -1, 0 or 1.
+ *
+ * @description
+ * Compare the two dates and return 1 if the first date is after the second,
+ * -1 if the first date is before the second or 0 if dates are equal.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param dateLeft - The first date to compare
+ * @param dateRight - The second date to compare
+ *
+ * @returns The result of the comparison
+ *
+ * @example
+ * // Compare 11 February 1987 and 10 July 1989:
+ * const result = compareAsc(new Date(1987, 1, 11), new Date(1989, 6, 10))
+ * //=> -1
+ *
+ * @example
+ * // Sort the array of dates:
+ * const result = [
+ *   new Date(1995, 6, 2),
+ *   new Date(1987, 1, 11),
+ *   new Date(1989, 6, 10)
+ * ].sort(compareAsc)
+ * //=> [
+ * //   Wed Feb 11 1987 00:00:00,
+ * //   Mon Jul 10 1989 00:00:00,
+ * //   Sun Jul 02 1995 00:00:00
+ * // ]
+ */
+export function compareAsc<DateType extends Date>(
+  dateLeft: DateType | number | string,
+  dateRight: DateType | number | string,
+): number {
+  const _dateLeft = toDate(dateLeft);
+  const _dateRight = toDate(dateRight);
+
+  const diff = _dateLeft.getTime() - _dateRight.getTime();
+
+  if (diff < 0) {
+    return -1;
+  } else if (diff > 0) {
+    return 1;
+    // Return 0 if diff is 0; return NaN if diff is NaN
+  } else {
+    return diff;
+  }
+}
+
+// Path: src/compareAsc/test.ts
+import { describe, expect, it } from "vitest";
+import { compareAsc } from "./index.js";
+
+describe("compareAsc", () => {
+  it("returns 0 if the given dates are equal", () => {
+    const result = compareAsc(
+      new Date(1989, 6 /* Jul */, 10),
+      new Date(1989, 6 /* Jul */, 10),
+    );
+    expect(result).toBe(0);
+  });
+
+  it("returns -1 if the first date is before the second one", () => {
+    const result = compareAsc(
+      new Date(1987, 1 /* Feb */, 11),
+      new Date(1989, 6 /* Jul */, 10),
+    );
+    expect(result).toBe(-1);
+  });
+
+  it("returns 1 if the first date is after the second one", () => {
+    const result = compareAsc(
+      new Date(1989, 6 /* Jul */, 10),
+      new Date(1987, 1 /* Feb */, 11),
+    );
+    expect(result).toBe(1);
+  });
+
+  it("sorts the dates array in the chronological order when function is passed as the argument to Array.prototype.sort()", () => {
+    const unsortedArray = [
+      new Date(1995, 6 /* Jul */, 2),
+      new Date(1987, 1 /* Feb */, 11),
+      new Date(1989, 6 /* Jul */, 10),
+    ];
+
+    const sortedArray = [
+      new Date(1987, 1 /* Feb */, 11),
+      new Date(1989, 6 /* Jul */, 10),
+      new Date(1995, 6 /* Jul */, 2),
+    ];
+
+    unsortedArray.sort(compareAsc);
+    const result = unsortedArray;
+
+    expect(result).toEqual(sortedArray);
+  });
+
+  it("accepts timestamps", () => {
+    const result = compareAsc(
+      new Date(1987, 1 /* Feb */, 11).getTime(),
+      new Date(1989, 6 /* Jul */, 10).getTime(),
+    );
+    expect(result).toBe(-1);
+  });
+
+  it("returns NaN if the first date is `Invalid Date`", () => {
+    const result = compareAsc(new Date(NaN), new Date(1989, 6 /* Jul */, 10));
+    expect(isNaN(result)).toBe(true);
+  });
+
+  it("returns NaN if the second date is `Invalid Date`", () => {
+    const result = compareAsc(new Date(1989, 6 /* Jul */, 10), new Date(NaN));
+    expect(isNaN(result)).toBe(true);
+  });
+
+  it("returns NaN if the both dates are `Invalid Date`", () => {
+    const result = compareAsc(new Date(NaN), new Date(NaN));
+    expect(isNaN(result)).toBe(true);
+  });
+});
+
+// Path: src/compareDesc/index.ts
+import { toDate } from "../toDate/index.js";
+
+/**
+ * @name compareDesc
+ * @category Common Helpers
+ * @summary Compare the two dates reverse chronologically and return -1, 0 or 1.
+ *
+ * @description
+ * Compare the two dates and return -1 if the first date is after the second,
+ * 1 if the first date is before the second or 0 if dates are equal.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param dateLeft - The first date to compare
+ * @param dateRight - The second date to compare
+ *
+ * @returns The result of the comparison
+ *
+ * @example
+ * // Compare 11 February 1987 and 10 July 1989 reverse chronologically:
+ * const result = compareDesc(new Date(1987, 1, 11), new Date(1989, 6, 10))
+ * //=> 1
+ *
+ * @example
+ * // Sort the array of dates in reverse chronological order:
+ * const result = [
+ *   new Date(1995, 6, 2),
+ *   new Date(1987, 1, 11),
+ *   new Date(1989, 6, 10)
+ * ].sort(compareDesc)
+ * //=> [
+ * //   Sun Jul 02 1995 00:00:00,
+ * //   Mon Jul 10 1989 00:00:00,
+ * //   Wed Feb 11 1987 00:00:00
+ * // ]
+ */
+export function compareDesc<DateType extends Date>(
+  dateLeft: DateType | number | string,
+  dateRight: DateType | number | string,
+): number {
+  const _dateLeft = toDate(dateLeft);
+  const _dateRight = toDate(dateRight);
+
+  const diff = _dateLeft.getTime() - _dateRight.getTime();
+
+  if (diff > 0) {
+    return -1;
+  } else if (diff < 0) {
+    return 1;
+    // Return 0 if diff is 0; return NaN if diff is NaN
+  } else {
+    return diff;
+  }
+}
+
+// Path: src/compareDesc/test.ts
+import { describe, expect, it } from "vitest";
+import { compareDesc } from "./index.js";
+
+describe("compareDesc", () => {
+  it("returns 0 if the given dates are equal", () => {
+    const result = compareDesc(
+      new Date(1989, 6 /* Jul */, 10),
+      new Date(1989, 6 /* Jul */, 10),
+    );
+    expect(result).toBe(0);
+  });
+
+  it("returns 1 if the first date is before the second one", () => {
+    const result = compareDesc(
+      new Date(1987, 1 /* Feb */, 11),
+      new Date(1989, 6 /* Jul */, 10),
+    );
+    expect(result).toBe(1);
+  });
+
+  it("returns -1 if the first date is after the second one", () => {
+    const result = compareDesc(
+      new Date(1989, 6 /* Jul */, 10),
+      new Date(1987, 1 /* Feb */, 11),
+    );
+    expect(result).toBe(-1);
+  });
+
+  it("sorts the dates array in the reverse chronological order when function is passed as the argument to Array.prototype.sort()", () => {
+    const unsortedArray = [
+      new Date(1995, 6 /* Jul */, 2),
+      new Date(1987, 1 /* Feb */, 11),
+      new Date(1989, 6 /* Jul */, 10),
+    ];
+
+    const sortedArray = [
+      new Date(1995, 6 /* Jul */, 2),
+      new Date(1989, 6 /* Jul */, 10),
+      new Date(1987, 1 /* Feb */, 11),
+    ];
+
+    unsortedArray.sort(compareDesc);
+    const result = unsortedArray;
+
+    expect(result).toEqual(sortedArray);
+  });
+
+  it("accepts timestamps", () => {
+    const result = compareDesc(
+      new Date(1987, 1 /* Feb */, 11).getTime(),
+      new Date(1989, 6 /* Jul */, 10).getTime(),
+    );
+    expect(result).toBe(1);
+  });
+
+  it("returns NaN if the first date is `Invalid Date`", () => {
+    const result = compareDesc(new Date(NaN), new Date(1989, 6 /* Jul */, 10));
+    expect(isNaN(result)).toBe(true);
+  });
+
+  it("returns NaN if the second date is `Invalid Date`", () => {
+    const result = compareDesc(new Date(1989, 6 /* Jul */, 10), new Date(NaN));
+    expect(isNaN(result)).toBe(true);
+  });
+
+  it("returns NaN if the both dates are `Invalid Date`", () => {
+    const result = compareDesc(new Date(1989, 6 /* Jul */, 10), new Date(NaN));
+    expect(isNaN(result)).toBe(true);
+  });
+});
+
+// Path: src/constructFrom/test.ts
+import { describe, expect, it } from "vitest";
+import { constructFrom } from ".";
+
+describe("constructFrom", () => {
+  it("should create a new Date instance using the constructor from the reference date", () => {
+    const referenceDate = new Date("2023-10-25T12:00:00");
+    const value = new Date("2023-10-26T12:00:00");
+
+    const result = constructFrom(referenceDate, value);
+
+    expect(result instanceof Date).toBe(true);
+    expect(result).toEqual(value);
+    expect(result.constructor).toBe(referenceDate.constructor);
+  });
+
+  it("should create a new Date instance using a number as the reference date", () => {
+    const referenceDate = 1635158400000; // October 25, 2023
+    const value = new Date("2023-10-26T12:00:00");
+
+    const result = constructFrom(referenceDate, value);
+
+    expect(result instanceof Date).toBe(true);
+    expect(result).toEqual(value);
+  });
+
+  it("should create a new custom Date instance using the constructor from the reference date", () => {
+    class CustomDate extends Date {}
+    const referenceDate = new CustomDate("2023-10-25T12:00:00");
+    const value = new CustomDate("2023-10-26T12:00:00");
+
+    const result = constructFrom(referenceDate, value);
+
+    expect(result instanceof CustomDate).toBe(true);
+    expect(result).toEqual(value);
+    expect(result.constructor).toBe(referenceDate.constructor);
+  });
+
+  it("should create a new Date instance using numbers as both referenceDate and value", () => {
+    const referenceDate = 1635158400000; // October 25, 2023
+    const value = 1635244800000; // October 26, 2023
+
+    const result = constructFrom(referenceDate, value);
+
+    expect(result instanceof Date).toBe(true);
+    expect(result.getTime()).toEqual(value);
+  });
+});
+
+// Path: src/constructNow/index.ts
+import { constructFrom } from "../constructFrom/index.js";
+
+/**
+ * @name constructNow
+ * @category Generic Helpers
+ * @summary Constructs a new current date using the passed value constructor.
+ * @pure false
+ *
+ * @description
+ * The function constructs a new current date using the constructor from
+ * the reference date. It helps to build generic functions that accept date
+ * extensions and use the current date.
+ *
+ * It defaults to `Date` if the passed reference date is a number or a string.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The reference date to take constructor from
+ *
+ * @returns Current date initialized using the given date constructor
+ *
+ * @example
+ * import { constructNow, isSameDay } from 'date-fns'
+ *
+ * function isToday<DateType extends Date>(
+ *   date: DateType | number | string,
+ * ): boolean {
+ *   // If we were to use `new Date()` directly, the function would  behave
+ *   // differently in different timezones and return false for the same date.
+ *   return isSameDay(date, constructNow(date));
+ * }
+ */
+export function constructNow<DateType extends Date>(
+  date: DateType | number | string,
+): DateType {
+  return constructFrom(date, Date.now());
+}
+
+// Path: src/constructNow/test.ts
+import { describe, expect, it } from "vitest";
+import { constructNow } from ".";
+
+describe("constructNow", () => {
+  it("creates a new Date instance using the constructor from the reference date", () => {
+    const result = constructNow(new Date("2023-10-25T12:00:00"));
+
+    expect(result instanceof Date).toBe(true);
+    expect(+result - Date.now()).toBeLessThan(10); // Give 10 ms of slack
+    expect(result.constructor).toBe(Date);
+  });
+
+  it("creates a new Date instance using a number as the reference date", () => {
+    const result = constructNow(1635158400000);
+
+    expect(result instanceof Date).toBe(true);
+    expect(+result - Date.now()).toBeLessThan(10); // Give 10 ms of slack
+    expect(result.constructor).toBe(Date);
+  });
+
+  it("creates a new Date instance using a string as the reference date", () => {
+    const result = constructNow("2023-10-25T12:00:00");
+
+    expect(result instanceof Date).toBe(true);
+    expect(+result - Date.now()).toBeLessThan(10); // Give 10 ms of slack
+    expect(result.constructor).toBe(Date);
+  });
+
+  it("creates a new custom Date instance using the constructor from the reference date", () => {
+    class CustomDate extends Date {}
+    const result = constructNow(new CustomDate("2023-10-26T12:00:00"));
+
+    expect(result instanceof CustomDate).toBe(true);
+    expect(+result - Date.now()).toBeLessThan(10); // Give 10 ms of slack
+    expect(result.constructor).toBe(CustomDate);
+  });
+});
+
+// Path: src/daysToWeeks/index.ts
+import { daysInWeek } from "../constants/index.js";
+
+/**
+ * @name daysToWeeks
+ * @category Conversion Helpers
+ * @summary Convert days to weeks.
+ *
+ * @description
+ * Convert a number of days to a full number of weeks.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param days - The number of days to be converted
+ *
+ * @returns The number of days converted in weeks
+ *
+ * @example
+ * // Convert 14 days to weeks:
+ * const result = daysToWeeks(14)
+ * //=> 2
+ *
+ * @example
+ * // It uses trunc rounding:
+ * const result = daysToWeeks(13)
+ * //=> 1
+ */
+export function daysToWeeks(days: number): number {
+  const weeks = days / daysInWeek;
+  const result = Math.trunc(weeks);
+  // Prevent negative zero
+  return result === 0 ? 0 : result;
+}
+
+// Path: src/daysToWeeks/test.ts
+import { describe, expect, it } from "vitest";
+import { daysToWeeks } from "./index.js";
+
+describe("daysToWeeks", () => {
+  it("converts days to weeks", () => {
+    expect(daysToWeeks(7)).toBe(1);
+    expect(daysToWeeks(14)).toBe(2);
+  });
+
+  it("uses trunc rounding", () => {
+    expect(daysToWeeks(8)).toBe(1);
+    expect(daysToWeeks(6)).toBe(0);
+  });
+
+  it("handles border values", () => {
+    expect(daysToWeeks(7.5)).toBe(1);
+    expect(daysToWeeks(0)).toBe(0);
+  });
+
+  it("properly works with negative numbers", () => {
+    expect(daysToWeeks(7)).toBe(1);
+    expect(daysToWeeks(-7)).toBe(-1);
+
+    expect(daysToWeeks(14)).toBe(2);
+    expect(daysToWeeks(-14)).toBe(-2);
+
+    expect(daysToWeeks(8)).toBe(1);
+    expect(daysToWeeks(-8)).toBe(-1);
+
+    expect(daysToWeeks(6)).toBe(0);
+    expect(daysToWeeks(-6)).toBe(0);
+
+    expect(daysToWeeks(7.5)).toBe(1);
+    expect(daysToWeeks(-7.5)).toBe(-1);
+  });
+});
+
+// Path: src/isSameDay/index.ts
+import { startOfDay } from "../startOfDay/index.js";
+
+/**
+ * @name isSameDay
+ * @category Day Helpers
+ * @summary Are the given dates in the same day (and year and month)?
+ *
+ * @description
+ * Are the given dates in the same day (and year and month)?
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param dateLeft - The first date to check
+ * @param dateRight - The second date to check
+
+ * @returns The dates are in the same day (and year and month)
+ *
+ * @example
+ * // Are 4 September 06:00:00 and 4 September 18:00:00 in the same day?
+ * const result = isSameDay(new Date(2014, 8, 4, 6, 0), new Date(2014, 8, 4, 18, 0))
+ * //=> true
+ *
+ * @example
+ * // Are 4 September and 4 October in the same day?
+ * const result = isSameDay(new Date(2014, 8, 4), new Date(2014, 9, 4))
+ * //=> false
+ *
+ * @example
+ * // Are 4 September, 2014 and 4 September, 2015 in the same day?
+ * const result = isSameDay(new Date(2014, 8, 4), new Date(2015, 8, 4))
+ * //=> false
+ */
+export function isSameDay<DateType extends Date>(
+  dateLeft: DateType | number | string,
+  dateRight: DateType | number | string,
+): boolean {
+  const dateLeftStartOfDay = startOfDay(dateLeft);
+  const dateRightStartOfDay = startOfDay(dateRight);
+
+  return +dateLeftStartOfDay === +dateRightStartOfDay;
+}
+
+// Path: src/isDate/index.ts
+/**
+ * @name isDate
+ * @category Common Helpers
+ * @summary Is the given value a date?
+ *
+ * @description
+ * Returns true if the given value is an instance of Date. The function works for dates transferred across iframes.
+ *
+ * @param value - The value to check
+ *
+ * @returns True if the given value is a date
+ *
+ * @example
+ * // For a valid date:
+ * const result = isDate(new Date())
+ * //=> true
+ *
+ * @example
+ * // For an invalid date:
+ * const result = isDate(new Date(NaN))
+ * //=> true
+ *
+ * @example
+ * // For some value:
+ * const result = isDate('2014-02-31')
+ * //=> false
+ *
+ * @example
+ * // For an object:
+ * const result = isDate({})
+ * //=> false
+ */
+export function isDate(value: unknown): value is Date {
+  return (
+    value instanceof Date ||
+    (typeof value === "object" &&
+      Object.prototype.toString.call(value) === "[object Date]")
+  );
+}
+
+// Path: src/isValid/index.ts
+import { isDate } from "../isDate/index.js";
+import { toDate } from "../toDate/index.js";
+
+/**
+ * @name isValid
+ * @category Common Helpers
+ * @summary Is the given date valid?
+ *
+ * @description
+ * Returns false if argument is Invalid Date and true otherwise.
+ * Argument is converted to Date using `toDate`. See [toDate](https://date-fns.org/docs/toDate)
+ * Invalid Date is a Date, whose time value is NaN.
+ *
+ * Time value of Date: http://es5.github.io/#x15.9.1.1
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param date - The date to check
+ *
+ * @returns The date is valid
+ *
+ * @example
+ * // For the valid date:
+ * const result = isValid(new Date(2014, 1, 31))
+ * //=> true
+ *
+ * @example
+ * // For the value, convertable into a date:
+ * const result = isValid(1393804800000)
+ * //=> true
+ *
+ * @example
+ * // For the invalid date:
+ * const result = isValid(new Date(''))
+ * //=> false
+ */
+export function isValid(date: unknown): boolean {
+  if (!isDate(date) && typeof date !== "number") {
+    return false;
+  }
+  const _date = toDate(date);
+  return !isNaN(Number(_date));
+}
+
+// Path: src/differenceInBusinessDays/index.ts
+import { addDays } from "../addDays/index.js";
+import { differenceInCalendarDays } from "../differenceInCalendarDays/index.js";
+import { isSameDay } from "../isSameDay/index.js";
+import { isValid } from "../isValid/index.js";
+import { isWeekend } from "../isWeekend/index.js";
+import { toDate } from "../toDate/index.js";
+
+/**
+ * @name differenceInBusinessDays
+ * @category Day Helpers
+ * @summary Get the number of business days between the given dates.
+ *
+ * @description
+ * Get the number of business day periods between the given dates.
+ * Business days being days that arent in the weekend.
+ * Like `differenceInCalendarDays`, the function removes the times from
+ * the dates before calculating the difference.
+ *
+ * @typeParam DateType - The `Date` type, the function operates on. Gets inferred from passed arguments. Allows to use extensions like [`UTCDate`](https://github.com/date-fns/utc).
+ *
+ * @param dateLeft - The later date
+ * @param dateRight - The earlier date
+ *
+ * @returns The number of business days
+ *
+ * @example
+ * // How many business days are between
+ * // 10 January 2014 and 20 July 2014?
+ * const result = differenceInBusinessDays(
+ *   new Date(2014, 6, 20),
+ *   new Date(2014, 0, 10)
+ * )
+ * //=> 136
+ *
+ * // How many business days are between
+ * // 30 November 2021 and 1 November 2021?
+ * const result = differenceInBusinessDays(
+ *   new Date(2021, 10, 30),
+ *   new Date(2021, 10, 1)
+ * )
+ * //=> 21
+ *
+ * // How many business days are between
+ * // 1 November 2021 and 1 December 2021?
+ * const result = differenceInBusinessDays(
+ *   new Date(2021, 10, 1),
+ *   new Date(2021, 11, 1)
+ * )
+ * //=> -22
+ *
+ * // How many business days are between
+ * // 1 November 2021 and 1 November 2021 ?
+ * const result = differenceInBusinessDays(
+ *   new Date(2021, 10, 1),
+ *   new Date(2021, 10, 1)
+ * )
+ * //=> 0
+ */
+export function differenceInBusinessDays<DateType extends Date>(
+  dateLeft: DateType | number | string,
+  dateRight: DateType | number | string,
+): number {
+  const _dateLeft = toDate(dateLeft);
+  let _dateRight = toDate(dateRight);
+
+  if (!isValid(_dateLeft) || !isValid(_dateRight)) return NaN;
+
+  const calendarDifference = differenceInCalendarDays(_dateLeft, _dateRight);
+  const sign = calendarDifference < 0 ? -1 : 1;
+
+  const weeks = Math.trunc(calendarDifference / 7);
+
+  let result = weeks * 5;
+  _dateRight = addDays(_dateRight, weeks * 7);
+
+  // the loop below will run at most 6 times to account for the remaining days that don't makeup a full week
+  while (!isSameDay(_dateLeft, _dateRight)) {
+    // sign is used to account for both negative and positive differences
+    result += isWeekend(_dateRight) ? 0 : sign;
+    _dateRight = addDays(_dateRight, sign);
+  }
+
+  // Prevent negative zero
+  return result === 0 ? 0 : result;
+}
+
+// Path: src/differenceInBusinessDays/test.ts
+import { describe, expect, it } from "vitest";
+import { differenceInBusinessDays } from "./index.js";
+
+describe("differenceInBusinessDays", () => {
+  it("returns the number of business days between the given dates, excluding weekends", () => {
+    const result = differenceInBusinessDays(
+      new Date(2014, 6 /* Jul */, 18),
+      new Date(2014, 0 /* Jan */, 10),
+    );
+    expect(result).toBe(135);
+  });
+
+  it("can handle long ranges", () => {
+    const result = differenceInBusinessDays(
+      new Date(15000, 0 /* Jan */, 1),
+      new Date(2014, 0 /* Jan */, 1),
+    );
+    expect(result).toBe(3387885);
+  });
+
+  it("the same except given first date falls on a weekend", () => {
+    const result = differenceInBusinessDays(
+      new Date(2019, 6 /* Jul */, 20),
+      new Date(2019, 6 /* Jul */, 18),
+    );
+    expect(result).toBe(2);
+  });
+
+  it("the same except given second date falls on a weekend", () => {
+    const result = differenceInBusinessDays(
+      new Date(2019, 6 /* Jul */, 23),
+      new Date(2019, 6 /* Jul */, 20),
+    );
+    expect(result).toBe(1);
+  });
+
+  it("the same except both given dates fall on a weekend", () => {
+    const result = differenceInBusinessDays(
+      new Date(2019, 6 /* Jul */, 28),
+      new Date(2019, 6 /* Jul */, 20),
+    );
+    expect(result).toBe(5);
+  });
+
+  it("returns a negative number if the time value of the first date is smaller", () => {
+    const result = differenceInBusinessDays(
+      new Date(2014, 0 /* Jan */, 10),
+      new Date(2014, 6 /* Jul */, 20),
+    );
+    expect(result).toBe(-135);
+  });
+
+  it("accepts timestamps", () => {
+    const result = differenceInBusinessDays(
+      new Date(2014, 6, 18).getTime(),
+      new Date(2014, 0, 10).getTime(),
+    );
+    expect(result).toBe(135);
+  });
+
+  describe("edge cases", () => {
+    it("the difference is less than a day, but the given dates are in different calendar days", () => {
+      const result = differenceInBusinessDays(
+        new Date(2014, 8 /* Sep */, 5, 0, 0),
+        new Date(2014, 8 /* Sep */, 4, 23, 59),
+      );
+      expect(result).toBe(1);
+    });
+
+    it("the same for the swapped dates", () => {
+      const result = differenceInBusinessDays(
+        new Date(2014, 8 /* Sep */, 4, 23, 59),
+        new Date(2014, 8 /* Sep */, 5, 0, 0),
+      );
+      expect(result).toBe(-1);
+    });
+
+    it("the time values of the given dates are the same", () => {
+      const result = differenceInBusinessDays(
+        new Date(2014, 8 /* Sep */, 5, 0, 0),
+        new Date(2014, 8 /* Sep */, 4, 0, 0),
+      );
+      expect(result).toBe(1);
+    });
+
+    it("the given dates are the same", () => {
+      const result = differenceInBusinessDays(
+        new Date(2014, 8 /* Sep */, 5, 0, 0),
+        new Date(2014, 8 /* Sep */, 5, 0, 0),
+      );
+      expect(result).toBe(0);
+    });
+
+    it("does not return -0 when the given dates are the same", () => {
+      function isNegativeZero(x: number) {
+        return x === 0 && 1 / x < 0;
+      }
+
+      const result = differenceInBusinessDays(
+        new Date(2014, 8 /* Sep */, 5, 0, 0),
+        new Date(2014, 8 /* Sep */, 5, 0, 0),
+      );
+
+      const resultIsNegative = isNegativeZero(result);
+      expect(resultIsNegative).toBe(false);
+    });
+
+    it("returns NaN if the first date is `Invalid Date`", () => {
+      const result = differenceInBusinessDays(
+        new Date(NaN),
+        new Date(2017, 0 /* Jan */, 1),
+      );
+      expect(isNaN(result)).toBe(true);
+    });
+
+    it("returns NaN if the second date is `Invalid Date`", () => {
+      const result = differenceInBusinessDays(
+        new Date(2017, 0 /* Jan */, 1),
+        new Date(NaN),
+      );
+      expect(isNaN(result)).toBe(true);
+    });
+
+    it("returns NaN if the both dates are `Invalid Date`", () => {
+      const result = differenceInBusinessDays(new Date(NaN), new Date(NaN));
+      expect(isNaN(result)).toBe(true);
+    });
+  });
+});
+
+// Path: src/differenceInCalendarDays/test.ts
+import { describe, expect, it } from "vitest";
+import { differenceInCalendarDays } from "./index.js";
+import { getDstTransitions } from "../../test/dst/tzOffsetTransitions.js";
+
+describe("differenceInCalendarDays", () => {
+  it("returns the number of calendar days between the given dates", () => {
+    const result = differenceInCalendarDays(
+      new Date(2012, 6 /* Jul */, 2, 18, 0),
+      new Date(2011, 6 /* Jul */, 2, 6, 0),
+    );
+    expect(result).toBe(366);
+  });
+
+  it("returns a negative number if the time value of the first date is smaller", () => {
+    const result = differenceInCalendarDays(
+      new Date(2011, 6 /* Jul */, 2, 6, 0),
+      new Date(2012, 6 /* Jul */, 2, 18, 0),
+    );
+    expect(result).toBe(-366);
+  });
+
+  it("accepts timestamps", () => {
+    const result = differenceInCalendarDays(
+      new Date(2014, 8 /* Sep */, 5, 18, 0).getTime(),
+      new Date(2014, 8 /* Sep */, 4, 6, 0).getTime(),
+    );
+    expect(result).toBe(1);
+  });
+
+  describe("edge cases", () => {
+    it("the difference is less than a day, but the given dates are in different calendar days", () => {
+      const result = differenceInCalendarDays(
+        new Date(2014, 8 /* Sep */, 5, 0, 0),
+        new Date(2014, 8 /* Sep */, 4, 23, 59),
+      );
+      expect(result).toBe(1);
+    });
+
+    it("the same for the swapped dates", () => {
+      const result = differenceInCalendarDays(
+        new Date(2014, 8 /* Sep */, 4, 23, 59),
+        new Date(2014, 8 /* Sep */, 5, 0, 0),
+      );
+      expect(result).toBe(-1);
+    });
+
+    it("the time values of the given the given dates are the same", () => {
+      const result = differenceInCalendarDays(
+        new Date(2014, 8 /* Sep */, 6, 0, 0),
+        new Date(2014, 8 /* Sep */, 5, 0, 0),
+      );
+      expect(result).toBe(1);
+    });
+
+    it("the given the given dates are the same", () => {
+      const result = differenceInCalendarDays(
+        new Date(2014, 8 /* Sep */, 5, 0, 0),
+        new Date(2014, 8 /* Sep */, 5, 0, 0),
+      );
+      expect(result).toBe(0);
+    });
+
+    it("does not return -0 when the given dates are the same", () => {
+      function isNegativeZero(x: number): boolean {
+        return x === 0 && 1 / x < 0;
+      }
+
+      const result = differenceInCalendarDays(
+        new Date(2014, 8 /* Sep */, 5, 0, 0),
+        new Date(2014, 8 /* Sep */, 5, 0, 0),
+      );
+
+      const resultIsNegative = isNegativeZero(result);
+      expect(resultIsNegative).toBe(false);
+    });
+
+    it("properly works with negative numbers", () => {
+      const a = new Date(2014, 6 /* Jul */, 1);
+      const b = new Date(2014, 6 /* Jul */, 2, 1);
+
+      expect(differenceInCalendarDays(b, a)).toBe(1);
+...

@@ -1,0 +1,15 @@
+{
+  "baseId": "ts_001",
+  "endByte": 2337,
+  "endLine": 64,
+  "instanceId": "ts_001_ctx4k",
+  "language": "typescript",
+  "needleName": "execScript",
+  "normalizedLanguage": "typescript",
+  "path": "src/isDate/test.ts",
+  "repo": "date-fns/date-fns",
+  "sequence": 1,
+  "startByte": 1672,
+  "startLine": 48,
+  "targetFunction": "function execScript(scriptText: string) {\n      const iframe = document.querySelector(\"iframe#iframe\");\n      if (!iframe || !(iframe instanceof HTMLIFrameElement)) {\n        throw new Error(\"Can't execute the script because iframe isn't found\");\n      }\n      const doc = iframe.contentDocument!;\n      const script = doc.createElement(\"script\");\n      script.innerText = scriptText;\n      // @ts-expect-error - We're messing with iframes\n      if (!(doc.body instanceof iframe.contentWindow.HTMLBodyElement)) {\n        throw new Error(\n          \"Can't execute the script because iframe does not have body\",\n        );\n      }\n      doc.body.append(script);\n    }"
+}

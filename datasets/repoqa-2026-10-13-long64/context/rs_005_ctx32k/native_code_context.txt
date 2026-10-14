@@ -1,0 +1,3001 @@
+// Path: libafl/src/mutators/token_mutations.rs
+//! Tokens are what AFL calls extras or dictionaries.
+//! They may be inserted as part of mutations during fuzzing.
+use alloc::vec::Vec;
+#[cfg(any(target_os = "linux", target_vendor = "apple"))]
+use core::slice::from_raw_parts;
+use core::{
+    fmt::Debug,
+    mem::size_of,
+    ops::{Add, AddAssign},
+    slice::Iter,
+};
+#[cfg(feature = "std")]
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+    path::Path,
+};
+
+use hashbrown::HashSet;
+use libafl_bolts::{rands::Rand, AsSlice};
+use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "std")]
+use crate::mutators::str_decode;
+use crate::{
+    corpus::{CorpusId, HasCurrentCorpusIdx},
+    inputs::{HasBytesVec, UsesInput},
+    mutators::{
+        buffer_self_copy, mutations::buffer_copy, MultiMutator, MutationResult, Mutator, Named,
+    },
+    observers::cmp::{AFLppCmpValuesMetadata, CmpValues, CmpValuesMetadata},
+    stages::TaintMetadata,
+    state::{HasCorpus, HasMaxSize, HasMetadata, HasRand},
+    Error,
+};
+
+/// A state metadata holding a list of tokens
+#[allow(clippy::unsafe_derive_deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct Tokens {
+    // We keep a vec and a set, set for faster deduplication, vec for access
+    tokens_vec: Vec<Vec<u8>>,
+    tokens_set: HashSet<Vec<u8>>,
+}
+
+libafl_bolts::impl_serdeany!(Tokens);
+
+/// The metadata used for token mutators
+impl Tokens {
+    /// Creates a new tokens metadata (old-skool afl name: `dictornary`)
+    #[must_use]
+    pub fn new() -> Self {
+        Tokens::default()
+    }
+
+    /// Add tokens from a slice of Vecs of bytes
+    pub fn add_tokens<IT, V>(&mut self, tokens: IT) -> &mut Self
+    where
+        IT: IntoIterator<Item = V>,
+        V: AsRef<Vec<u8>>,
+    {
+        for token in tokens {
+            self.add_token(token.as_ref());
+        }
+        self
+    }
+
+    /// Build tokens from files
+    #[cfg(feature = "std")]
+    pub fn add_from_files<IT, P>(mut self, files: IT) -> Result<Self, Error>
+    where
+        IT: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
+        for file in files {
+            self.add_from_file(file)?;
+        }
+        Ok(self)
+    }
+
+    /// Parse autodict section
+    pub fn parse_autodict(&mut self, slice: &[u8], size: usize) {
+        let mut head = 0;
+        loop {
+            if head >= size {
+                // Sanity Check
+                assert!(head == size);
+                break;
+            }
+            let size = slice[head] as usize;
+            head += 1;
+            if size > 0 {
+                self.add_token(&slice[head..head + size].to_vec());
+                log::info!(
+                    "Token size: {} content: {:x?}",
+                    size,
+                    &slice[head..head + size].to_vec()
+                );
+                head += size;
+            }
+        }
+    }
+
+    /// Create a token section from a start and an end pointer
+    /// Reads from an autotokens section, returning the count of new entries read
+    ///
+    /// # Safety
+    /// The caller must ensure that the region between `token_start` and `token_stop`
+    /// is a valid region, containing autotokens in the expected format.
+    #[cfg(any(target_os = "linux", target_vendor = "apple"))]
+    pub unsafe fn from_mut_ptrs(
+        token_start: *const u8,
+        token_stop: *const u8,
+    ) -> Result<Self, Error> {
+        let mut ret = Self::default();
+        if token_start.is_null() || token_stop.is_null() {
+            return Ok(Self::new());
+        }
+        if token_stop < token_start {
+            return Err(Error::illegal_argument(format!(
+                "Tried to create tokens from illegal section: stop < start ({token_stop:?} < {token_start:?})"
+            )));
+        }
+        let section_size: usize = token_stop.offset_from(token_start).try_into().unwrap();
+        // log::info!("size: {}", section_size);
+        let slice = from_raw_parts(token_start, section_size);
+
+        // Now we know the beginning and the end of the token section.. let's parse them into tokens
+        ret.parse_autodict(slice, section_size);
+
+        Ok(ret)
+    }
+
+    /// Creates a new instance from a file
+    #[cfg(feature = "std")]
+    pub fn from_file<P>(file: P) -> Result<Self, Error>
+    where
+        P: AsRef<Path>,
+    {
+        let mut ret = Self::new();
+        ret.add_from_file(file)?;
+        Ok(ret)
+    }
+
+    /// Adds a token to a dictionary, checking it is not a duplicate
+    /// Returns `false` if the token was already present and did not get added.
+    #[allow(clippy::ptr_arg)]
+    pub fn add_token(&mut self, token: &Vec<u8>) -> bool {
+        if !self.tokens_set.insert(token.clone()) {
+            return false;
+        }
+        self.tokens_vec.push(token.clone());
+        true
+    }
+
+    /// Reads a tokens file, returning the count of new entries read
+    #[cfg(feature = "std")]
+    pub fn add_from_file<P>(&mut self, file: P) -> Result<&mut Self, Error>
+    where
+        P: AsRef<Path>,
+    {
+        // log::info!("Loading tokens file {:?} ...", file);
+
+        let file = File::open(file)?; // panic if not found
+        let reader = BufReader::new(file);
+
+        for line in reader.lines() {
+            let line = line.unwrap();
+            let line = line.trim_start().trim_end();
+
+            // we are only interested in '"..."', not prefixed 'foo = '
+            let start = line.chars().next();
+            if line.is_empty() || start == Some('#') {
+                continue;
+            }
+            let Some(pos_quote) = line.find('\"') else {
+                return Err(Error::illegal_argument(format!("Illegal line: {line}")));
+            };
+            if line.chars().nth(line.len() - 1) != Some('"') {
+                return Err(Error::illegal_argument(format!("Illegal line: {line}")));
+            }
+
+            // extract item
+            let Some(item) = line.get(pos_quote + 1..line.len() - 1) else {
+                return Err(Error::illegal_argument(format!("Illegal line: {line}")));
+            };
+            if item.is_empty() {
+                continue;
+            }
+
+            // decode
+            let token: Vec<u8> = match str_decode(item) {
+                Ok(val) => val,
+                Err(_) => {
+                    return Err(Error::illegal_argument(format!(
+                        "Illegal line (hex decoding): {line}"
+                    )))
+                }
+            };
+
+            // add
+            self.add_token(&token);
+        }
+
+        Ok(self)
+    }
+
+    /// Returns the amount of tokens in this Tokens instance
+    #[inline]
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.tokens_vec.len()
+    }
+
+    /// Returns if this tokens-instance is empty
+    #[inline]
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.tokens_vec.is_empty()
+    }
+
+    /// Gets the tokens stored in this db
+    #[must_use]
+...
+// Path: libafl/src/mutators/grimoire.rs
+//! Grimoire is the rewritten grimoire mutator in rust.
+//! See the original repo [`Grimoire`](https://github.com/RUB-SysSec/grimoire) for more details.
+
+use alloc::vec::Vec;
+use core::cmp::{max, min};
+
+use libafl_bolts::{rands::Rand, Named};
+
+use crate::{
+    corpus::Corpus,
+    inputs::{GeneralizedInputMetadata, GeneralizedItem},
+    mutators::{token_mutations::Tokens, MutationResult, Mutator},
+    random_corpus_id,
+    state::{HasCorpus, HasMetadata, HasRand},
+    Error,
+};
+
+const RECURSIVE_REPLACEMENT_DEPTH: [usize; 6] = [2, 4, 8, 16, 32, 64];
+const MAX_RECURSIVE_REPLACEMENT_LEN: usize = 64 << 10;
+const CHOOSE_SUBINPUT_PROB: u64 = 50;
+
+fn extend_with_random_generalized<S>(
+    state: &mut S,
+    items: &mut Vec<GeneralizedItem>,
+    gap_indices: &mut Vec<usize>,
+) -> Result<MutationResult, Error>
+where
+    S: HasMetadata + HasRand + HasCorpus,
+{
+    let idx = random_corpus_id!(state.corpus(), state.rand_mut());
+
+    if state.rand_mut().below(100) > CHOOSE_SUBINPUT_PROB {
+        if state.rand_mut().below(100) < 50 {
+            let rand1 = state.rand_mut().next() as usize;
+            let rand2 = state.rand_mut().next() as usize;
+
+            let other_testcase = state.corpus().get(idx)?.borrow();
+            if let Some(other) = other_testcase
+                .metadata_map()
+                .get::<GeneralizedInputMetadata>()
+            {
+                let gen = other.generalized();
+
+                for (i, _) in gen
+                    .iter()
+                    .enumerate()
+                    .filter(|&(_, x)| *x == GeneralizedItem::Gap)
+                {
+                    gap_indices.push(i);
+                }
+                let min_idx = gap_indices[rand1 % gap_indices.len()];
+                let max_idx = gap_indices[rand2 % gap_indices.len()];
+                let (mut min_idx, max_idx) = (min(min_idx, max_idx), max(min_idx, max_idx));
+
+                gap_indices.clear();
+
+                if items.last() == Some(&GeneralizedItem::Gap) {
+                    min_idx += 1;
+                }
+                items.extend_from_slice(&gen[min_idx..=max_idx]);
+
+                debug_assert!(items.first() == Some(&GeneralizedItem::Gap));
+                debug_assert!(items.last() == Some(&GeneralizedItem::Gap));
+
+                return Ok(MutationResult::Mutated);
+            }
+        }
+
+        let rand1 = state.rand_mut().next() as usize;
+
+        if let Some(meta) = state.metadata_map().get::<Tokens>() {
+            if !meta.tokens().is_empty() {
+                let tok = &meta.tokens()[rand1 % meta.tokens().len()];
+                if items.last() != Some(&GeneralizedItem::Gap) {
+                    items.push(GeneralizedItem::Gap);
+                }
+                items.push(GeneralizedItem::Bytes(tok.clone()));
+                items.push(GeneralizedItem::Gap);
+
+                debug_assert!(items.first() == Some(&GeneralizedItem::Gap));
+                debug_assert!(items.last() == Some(&GeneralizedItem::Gap));
+
+                return Ok(MutationResult::Mutated);
+            }
+        }
+    }
+
+    let other_testcase = state.corpus().get(idx)?.borrow();
+    if let Some(other) = other_testcase
+        .metadata_map()
+        .get::<GeneralizedInputMetadata>()
+    {
+        let gen = other.generalized();
+
+        if items.last() == Some(&GeneralizedItem::Gap) && gen.first() == Some(&GeneralizedItem::Gap)
+        {
+            items.extend_from_slice(&gen[1..]);
+        } else {
+            items.extend_from_slice(gen);
+        }
+
+        debug_assert!(items.first() == Some(&GeneralizedItem::Gap));
+        debug_assert!(items.last() == Some(&GeneralizedItem::Gap));
+
+        Ok(MutationResult::Mutated)
+    } else {
+        Ok(MutationResult::Skipped)
+    }
+}
+
+/// Extend the generalized input with another random one from the corpus
+#[derive(Debug, Default)]
+pub struct GrimoireExtensionMutator {
+    gap_indices: Vec<usize>,
+}
+
+impl<S> Mutator<GeneralizedInputMetadata, S> for GrimoireExtensionMutator
+where
+    S: HasMetadata + HasRand + HasCorpus,
+{
+    fn mutate(
+        &mut self,
+        state: &mut S,
+        generalised_meta: &mut GeneralizedInputMetadata,
+    ) -> Result<MutationResult, Error> {
+        extend_with_random_generalized(
+            state,
+            generalised_meta.generalized_mut(),
+            &mut self.gap_indices,
+        )
+    }
+}
+
+impl Named for GrimoireExtensionMutator {
+    fn name(&self) -> &str {
+        "GrimoireExtensionMutator"
+    }
+}
+
+impl GrimoireExtensionMutator {
+    /// Creates a new [`GrimoireExtensionMutator`].
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            gap_indices: vec![],
+        }
+    }
+}
+
+/// Extend the generalized input with another random one from the corpus
+#[derive(Debug, Default)]
+pub struct GrimoireRecursiveReplacementMutator {
+    scratch: Vec<GeneralizedItem>,
+    gap_indices: Vec<usize>,
+}
+
+impl<S> Mutator<GeneralizedInputMetadata, S> for GrimoireRecursiveReplacementMutator
+where
+    S: HasMetadata + HasRand + HasCorpus,
+{
+    fn mutate(
+        &mut self,
+        state: &mut S,
+        generalised_meta: &mut GeneralizedInputMetadata,
+    ) -> Result<MutationResult, Error> {
+        let mut mutated = MutationResult::Skipped;
+
+        let depth = *state.rand_mut().choose(&RECURSIVE_REPLACEMENT_DEPTH);
+        for _ in 0..depth {
+            if generalised_meta.generalized_len() >= MAX_RECURSIVE_REPLACEMENT_LEN {
+                break;
+            }
+
+            let gen = generalised_meta.generalized_mut();
+
+            for (i, _) in gen
+                .iter()
+                .enumerate()
+                .filter(|&(_, x)| *x == GeneralizedItem::Gap)
+            {
+                self.gap_indices.push(i);
+            }
+            if self.gap_indices.is_empty() {
+                break;
+            }
+            let selected = *state.rand_mut().choose(&self.gap_indices);
+            self.gap_indices.clear();
+
+            self.scratch.extend_from_slice(&gen[selected + 1..]);
+            gen.truncate(selected);
+
+            if extend_with_random_generalized(state, gen, &mut self.gap_indices)?
+                == MutationResult::Skipped
+            {
+                gen.push(GeneralizedItem::Gap);
+            }
+
+            gen.extend_from_slice(&self.scratch);
+            self.scratch.clear();
+
+            mutated = MutationResult::Mutated;
+        }
+
+        Ok(mutated)
+    }
+}
+
+impl Named for GrimoireRecursiveReplacementMutator {
+    fn name(&self) -> &str {
+        "GrimoireRecursiveReplacementMutator"
+    }
+}
+
+impl GrimoireRecursiveReplacementMutator {
+    /// Creates a new [`GrimoireRecursiveReplacementMutator`].
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            scratch: vec![],
+            gap_indices: vec![],
+        }
+    }
+}
+
+/// Replace matching tokens with others from the tokens metadata
+#[derive(Debug, Default)]
+pub struct GrimoireStringReplacementMutator {}
+
+impl<S> Mutator<GeneralizedInputMetadata, S> for GrimoireStringReplacementMutator
+where
+    S: HasMetadata + HasRand + HasCorpus,
+{
+    fn mutate(
+        &mut self,
+        state: &mut S,
+        generalised_meta: &mut GeneralizedInputMetadata,
+    ) -> Result<MutationResult, Error> {
+        let tokens_len = {
+            let meta = state.metadata_map().get::<Tokens>();
+            if let Some(tokens) = meta {
+                if tokens.is_empty() {
+                    return Ok(MutationResult::Skipped);
+                }
+                tokens.tokens().len()
+            } else {
+                return Ok(MutationResult::Skipped);
+            }
+        };
+
+        let token_find = state.rand_mut().below(tokens_len as u64) as usize;
+        let mut token_replace = state.rand_mut().below(tokens_len as u64) as usize;
+        if token_find == token_replace {
+            token_replace = state.rand_mut().below(tokens_len as u64) as usize;
+        }
+
+        let stop_at_first = state.rand_mut().below(100) > 50;
+        let mut rand_idx = state.rand_mut().next() as usize;
+
+        let meta = state.metadata_map().get::<Tokens>().unwrap();
+        let token_1 = &meta.tokens()[token_find];
+        let token_2 = &meta.tokens()[token_replace];
+
+        let mut mutated = MutationResult::Skipped;
+
+        let gen = generalised_meta.generalized_mut();
+        rand_idx %= gen.len();
+
+        'first: for item in &mut gen[..rand_idx] {
+            if let GeneralizedItem::Bytes(bytes) = item {
+                let mut i = 0;
+                while bytes
+                    .len()
+                    .checked_sub(token_1.len())
+                    .map_or(false, |len| i < len)
+                {
+                    if bytes[i..].starts_with(token_1) {
+                        bytes.splice(i..(i + token_1.len()), token_2.iter().copied());
+
+                        mutated = MutationResult::Mutated;
+                        if stop_at_first {
+                            break 'first;
+                        }
+                        i += token_2.len();
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+        }
+        if mutated == MutationResult::Skipped || !stop_at_first {
+            'second: for item in &mut gen[rand_idx..] {
+                if let GeneralizedItem::Bytes(bytes) = item {
+                    let mut i = 0;
+                    while bytes
+                        .len()
+                        .checked_sub(token_1.len())
+                        .map_or(false, |len| i < len)
+                    {
+                        if bytes[i..].starts_with(token_1) {
+                            bytes.splice(i..(i + token_1.len()), token_2.iter().copied());
+
+                            mutated = MutationResult::Mutated;
+                            if stop_at_first {
+                                break 'second;
+                            }
+                            i += token_2.len();
+                        } else {
+                            i += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(mutated)
+    }
+}
+
+impl Named for GrimoireStringReplacementMutator {
+    fn name(&self) -> &str {
+        "GrimoireStringReplacementMutator"
+    }
+}
+
+impl GrimoireStringReplacementMutator {
+    /// Creates a new [`GrimoireExtensionMutator`].
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+/// Randomly delete a part of the generalized input
+#[derive(Debug, Default)]
+pub struct GrimoireRandomDeleteMutator {
+    gap_indices: Vec<usize>,
+}
+
+impl<S> Mutator<GeneralizedInputMetadata, S> for GrimoireRandomDeleteMutator
+where
+    S: HasMetadata + HasRand + HasCorpus,
+{
+    fn mutate(
+        &mut self,
+        state: &mut S,
+        generalised_meta: &mut GeneralizedInputMetadata,
+    ) -> Result<MutationResult, Error> {
+        let gen = generalised_meta.generalized_mut();
+
+        for i in gen
+            .iter()
+            .enumerate()
+            .filter_map(|(i, x)| (*x == GeneralizedItem::Gap).then_some(i))
+        {
+            self.gap_indices.push(i);
+        }
+        let min_idx =
+            self.gap_indices[state.rand_mut().below(self.gap_indices.len() as u64) as usize];
+        let max_idx =
+            self.gap_indices[state.rand_mut().below(self.gap_indices.len() as u64) as usize];
+
+        let (min_idx, max_idx) = (min(min_idx, max_idx), max(min_idx, max_idx));
+
+        self.gap_indices.clear();
+
+        let result = if min_idx == max_idx {
+            MutationResult::Skipped
+        } else {
+            gen.drain(min_idx..max_idx);
+            MutationResult::Mutated
+        };
+
+        Ok(result)
+    }
+}
+
+impl Named for GrimoireRandomDeleteMutator {
+    fn name(&self) -> &str {
+        "GrimoireRandomDeleteMutator"
+    }
+}
+
+impl GrimoireRandomDeleteMutator {
+    /// Creates a new [`GrimoireExtensionMutator`].
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            gap_indices: vec![],
+        }
+    }
+}
+
+// Path: libafl/src/mutators/scheduled.rs
+//! The `ScheduledMutator` schedules multiple mutations internally.
+
+use alloc::{string::String, vec::Vec};
+use core::{
+    fmt::{self, Debug},
+    marker::PhantomData,
+};
+
+use libafl_bolts::{
+    rands::Rand,
+    tuples::{tuple_list, tuple_list_type, Merge, NamedTuple},
+    AsMutSlice, AsSlice, Named,
+};
+use serde::{Deserialize, Serialize};
+
+use super::MutationId;
+use crate::{
+    corpus::{Corpus, CorpusId},
+    mutators::{
+        mutations::{
+            BitFlipMutator, ByteAddMutator, ByteDecMutator, ByteFlipMutator, ByteIncMutator,
+            ByteInterestingMutator, ByteNegMutator, ByteRandMutator, BytesCopyMutator,
+            BytesDeleteMutator, BytesExpandMutator, BytesInsertCopyMutator, BytesInsertMutator,
+            BytesRandInsertMutator, BytesRandSetMutator, BytesSetMutator, BytesSwapMutator,
+            CrossoverInsertMutator, CrossoverReplaceMutator, DwordAddMutator,
+            DwordInterestingMutator, QwordAddMutator, WordAddMutator, WordInterestingMutator,
+        },
+        token_mutations::{TokenInsert, TokenReplace},
+        MutationResult, Mutator, MutatorsTuple,
+    },
+    state::{HasCorpus, HasMetadata, HasRand},
+    Error,
+};
+
+/// The metadata placed in a [`crate::corpus::Testcase`] by a [`LoggerScheduledMutator`].
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(
+    any(not(feature = "serdeany_autoreg"), miri),
+    allow(clippy::unsafe_derive_deserialize)
+)] // for SerdeAny
+pub struct LogMutationMetadata {
+    /// A list of logs
+    pub list: Vec<String>,
+}
+
+libafl_bolts::impl_serdeany!(LogMutationMetadata);
+
+impl AsSlice for LogMutationMetadata {
+    type Entry = String;
+    #[must_use]
+    fn as_slice(&self) -> &[String] {
+        self.list.as_slice()
+    }
+}
+impl AsMutSlice for LogMutationMetadata {
+    type Entry = String;
+    #[must_use]
+    fn as_mut_slice(&mut self) -> &mut [String] {
+        self.list.as_mut_slice()
+    }
+}
+
+impl LogMutationMetadata {
+    /// Creates new [`struct@LogMutationMetadata`].
+    #[must_use]
+    pub fn new(list: Vec<String>) -> Self {
+        Self { list }
+    }
+}
+
+/// A [`Mutator`] that composes multiple mutations into one.
+pub trait ComposedByMutations<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+{
+    /// Get the mutations
+    fn mutations(&self) -> &MT;
+
+    /// Get the mutations (mutable)
+    fn mutations_mut(&mut self) -> &mut MT;
+}
+
+/// A [`Mutator`] scheduling multiple [`Mutator`]s for an input.
+pub trait ScheduledMutator<I, MT, S>: ComposedByMutations<I, MT, S> + Mutator<I, S>
+where
+    MT: MutatorsTuple<I, S>,
+{
+    /// Compute the number of iterations used to apply stacked mutations
+    fn iterations(&self, state: &mut S, input: &I) -> u64;
+
+    /// Get the next mutation to apply
+    fn schedule(&self, state: &mut S, input: &I) -> MutationId;
+
+    /// New default implementation for mutate.
+    /// Implementations must forward `mutate()` to this method
+    fn scheduled_mutate(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        let mut r = MutationResult::Skipped;
+        let num = self.iterations(state, input);
+        for _ in 0..num {
+            let idx = self.schedule(state, input);
+            let outcome = self.mutations_mut().get_and_mutate(idx, state, input)?;
+            if outcome == MutationResult::Mutated {
+                r = MutationResult::Mutated;
+            }
+        }
+        Ok(r)
+    }
+}
+
+/// A [`Mutator`] that schedules one of the embedded mutations on each call.
+pub struct StdScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand,
+{
+    name: String,
+    mutations: MT,
+    max_stack_pow: u64,
+    phantom: PhantomData<(I, S)>,
+}
+
+impl<I, MT, S> Debug for StdScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "StdScheduledMutator with {} mutations for Input type {}",
+            self.mutations.len(),
+            core::any::type_name::<I>()
+        )
+    }
+}
+
+impl<I, MT, S> Named for StdScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand,
+{
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl<I, MT, S> Mutator<I, S> for StdScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand,
+{
+    #[inline]
+    fn mutate(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        self.scheduled_mutate(state, input)
+    }
+}
+
+impl<I, MT, S> ComposedByMutations<I, MT, S> for StdScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand,
+{
+    /// Get the mutations
+    #[inline]
+    fn mutations(&self) -> &MT {
+        &self.mutations
+    }
+
+    // Get the mutations (mutable)
+    #[inline]
+    fn mutations_mut(&mut self) -> &mut MT {
+        &mut self.mutations
+    }
+}
+
+impl<I, MT, S> ScheduledMutator<I, MT, S> for StdScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand,
+{
+    /// Compute the number of iterations used to apply stacked mutations
+    fn iterations(&self, state: &mut S, _: &I) -> u64 {
+        1 << (1 + state.rand_mut().below(self.max_stack_pow))
+    }
+
+    /// Get the next mutation to apply
+    fn schedule(&self, state: &mut S, _: &I) -> MutationId {
+        debug_assert!(self.mutations.len() != 0);
+        state.rand_mut().below(self.mutations.len() as u64).into()
+    }
+}
+
+impl<I, MT, S> StdScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand,
+{
+    /// Create a new [`StdScheduledMutator`] instance specifying mutations
+    pub fn new(mutations: MT) -> Self {
+        StdScheduledMutator {
+            name: format!("StdScheduledMutator[{}]", mutations.names().join(", ")),
+            mutations,
+            max_stack_pow: 7,
+            phantom: PhantomData,
+        }
+    }
+
+    /// Create a new [`StdScheduledMutator`] instance specifying mutations and the maximun number of iterations
+    
+pub fn with_max_stack_pow(mutations: MT, max_stack_pow: u64) -> Self {
+        StdScheduledMutator {
+            name: format!("StdScheduledMutator[{}]", mutations.names().join(", ")),
+            mutations,
+            max_stack_pow,
+            phantom: PhantomData,
+        }
+    }
+}
+
+/// Tuple type of the mutations that compose the Havoc mutator without crossover mutations
+pub type HavocMutationsNoCrossoverType = tuple_list_type!(
+    BitFlipMutator,
+    ByteFlipMutator,
+    ByteIncMutator,
+    ByteDecMutator,
+    ByteNegMutator,
+    ByteRandMutator,
+    ByteAddMutator,
+    WordAddMutator,
+    DwordAddMutator,
+    QwordAddMutator,
+    ByteInterestingMutator,
+    WordInterestingMutator,
+    DwordInterestingMutator,
+    BytesDeleteMutator,
+    BytesDeleteMutator,
+    BytesDeleteMutator,
+    BytesDeleteMutator,
+    BytesExpandMutator,
+    BytesInsertMutator,
+    BytesRandInsertMutator,
+    BytesSetMutator,
+    BytesRandSetMutator,
+    BytesCopyMutator,
+    BytesInsertCopyMutator,
+    BytesSwapMutator,
+);
+
+/// Tuple type of the mutations that compose the Havoc mutator's crossover mutations
+pub type HavocCrossoverType<I> =
+    tuple_list_type!(CrossoverInsertMutator<I>, CrossoverReplaceMutator<I>);
+
+/// Tuple type of the mutations that compose the Havoc mutator
+pub type HavocMutationsType<I> = tuple_list_type!(
+    BitFlipMutator,
+    ByteFlipMutator,
+    ByteIncMutator,
+    ByteDecMutator,
+    ByteNegMutator,
+    ByteRandMutator,
+    ByteAddMutator,
+    WordAddMutator,
+    DwordAddMutator,
+    QwordAddMutator,
+    ByteInterestingMutator,
+    WordInterestingMutator,
+    DwordInterestingMutator,
+    BytesDeleteMutator,
+    BytesDeleteMutator,
+    BytesDeleteMutator,
+    BytesDeleteMutator,
+    BytesExpandMutator,
+    BytesInsertMutator,
+    BytesRandInsertMutator,
+    BytesSetMutator,
+    BytesRandSetMutator,
+    BytesCopyMutator,
+    BytesInsertCopyMutator,
+    BytesSwapMutator,
+    CrossoverInsertMutator<I>,
+    CrossoverReplaceMutator<I>,
+);
+
+/// Get the mutations that compose the Havoc mutator (only applied to single inputs)
+#[must_use]
+pub fn havoc_mutations_no_crossover() -> HavocMutationsNoCrossoverType {
+    tuple_list!(
+        BitFlipMutator::new(),
+        ByteFlipMutator::new(),
+        ByteIncMutator::new(),
+        ByteDecMutator::new(),
+        ByteNegMutator::new(),
+        ByteRandMutator::new(),
+        ByteAddMutator::new(),
+        WordAddMutator::new(),
+        DwordAddMutator::new(),
+        QwordAddMutator::new(),
+        ByteInterestingMutator::new(),
+        WordInterestingMutator::new(),
+        DwordInterestingMutator::new(),
+        BytesDeleteMutator::new(),
+        BytesDeleteMutator::new(),
+        BytesDeleteMutator::new(),
+        BytesDeleteMutator::new(),
+        BytesExpandMutator::new(),
+        BytesInsertMutator::new(),
+        BytesRandInsertMutator::new(),
+        BytesSetMutator::new(),
+        BytesRandSetMutator::new(),
+        BytesCopyMutator::new(),
+        BytesInsertCopyMutator::new(),
+        BytesSwapMutator::new(),
+    )
+}
+
+/// Get the mutations that compose the Havoc mutator's crossover strategy
+#[must_use]
+pub fn havoc_crossover<I>() -> HavocCrossoverType<I> {
+    tuple_list!(
+        CrossoverInsertMutator::new(),
+        CrossoverReplaceMutator::new(),
+    )
+}
+
+/// Get the mutations that compose the Havoc mutator
+#[must_use]
+pub fn havoc_mutations<I>() -> HavocMutationsType<I> {
+    havoc_mutations_no_crossover().merge(havoc_crossover())
+}
+
+/// Get the mutations that uses the Tokens metadata
+#[must_use]
+pub fn tokens_mutations() -> tuple_list_type!(TokenInsert, TokenReplace) {
+    tuple_list!(TokenInsert::new(), TokenReplace::new())
+}
+
+/// A logging [`Mutator`] that wraps around a [`StdScheduledMutator`].
+pub struct LoggerScheduledMutator<I, MT, S, SM>
+where
+    MT: MutatorsTuple<I, S> + NamedTuple,
+    S: HasRand + HasCorpus,
+    SM: ScheduledMutator<I, MT, S>,
+{
+    name: String,
+    scheduled: SM,
+    mutation_log: Vec<MutationId>,
+    phantom: PhantomData<(I, MT, S)>,
+}
+
+impl<I, MT, S, SM> Debug for LoggerScheduledMutator<I, MT, S, SM>
+where
+    MT: MutatorsTuple<I, S> + NamedTuple,
+    S: HasRand + HasCorpus,
+    SM: ScheduledMutator<I, MT, S>,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "LoggerScheduledMutator with {} mutations for Input type {}",
+            MT::LEN,
+            core::any::type_name::<I>()
+        )
+    }
+}
+
+impl<I, MT, S, SM> Named for LoggerScheduledMutator<I, MT, S, SM>
+where
+    MT: MutatorsTuple<I, S> + NamedTuple,
+    S: HasRand + HasCorpus,
+    SM: ScheduledMutator<I, MT, S>,
+{
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl<I, MT, S, SM> Mutator<I, S> for LoggerScheduledMutator<I, MT, S, SM>
+where
+    MT: MutatorsTuple<I, S> + NamedTuple,
+    S: HasRand + HasCorpus,
+    SM: ScheduledMutator<I, MT, S>,
+{
+    fn mutate(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        self.scheduled_mutate(state, input)
+    }
+
+    fn post_exec(&mut self, state: &mut S, corpus_idx: Option<CorpusId>) -> Result<(), Error> {
+        if let Some(idx) = corpus_idx {
+            let mut testcase = (*state.corpus_mut().get(idx)?).borrow_mut();
+            let mut log = Vec::<String>::new();
+            while let Some(idx) = self.mutation_log.pop() {
+                let name = String::from(self.scheduled.mutations().name(idx.0).unwrap()); // TODO maybe return an Error on None
+                log.push(name);
+            }
+            let meta = LogMutationMetadata::new(log);
+            testcase.add_metadata(meta);
+        };
+        // Always reset the log for each run
+        self.mutation_log.clear();
+        Ok(())
+    }
+}
+
+impl<I, MT, S, SM> ComposedByMutations<I, MT, S> for LoggerScheduledMutator<I, MT, S, SM>
+where
+    MT: MutatorsTuple<I, S> + NamedTuple,
+    S: HasRand + HasCorpus,
+    SM: ScheduledMutator<I, MT, S>,
+{
+    #[inline]
+    fn mutations(&self) -> &MT {
+        self.scheduled.mutations()
+    }
+
+    #[inline]
+    fn mutations_mut(&mut self) -> &mut MT {
+        self.scheduled.mutations_mut()
+    }
+}
+
+impl<I, MT, S, SM> ScheduledMutator<I, MT, S> for LoggerScheduledMutator<I, MT, S, SM>
+where
+    MT: MutatorsTuple<I, S> + NamedTuple,
+    S: HasRand + HasCorpus,
+    SM: ScheduledMutator<I, MT, S>,
+{
+    /// Compute the number of iterations used to apply stacked mutations
+    fn iterations(&self, state: &mut S, _: &I) -> u64 {
+        1 << (1 + state.rand_mut().below(6))
+    }
+
+    /// Get the next mutation to apply
+    fn schedule(&self, state: &mut S, _: &I) -> MutationId {
+        debug_assert!(MT::LEN != 0);
+        state.rand_mut().below(MT::LEN as u64).into()
+    }
+
+    fn scheduled_mutate(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        let mut r = MutationResult::Skipped;
+        let num = self.iterations(state, input);
+        self.mutation_log.clear();
+        for _ in 0..num {
+            let idx = self.schedule(state, input);
+            self.mutation_log.push(idx);
+            let outcome = self.mutations_mut().get_and_mutate(idx, state, input)?;
+            if outcome == MutationResult::Mutated {
+                r = MutationResult::Mutated;
+            }
+        }
+        Ok(r)
+    }
+}
+
+impl<I, MT, S, SM> LoggerScheduledMutator<I, MT, S, SM>
+where
+    MT: MutatorsTuple<I, S> + NamedTuple,
+    S: HasRand + HasCorpus,
+    SM: ScheduledMutator<I, MT, S>,
+{
+    /// Create a new [`LoggerScheduledMutator`] instance without mutations and corpus
+    /// This mutator logs all mutators.
+    pub fn new(scheduled: SM) -> Self {
+        Self {
+            name: format!("LoggerScheduledMutator[{}]", scheduled.name()),
+            scheduled,
+            mutation_log: vec![],
+            phantom: PhantomData,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use libafl_bolts::rands::{Rand, StdRand, XkcdRand};
+
+    use crate::{
+        corpus::{Corpus, InMemoryCorpus, Testcase},
+        feedbacks::ConstFeedback,
+        inputs::{BytesInput, HasBytesVec},
+        mutators::{
+            mutations::SpliceMutator,
+            scheduled::{havoc_mutations, StdScheduledMutator},
+            Mutator,
+        },
+        state::StdState,
+    };
+
+    #[test]
+    fn test_mut_scheduled() {
+        // With the current impl, seed of 1 will result in a split at pos 2.
+        let mut rand = XkcdRand::with_seed(5);
+        let mut corpus: InMemoryCorpus<BytesInput> = InMemoryCorpus::new();
+        corpus
+            .add(Testcase::new(vec![b'a', b'b', b'c'].into()))
+            .unwrap();
+        corpus
+            .add(Testcase::new(vec![b'd', b'e', b'f'].into()))
+            .unwrap();
+
+        let mut input = corpus.cloned_input_for_id(corpus.first().unwrap()).unwrap();
+
+        let mut feedback = ConstFeedback::new(false);
+        let mut objective = ConstFeedback::new(false);
+
+        let mut state = StdState::new(
+            rand,
+            corpus,
+            InMemoryCorpus::new(),
+            &mut feedback,
+            &mut objective,
+        )
+        .unwrap();
+
+        rand.set_seed(5);
+
+        let mut splice = SpliceMutator::new();
+        splice.mutate(&mut state, &mut input).unwrap();
+
+        log::trace!("{:?}", input.bytes());
+
+        // The pre-seeded rand should have spliced at position 2.
+        // TODO: Maybe have a fixed rand for this purpose?
+        assert_eq!(input.bytes(), &[b'a', b'b', b'f']);
+    }
+
+    #[test]
+    fn test_havoc() {
+        // With the current impl, seed of 1 will result in a split at pos 2.
+        let rand = StdRand::with_seed(0x1337);
+        let mut corpus: InMemoryCorpus<BytesInput> = InMemoryCorpus::new();
+        corpus
+            .add(Testcase::new(vec![b'a', b'b', b'c'].into()))
+            .unwrap();
+        corpus
+            .add(Testcase::new(vec![b'd', b'e', b'f'].into()))
+            .unwrap();
+
+        let mut input = corpus.cloned_input_for_id(corpus.first().unwrap()).unwrap();
+        let input_prior = input.clone();
+
+        let mut feedback = ConstFeedback::new(false);
+        let mut objective = ConstFeedback::new(false);
+
+        let mut state = StdState::new(
+            rand,
+            corpus,
+            InMemoryCorpus::new(),
+            &mut feedback,
+            &mut objective,
+        )
+        .unwrap();
+
+        let mut havoc = StdScheduledMutator::new(havoc_mutations());
+
+        assert_eq!(input, input_prior);
+
+        let mut equal_in_a_row = 0;
+
+        for _ in 0..42 {
+            havoc.mutate(&mut state, &mut input).unwrap();
+
+            // Make sure we actually mutate something, at least sometimes
+            equal_in_a_row = if input == input_prior {
+                equal_in_a_row + 1
+            } else {
+                0
+            };
+            assert_ne!(equal_in_a_row, 5);
+        }
+    }
+}
+
+// Path: libafl/src/mutators/mopt_mutator.rs
+//! The `MOpt` mutator scheduler, see <https://github.com/puppet-meteor/MOpt-AFL> and <https://www.usenix.org/conference/usenixsecurity19/presentation/lyu>
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
+use core::{
+    fmt::{self, Debug},
+    marker::PhantomData,
+};
+
+use libafl_bolts::{
+    rands::{Rand, StdRand},
+    Named,
+};
+use serde::{Deserialize, Serialize};
+
+use super::MutationId;
+use crate::{
+    corpus::{Corpus, CorpusId},
+    mutators::{ComposedByMutations, MutationResult, Mutator, MutatorsTuple, ScheduledMutator},
+    state::{HasCorpus, HasMetadata, HasRand, HasSolutions},
+    Error,
+};
+
+/// A Struct for managing MOpt-mutator parameters.
+/// There are 2 modes for `MOpt` scheduler, the core fuzzing mode and the pilot fuzzing mode.
+/// In short, in the pilot fuzzing mode, the fuzzer employs several `swarms` to compute the probability to choose the mutation operator.
+/// On the other hand, in the core fuzzing mode, the fuzzer chooses the best `swarms`, which was determined during the pilot fuzzing mode, to compute the probability to choose the operation operator.
+/// With the current implementation we are always in the pacemaker fuzzing mode.
+#[derive(Serialize, Deserialize, Clone)]
+#[cfg_attr(
+    any(not(feature = "serdeany_autoreg"), miri),
+    allow(clippy::unsafe_derive_deserialize)
+)] // for SerdeAny
+pub struct MOpt {
+    /// Random number generator
+    pub rand: StdRand,
+    /// The number of total findings (unique crashes and unique interesting paths). This is equivalent to `state.corpus().count() + state.solutions().count()`;
+    pub total_finds: usize,
+    /// The number of finds before until last swarm.
+    pub finds_until_last_swarm: usize,
+    /// These w_* and g_* values are the coefficients for updating variables according to the PSO algorithms
+    pub w_init: f64,
+    /// These w_* and g_* values are the coefficients for updating variables according to the PSO algorithms
+    pub w_end: f64,
+    /// These w_* and g_* values are the coefficients for updating variables according to the PSO algorithms
+    pub w_now: f64,
+    /// These w_* and g_* values are the coefficients for updating variables according to the PSO algorithms
+    pub g_now: f64,
+    /// These w_* and g_* values are the coefficients for updating variables according to the PSO algorithms
+    pub g_max: f64,
+    /// The number of mutation operators
+    pub operator_num: usize,
+    /// The number of swarms that we want to employ during the pilot fuzzing mode
+    pub swarm_num: usize,
+    /// We'll generate inputs for `period_pilot` times before we call `pso_update` in pilot fuzzing module
+    pub period_pilot: usize,
+    /// We'll generate inputs for `period_core` times before we call `pso_update` in core fuzzing module
+    pub period_core: usize,
+    /// The number of testcases generated during this pilot fuzzing mode
+    pub pilot_time: usize,
+    /// The number of testcases generated during this core fuzzing mode
+    pub core_time: usize,
+    /// The swarm identifier that we are currently using in the pilot fuzzing mode
+    pub swarm_now: usize,
+    /// A parameter for the PSO algorithm
+    x_now: Vec<Vec<f64>>,
+    /// A parameter for the PSO algorithm
+    l_best: Vec<Vec<f64>>,
+    /// A parameter for the PSO algorithm
+    eff_best: Vec<Vec<f64>>,
+    /// A parameter for the PSO algorithm
+    g_best: Vec<f64>,
+    /// A parameter for the PSO algorithm
+    v_now: Vec<Vec<f64>>,
+    /// The probability that we want to use to choose the mutation operator.
+    probability_now: Vec<Vec<f64>>,
+    /// The fitness for each swarm, we'll calculate the fitness in the pilot fuzzing mode and use the best one in the core fuzzing mode
+    pub swarm_fitness: Vec<f64>,
+    /// (Pilot Mode) Finds by each operators. This vector is used in `pso_update`
+    pub pilot_operator_finds: Vec<Vec<u64>>,
+    /// (Pilot Mode) Finds by each operator till now.
+    pub pilot_operator_finds_v2: Vec<Vec<u64>>,
+    /// (Pilot Mode) The number of mutation operator used. This vector is used in `pso_update`
+    pub pilot_operator_cycles: Vec<Vec<u64>>,
+    /// (Pilot Mode) The number of mutation operator used till now
+    pub pilot_operator_cycles_v2: Vec<Vec<u64>>,
+    /// (Pilot Mode) The number of mutation operator used till last execution
+    pub pilot_operator_cycles_v3: Vec<Vec<u64>>,
+    /// Vector used in `pso_update`
+    pub operator_finds_puppet: Vec<u64>,
+    /// (Core Mode) Finds by each operators. This vector is used in `pso_update`
+    pub core_operator_finds: Vec<u64>,
+    /// (Core Mode) Finds by each operator till now.
+    pub core_operator_finds_v2: Vec<u64>,
+    /// (Core Mode) The number of mutation operator used. This vector is used in `pso_update`
+    pub core_operator_cycles: Vec<u64>,
+    /// (Core Mode) The number of mutation operator used till now
+    pub core_operator_cycles_v2: Vec<u64>,
+    /// (Core Mode) The number of mutation operator used till last execution
+    pub core_operator_cycles_v3: Vec<u64>,
+}
+
+libafl_bolts::impl_serdeany!(MOpt);
+
+impl Debug for MOpt {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MOpt")
+            .field("\ntotal_finds", &self.total_finds)
+            .field("\nfinds_until_last_swarm", &self.finds_until_last_swarm)
+            .field("\nw_init", &self.w_init)
+            .field("\nw_end", &self.w_end)
+            .field("\nw_now", &self.g_now)
+            .field("\ng_now", &self.g_max)
+            .field("\npilot_time", &self.pilot_time)
+            .field("\ncore_time", &self.core_time)
+            .field("\n\nx_now", &self.x_now)
+            .field("\n\nl_best", &self.l_best)
+            .field("\n\neff_best", &self.eff_best)
+            .field("\n\ng_best", &self.g_best)
+            .field("\n\nv_now", &self.v_now)
+            .field("\n\nprobability_now", &self.probability_now)
+            .field("\n\nswarm_fitness", &self.swarm_fitness)
+            .field("\n\npilot_operator_finds", &self.pilot_operator_finds)
+            .field(
+                "\n\npilot_operator_finds_this",
+                &self.pilot_operator_finds_v2,
+            )
+            .field("\n\npilot_operator_cycles", &self.pilot_operator_cycles)
+            .field(
+                "\n\npilot_operator_cycles_v2",
+                &self.pilot_operator_cycles_v2,
+            )
+            .field(
+                "\n\npilot_operator_cycles_v3",
+                &self.pilot_operator_cycles_v3,
+            )
+            .field("\n\noperator_finds_puppuet", &self.operator_finds_puppet)
+            .field("\n\ncore_operator_finds", &self.core_operator_finds)
+            .field("\n\ncore_operator_finds_v2", &self.core_operator_finds_v2)
+            .field("\n\ncore_operator_cycles", &self.core_operator_cycles)
+            .field("\n\ncore_operator_cycles_v2", &self.core_operator_cycles_v2)
+            .field("\n\ncore_operator_cycles_v3", &self.core_operator_cycles_v3)
+            .finish_non_exhaustive()
+    }
+}
+
+const PERIOD_PILOT_COEF: f64 = 5000.0;
+
+impl MOpt {
+    /// Creates a new [`struct@MOpt`] instance.
+    pub fn new(operator_num: usize, swarm_num: usize, rand_seed: u64) -> Result<Self, Error> {
+        let mut mopt = Self {
+            rand: StdRand::with_seed(rand_seed),
+            total_finds: 0,
+            finds_until_last_swarm: 0,
+            w_init: 0.9,
+            w_end: 0.3,
+            w_now: 0.0,
+            g_now: 0.0,
+            g_max: 5000.0,
+            operator_num,
+            swarm_num,
+            period_pilot: 50000,
+            period_core: 500000,
+            pilot_time: 0,
+            core_time: 0,
+            swarm_now: 0,
+            x_now: vec![vec![0.0; operator_num]; swarm_num],
+            l_best: vec![vec![0.0; operator_num]; swarm_num],
+            eff_best: vec![vec![0.0; operator_num]; swarm_num],
+            g_best: vec![0.0; operator_num],
+            v_now: vec![vec![0.0; operator_num]; swarm_num],
+            probability_now: vec![vec![0.0; operator_num]; swarm_num],
+            swarm_fitness: vec![0.0; swarm_num],
+            pilot_operator_finds: vec![vec![0; operator_num]; swarm_num],
+            pilot_operator_finds_v2: vec![vec![0; operator_num]; swarm_num],
+            pilot_operator_cycles: vec![vec![0; operator_num]; swarm_num],
+            pilot_operator_cycles_v2: vec![vec![0; operator_num]; swarm_num],
+            pilot_operator_cycles_v3: vec![vec![0; operator_num]; swarm_num],
+            operator_finds_puppet: vec![0; operator_num],
+            core_operator_finds: vec![0; operator_num],
+            core_operator_finds_v2: vec![0; operator_num],
+            core_operator_cycles: vec![0; operator_num],
+            core_operator_cycles_v2: vec![0; operator_num],
+            core_operator_cycles_v3: vec![0; operator_num],
+        };
+        mopt.pso_initialize()?;
+        Ok(mopt)
+    }
+
+    /// initialize pso
+    #[allow(clippy::cast_precision_loss)]
+    pub fn pso_initialize(&mut self) -> Result<(), Error> {
+        if self.g_now > self.g_max {
+            self.g_now = 0.0;
+        }
+        self.w_now =
+            (self.w_init - self.w_end) * (self.g_max - self.g_now) / self.g_max + self.w_end;
+
+        for swarm in 0..self.swarm_num {
+            let mut total_x_now = 0.0;
+            let mut x_sum = 0.0;
+            for i in 0..self.operator_num {
+                self.x_now[swarm][i] = (self.rand.below(7000) as f64) * 0.0001 + 0.1;
+                total_x_now += self.x_now[swarm][i];
+                self.v_now[swarm][i] = 0.1;
+                self.l_best[swarm][i] = 0.5;
+                self.g_best[i] = 0.5;
+            }
+
+            for i in 0..self.operator_num {
+                self.x_now[swarm][i] /= total_x_now;
+            }
+
+            for i in 0..self.operator_num {
+                self.v_now[swarm][i] = self.w_now * self.v_now[swarm][i]
+                    + (self.rand.below(1000) as f64)
+                        * 0.001
+                        * (self.l_best[swarm][i] - self.x_now[swarm][i])
+                    + (self.rand.below(1000) as f64)
+                        * 0.001
+                        * (self.g_best[i] - self.x_now[swarm][i]);
+                self.x_now[swarm][i] += self.v_now[swarm][i];
+
+                self.x_now[swarm][i] = self.x_now[swarm][i].clamp(V_MIN, V_MAX);
+
+                x_sum += self.x_now[swarm][i];
+            }
+
+            for i in 0..self.operator_num {
+                self.x_now[swarm][i] /= x_sum;
+                if i == 0 {
+                    self.probability_now[swarm][i] = self.x_now[swarm][i];
+                } else {
+                    self.probability_now[swarm][i] =
+                        self.probability_now[swarm][i - 1] + self.x_now[swarm][i];
+                }
+            }
+            if self.probability_now[swarm][self.operator_num - 1] < 0.99
+                || self.probability_now[swarm][self.operator_num - 1] > 1.01
+            {
+                return Err(Error::illegal_state(
+                    "MOpt: Error in pso_update".to_string(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Update the `PSO` algorithm parameters
+    /// See <https://github.com/puppet-meteor/MOpt-AFL/blob/master/MOpt/afl-fuzz.c#L10623>
+    #[allow(clippy::cast_precision_loss)]
+    pub fn pso_update(&mut self) -> Result<(), Error> {
+        self.g_now += 1.0;
+        if self.g_now > self.g_max {
+            self.g_now = 0.0;
+        }
+        self.w_now =
+            ((self.w_init - self.w_end) * (self.g_max - self.g_now) / self.g_max) + self.w_end;
+
+        let mut operator_finds_sum = 0;
+
+        for i in 0..self.operator_num {
+            self.operator_finds_puppet[i] = self.core_operator_finds[i];
+
+            for j in 0..self.swarm_num {
+                self.operator_finds_puppet[i] += self.pilot_operator_finds[j][i];
+            }
+            operator_finds_sum += self.operator_finds_puppet[i];
+        }
+
+        for i in 0..self.operator_num {
+            if self.operator_finds_puppet[i] > 0 {
+                self.g_best[i] =
+                    (self.operator_finds_puppet[i] as f64) / (operator_finds_sum as f64);
+            }
+        }
+
+        for swarm in 0..self.swarm_num {
+            let mut x_sum = 0.0;
+            for i in 0..self.operator_num {
+                self.probability_now[swarm][i] = 0.0;
+                self.v_now[swarm][i] = self.w_now * self.v_now[swarm][i]
+                    + (self.rand.below(1000) as f64)
+                        * 0.001
+                        * (self.l_best[swarm][i] - self.x_now[swarm][i])
+                    + (self.rand.below(1000) as f64)
+                        * 0.001
+                        * (self.g_best[i] - self.x_now[swarm][i]);
+                self.x_now[swarm][i] += self.v_now[swarm][i];
+
+                self.x_now[swarm][i] = self.x_now[swarm][i].clamp(V_MIN, V_MAX);
+
+                x_sum += self.x_now[swarm][i];
+            }
+
+            for i in 0..self.operator_num {
+                self.x_now[swarm][i] /= x_sum;
+                if i == 0 {
+                    self.probability_now[swarm][i] = self.x_now[swarm][i];
+                } else {
+                    self.probability_now[swarm][i] =
+                        self.probability_now[swarm][i - 1] + self.x_now[swarm][i];
+                }
+            }
+            if self.probability_now[swarm][self.operator_num - 1] < 0.99
+                || self.probability_now[swarm][self.operator_num - 1] > 1.01
+            {
+                return Err(Error::illegal_state(
+                    "MOpt: Error in pso_update".to_string(),
+                ));
+            }
+        }
+        self.swarm_now = 0;
+
+        // After pso_update, go back to pilot-fuzzing module
+        Ok(())
+    }
+
+    /// This function is used to decide the operator that we want to apply next
+    /// see <https://github.com/puppet-meteor/MOpt-AFL/blob/master/MOpt/afl-fuzz.c#L397>
+    #[allow(clippy::cast_precision_loss)]
+    pub fn select_algorithm(&mut self) -> Result<MutationId, Error> {
+        let mut res = 0;
+        let mut sentry = 0;
+
+        let operator_num = self.operator_num;
+
+        // Fetch a random sele value
+        let select_prob: f64 = self.probability_now[self.swarm_now][operator_num - 1]
+            * ((self.rand.below(10000) as f64) * 0.0001);
+
+        for i in 0..operator_num {
+            if i == 0 {
+                if select_prob < self.probability_now[self.swarm_now][i] {
+                    res = i;
+                    break;
+                }
+            } else if select_prob < self.probability_now[self.swarm_now][i] {
+                res = i;
+                sentry = 1;
+                break;
+            }
+        }
+
+        if (sentry == 1 && select_prob < self.probability_now[self.swarm_now][res - 1])
+            || (res + 1 < operator_num
+                && select_prob > self.probability_now[self.swarm_now][res + 1])
+        {
+            return Err(Error::illegal_state(
+                "MOpt: Error in select_algorithm".to_string(),
+            ));
+        }
+        Ok(res.into())
+    }
+}
+
+const V_MAX: f64 = 1.0;
+const V_MIN: f64 = 0.05;
+
+/// The `MOpt` mode to use
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+pub enum MOptMode {
+    /// Pilot fuzzing mode
+    Pilotfuzzing,
+    /// Core fuzzing mode
+    Corefuzzing,
+}
+
+/// This is the main struct of `MOpt`, an `AFL` mutator.
+/// See the original `MOpt` implementation in <https://github.com/puppet-meteor/MOpt-AFL>
+pub struct StdMOptMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand + HasMetadata + HasCorpus + HasSolutions,
+{
+    name: String,
+    mode: MOptMode,
+    finds_before: usize,
+    mutations: MT,
+    max_stack_pow: u64,
+    phantom: PhantomData<(I, S)>,
+}
+
+impl<I, MT, S> Debug for StdMOptMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand + HasMetadata + HasCorpus + HasSolutions,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "StdMOptMutator with {} mutations for Input type {}",
+            self.mutations.len(),
+            core::any::type_name::<I>()
+        )
+    }
+}
+
+impl<I, MT, S> Mutator<I, S> for StdMOptMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand + HasMetadata + HasCorpus + HasSolutions,
+{
+    #[inline]
+    fn mutate(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        self.finds_before = state.corpus().count() + state.solutions().count();
+        self.scheduled_mutate(state, input)
+    }
+
+    #[allow(clippy::cast_precision_loss)]
+    fn post_exec(&mut self, state: &mut S, _new_corpus_idx: Option<CorpusId>) -> Result<(), Error> {
+        let before = self.finds_before;
+        let after = state.corpus().count() + state.solutions().count();
+
+        let mopt = state.metadata_map_mut().get_mut::<MOpt>().unwrap();
+        let key_module = self.mode;
+        match key_module {
+            MOptMode::Corefuzzing => {
+                mopt.core_time += 1;
+
+                if after > before {
+                    let diff = after - before;
+                    mopt.total_finds += diff;
+                    for i in 0..mopt.operator_num {
+                        if mopt.core_operator_cycles_v2[i] > mopt.core_operator_cycles_v3[i] {
+                            mopt.core_operator_finds_v2[i] += diff as u64;
+                        }
+                    }
+                }
+
+                if mopt.core_time > mopt.period_core {
+                    mopt.core_time = 0;
+                    let total_finds = mopt.total_finds;
+                    mopt.finds_until_last_swarm = total_finds;
+                    for i in 0..mopt.operator_num {
+                        mopt.core_operator_finds[i] = mopt.core_operator_finds_v2[i];
+                        mopt.core_operator_cycles[i] = mopt.core_operator_cycles_v2[i];
+                    }
+                    mopt.pso_update()?;
+                    self.mode = MOptMode::Pilotfuzzing;
+                }
+            }
+            MOptMode::Pilotfuzzing => {
+                mopt.pilot_time += 1;
+                let swarm_now = mopt.swarm_now;
+
+                if after > before {
+                    let diff = after - before;
+                    mopt.total_finds += diff;
+                    for i in 0..mopt.operator_num {
+                        if mopt.pilot_operator_cycles_v2[swarm_now][i]
+                            > mopt.pilot_operator_cycles_v3[swarm_now][i]
+                        {
+                            mopt.pilot_operator_finds_v2[swarm_now][i] += diff as u64;
+                        }
+                    }
+                }
+
+                #[allow(clippy::cast_lossless)]
+                if mopt.pilot_time > mopt.period_pilot {
+                    let new_finds = mopt.total_finds - mopt.finds_until_last_swarm;
+                    let f = (new_finds as f64) / ((mopt.pilot_time as f64) / (PERIOD_PILOT_COEF));
+                    mopt.swarm_fitness[swarm_now] = f;
+                    mopt.pilot_time = 0;
+                    let total_finds = mopt.total_finds;
+                    mopt.finds_until_last_swarm = total_finds;
+
+                    for i in 0..mopt.operator_num {
+                        let mut eff = 0.0;
+                        if mopt.pilot_operator_cycles_v2[swarm_now][i]
+                            > mopt.pilot_operator_cycles[swarm_now][i]
+                        {
+                            eff = ((mopt.pilot_operator_finds_v2[swarm_now][i]
+                                - mopt.pilot_operator_finds[swarm_now][i])
+                                as f64)
+                                / ((mopt.pilot_operator_cycles_v2[swarm_now][i]
+                                    - mopt.pilot_operator_cycles[swarm_now][i])
+                                    as f64);
+                        }
+
+                        if mopt.eff_best[swarm_now][i] < eff {
+                            mopt.eff_best[swarm_now][i] = eff;
+                            mopt.l_best[swarm_now][i] = mopt.x_now[swarm_now][i];
+                        }
+
+                        mopt.pilot_operator_finds[swarm_now][i] =
+                            mopt.pilot_operator_finds_v2[swarm_now][i];
+                        mopt.pilot_operator_cycles[swarm_now][i] =
+                            mopt.pilot_operator_cycles_v2[swarm_now][i];
+                    }
+
+                    mopt.swarm_now += 1;
+
+                    if mopt.swarm_num == 1 {
+                        // If there's only 1 swarm, then no core_fuzzing mode.
+                        mopt.pso_update()?;
+                    } else if mopt.swarm_now == mopt.swarm_num {
+                        self.mode = MOptMode::Corefuzzing;
+
+                        for i in 0..mopt.operator_num {
+                            mopt.core_operator_cycles_v2[i] = mopt.core_operator_cycles[i];
+                            mopt.core_operator_cycles_v3[i] = mopt.core_operator_cycles[i];
+                            mopt.core_operator_finds_v2[i] = mopt.core_operator_finds[i];
+                        }
+
+                        let mut swarm_eff = 0.0;
+                        let mut best_swarm = 0;
+                        for i in 0..mopt.swarm_num {
+                            if mopt.swarm_fitness[i] > swarm_eff {
+                                swarm_eff = mopt.swarm_fitness[i];
+                                best_swarm = i;
+                            }
+                        }
+
+                        mopt.swarm_now = best_swarm;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<I, MT, S> StdMOptMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand + HasMetadata + HasCorpus + HasSolutions,
+{
+    /// Create a new [`StdMOptMutator`].
+    pub fn new(
+        state: &mut S,
+        mutations: MT,
+        max_stack_pow: u64,
+        swarm_num: usize,
+    ) -> Result<Self, Error> {
+        if !state.has_metadata::<MOpt>() {
+            let rand_seed = state.rand_mut().next();
+            state.add_metadata::<MOpt>(MOpt::new(mutations.len(), swarm_num, rand_seed)?);
+        }
+        Ok(Self {
+            name: format!("StdMOptMutator[{}]", mutations.names().join(",")),
+            mode: MOptMode::Pilotfuzzing,
+            finds_before: 0,
+            mutations,
+            max_stack_pow,
+            phantom: PhantomData,
+        })
+    }
+    fn core_mutate(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        let mut r = MutationResult::Skipped;
+        let mopt = state.metadata_map_mut().get_mut::<MOpt>().unwrap();
+        for i in 0..mopt.operator_num {
+            mopt.core_operator_cycles_v3[i] = mopt.core_operator_cycles_v2[i];
+        }
+
+        for _i in 0..self.iterations(state, input) {
+            let idx = self.schedule(state, input);
+            let outcome = self.mutations_mut().get_and_mutate(idx, state, input)?;
+            if outcome == MutationResult::Mutated {
+                r = MutationResult::Mutated;
+            }
+
+            state
+                .metadata_map_mut()
+                .get_mut::<MOpt>()
+                .unwrap()
+                .core_operator_cycles_v2[idx.0] += 1;
+        }
+        Ok(r)
+    }
+
+    fn pilot_mutate(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        let mut r = MutationResult::Skipped;
+        let swarm_now;
+        {
+            let mopt = state.metadata_map_mut().get_mut::<MOpt>().unwrap();
+            swarm_now = mopt.swarm_now;
+
+            for i in 0..mopt.operator_num {
+                mopt.pilot_operator_cycles_v3[swarm_now][i] =
+                    mopt.pilot_operator_cycles_v2[swarm_now][i];
+            }
+        }
+
+        for _i in 0..self.iterations(state, input) {
+            let idx = self.schedule(state, input);
+            let outcome = self.mutations_mut().get_and_mutate(idx, state, input)?;
+            if outcome == MutationResult::Mutated {
+                r = MutationResult::Mutated;
+            }
+
+            state
+                .metadata_map_mut()
+                .get_mut::<MOpt>()
+                .unwrap()
+                .pilot_operator_cycles_v2[swarm_now][idx.0] += 1;
+        }
+
+        Ok(r)
+    }
+}
+
+impl<I, MT, S> ComposedByMutations<I, MT, S> for StdMOptMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand + HasMetadata + HasCorpus + HasSolutions,
+{
+    /// Get the mutations
+    #[inline]
+    fn mutations(&self) -> &MT {
+        &self.mutations
+    }
+
+    // Get the mutations (mutable)
+    #[inline]
+    fn mutations_mut(&mut self) -> &mut MT {
+        &mut self.mutations
+    }
+}
+
+impl<I, MT, S> Named for StdMOptMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand + HasMetadata + HasCorpus + HasSolutions,
+{
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl<I, MT, S> ScheduledMutator<I, MT, S> for StdMOptMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand + HasMetadata + HasCorpus + HasSolutions,
+{
+    /// Compute the number of iterations used to apply stacked mutations
+    fn iterations(&self, state: &mut S, _: &I) -> u64 {
+        1 << (1 + state.rand_mut().below(self.max_stack_pow))
+    }
+
+    /// Get the next mutation to apply
+    #[inline]
+    fn schedule(&self, state: &mut S, _: &I) -> MutationId {
+        state
+            .metadata_map_mut()
+            .get_mut::<MOpt>()
+            .unwrap()
+            .select_algorithm()
+            .unwrap()
+    }
+
+    fn scheduled_mutate(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        let mode = self.mode;
+        match mode {
+            MOptMode::Corefuzzing => self.core_mutate(state, input),
+            MOptMode::Pilotfuzzing => self.pilot_mutate(state, input),
+        }
+    }
+}
+
+// Path: libafl/src/mutators/tuneable.rs
+//! An extension to the `ScheduledMutator` which schedules multiple mutations internally.
+//! Instead of a random mutator for a random amount of iterations, we can run
+//! a specific mutator for a specified amount of iterations
+
+use alloc::{string::String, vec::Vec};
+use core::{
+    fmt::{self, Debug},
+    marker::PhantomData,
+};
+
+use libafl_bolts::{
+    impl_serdeany, math::calculate_cumulative_distribution_in_place, rands::Rand, Named,
+};
+use serde::{Deserialize, Serialize};
+
+pub use crate::mutators::{mutations::*, token_mutations::*};
+use crate::{
+    mutators::{
+        ComposedByMutations, MutationId, MutationResult, Mutator, MutatorsTuple, ScheduledMutator,
+    },
+    state::{HasMetadata, HasRand},
+    Error,
+};
+
+/// Metadata in the state, that controls the behavior of the [`TuneableScheduledMutator`] at runtime
+#[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]
+#[cfg_attr(
+    any(not(feature = "serdeany_autoreg"), miri),
+    allow(clippy::unsafe_derive_deserialize)
+)] // for SerdeAny
+pub struct TuneableScheduledMutatorMetadata {
+    /// The offsets of mutators to run, in order. Clear to fall back to random,
+    /// or use `mutation_probabilities`
+    pub mutation_ids: Vec<MutationId>,
+    /// The next index to read from in the `next` vec
+    pub next_id: MutationId,
+    /// The cumulative probability distribution for each mutation.
+    /// Will not be used when `mutation_ids` are set.
+    /// Clear to fall back to random.
+    pub mutation_probabilities_cumulative: Vec<f32>,
+    /// The count of mutations to stack.
+    /// If `mutation_ids` is of length `10`, and this number is `20`,
+    /// the mutations will be iterated through twice.
+    pub iters: Option<u64>,
+    /// The probability of each number of mutations to stack.
+    pub iter_probabilities_pow_cumulative: Vec<f32>,
+}
+
+impl_serdeany!(TuneableScheduledMutatorMetadata);
+
+impl Default for TuneableScheduledMutatorMetadata {
+    fn default() -> Self {
+        Self {
+            mutation_ids: Vec::default(),
+            next_id: 0.into(),
+            mutation_probabilities_cumulative: Vec::default(),
+            iters: None,
+            iter_probabilities_pow_cumulative: Vec::default(),
+        }
+    }
+}
+
+impl TuneableScheduledMutatorMetadata {
+    /// Gets the stored metadata, used to alter the [`TuneableScheduledMutator`] behavior
+    pub fn get<S: HasMetadata>(state: &S) -> Result<&Self, Error> {
+        state
+            .metadata_map()
+            .get::<Self>()
+            .ok_or_else(|| Error::illegal_state("TuneableScheduledMutator not in use"))
+    }
+
+    /// Gets the stored metadata, used to alter the [`TuneableScheduledMutator`] behavior, mut
+    pub fn get_mut<S: HasMetadata>(state: &mut S) -> Result<&mut Self, Error> {
+        state
+            .metadata_map_mut()
+            .get_mut::<Self>()
+            .ok_or_else(|| Error::illegal_state("TuneableScheduledMutator not in use"))
+    }
+}
+
+/// A [`Mutator`] that schedules one of the embedded mutations on each call.
+/// The index of the next mutation can be set.
+pub struct TuneableScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand,
+{
+    name: String,
+    mutations: MT,
+    max_stack_pow: u64,
+    phantom: PhantomData<(I, S)>,
+}
+
+impl<I, MT, S> Debug for TuneableScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "TuneableScheduledMutator with {} mutations for Input type {}",
+            self.mutations.len(),
+            core::any::type_name::<I>()
+        )
+    }
+}
+
+impl<I, MT, S> Mutator<I, S> for TuneableScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand + HasMetadata,
+{
+    #[inline]
+    fn mutate(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        self.scheduled_mutate(state, input)
+    }
+}
+
+impl<I, MT, S> ComposedByMutations<I, MT, S> for TuneableScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand,
+{
+    /// Get the mutations
+    #[inline]
+    fn mutations(&self) -> &MT {
+        &self.mutations
+    }
+
+    // Get the mutations (mutable)
+    #[inline]
+    fn mutations_mut(&mut self) -> &mut MT {
+        &mut self.mutations
+    }
+}
+
+impl<I, MT, S> Named for TuneableScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand,
+{
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl<I, MT, S> ScheduledMutator<I, MT, S> for TuneableScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand + HasMetadata,
+{
+    /// Compute the number of iterations used to apply stacked mutations
+    fn iterations(&self, state: &mut S, _: &I) -> u64 {
+        let metadata = TuneableScheduledMutatorMetadata::get_mut(state).unwrap();
+
+        if metadata.iter_probabilities_pow_cumulative.is_empty() {
+            if let Some(iters) = metadata.iters {
+                iters
+            } else {
+                // fall back to random
+                1 << (1 + state.rand_mut().below(self.max_stack_pow))
+            }
+        } else {
+            // We will sample using the mutation probabilities.
+            // Doing this outside of the original if branch to make the borrow checker happy.
+            #[allow(clippy::cast_precision_loss)]
+            let coin = state.rand_mut().next() as f32 / u64::MAX as f32;
+            debug_assert!(coin <= 1.0_f32);
+
+            let metadata = TuneableScheduledMutatorMetadata::get_mut(state).unwrap();
+            let power = metadata
+                .iter_probabilities_pow_cumulative
+                .iter()
+                .position(|i| *i >= coin)
+                .unwrap();
+
+            1 << (1 + power)
+        }
+    }
+
+    /// Get the next mutation to apply
+    fn schedule(&self, state: &mut S, _: &I) -> MutationId {
+        debug_assert!(self.mutations.len() != 0);
+        // Assumption: we can not reach this code path without previously adding this metadatum.
+        let metadata = TuneableScheduledMutatorMetadata::get_mut(state).unwrap();
+
+        #[allow(clippy::cast_possible_truncation)]
+        if !metadata.mutation_ids.is_empty() {
+            // using pre-set ids.
+            let ret = metadata.mutation_ids[metadata.next_id.0];
+            metadata.next_id.0 += 1_usize;
+            if metadata.next_id.0 >= metadata.mutation_ids.len() {
+                metadata.next_id = 0.into();
+            }
+            debug_assert!(
+                self.mutations.len() > ret.0,
+                "TuneableScheduler: next vec may not contain id larger than number of mutations!"
+            );
+            return ret;
+        }
+
+        if !metadata.mutation_probabilities_cumulative.is_empty() {
+            // We will sample using the mutation probabilities.
+            // Doing this outside of the original if branch to make the borrow checker happy.
+            #[allow(clippy::cast_precision_loss)]
+            let coin = state.rand_mut().next() as f32 / u64::MAX as f32;
+            debug_assert!(coin <= 1.0_f32);
+
+            let metadata = TuneableScheduledMutatorMetadata::get_mut(state).unwrap();
+            debug_assert_eq!(
+                self.mutations.len(),
+                metadata.mutation_probabilities_cumulative.len(),
+                "TuneableScheduler: mutation probabilities do not match with number of mutations"
+            );
+
+            let mutation_id = metadata
+                .mutation_probabilities_cumulative
+                .iter()
+                .position(|i| *i >= coin)
+                .unwrap()
+                .into();
+
+            return mutation_id;
+        }
+
+        // fall back to random if no entries in either vec, the scheduling is not tuned.
+        state.rand_mut().below(self.mutations.len() as u64).into()
+    }
+}
+
+impl<I, MT, S> TuneableScheduledMutator<I, MT, S>
+where
+    MT: MutatorsTuple<I, S>,
+    S: HasRand + HasMetadata,
+{
+    /// Create a new [`TuneableScheduledMutator`] instance specifying mutations
+    pub fn new(state: &mut S, mutations: MT) -> Self {
+        if !state.has_metadata::<TuneableScheduledMutatorMetadata>() {
+            state.add_metadata(TuneableScheduledMutatorMetadata::default());
+        }
+        TuneableScheduledMutator {
+            name: format!("TuneableMutator[{}]", mutations.names().join(", ")),
+            mutations,
+            max_stack_pow: 7,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<S> TuneableScheduledMutator<(), (), S>
+where
+    S: HasRand + HasMetadata,
+{
+    fn metadata_mut(state: &mut S) -> &mut TuneableScheduledMutatorMetadata {
+        state
+            .metadata_map_mut()
+            .get_mut::<TuneableScheduledMutatorMetadata>()
+            .unwrap()
+    }
+
+    fn metadata(state: &S) -> &TuneableScheduledMutatorMetadata {
+        state
+            .metadata_map()
+            .get::<TuneableScheduledMutatorMetadata>()
+            .unwrap()
+    }
+
+    /// Sets the next iterations count, i.e., how many times to mutate the input
+    ///
+    /// Using `set_mutation_ids_and_iter` to set multiple values at the same time
+    /// will be faster than setting them individually
+    /// as it internally only needs a single metadata lookup
+    pub fn set_iters(state: &mut S, iters: u64) {
+        let metadata = Self::metadata_mut(state);
+        metadata.iters = Some(iters);
+        metadata.iter_probabilities_pow_cumulative.clear();
+    }
+
+    /// Sets the probability of next iteration counts,
+    /// i.e., how many times the mutation is likely to get mutated.
+    ///
+    /// So, setting the `iter_probabilities` to `vec![0.1, 0.7, 0.2]`
+    /// would apply 2^1 mutation with the likelihood of 10%, 2^2 mutations with the
+    /// a probability of 70% (0.7), and 2^3 mutations with the likelihood of 20%.
+    /// These will be applied for each call of this `mutate` function.
+    ///
+    /// Setting this function will unset everything previously set in `set_iters`.
+    pub fn set_iter_probabilities_pow(
+        state: &mut S,
+        mut iter_probabilities_pow: Vec<f32>,
+    ) -> Result<(), Error> {
+        if iter_probabilities_pow.len() >= 32 {
+            return Err(Error::illegal_argument(
+                "Cannot stack more than 2^32 mutations",
+            ));
+        }
+        let metadata = Self::metadata_mut(state);
+        metadata.iters = None;
+
+        // we precalculate the cumulative probability to be faster when sampling later.
+        calculate_cumulative_distribution_in_place(&mut iter_probabilities_pow)?;
+        metadata.iter_probabilities_pow_cumulative = iter_probabilities_pow;
+
+        Ok(())
+    }
+
+    /// Gets the set amount of iterations
+    pub fn get_iters(state: &S) -> Option<u64> {
+        let metadata = Self::metadata(state);
+        metadata.iters
+    }
+
+    /// Sets the mutation ids
+    pub fn set_mutation_ids(state: &mut S, mutations: Vec<MutationId>) {
+        let metadata = TuneableScheduledMutatorMetadata::get_mut(state).unwrap();
+        metadata.mutation_ids = mutations;
+        metadata.next_id = 0.into();
+    }
+
+    /// Sets the mutation probabilities.
+    /// The `Vec` contains a probability per [`MutationId`]: between 0 and 1, and they have to add
+    /// up to 1.
+    /// Setting the probabilities will remove the value set through `set_mutation_ids`.
+    pub fn set_mutation_probabilities(
+        state: &mut S,
+        mut mutation_probabilities: Vec<f32>,
+    ) -> Result<(), Error> {
+        let metadata = TuneableScheduledMutatorMetadata::get_mut(state).unwrap();
+        metadata.mutation_ids.clear();
+        metadata.next_id = 0.into();
+
+        // we precalculate the cumulative probability to be faster when sampling later.
+        calculate_cumulative_distribution_in_place(&mut mutation_probabilities)?;
+        metadata.mutation_probabilities_cumulative = mutation_probabilities;
+        Ok(())
+    }
+
+    /// mutation ids and iterations
+    pub fn set_mutation_ids_and_iters(state: &mut S, mutations: Vec<MutationId>, iters: u64) {
+        let metadata = TuneableScheduledMutatorMetadata::get_mut(state).unwrap();
+        metadata.mutation_ids = mutations;
+        metadata.next_id = 0.into();
+        metadata.iters = Some(iters);
+    }
+
+    /// Appends a mutation id to the end of the mutations
+    pub fn push_mutation_id(state: &mut S, mutation_id: MutationId) {
+        let metadata = TuneableScheduledMutatorMetadata::get_mut(state).unwrap();
+        metadata.mutation_ids.push(mutation_id);
+    }
+
+    /// Resets this to a randomic mutational stage
+    pub fn reset(state: &mut S) {
+        let metadata = Self::metadata_mut(state);
+        metadata.mutation_ids.clear();
+        metadata.next_id = 0.into();
+        metadata.iters = None;
+        metadata.mutation_probabilities_cumulative.clear();
+        metadata.iter_probabilities_pow_cumulative.clear();
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use libafl_bolts::tuples::tuple_list;
+
+    use super::{
+        BitFlipMutator, ByteDecMutator, TuneableScheduledMutator, TuneableScheduledMutatorMetadata,
+    };
+    use crate::{
+        inputs::BytesInput,
+        mutators::{ByteRandMutator, ScheduledMutator},
+        state::NopState,
+    };
+
+    #[test]
+    fn test_tuning() {
+        // # Safety
+        // No concurrency per testcase
+        #[cfg(any(not(feature = "serdeany_autoreg"), miri))]
+        unsafe {
+            TuneableScheduledMutatorMetadata::register();
+        }
+
+        let mut state: NopState<BytesInput> = NopState::new();
+        let mutators = tuple_list!(
+            BitFlipMutator::new(),
+            ByteDecMutator::new(),
+            ByteRandMutator::new()
+        );
+        let tuneable = TuneableScheduledMutator::new(&mut state, mutators);
+        let input = BytesInput::new(vec![42]);
+        let metadata = TuneableScheduledMutatorMetadata::get_mut(&mut state).unwrap();
+        metadata.mutation_ids.push(1.into());
+        metadata.mutation_ids.push(2.into());
+        assert_eq!(tuneable.schedule(&mut state, &input), 1.into());
+        assert_eq!(tuneable.schedule(&mut state, &input), 2.into());
+        assert_eq!(tuneable.schedule(&mut state, &input), 1.into());
+    }
+
+    #[test]
+    fn test_mutation_distribution() {
+        // # Safety
+        // No concurrency per testcase
+        #[cfg(any(not(feature = "serdeany_autoreg"), miri))]
+        unsafe {
+            TuneableScheduledMutatorMetadata::register();
+        }
+
+        let mut state: NopState<BytesInput> = NopState::new();
+        let mutators = tuple_list!(
+            BitFlipMutator::new(),
+            ByteDecMutator::new(),
+            ByteRandMutator::new()
+        );
+        let tuneable = TuneableScheduledMutator::new(&mut state, mutators);
+        let input = BytesInput::new(vec![42]);
+
+        // Basic tests over the probability distribution.
+        assert!(
+            TuneableScheduledMutator::set_mutation_probabilities(&mut state, vec![0.0]).is_err()
+        );
+        assert!(
+            TuneableScheduledMutator::set_mutation_probabilities(&mut state, vec![1.0; 3]).is_err()
+        );
+        assert!(TuneableScheduledMutator::set_mutation_probabilities(
+            &mut state,
+            vec![-1.0, 1.0, 1.0]
+        )
+        .is_err());
+        assert!(TuneableScheduledMutator::set_mutation_probabilities(&mut state, vec![]).is_err());
+
+        assert!(TuneableScheduledMutator::set_mutation_probabilities(
+            &mut state,
+            vec![0.0, 0.0, 1.0]
+        )
+        .is_ok());
+        assert_eq!(tuneable.schedule(&mut state, &input), 2.into());
+        assert!(TuneableScheduledMutator::set_mutation_probabilities(
+            &mut state,
+            vec![0.0, 1.0, 0.0]
+        )
+        .is_ok());
+        assert_eq!(tuneable.schedule(&mut state, &input), 1.into());
+        assert!(TuneableScheduledMutator::set_mutation_probabilities(
+            &mut state,
+            vec![1.0, 0.0, 0.0]
+        )
+        .is_ok());
+        assert_eq!(tuneable.schedule(&mut state, &input), 0.into());
+
+        // We should not choose a mutation with p=0.
+        assert!(TuneableScheduledMutator::set_mutation_probabilities(
+            &mut state,
+            vec![0.5, 0.0, 0.5]
+        )
+        .is_ok());
+        assert!(tuneable.schedule(&mut state, &input) != 1.into());
+    }
+}
+
+// Path: libafl/src/mutators/mod.rs
+//! Mutators mutate input during fuzzing.
+
+pub mod scheduled;
+use core::fmt;
+
+pub use scheduled::*;
+pub mod mutations;
+pub use mutations::*;
+pub mod token_mutations;
+use serde::{Deserialize, Serialize};
+pub use token_mutations::*;
+pub mod encoded_mutations;
+pub use encoded_mutations::*;
+pub mod mopt_mutator;
+pub use mopt_mutator::*;
+pub mod gramatron;
+pub use gramatron::*;
+pub mod grimoire;
+pub use grimoire::*;
+pub mod tuneable;
+pub use tuneable::*;
+
+#[cfg(feature = "unicode")]
+pub mod string;
+#[cfg(feature = "unicode")]
+pub use string::*;
+
+#[cfg(feature = "multipart_inputs")]
+pub mod multi;
+#[cfg(feature = "multipart_inputs")]
+pub use multi::*;
+
+#[cfg(feature = "nautilus")]
+pub mod nautilus;
+
+use alloc::{boxed::Box, vec::Vec};
+
+use libafl_bolts::{tuples::IntoVec, HasLen, Named};
+#[cfg(feature = "nautilus")]
+pub use nautilus::*;
+use tuple_list::NonEmptyTuple;
+
+use crate::{corpus::CorpusId, Error};
+
+// TODO mutator stats method that produces something that can be sent with the NewTestcase event
+// We can use it to report which mutations generated the testcase in the broker logs
+
+/// The index of a mutation in the mutations tuple
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[repr(transparent)]
+pub struct MutationId(pub(crate) usize);
+
+impl fmt::Display for MutationId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "MutationId({})", self.0)
+    }
+}
+
+impl From<usize> for MutationId {
+    fn from(value: usize) -> Self {
+        MutationId(value)
+    }
+}
+
+impl From<u64> for MutationId {
+    fn from(value: u64) -> Self {
+        MutationId(value as usize)
+    }
+}
+
+impl From<i32> for MutationId {
+    #[allow(clippy::cast_sign_loss)]
+    fn from(value: i32) -> Self {
+        debug_assert!(value >= 0);
+        MutationId(value as usize)
+    }
+}
+
+/// The result of a mutation.
+/// If the mutation got skipped, the target
+/// will not be executed with the returned input.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MutationResult {
+    /// The [`Mutator`] mutated this `Input`.
+    Mutated,
+    /// The [`Mutator`] did not mutate this `Input`. It was `Skipped`.
+    Skipped,
+}
+
+/// A mutator takes input, and mutates it.
+/// Simple as that.
+pub trait Mutator<I, S>: Named {
+    /// Mutate a given input
+    fn mutate(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error>;
+
+    /// Post-process given the outcome of the execution
+    /// `new_corpus_idx` will be `Some` if a new `Testcase` was created this execution.
+    #[inline]
+    fn post_exec(
+        &mut self,
+        _state: &mut S,
+        _new_corpus_idx: Option<CorpusId>,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+/// A mutator that takes input, and returns a vector of mutated inputs.
+/// Simple as that.
+pub trait MultiMutator<I, S>: Named {
+    /// Mutate a given input up to `max_count` times,
+    /// or as many times as appropriate, if no `max_count` is given
+    fn multi_mutate(
+        &mut self,
+        state: &mut S,
+        input: &I,
+        max_count: Option<usize>,
+    ) -> Result<Vec<I>, Error>;
+
+    /// Post-process given the outcome of the execution
+    /// `new_corpus_idx` will be `Some` if a new `Testcase` was created this execution.
+    #[inline]
+    fn multi_post_exec(
+        &mut self,
+        _state: &mut S,
+        _new_corpus_idx: Option<CorpusId>,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+/// A `Tuple` of `Mutators` that can execute multiple `Mutators` in a row.
+pub trait MutatorsTuple<I, S>: HasLen {
+    /// Runs the `mutate` function on all `Mutators` in this `Tuple`.
+    fn mutate_all(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error>;
+
+    /// Runs the `post_exec` function on all `Mutators` in this `Tuple`.
+    /// `new_corpus_idx` will be `Some` if a new `Testcase` was created this execution.
+    fn post_exec_all(
+        &mut self,
+        state: &mut S,
+        new_corpus_idx: Option<CorpusId>,
+    ) -> Result<(), Error>;
+
+    /// Gets the [`Mutator`] at the given index and runs the `mutate` function on it.
+    fn get_and_mutate(
+        &mut self,
+        index: MutationId,
+        state: &mut S,
+        input: &mut I,
+    ) -> Result<MutationResult, Error>;
+
+    /// Gets the [`Mutator`] at the given index and runs the `post_exec` function on it.
+    /// `new_corpus_idx` will be `Some` if a new `Testcase` was created this execution.
+    fn get_and_post_exec(
+        &mut self,
+        index: usize,
+        state: &mut S,
+
+        corpus_idx: Option<CorpusId>,
+    ) -> Result<(), Error>;
+
+    /// Gets all names of the wrapped [`Mutator`]`s`, reversed.
+    fn names_reversed(&self) -> Vec<&str>;
+
+    /// Gets all names of the wrapped [`Mutator`]`s`.
+    fn names(&self) -> Vec<&str>;
+}
+
+impl<I, S> MutatorsTuple<I, S> for () {
+    #[inline]
+    fn mutate_all(&mut self, _state: &mut S, _input: &mut I) -> Result<MutationResult, Error> {
+        Ok(MutationResult::Skipped)
+    }
+
+    #[inline]
+    fn post_exec_all(
+        &mut self,
+        _state: &mut S,
+        _new_corpus_idx: Option<CorpusId>,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    #[inline]
+    fn get_and_mutate(
+        &mut self,
+        _index: MutationId,
+        _state: &mut S,
+        _input: &mut I,
+    ) -> Result<MutationResult, Error> {
+        Ok(MutationResult::Skipped)
+    }
+
+    #[inline]
+    fn get_and_post_exec(
+        &mut self,
+        _index: usize,
+        _state: &mut S,
+        _new_corpus_idx: Option<CorpusId>,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    #[inline]
+    fn names_reversed(&self) -> Vec<&str> {
+        Vec::new()
+    }
+
+    #[inline]
+    fn names(&self) -> Vec<&str> {
+        Vec::new()
+    }
+}
+
+impl<Head, Tail, I, S> MutatorsTuple<I, S> for (Head, Tail)
+where
+    Head: Mutator<I, S>,
+    Tail: MutatorsTuple<I, S>,
+{
+    fn mutate_all(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        let r = self.0.mutate(state, input)?;
+        if self.1.mutate_all(state, input)? == MutationResult::Mutated {
+            Ok(MutationResult::Mutated)
+        } else {
+            Ok(r)
+        }
+    }
+
+    fn post_exec_all(
+        &mut self,
+        state: &mut S,
+        new_corpus_idx: Option<CorpusId>,
+    ) -> Result<(), Error> {
+        self.0.post_exec(state, new_corpus_idx)?;
+        self.1.post_exec_all(state, new_corpus_idx)
+    }
+
+    fn get_and_mutate(
+        &mut self,
+        index: MutationId,
+        state: &mut S,
+        input: &mut I,
+    ) -> Result<MutationResult, Error> {
+        if index.0 == 0 {
+            self.0.mutate(state, input)
+        } else {
+            self.1.get_and_mutate((index.0 - 1).into(), state, input)
+        }
+    }
+
+    fn get_and_post_exec(
+        &mut self,
+        index: usize,
+        state: &mut S,
+        new_corpus_idx: Option<CorpusId>,
+    ) -> Result<(), Error> {
+        if index == 0 {
+            self.0.post_exec(state, new_corpus_idx)
+        } else {
+            self.1.get_and_post_exec(index - 1, state, new_corpus_idx)
+        }
+    }
+
+    fn names_reversed(&self) -> Vec<&str> {
+        let mut ret = self.1.names_reversed();
+        ret.push(self.0.name());
+        ret
+    }
+
+    fn names(&self) -> Vec<&str> {
+        let mut ret = self.names_reversed();
+        ret.reverse();
+        ret
+    }
+}
+
+impl<Head, Tail, I, S> IntoVec<Box<dyn Mutator<I, S>>> for (Head, Tail)
+where
+    Head: Mutator<I, S> + 'static,
+    Tail: IntoVec<Box<dyn Mutator<I, S>>>,
+{
+    fn into_vec_reversed(self) -> Vec<Box<dyn Mutator<I, S>>> {
+        let (head, tail) = self.uncons();
+        let mut ret = tail.into_vec_reversed();
+        ret.push(Box::new(head));
+        ret
+    }
+
+    fn into_vec(self) -> Vec<Box<dyn Mutator<I, S>>> {
+        let mut ret = self.into_vec_reversed();
+        ret.reverse();
+        ret
+    }
+}
+
+impl<Tail, I, S> MutatorsTuple<I, S> for (Tail,)
+where
+    Tail: MutatorsTuple<I, S>,
+{
+    fn mutate_all(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        self.0.mutate_all(state, input)
+    }
+
+    fn post_exec_all(
+        &mut self,
+        state: &mut S,
+        new_corpus_idx: Option<CorpusId>,
+    ) -> Result<(), Error> {
+        self.0.post_exec_all(state, new_corpus_idx)
+    }
+
+    fn get_and_mutate(
+        &mut self,
+        index: MutationId,
+        state: &mut S,
+        input: &mut I,
+    ) -> Result<MutationResult, Error> {
+        self.0.get_and_mutate(index, state, input)
+    }
+
+    fn get_and_post_exec(
+        &mut self,
+        index: usize,
+        state: &mut S,
+        new_corpus_idx: Option<CorpusId>,
+    ) -> Result<(), Error> {
+        self.0.get_and_post_exec(index, state, new_corpus_idx)
+    }
+
+    fn names(&self) -> Vec<&str> {
+        self.0.names()
+    }
+
+    fn names_reversed(&self) -> Vec<&str> {
+        self.0.names_reversed()
+    }
+}
+
+impl<Tail, I, S> IntoVec<Box<dyn Mutator<I, S>>> for (Tail,)
+where
+    Tail: IntoVec<Box<dyn Mutator<I, S>>>,
+{
+    fn into_vec(self) -> Vec<Box<dyn Mutator<I, S>>> {
+        self.0.into_vec()
+    }
+}
+
+impl<I, S> MutatorsTuple<I, S> for Vec<Box<dyn Mutator<I, S>>> {
+    fn mutate_all(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        self.iter_mut()
+            .try_fold(MutationResult::Skipped, |ret, mutator| {
+                if mutator.mutate(state, input)? == MutationResult::Mutated {
+                    Ok(MutationResult::Mutated)
+                } else {
+                    Ok(ret)
+                }
+            })
+    }
+
+    fn post_exec_all(
+        &mut self,
+        state: &mut S,
+        new_corpus_idx: Option<CorpusId>,
+    ) -> Result<(), Error> {
+        for mutator in self.iter_mut() {
+            mutator.post_exec(state, new_corpus_idx)?;
+        }
+        Ok(())
+    }
+
+    fn get_and_mutate(
+        &mut self,
+        index: MutationId,
+        state: &mut S,
+        input: &mut I,
+    ) -> Result<MutationResult, Error> {
+        let mutator = self
+            .get_mut(index.0)
+            .ok_or_else(|| Error::key_not_found("Mutator with id {index:?} not found."))?;
+        mutator.mutate(state, input)
+    }
+
+    fn get_and_post_exec(
+        &mut self,
+        index: usize,
+        state: &mut S,
+        new_corpus_idx: Option<CorpusId>,
+    ) -> Result<(), Error> {
+        let mutator = self
+            .get_mut(index)
+            .ok_or_else(|| Error::key_not_found("Mutator with id {index:?} not found."))?;
+        mutator.post_exec(state, new_corpus_idx)
+    }
+
+    fn names_reversed(&self) -> Vec<&str> {
+        self.iter().rev().map(|x| x.name()).collect()
+    }
+
+    fn names(&self) -> Vec<&str> {
+        self.iter().map(|x| x.name()).collect()
+    }
+}
+
+impl<I, S> IntoVec<Box<dyn Mutator<I, S>>> for Vec<Box<dyn Mutator<I, S>>> {
+    fn into_vec(self) -> Vec<Box<dyn Mutator<I, S>>> {
+        self
+    }
+}
+
+// Path: libafl/src/mutators/mutations.rs
+//! A wide variety of mutations used during fuzzing.
+
+use alloc::{borrow::ToOwned, vec::Vec};
+use core::{cmp::min, marker::PhantomData, mem::size_of, ops::Range};
+
+use libafl_bolts::{rands::Rand, Named};
+
+use crate::{
+    corpus::Corpus,
+    inputs::{HasBytesVec, Input},
+    mutators::{MutationResult, Mutator},
+    random_corpus_id,
+    state::{HasCorpus, HasMaxSize, HasRand},
+    Error,
+};
+
+/// Mem move in the own vec
+#[inline]
+pub(crate) unsafe fn buffer_self_copy<T>(data: &mut [T], from: usize, to: usize, len: usize) {
+    debug_assert!(!data.is_empty());
+    debug_assert!(from + len <= data.len());
+    debug_assert!(to + len <= data.len());
+    if len != 0 && from != to {
+        let ptr = data.as_mut_ptr();
+        unsafe {
+            core::ptr::copy(ptr.add(from), ptr.add(to), len);
+        }
+    }
+}
+
+/// Mem move between vecs
+#[inline]
+pub(crate) unsafe fn buffer_copy<T>(dst: &mut [T], src: &[T], from: usize, to: usize, len: usize) {
+    debug_assert!(!dst.is_empty());
+    debug_assert!(!src.is_empty());
+    debug_assert!(from + len <= src.len());
+    debug_assert!(to + len <= dst.len());
+    let dst_ptr = dst.as_mut_ptr();
+    let src_ptr = src.as_ptr();
+    if len != 0 {
+        unsafe {
+            core::ptr::copy(src_ptr.add(from), dst_ptr.add(to), len);
+        }
+    }
+}
+
+/// A simple way to set buffer contents.
+/// The compiler does the heavy lifting.
+/// see <https://stackoverflow.com/a/51732799/1345238/>
+#[inline]
+pub fn buffer_set<T: Clone>(data: &mut [T], from: usize, len: usize, val: T) {
+    debug_assert!(from + len <= data.len());
+    data[from..(from + len)].fill(val);
+}
+
+/// Generate a range of values where (upon repeated calls) each index is likely to appear in the
+/// provided range as likely as any other value
+///
+/// The solution for this is to specify a window length, then pretend we can start at indices that
+/// would lead to invalid ranges. Then, clamp the values.
+///
+/// This problem corresponds to: <https://oeis.org/A059036>
+#[inline]
+pub fn rand_range<S: HasRand>(state: &mut S, upper: usize, max_len: usize) -> Range<usize> {
+    let len = 1 + state.rand_mut().below(max_len as u64) as usize;
+    // sample from [1..upper + len]
+    let mut offset2 = 1 + state.rand_mut().below((upper + len - 1) as u64) as usize;
+    let offset1 = offset2.saturating_sub(len);
+    if offset2 > upper {
+        offset2 = upper;
+    }
+
+    offset1..offset2
+}
+
+/// The max value that will be added or subtracted during add mutations
+pub const ARITH_MAX: u64 = 35;
+
+/// Interesting 8-bit values from AFL
+pub const INTERESTING_8: [i8; 9] = [-128, -1, 0, 1, 16, 32, 64, 100, 127];
+/// Interesting 16-bit values from AFL
+pub const INTERESTING_16: [i16; 19] = [
+    -128, -1, 0, 1, 16, 32, 64, 100, 127, -32768, -129, 128, 255, 256, 512, 1000, 1024, 4096, 32767,
+];
+/// Interesting 32-bit values from AFL
+pub const INTERESTING_32: [i32; 27] = [
+    -128,
+    -1,
+    0,
+    1,
+    16,
+    32,
+    64,
+    100,
+    127,
+    -32768,
+    -129,
+    128,
+    255,
+    256,
+    512,
+    1000,
+    1024,
+    4096,
+    32767,
+    -2147483648,
+    -100663046,
+    -32769,
+    32768,
+    65535,
+    65536,
+    100663045,
+    2147483647,
+];
+
+/// Bitflip mutation for inputs with a bytes vector
+#[derive(Default, Debug)]
+pub struct BitFlipMutator;
+
+impl<I, S> Mutator<I, S> for BitFlipMutator
+where
+    S: HasRand,
+    I: HasBytesVec,
+{
+    fn mutate(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        if input.bytes().is_empty() {
+            Ok(MutationResult::Skipped)
+        } else {
+            let bit = 1 << state.rand_mut().choose(0..8);
+            let byte = state.rand_mut().choose(input.bytes_mut());
+            *byte ^= bit;
+            Ok(MutationResult::Mutated)
+        }
+    }
+}
+
+impl Named for BitFlipMutator {
+    fn name(&self) -> &str {
+        "BitFlipMutator"
+    }
+}
+
+impl BitFlipMutator {
+    /// Creates a new [`BitFlipMutator`].
+    #[must_use]
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+/// Byteflip mutation for inputs with a bytes vector
+#[derive(Default, Debug)]
+pub struct ByteFlipMutator;
+
+impl<I, S> Mutator<I, S> for ByteFlipMutator
+where
+    S: HasRand,
+    I: HasBytesVec,
+{
+    fn mutate(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        if input.bytes().is_empty() {
+            Ok(MutationResult::Skipped)
+        } else {
+            *state.rand_mut().choose(input.bytes_mut()) ^= 0xff;
+            Ok(MutationResult::Mutated)
+        }
+    }
+}
+
+impl Named for ByteFlipMutator {
+    fn name(&self) -> &str {
+        "ByteFlipMutator"
+    }
+}
+
+impl ByteFlipMutator {
+    /// Creates a new [`ByteFlipMutator`].
+    #[must_use]
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+/// Byte increment mutation for inputs with a bytes vector
+#[derive(Default, Debug)]
+pub struct ByteIncMutator;
+
+impl<I, S> Mutator<I, S> for ByteIncMutator
+where
+    S: HasRand,
+    I: HasBytesVec,
+{
+    fn mutate(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        if input.bytes().is_empty() {
+            Ok(MutationResult::Skipped)
+        } else {
+            let byte = state.rand_mut().choose(input.bytes_mut());
+            *byte = byte.wrapping_add(1);
+            Ok(MutationResult::Mutated)
+        }
+    }
+}
+
+impl Named for ByteIncMutator {
+    fn name(&self) -> &str {
+        "ByteIncMutator"
+    }
+}
+
+impl ByteIncMutator {
+    /// Creates a new [`ByteIncMutator`].
+    #[must_use]
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+/// Byte decrement mutation for inputs with a bytes vector
+#[derive(Default, Debug)]
+pub struct ByteDecMutator;
+
+impl<I, S> Mutator<I, S> for ByteDecMutator
+where
+    S: HasRand,
+    I: HasBytesVec,
+{
+    fn mutate(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        if input.bytes().is_empty() {
+            Ok(MutationResult::Skipped)
+        } else {
+            let byte = state.rand_mut().choose(input.bytes_mut());
+            *byte = byte.wrapping_sub(1);
+            Ok(MutationResult::Mutated)
+        }
+    }
+}
+
+impl Named for ByteDecMutator {
+    fn name(&self) -> &str {
+        "ByteDecMutator"
+    }
+}
+
+impl ByteDecMutator {
+    /// Creates a a new [`ByteDecMutator`].
+    #[must_use]
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+/// Byte negate mutation for inputs with a bytes vector
+#[derive(Default, Debug)]
+pub struct ByteNegMutator;
+
+impl<I, S> Mutator<I, S> for ByteNegMutator
+where
+    S: HasRand,
+    I: HasBytesVec,
+{
+    fn mutate(&mut self, state: &mut S, input: &mut I) -> Result<MutationResult, Error> {
+        if input.bytes().is_empty() {
+            Ok(MutationResult::Skipped)
+        } else {
+            let byte = state.rand_mut().choose(input.bytes_mut());
+            *byte = (!(*byte)).wrapping_add(1);
+            Ok(MutationResult::Mutated)
+        }
+    }
+}
+
+...

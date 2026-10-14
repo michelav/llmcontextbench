@@ -1,0 +1,21 @@
+{
+  "base_id": "py_005",
+  "code_context_ntokens": 64493,
+  "description": "1. **Purpose**: To extract and convert specific memory usage statistics from profiling data into a more readable format, specifically in megabytes.\n2. **Input**: A profiler object that contains raw memory profiling records.\n3. **Output**: A list of floats, each representing a memory statistic (peak allocated, reserved, and active bytes) converted from bytes to megabytes.\n4. **Procedure**: The function retrieves raw line records from the profiler, specifies the memory statistics to track, and then processes these records to extract the maximum values of the specified statistics. These byte values are then converted to megabytes and returned as a list.",
+  "end_byte": 8356,
+  "end_line": 245,
+  "instance_id": "py_005_ctx64k",
+  "language": "python",
+  "needle_name": "read_from_memlab",
+  "needle_token_end": 16238,
+  "needle_token_start": 16006,
+  "normalized_language": "python",
+  "path": "torch_geometric/profile/profile.py",
+  "position_ratio": 0.25,
+  "repo": "pyg-team/pytorch_geometric",
+  "repoqa_description": "Function Description:1. **Purpose**: To extract and convert specific memory usage statistics from profiling data into a more readable format, specifically in megabytes.\n2. **Input**: A profiler object that contains raw memory profiling records.\n3. **Output**: A list of floats, each representing a memory statistic (peak allocated, reserved, and active bytes) converted from bytes to megabytes.\n4. **Procedure**: The function retrieves raw line records from the profiler, specifies the memory statistics to track, and then processes these records to extract the maximum values of the specified statistics. These byte values are then converted to megabytes and returned as a list.",
+  "requested_context_tokens": 65536,
+  "sequence": 5,
+  "start_byte": 7700,
+  "start_line": 230
+}

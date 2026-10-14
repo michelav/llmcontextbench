@@ -1,0 +1,242 @@
+{
+  "context_builder": "repoqa-native",
+  "context_type": "repoqa_structured_code_context",
+  "files": [
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/nn/conv/supergat_conv.py",
+      "symbols": [
+        {
+          "children": [
+            {
+              "children": [],
+              "code": "def message(self, edge_index_i: Tensor, x_i: Tensor, x_j: Tensor,\n                size_i: Optional[int]) -> Tensor:\n        alpha = self.get_attention(edge_index_i, x_i, x_j, num_nodes=size_i)\n        alpha = F.dropout(alpha, p=self.dropout, training=self.training)\n        return x_j * alpha.view(-1, self.heads, 1)",
+              "documentation": null,
+              "end_line": 258,
+              "kind": "method",
+              "name": "message",
+              "parent_id": "torch_geometric/nn/conv/supergat_conv.py#class:SuperGATConv:25",
+              "parent_name": "SuperGATConv",
+              "qualified_name": "SuperGATConv.message",
+              "signature": "def message(self, edge_index_i: Tensor, x_i: Tensor, x_j: Tensor,\n                size_i: Optional[int]) -> Tensor",
+              "start_line": 254,
+              "symbol_id": "torch_geometric/nn/conv/supergat_conv.py#method:SuperGATConv.message:254"
+            },
+            {
+              "children": [],
+              "code": "def negative_sampling(self, edge_index: Tensor, num_nodes: int,\n                          batch: OptTensor = None) -> Tensor:\n\n        num_neg_samples = int(self.neg_sample_ratio * self.edge_sample_ratio *\n                              edge_index.size(1))\n\n        if not self.is_undirected and not is_undirected(\n                edge_index, num_nodes=num_nodes):\n            edge_index = to_undirected(edge_index, num_nodes=num_nodes)\n\n        if batch is None:\n            neg_edge_index = negative_sampling(edge_index, num_nodes,\n                                               num_neg_samples=num_neg_samples)\n        else:\n            neg_edge_index = batched_negative_sampling(\n                edge_index, batch, num_neg_samples=num_neg_samples)\n\n        return neg_edge_index",
+              "documentation": null,
+              "end_line": 277,
+              "kind": "method",
+              "name": "negative_sampling",
+              "parent_id": "torch_geometric/nn/conv/supergat_conv.py#class:SuperGATConv:25",
+              "parent_name": "SuperGATConv",
+              "qualified_name": "SuperGATConv.negative_sampling",
+              "signature": "def negative_sampling(self, edge_index: Tensor, num_nodes: int,\n                          batch: OptTensor = None) -> Tensor",
+              "start_line": 260,
+              "symbol_id": "torch_geometric/nn/conv/supergat_conv.py#method:SuperGATConv.negative_sampling:260"
+            },
+            {
+              "children": [],
+              "code": "def positive_sampling(self, edge_index: Tensor) -> Tensor:\n        pos_edge_index, _ = dropout_edge(edge_index,\n                                         p=1. - self.edge_sample_ratio,\n                                         training=self.training)\n        return pos_edge_index",
+              "documentation": null,
+              "end_line": 283,
+              "kind": "method",
+              "name": "positive_sampling",
+              "parent_id": "torch_geometric/nn/conv/supergat_conv.py#class:SuperGATConv:25",
+              "parent_name": "SuperGATConv",
+              "qualified_name": "SuperGATConv.positive_sampling",
+              "signature": "def positive_sampling(self, edge_index: Tensor) -> Tensor",
+              "start_line": 279,
+              "symbol_id": "torch_geometric/nn/conv/supergat_conv.py#method:SuperGATConv.positive_sampling:279"
+            },
+            {
+              "children": [],
+              "code": "def get_attention(self, edge_index_i: Tensor, x_i: Tensor, x_j: Tensor,\n                      num_nodes: Optional[int],\n                      return_logits: bool = False) -> Tensor:\n\n        if self.attention_type == 'MX':\n            logits = (x_i * x_j).sum(dim=-1)\n            if return_logits:\n                return logits\n\n            alpha = (x_j * self.att_l).sum(-1) + (x_i * self.att_r).sum(-1)\n            alpha = alpha * logits.sigmoid()\n\n        else:  # self.attention_type == 'SD'\n            alpha = (x_i * x_j).sum(dim=-1) / math.sqrt(self.out_channels)\n            if return_logits:\n                return alpha\n\n        alpha = F.leaky_relu(alpha, self.negative_slope)\n        alpha = softmax(alpha, edge_index_i, num_nodes=num_nodes)\n        return alpha",
+              "documentation": null,
+              "end_line": 304,
+              "kind": "method",
+              "name": "get_attention",
+              "parent_id": "torch_geometric/nn/conv/supergat_conv.py#class:SuperGATConv:25",
+              "parent_name": "SuperGATConv",
+              "qualified_name": "SuperGATConv.get_attention",
+              "signature": "def get_attention(self, edge_index_i: Tensor, x_i: Tensor, x_j: Tensor,\n                      num_nodes: Optional[int],\n                      return_logits: bool = False) -> Tensor",
+              "start_line": 285,
+              "symbol_id": "torch_geometric/nn/conv/supergat_conv.py#method:SuperGATConv.get_attention:285"
+            },
+            {
+              "children": [],
+              "code": "def get_attention_loss(self) -> Tensor:\n        r\"\"\"Computes the self-supervised graph attention loss.\"\"\"\n        if not self.training:\n            return torch.tensor([0], device=self.lin.weight.device)\n\n        return F.binary_cross_entropy_with_logits(\n            self.att_x.mean(dim=-1),\n            self.att_y,\n        )",
+              "documentation": "Computes the self-supervised graph attention loss.",
+              "end_line": 314,
+              "kind": "method",
+              "name": "get_attention_loss",
+              "parent_id": "torch_geometric/nn/conv/supergat_conv.py#class:SuperGATConv:25",
+              "parent_name": "SuperGATConv",
+              "qualified_name": "SuperGATConv.get_attention_loss",
+              "signature": "def get_attention_loss(self) -> Tensor",
+              "start_line": 306,
+              "symbol_id": "torch_geometric/nn/conv/supergat_conv.py#method:SuperGATConv.get_attention_loss:306"
+            },
+            {
+              "children": [],
+              "code": "def __repr__(self) -> str:\n        return (f'{self.__class__.__name__}({self.in_channels}, '\n                f'{self.out_channels}, heads={self.heads}, '\n                f'type={self.attention_type})')",
+              "documentation": null,
+              "end_line": 319,
+              "kind": "method",
+              "name": "__repr__",
+              "parent_id": "torch_geometric/nn/conv/supergat_conv.py#class:SuperGATConv:25",
+              "parent_name": "SuperGATConv",
+              "qualified_name": "SuperGATConv.__repr__",
+              "signature": "def __repr__(self) -> str",
+              "start_line": 316,
+              "symbol_id": "torch_geometric/nn/conv/supergat_conv.py#method:SuperGATConv.__repr__:316"
+            }
+          ],
+          "code": null,
+          "documentation": null,
+          "end_line": 319,
+          "kind": "class",
+          "name": "SuperGATConv",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "SuperGATConv",
+          "signature": null,
+          "start_line": 25,
+          "symbol_id": "torch_geometric/nn/conv/supergat_conv.py#class:SuperGATConv:25"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/nn/conv/tag_conv.py",
+      "symbols": [
+        {
+          "children": [
+            {
+              "children": [],
+              "code": "def __init__(self, in_channels: int, out_channels: int, K: int = 3,\n                 bias: bool = True, normalize: bool = True, **kwargs):\n        kwargs.setdefault('aggr', 'add')\n        super().__init__(**kwargs)\n\n        self.in_channels = in_channels\n        self.out_channels = out_channels\n        self.K = K\n        self.normalize = normalize\n\n        self.lins = torch.nn.ModuleList([\n            Linear(in_channels, out_channels, bias=False) for _ in range(K + 1)\n        ])\n\n        if bias:\n            self.bias = torch.nn.Parameter(torch.empty(out_channels))\n        else:\n            self.register_parameter('bias', None)\n\n        self.reset_parameters()",
+              "documentation": null,
+              "end_line": 64,
+              "kind": "method",
+              "name": "__init__",
+              "parent_id": "torch_geometric/nn/conv/tag_conv.py#class:TAGConv:12",
+              "parent_name": "TAGConv",
+              "qualified_name": "TAGConv.__init__",
+              "signature": "def __init__(self, in_channels: int, out_channels: int, K: int = 3,\n                 bias: bool = True, normalize: bool = True, **kwargs)",
+              "start_line": 45,
+              "symbol_id": "torch_geometric/nn/conv/tag_conv.py#method:TAGConv.__init__:45"
+            },
+            {
+              "children": [],
+              "code": "def reset_parameters(self):\n        super().reset_parameters()\n        for lin in self.lins:\n            lin.reset_parameters()\n        zeros(self.bias)",
+              "documentation": null,
+              "end_line": 70,
+              "kind": "method",
+              "name": "reset_parameters",
+              "parent_id": "torch_geometric/nn/conv/tag_conv.py#class:TAGConv:12",
+              "parent_name": "TAGConv",
+              "qualified_name": "TAGConv.reset_parameters",
+              "signature": "def reset_parameters(self)",
+              "start_line": 66,
+              "symbol_id": "torch_geometric/nn/conv/tag_conv.py#method:TAGConv.reset_parameters:66"
+            },
+            {
+              "children": [],
+              "code": "def forward(self, x: Tensor, edge_index: Adj,\n                edge_weight: OptTensor = None) -> Tensor:\n\n        if self.normalize:\n            if isinstance(edge_index, Tensor):\n                edge_index, edge_weight = gcn_norm(  # yapf: disable\n                    edge_index, edge_weight, x.size(self.node_dim),\n                    improved=False, add_self_loops=False, flow=self.flow,\n                    dtype=x.dtype)\n\n            elif isinstance(edge_index, SparseTensor):\n                edge_index = gcn_norm(  # yapf: disable\n                    edge_index, edge_weight, x.size(self.node_dim),\n                    add_self_loops=False, flow=self.flow, dtype=x.dtype)\n\n        out = self.lins[0](x)\n        for lin in self.lins[1:]:\n            # propagate_type: (x: Tensor, edge_weight: OptTensor)\n            x = self.propagate(edge_index, x=x, edge_weight=edge_weight)\n            out = out + lin.forward(x)\n\n        if self.bias is not None:\n            out = out + self.bias\n\n        return out",
+              "documentation": null,
+              "end_line": 96,
+              "kind": "method",
+              "name": "forward",
+              "parent_id": "torch_geometric/nn/conv/tag_conv.py#class:TAGConv:12",
+              "parent_name": "TAGConv",
+              "qualified_name": "TAGConv.forward",
+              "signature": "def forward(self, x: Tensor, edge_index: Adj,\n                edge_weight: OptTensor = None) -> Tensor",
+              "start_line": 72,
+              "symbol_id": "torch_geometric/nn/conv/tag_conv.py#method:TAGConv.forward:72"
+            },
+            {
+              "children": [],
+              "code": "def message(self, x_j: Tensor, edge_weight: OptTensor) -> Tensor:\n        return x_j if edge_weight is None else edge_weight.view(-1, 1) * x_j",
+              "documentation": null,
+              "end_line": 99,
+              "kind": "method",
+              "name": "message",
+              "parent_id": "torch_geometric/nn/conv/tag_conv.py#class:TAGConv:12",
+              "parent_name": "TAGConv",
+              "qualified_name": "TAGConv.message",
+              "signature": "def message(self, x_j: Tensor, edge_weight: OptTensor) -> Tensor",
+              "start_line": 98,
+              "symbol_id": "torch_geometric/nn/conv/tag_conv.py#method:TAGConv.message:98"
+            },
+            {
+              "children": [],
+              "code": "def message_and_aggregate(self, adj_t: Adj, x: Tensor) -> Tensor:\n        return spmm(adj_t, x, reduce=self.aggr)",
+              "documentation": null,
+              "end_line": 102,
+              "kind": "method",
+              "name": "message_and_aggregate",
+              "parent_id": "torch_geometric/nn/conv/tag_conv.py#class:TAGConv:12",
+              "parent_name": "TAGConv",
+              "qualified_name": "TAGConv.message_and_aggregate",
+              "signature": "def message_and_aggregate(self, adj_t: Adj, x: Tensor) -> Tensor",
+              "start_line": 101,
+              "symbol_id": "torch_geometric/nn/conv/tag_conv.py#method:TAGConv.message_and_aggregate:101"
+            },
+            {
+              "children": [],
+              "code": "def __repr__(self) -> str:\n        return (f'{self.__class__.__name__}({self.in_channels}, '\n                f'{self.out_channels}, K={self.K})')",
+              "documentation": null,
+              "end_line": 106,
+              "kind": "method",
+              "name": "__repr__",
+              "parent_id": "torch_geometric/nn/conv/tag_conv.py#class:TAGConv:12",
+              "parent_name": "TAGConv",
+              "qualified_name": "TAGConv.__repr__",
+              "signature": "def __repr__(self) -> str",
+              "start_line": 104,
+              "symbol_id": "torch_geometric/nn/conv/tag_conv.py#method:TAGConv.__repr__:104"
+            }
+          ],
+          "code": "class TAGConv(MessagePassing):\n    r\"\"\"The topology adaptive graph convolutional networks operator from the\n    `\"Topology Adaptive Graph Convolutional Networks\"\n    <https://arxiv.org/abs/1710.10370>`_ paper.\n\n    .. math::\n        \\mathbf{X}^{\\prime} = \\sum_{k=0}^K \\left( \\mathbf{D}^{-1/2} \\mathbf{A}\n        \\mathbf{D}^{-1/2} \\right)^k \\mathbf{X} \\mathbf{W}_{k},\n\n    where :math:`\\mathbf{A}` denotes the adjacency matrix and\n    :math:`D_{ii} = \\sum_{j=0} A_{ij}` its diagonal degree matrix.\n    The adjacency matrix can include other values than :obj:`1` representing\n    edge weights via the optional :obj:`edge_weight` tensor.\n\n    Args:\n        in_channels (int): Size of each input sample, or :obj:`-1` to derive\n            the size from the first input(s) to the forward method.\n        out_channels (int): Size of each output sample.\n        K (int, optional): Number of hops :math:`K`. (default: :obj:`3`)\n        bias (bool, optional): If set to :obj:`False`, the layer will not learn\n            an additive bias. (default: :obj:`True`)\n        normalize (bool, optional): Whether to apply symmetric normalization.\n            (default: :obj:`True`)\n        **kwargs (optional): Additional arguments of\n            :class:`torch_geometric.nn.conv.MessagePassing`.\n\n    Shapes:\n        - **input:**\n          node_features :math:`(|\\mathcal{V}|, F_{in})`,\n          edge_index :math:`(2, |\\mathcal{E}|)`,\n          edge_weights :math:`(|\\mathcal{E}|)` *(optional)*\n        - **output:** node features :math:`(|\\mathcal{V}|, F_{out})`\n    \"\"\"\n    def __init__(self, in_channels: int, out_channels: int, K: int = 3,\n                 bias: bool = True, normalize: bool = True, **kwargs):\n        kwargs.setdefault('aggr', 'add')\n        super().__init__(**kwargs)\n\n        self.in_channels = in_channels\n        self.out_channels = out_channels\n        self.K = K\n        self.normalize = normalize\n\n        self.lins = torch.nn.ModuleList([\n            Linear(in_channels, out_channels, bias=False) for _ in range(K + 1)\n        ])\n\n        if bias:\n            self.bias = torch.nn.Parameter(torch.empty(out_channels))\n        else:\n            self.register_parameter('bias', None)\n\n        self.reset_parameters()\n\n    def reset_parameters(self):\n        super().reset_parameters()\n        for lin in self.lins:\n            lin.reset_parameters()\n        zeros(self.bias)\n\n    def forward(self, x: Tensor, edge_index: Adj,\n                edge_weight: OptTensor = None) -> Tensor:\n\n        if self.normalize:\n            if isinstance(edge_index, Tensor):\n                edge_index, edge_weight = gcn_norm(  # yapf: disable\n                    edge_index, edge_weight, x.size(self.node_dim),\n                    improved=False, add_self_loops=False, flow=self.flow,\n                    dtype=x.dtype)\n\n            elif isinstance(edge_index, SparseTensor):\n                edge_index = gcn_norm(  # yapf: disable\n                    edge_index, edge_weight, x.size(self.node_dim),\n                    add_self_loops=False, flow=self.flow, dtype=x.dtype)\n\n        out = self.lins[0](x)\n        for lin in self.lins[1:]:\n            # propagate_type: (x: Tensor, edge_weight: OptTensor)\n            x = self.propagate(edge_index, x=x, edge_weight=edge_weight)\n            out = out + lin.forward(x)\n\n        if self.bias is not None:\n            out = out + self.bias\n\n        return out\n\n    def message(self, x_j: Tensor, edge_weight: OptTensor) -> Tensor:\n        return x_j if edge_weight is None else edge_weight.view(-1, 1) * x_j\n\n    def message_and_aggregate(self, adj_t: Adj, x: Tensor) -> Tensor:\n        return spmm(adj_t, x, reduce=self.aggr)\n\n    def __repr__(self) -> str:\n        return (f'{self.__class__.__name__}({self.in_channels}, '\n                f'{self.out_channels}, K={self.K})')",
+          "documentation": "The topology adaptive graph convolutional networks operator from the\n`\"Topology Adaptive Graph Convolutional Networks\"\n<https://arxiv.org/abs/1710.10370>`_ paper.\n\n.. math::\n    \\mathbf{X}^{\\prime} = \\sum_{k=0}^K \\left( \\mathbf{D}^{-1/2} \\mathbf{A}\n    \\mathbf{D}^{-1/2} \\right)^k \\mathbf{X} \\mathbf{W}_{k},\n\nwhere :math:`\\mathbf{A}` denotes the adjacency matrix and\n:math:`D_{ii} = \\sum_{j=0} A_{ij}` its diagonal degree matrix.\nThe adjacency matrix can include other values than :obj:`1` representing\nedge weights via the optional :obj:`edge_weight` tensor.\n\nArgs:\n    in_channels (int): Size of each input sample, or :obj:`-1` to derive\n        the size from the first input(s) to the forward method.\n    out_channels (int): Size of each output sample.\n    K (int, optional): Number of hops :math:`K`. (default: :obj:`3`)\n    bias (bool, optional): If set to :obj:`False`, the layer will not learn\n        an additive bias. (default: :obj:`True`)\n    normalize (bool, optional): Whether to apply symmetric normalization.\n        (default: :obj:`True`)\n    **kwargs (optional): Additional arguments of\n        :class:`torch_geometric.nn.conv.MessagePassing`.\n\nShapes:\n    - **input:**\n      node_features :math:`(|\\mathcal{V}|, F_{in})`,\n      edge_index :math:`(2, |\\mathcal{E}|)`,\n      edge_weights :math:`(|\\mathcal{E}|)` *(optional)*\n    - **output:** node features :math:`(|\\mathcal{V}|, F_{out})`",
+          "end_line": 106,
+          "kind": "class",
+          "name": "TAGConv",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "TAGConv",
+          "signature": "class TAGConv(MessagePassing)",
+          "start_line": 12,
+          "symbol_id": "torch_geometric/nn/conv/tag_conv.py#class:TAGConv:12"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/nn/conv/transformer_conv.py",
+      "symbols": [],
+      "unparsed_code": "import math\nimport typing\nfrom typing import Optional, Tuple, Union\n\nimport torch\nimport torch.nn.functional as F\nfrom torch import Tensor\n\nfrom torch_geometric.nn.conv import MessagePassing\nfrom torch_geometric.nn.dense.linear import Linear\nfrom torch_geometric.typing import (\n    Adj,\n    NoneType,\n    OptTensor,\n    PairTensor,\n    SparseTensor,\n)\nfrom torch_geometric.utils import softmax\n\nif typing.TYPE_CHECKING:\n    from typing import overload\nelse:\n    from torch.jit import _overload_method as overload\n\n\nclass TransformerConv(MessagePassing):\n    r\"\"\"The graph transformer operator from the `\"Masked Label Prediction:\n    Unified Message Passing Model for Semi-Supervised Classification\"\n    <https://arxiv.org/abs/2009.03509>`_ paper.\n\n    .. math::\n        \\mathbf{x}^{\\prime}_i = \\mathbf{W}_1 \\mathbf{x}_i +\n        \\sum_{j \\in \\mathcal{N}(i)} \\alpha_{i,j} \\mathbf{W}_2 \\mathbf{x}_{j},\n\n    where the attention coefficients :math:`\\alpha_{i,j}` are computed via\n    multi-head dot product attention:\n\n    .. math::\n        \\alpha_{i,j} = \\textrm{softmax} \\left(\n        \\frac{(\\mathbf{W}_3\\mathbf{x}_i)^{\\top} (\\mathbf{W}_4\\mathbf{x}_j)}\n        {\\sqrt{d}} \\right)\n\n    Args:\n        in_channels (int or tuple): Size of each input sample, or :obj:`-1` to\n            derive the size from the first input(s) to the forward method.\n            A tuple corresponds to the sizes of source and target\n            dimensionalities.\n        out_channels (int): Size of each output sample.\n        heads (int, optional): Number of multi-head-attentions.\n            (default: :obj:`1`)\n        concat (bool, optional): If set to :obj:`False`, the multi-head\n            attentions are averaged instead of concatenated.\n            (default: :obj:`True`)\n        beta (bool, optional): If set, will combine aggregation and\n            skip information via\n\n            .. math::\n                \\mathbf{x}^{\\prime}_i = \\beta_i \\mathbf{W}_1 \\mathbf{x}_i +\n                (1 - \\beta_i) \\underbrace{\\left(\\sum_{j \\in \\mathcal{N}(i)}\n                \\alpha_{i,j} \\mathbf{W}_2 \\vec{x}_j \\right)}_{=\\mathbf{m}_i}\n\n            with :math:`\\beta_i = \\textrm{sigmoid}(\\mathbf{w}_5^{\\top}\n            [ \\mathbf{W}_1 \\mathbf{x}_i, \\mathbf{m}_i, \\mathbf{W}_1\n            \\mathbf{x}_i - \\mathbf{m}_i ])` (default: :obj:`False`)\n        dropout (float, optional): Dropout probability of the normalized\n            attention coefficients which exposes each node to a stochastically\n            sampled neighborhood during training. (default: :obj:`0`)\n        edge_dim (int, optional): Edge feature dimensionality (in case\n            there are any). Edge features are added to the keys after\n            linear transformation, that is, prior to computing the\n            attention dot product. They are also added to final values\n            after the same linear transformation. The model is:\n\n            .. math::\n                \\mathbf{x}^{\\prime}_i = \\mathbf{W}_1 \\mathbf{x}_i +\n                \\sum_{j \\in \\mathcal{N}(i)} \\alpha_{i,j} \\left(\n                \\mathbf{W}_2 \\mathbf{x}_{j} + \\mathbf{W}_6 \\mathbf{e}_{ij}\n                \\right),\n\n            where the attention coefficients :math:`\\alpha_{i,j}` are now\n            computed via:\n\n            .. math::\n                \\alpha_{i,j} = \\textrm{softmax} \\left(\n                \\frac{(\\mathbf{W}_3\\mathbf{x}_i)^{\\top}\n                (\\mathbf{W}_4\\mathbf{x}_j + \\mathbf{W}_6 \\mathbf{e}_{ij})}\n                {\\sqrt{d}} \\right)\n\n            (default :obj:`None`)\n        bias (bool, optional): If set to :obj:`False`, the layer will not learn\n            an additive bias. (default: :obj:`True`)\n        root_weight (bool, optional): If set to :obj:`False`, the layer will\n            not add the transformed root node features to the output and the\n            option  :attr:`beta` is set to :obj:`False`. (default: :obj:`True`)\n        **kwargs (optional): Additional arguments of\n            :class:`torch_geometric.nn.conv.MessagePassing`.\n    \"\"\"\n    _alpha: OptTensor\n\n    def __init__(\n        self,\n        in_channels: Union[int, Tuple[int, int]],\n        out_channels: int,\n        heads: int = 1,\n        concat: bool = True,\n        beta: bool = False,\n        dropout: float = 0.,\n        edge_dim: Optional[int] = None,\n        bias: bool = True,\n        root_weight: bool = True,\n        **kwargs,\n    ):\n        kwargs.setdefault('aggr', 'add')\n        super().__init__(node_dim=0, **kwargs)\n\n        self.in_channels = in_channels\n        self.out_channels = out_channels\n        self.heads = heads\n        self.beta = beta and root_weight\n        self.root_weight = root_weight\n        self.concat = concat\n        self.dropout = dropout\n        self.edge_dim = edge_dim\n        self._alpha = None\n\n        if isinstance(in_channels, int):\n            in_channels = (in_channels, in_channels)\n\n        self.lin_key = Linear(in_channels[0], heads * out_channels)\n        self.lin_query = Linear(in_channels[1], heads * out_channels)\n        self.lin_value = Linear(in_channels[0], heads * out_channels)\n..."
+    }
+  ],
+  "metadata": {
+    "actual_code_context_tokens": 4030,
+    "base_id": "py_004",
+    "instance_id": "py_004_ctx4k",
+    "language": "python",
+    "normalized_language": "python",
+    "position_ratio": 0.15,
+    "requested_context_tokens": 4096,
+    "sequence": 4
+  },
+  "repository": "pyg-team/pytorch_geometric",
+  "workspace_id": "py_004_ctx4k"
+}

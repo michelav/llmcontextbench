@@ -1,0 +1,3296 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:// Path: langchain/src/chains/query_constructor/ir.ts
+import { VectorStore } from "@langchain/core/vectorstores";
+
+/**
+ * Represents logical AND operator.
+ */
+export type AND = "and";
+/**
+ * Represents logical OR operator.
+ */
+export type OR = "or";
+/**
+ * Represents logical NOT operator.
+ */
+export type NOT = "not";
+
+/**
+ * Represents a logical operator which can be AND, OR, or NOT.
+ */
+export type Operator = AND | OR | NOT;
+
+/**
+ * Represents equality comparison operator.
+ */
+export type EQ = "eq";
+/**
+ * Represents inequality comparison operator.
+ */
+export type NE = "ne";
+/**
+ * Represents less than comparison operator.
+ */
+export type LT = "lt";
+/**
+ * Represents greater than comparison operator.
+ */
+export type GT = "gt";
+/**
+ * Represents less than or equal to comparison operator.
+ */
+export type LTE = "lte";
+/**
+ * Represents greater than or equal to comparison operator.
+ */
+export type GTE = "gte";
+
+/**
+ * Represents a comparison operator which can be EQ, NE, LT, GT, LTE, or
+ * GTE.
+ */
+export type Comparator = EQ | NE | LT | GT | LTE | GTE;
+
+export const Operators: { [key: string]: Operator } = {
+  and: "and",
+  or: "or",
+  not: "not",
+};
+
+export const Comparators: { [key: string]: Comparator } = {
+  eq: "eq",
+  ne: "ne",
+  lt: "lt",
+  gt: "gt",
+  lte: "lte",
+  gte: "gte",
+};
+
+/**
+ * Represents the result of visiting an operation or comparison
+ * expression.
+ */
+export type VisitorResult = VisitorOperationResult | VisitorComparisonResult;
+
+/**
+ * Represents the result of visiting an operation expression.
+ */
+export type VisitorOperationResult = {
+  [operator: string]: VisitorResult[];
+};
+
+/**
+ * Represents the result of visiting a comparison expression.
+ */
+export type VisitorComparisonResult = {
+  [attr: string]: {
+    [comparator: string]: string | number;
+  };
+};
+
+/**
+ * Represents the result of visiting a structured query expression.
+ */
+export type VisitorStructuredQueryResult = {
+...
+// Path: langchain/src/chains/query_constructor/parser.ts
+import {
+  Comparator,
+  Comparators,
+  Comparison,
+  FilterDirective,
+  Operation,
+  Operator,
+  Operators,
+} from "./ir.js";
+import {
+  CallExpressionType,
+  ExpressionParser,
+  ParsedType,
+} from "../../output_parsers/expression.js";
+
+/**
+ * A type representing the possible types that can be traversed in an
+ * expression.
+ */
+export type TraverseType =
+  | boolean
+  | Operation
+  | Comparison
+  | string
+  | number
+  | { [key: string]: TraverseType }
+  | TraverseType[];
+
+/**
+ * A class for transforming and parsing query expressions.
+ */
+export class QueryTransformer {
+  constructor(
+    public allowedComparators: Comparator[] = [],
+    public allowedOperators: Operator[] = []
+  ) {}
+
+  /**
+   * Matches a function name to a comparator or operator. Throws an error if
+   * the function name is unknown or not allowed.
+   * @param funcName The function name to match.
+   * @returns The matched function name.
+   */
+  private matchFunctionName(funcName: string) {
+    if (funcName in Comparators) {
+      if (this.allowedComparators.length > 0) {
+        if (this.allowedComparators.includes(funcName as Comparator)) {
+          return funcName;
+        } else {
+          throw new Error("Received comparator not allowed");
+        }
+      } else {
+        return funcName;
+      }
+    }
+    if (funcName in Operators) {
+      if (this.allowedOperators.length > 0) {
+        if (this.allowedOperators.includes(funcName as Operator)) {
+          return funcName;
+        } else {
+          throw new Error("Received operator not allowed");
+        }
+      } else {
+        return funcName;
+      }
+    }
+    throw new Error("Unknown function name");
+  }
+
+  /**
+   * Transforms a parsed expression into an operation or comparison. Throws
+   * an error if the parsed expression is not supported.
+   * @param parsed The parsed expression to transform.
+   * @returns The transformed operation or comparison.
+   */
+  private transform(parsed: CallExpressionType): Operation | Comparison {
+    const traverse = (node: ParsedType): TraverseType => {
+      switch (node.type) {
+        case "call_expression": {
+          if (typeof node.funcCall !== "string") {
+            throw new Error(
+              "Property access expression and element access expression not supported"
+            );
+          }
+          const funcName = this.matchFunctionName(node.funcCall);
+          if (funcName in Operators) {
+            return new Operation(
+              funcName as Operator,
+              node.args?.map((arg) => traverse(arg)) as FilterDirective[]
+            );
+          }
+          if (funcName in Comparators) {
+            if (node.args && node.args.length === 2) {
+              return new Comparison(
+                funcName as Comparator,
+                traverse(node.args[0]) as string,
+                traverse(node.args[1]) as string | number
+              );
+            }
+            throw new Error("Comparator must have exactly 2 arguments");
+          }
+          throw new Error("Function name neither operator nor comparator");
+        }
+        case "string_literal": {
+          return node.value;
+        }
+        case "numeric_literal": {
+          return node.value;
+        }
+        case "array_literal": {
+          return node.values.map((value) => traverse(value));
+        }
+        case "object_literal": {
+          return node.values.reduce((acc, value) => {
+            acc[value.identifier] = traverse(value.value);
+            return acc;
+          }, {} as { [key: string]: TraverseType });
+        }
+        case "boolean_literal": {
+          return node.value;
+        }
+        default: {
+          throw new Error("Unknown node type");
+        }
+      }
+    };
+    return traverse(parsed) as Operation | Comparison;
+  }
+
+  /**
+   * Parses an expression and returns the transformed operation or
+   * comparison. Throws an error if the expression cannot be parsed.
+   * @param expression The expression to parse.
+   * @returns A Promise that resolves to the transformed operation or comparison.
+   */
+  async parse(expression: string): Promise<Operation | Comparison> {
+    const expressionParser = new ExpressionParser();
+    const parsed = (await expressionParser.parse(
+      expression
+    )) as CallExpressionType;
+    if (!parsed) {
+      throw new Error("Could not parse expression");
+    }
+    return this.transform(parsed);
+  }
+}
+
+// Path: langchain/src/chains/query_constructor/prompt.ts
+import { PromptTemplate } from "@langchain/core/prompts";
+
+export const SONG_DATA_SOURCE = `\
+\`\`\`json
+{
+    "content": "Lyrics of a song",
+    "attributes": {
+        "artist": {
+            "type": "string",
+            "description": "Name of the song artist"
+        },
+        "length": {
+            "type": "integer",
+            "description": "Length of the song in seconds"
+        },
+        "genre": {
+            "type": "string",
+            "description": "The song genre, one of 'pop', 'rock' or 'rap'"
+        }
+    }
+}
+\`\`\`\
+`
+  .replaceAll("{", "{{")
+  .replaceAll("}", "}}");
+
+export const FULL_ANSWER = `\
+\`\`\`json
+{{
+    "query": "teenager love",
+    "filter": "and(or(eq(\\"artist\\", \\"Taylor Swift\\"), eq(\\"artist\\", \\"Katy Perry\\")), \
+lt(\\"length\\", 180), eq(\\"genre\\", \\"pop\\"))"
+}}`;
+
+export const NO_FILTER_ANSWER = `\
+\`\`\`json
+{{
+    "query": "",
+    "filter": "NO_FILTER"
+}}
+\`\`\`\
+`;
+
+export const DEFAULT_EXAMPLES = [
+  {
+    i: "1",
+    data_source: SONG_DATA_SOURCE,
+    user_query:
+      "What are songs by Taylor Swift or Katy Perry about teenage romance under 3 minutes long in the dance pop genre",
+    structured_request: FULL_ANSWER,
+  },
+  {
+    i: "2",
+    data_source: SONG_DATA_SOURCE,
+    user_query: "What are songs that were not published on Spotify",
+    structured_request: NO_FILTER_ANSWER,
+  },
+];
+
+export const EXAMPLE_PROMPT_TEMPLATE = `\
+<< Example {i}. >>
+Data Source:
+{data_source}
+
+User Query:
+{user_query}
+
+Structured Request:
+{structured_request}
+`;
+
+export const EXAMPLE_PROMPT = /* #__PURE__ */ new PromptTemplate({
+  inputVariables: ["i", "data_source", "user_query", "structured_request"],
+  template: EXAMPLE_PROMPT_TEMPLATE,
+});
+
+export const DEFAULT_SCHEMA = `\
+<< Structured Request Schema >>
+When responding use a markdown code snippet with a JSON object formatted in the \
+following schema:
+
+\`\`\`json
+{{{{
+    "query": string \\ text string to compare to document contents
+    "filter": string \\ logical condition statement for filtering documents
+}}}}
+\`\`\`
+
+The query string should contain only text that is expected to match the contents of \
+documents. Any conditions in the filter should not be mentioned in the query as well.
+
+A logical condition statement is composed of one or more comparison and logical \
+operation statements.
+
+A comparison statement takes the form: \`comp(attr, val)\`:
+- \`comp\` ({allowed_comparators}): comparator
+- \`attr\` (string):  name of attribute to apply the comparison to
+- \`val\` (string): is the comparison value
+
+A logical operation statement takes the form \`op(statement1, statement2, ...)\`:
+- \`op\` ({allowed_operators}): logical operator
+- \`statement1\`, \`statement2\`, ... (comparison statements or logical operation \
+statements): one or more statements to apply the operation to
+
+Make sure that you only use the comparators and logical operators listed above and \
+no others.
+Make sure that filters only refer to attributes that exist in the data source.
+Make sure that filters only use the attributed names with its function names if there are functions applied on them.
+Make sure that filters only use format \`YYYY-MM-DD\` when handling timestamp data typed values.
+Make sure that filters take into account the descriptions of attributes and only make \
+comparisons that are feasible given the type of data being stored.
+Make sure that filters are only used as needed. If there are no filters that should be \
+applied return "NO_FILTER" for the filter value.\
+`;
+
+export const DEFAULT_PREFIX = `\
+Your goal is to structure the user's query to match the request schema provided below.
+
+{schema}\
+`;
+
+export const DEFAULT_SUFFIX = `\
+<< Example {i}. >>
+Data Source:
+\`\`\`json
+{{{{
+    "content": "{content}",
+    "attributes": {attributes}
+}}}}
+\`\`\`
+
+User Query:
+{{query}}
+
+Structured Request:
+`;
+
+// Path: langchain/src/chains/query_constructor/index.ts
+import type { BaseLanguageModelInterface } from "@langchain/core/language_models/base";
+import { z } from "zod";
+import {
+  Example,
+  interpolateFString,
+  FewShotPromptTemplate,
+} from "@langchain/core/prompts";
+import { InputValues } from "@langchain/core/utils/types";
+import { QueryTransformer, TraverseType } from "./parser.js";
+import {
+  Comparator,
+  Comparators,
+  Operator,
+  Operators,
+  StructuredQuery,
+} from "./ir.js";
+import {
+  DEFAULT_EXAMPLES,
+  DEFAULT_PREFIX,
+  DEFAULT_SCHEMA,
+  DEFAULT_SUFFIX,
+  EXAMPLE_PROMPT,
+} from "./prompt.js";
+import { LLMChain } from "../llm_chain.js";
+import { AsymmetricStructuredOutputParser } from "../../output_parsers/structured.js";
+import { AttributeInfo } from "../../schema/query_constructor.js";
+
+export { QueryTransformer, type TraverseType };
+export {
+  DEFAULT_EXAMPLES,
+  DEFAULT_PREFIX,
+  DEFAULT_SCHEMA,
+  DEFAULT_SUFFIX,
+  EXAMPLE_PROMPT,
+};
+
+const queryInputSchema = /* #__PURE__ */ z.object({
+  query: /* #__PURE__ */ z
+    .string()
+    .describe("text string to compare to document contents"),
+  filter: /* #__PURE__ */ z
+    .string()
+    .optional()
+    .describe("logical condition statement for filtering documents"),
+});
+
+/**
+ * A class that extends AsymmetricStructuredOutputParser to parse
+ * structured query output.
+ */
+export class StructuredQueryOutputParser extends AsymmetricStructuredOutputParser<
+  typeof queryInputSchema,
+  StructuredQuery
+> {
+  lc_namespace = ["langchain", "chains", "query_constructor"];
+
+  queryTransformer: QueryTransformer;
+
+  constructor(fields: {
+    allowedComparators: Comparator[];
+    allowedOperators: Operator[];
+  }) {
+    super({ ...fields, inputSchema: queryInputSchema });
+
+    const { allowedComparators, allowedOperators } = fields;
+    this.queryTransformer = new QueryTransformer(
+      allowedComparators,
+      allowedOperators
+    );
+  }
+
+  /**
+   * Processes the output of a structured query.
+   * @param query The query string.
+   * @param filter The filter condition.
+   * @returns A Promise that resolves to a StructuredQuery instance.
+   */
+  async outputProcessor({
+    query,
+    filter,
+  }: z.infer<typeof queryInputSchema>): Promise<StructuredQuery> {
+    let myQuery = query;
+    if (myQuery.length === 0) {
+      myQuery = " ";
+    }
+    if (filter === "NO_FILTER" || filter === undefined) {
+      return new StructuredQuery(query);
+    } else {
+      const parsedFilter = await this.queryTransformer.parse(filter);
+      return new StructuredQuery(query, parsedFilter);
+    }
+  }
+
+  /**
+   * Creates a new StructuredQueryOutputParser instance from the provided
+   * components.
+   * @param allowedComparators An array of allowed Comparator instances.
+   * @param allowedOperators An array of allowed Operator instances.
+   * @returns A new StructuredQueryOutputParser instance.
+   */
+  static fromComponents(
+    allowedComparators: Comparator[] = [],
+    allowedOperators: Operator[] = []
+  ) {
+    return new StructuredQueryOutputParser({
+      allowedComparators,
+      allowedOperators,
+    });
+  }
+}
+
+export function formatAttributeInfo(info: AttributeInfo[]) {
+  const infoObj = info.reduce((acc, attr) => {
+    acc[attr.name] = {
+      type: attr.type,
+      description: attr.description,
+    };
+    return acc;
+  }, {} as { [name: string]: { type: string; description: string } });
+
+  return JSON.stringify(infoObj, null, 2)
+    .replaceAll("{", "{{")
+    .replaceAll("}", "}}");
+}
+
+const defaultExample = DEFAULT_EXAMPLES.map((EXAMPLE) => EXAMPLE as Example);
+
+function _getPrompt(
+  documentContents: string,
+  attributeInfo: AttributeInfo[],
+  allowedComparators?: Comparator[],
+  allowedOperators?: Operator[],
+  examples: InputValues[] = defaultExample
+) {
+  const myAllowedComparators: Comparator[] =
+    allowedComparators ?? Object.values(Comparators);
+  const myAllowedOperators: Operator[] =
+    allowedOperators ?? Object.values(Operators);
+  const attributeJSON = formatAttributeInfo(attributeInfo);
+  const schema = interpolateFString(DEFAULT_SCHEMA, {
+    allowed_comparators: myAllowedComparators.join(" | "),
+    allowed_operators: myAllowedOperators.join(" | "),
+  });
+  const prefix = interpolateFString(DEFAULT_PREFIX, {
+    schema,
+  });
+  const suffix = interpolateFString(DEFAULT_SUFFIX, {
+    i: examples.length + 1,
+    content: documentContents,
+    attributes: attributeJSON,
+  });
+
+  const outputParser = StructuredQueryOutputParser.fromComponents(
+    allowedComparators,
+    allowedOperators
+  );
+
+  return new FewShotPromptTemplate({
+    examples,
+    examplePrompt: EXAMPLE_PROMPT,
+    inputVariables: ["query"],
+    suffix,
+    prefix,
+    outputParser,
+  });
+}
+
+/**
+ * A type that represents options for the query constructor chain.
+ */
+export type QueryConstructorChainOptions = {
+  llm: BaseLanguageModelInterface;
+  documentContents: string;
+  attributeInfo: AttributeInfo[];
+  examples?: InputValues[];
+  allowedComparators?: Comparator[];
+  allowedOperators?: Operator[];
+};
+
+export function loadQueryConstructorChain(opts: QueryConstructorChainOptions) {
+  const prompt = _getPrompt(
+    opts.documentContents,
+    opts.attributeInfo,
+    opts.allowedComparators,
+    opts.allowedOperators,
+    opts.examples
+  );
+  return new LLMChain({
+    llm: opts.llm,
+    prompt,
+  });
+}
+
+// Path: langchain/src/retrievers/self_query/utils.ts
+/**
+ * Checks if the provided argument is an object and not an array.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function isObject(obj: any): obj is object {
+  return obj && typeof obj === "object" && !Array.isArray(obj);
+}
+
+/**
+ * Checks if a provided filter is empty. The filter can be a function, an
+ * object, a string, or undefined.
+ */
+export 
+function isFilterEmpty(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  filter: ((q: any) => any) | object | string | undefined
+): filter is undefined {
+  if (!filter) return true;
+  // for Milvus
+  if (typeof filter === "string" && filter.length > 0) {
+    return false;
+  }
+  if (typeof filter === "function") {
+    return false;
+  }
+  return isObject(filter) && Object.keys(filter).length === 0;
+}
+
+/**
+ * Checks if the provided value is an integer.
+ */
+export function isInt(value: unknown): boolean {
+  if (typeof value === "number") {
+    return value % 1 === 0;
+  } else if (typeof value === "string") {
+    const numberValue = parseInt(value, 10);
+    return (
+      !Number.isNaN(numberValue) &&
+      numberValue % 1 === 0 &&
+      numberValue.toString() === value
+    );
+  }
+
+  return false;
+}
+
+/**
+ * Checks if the provided value is a floating-point number.
+ */
+export function isFloat(value: unknown): boolean {
+  if (typeof value === "number") {
+    return value % 1 !== 0;
+  } else if (typeof value === "string") {
+    const numberValue = parseFloat(value);
+    return (
+      !Number.isNaN(numberValue) &&
+      numberValue % 1 !== 0 &&
+      numberValue.toString() === value
+    );
+  }
+
+  return false;
+}
+
+/**
+ * Checks if the provided value is a string that cannot be parsed into a
+ * number.
+ */
+export function isString(value: unknown): boolean {
+  return (
+    typeof value === "string" &&
+    (Number.isNaN(parseFloat(value)) || parseFloat(value).toString() !== value)
+  );
+}
+
+/**
+ * Casts a value that might be string or number to actual string or number.
+ * Since LLM might return back an integer/float as a string, we need to cast
+ * it back to a number, as many vector databases can't handle number as string
+ * values as a comparator.
+ */
+export function castValue(input: unknown): string | number {
+  let value;
+  if (isString(input)) {
+    value = input as string;
+  } else if (isInt(input)) {
+    value = parseInt(input as string, 10);
+  } else if (isFloat(input)) {
+    value = parseFloat(input as string);
+  } else {
+    throw new Error("Unsupported value type");
+  }
+
+  return value;
+}
+
+// Path: langchain/src/retrievers/self_query/base.ts
+import { VectorStore } from "@langchain/core/vectorstores";
+import {
+  Comparator,
+  Comparators,
+  Comparison,
+  Operation,
+  Operator,
+  Operators,
+  StructuredQuery,
+  Visitor,
+  VisitorComparisonResult,
+  VisitorOperationResult,
+  VisitorResult,
+  VisitorStructuredQueryResult,
+} from "../../chains/query_constructor/ir.js";
+import { isFilterEmpty, castValue } from "./utils.js";
+
+/**
+ * Options object for the BasicTranslator class. Specifies the allowed
+ * operators and comparators.
+ */
+export type TranslatorOpts = {
+  allowedOperators: Operator[];
+  allowedComparators: Comparator[];
+};
+
+/**
+ * Abstract class that provides a blueprint for creating specific
+ * translator classes. Defines two abstract methods: formatFunction and
+ * mergeFilters.
+ */
+export abstract class BaseTranslator<
+  T extends VectorStore = VectorStore
+> extends Visitor<T> {
+  /**
+   * Formats a given function (either an operator or a comparator) into a
+   * string.
+   * @param func The function to format.
+   * @returns Formatted string representation of the function.
+   */
+  abstract formatFunction(func: Operator | Comparator): string;
+
+  /**
+   * Merges two filters into one, using a specified merge type.
+   * @param defaultFilter The default filter.
+   * @param generatedFilter The generated filter.
+   * @param mergeType The type of merge to perform. Can be 'and', 'or', or 'replace'.
+   * @param forceDefaultFilter If true, the default filter will be used even if the generated filter is not empty.
+   * @returns The merged filter, or undefined if both filters are empty.
+   */
+  abstract mergeFilters(
+    defaultFilter: this["VisitStructuredQueryOutput"]["filter"] | undefined,
+    generatedFilter: this["VisitStructuredQueryOutput"]["filter"] | undefined,
+    mergeType?: "and" | "or" | "replace",
+    forceDefaultFilter?: boolean
+  ): this["VisitStructuredQueryOutput"]["filter"] | undefined;
+}
+
+/**
+ * Class that extends the BaseTranslator class and provides concrete
+ * implementations for the abstract methods. Also declares three types:
+ * VisitOperationOutput, VisitComparisonOutput, and
+ * VisitStructuredQueryOutput, which are used as the return types for the
+ * visitOperation, visitComparison, and visitStructuredQuery methods
+ * respectively.
+ */
+export class BasicTranslator<
+  T extends VectorStore = VectorStore
+> extends BaseTranslator<T> {
+  declare VisitOperationOutput: VisitorOperationResult;
+
+  declare VisitComparisonOutput: VisitorComparisonResult;
+
+  declare VisitStructuredQueryOutput: VisitorStructuredQueryResult;
+
+  allowedOperators: Operator[];
+
+  allowedComparators: Comparator[];
+
+  constructor(opts?: TranslatorOpts) {
+    super();
+    this.allowedOperators = opts?.allowedOperators ?? [
+      Operators.and,
+      Operators.or,
+    ];
+    this.allowedComparators = opts?.allowedComparators ?? [
+      Comparators.eq,
+      Comparators.ne,
+      Comparators.gt,
+      Comparators.gte,
+      Comparators.lt,
+      Comparators.lte,
+    ];
+  }
+
+  formatFunction(func: Operator | Comparator): string {
+    if (func in Comparators) {
+      if (
+        this.allowedComparators.length > 0 &&
+        this.allowedComparators.indexOf(func as Comparator) === -1
+      ) {
+        throw new Error(
+          `Comparator ${func} not allowed. Allowed operators: ${this.allowedComparators.join(
+            ", "
+          )}`
+        );
+      }
+    } else if (func in Operators) {
+      if (
+        this.allowedOperators.length > 0 &&
+        this.allowedOperators.indexOf(func as Operator) === -1
+      ) {
+        throw new Error(
+          `Operator ${func} not allowed. Allowed operators: ${this.allowedOperators.join(
+            ", "
+          )}`
+        );
+      }
+    } else {
+      throw new Error("Unknown comparator or operator");
+    }
+    return `$${func}`;
+  }
+
+  /**
+   * Visits an operation and returns a result.
+   * @param operation The operation to visit.
+   * @returns The result of visiting the operation.
+   */
+  visitOperation(operation: Operation): this["VisitOperationOutput"] {
+    const args = operation.args?.map((arg) =>
+      arg.accept(this)
+    ) as VisitorResult[];
+    return {
+      [this.formatFunction(operation.operator)]: args,
+    };
+  }
+
+  /**
+   * Visits a comparison and returns a result.
+   * @param comparison The comparison to visit.
+   * @returns The result of visiting the comparison.
+   */
+  visitComparison(comparison: Comparison): this["VisitComparisonOutput"] {
+    return {
+      [comparison.attribute]: {
+        [this.formatFunction(comparison.comparator)]: castValue(
+          comparison.value
+        ),
+      },
+    };
+  }
+
+  /**
+   * Visits a structured query and returns a result.
+   * @param query The structured query to visit.
+   * @returns The result of visiting the structured query.
+   */
+  visitStructuredQuery(
+    query: StructuredQuery
+  ): this["VisitStructuredQueryOutput"] {
+    let nextArg = {};
+    if (query.filter) {
+      nextArg = {
+        filter: query.filter.accept(this),
+      };
+    }
+    return nextArg;
+  }
+
+  mergeFilters(
+    defaultFilter: VisitorStructuredQueryResult["filter"] | undefined,
+    generatedFilter: VisitorStructuredQueryResult["filter"] | undefined,
+    mergeType = "and",
+    forceDefaultFilter = false
+  ): VisitorStructuredQueryResult["filter"] | undefined {
+    if (isFilterEmpty(defaultFilter) && isFilterEmpty(generatedFilter)) {
+      return undefined;
+    }
+    if (isFilterEmpty(defaultFilter) || mergeType === "replace") {
+      if (isFilterEmpty(generatedFilter)) {
+        return undefined;
+      }
+      return generatedFilter;
+    }
+    if (isFilterEmpty(generatedFilter)) {
+      if (forceDefaultFilter) {
+        return defaultFilter;
+      }
+      if (mergeType === "and") {
+        return undefined;
+      }
+      return defaultFilter;
+    }
+    if (mergeType === "and") {
+      return {
+        $and: [defaultFilter, generatedFilter],
+      };
+    } else if (mergeType === "or") {
+      return {
+        $or: [defaultFilter, generatedFilter],
+      };
+    } else {
+      throw new Error("Unknown merge type");
+    }
+  }
+}
+
+// Path: langchain/src/chains/query_constructor/tests/query_chain.int.test.ts
+import { test } from "@jest/globals";
+import { OpenAI } from "@langchain/openai";
+import { loadQueryConstructorChain } from "../index.js";
+import {
+  Comparators,
+  Comparison,
+  Operation,
+  Operators,
+  StructuredQuery,
+} from "../ir.js";
+import { AttributeInfo } from "../../../schema/query_constructor.js";
+import { BasicTranslator } from "../../../retrievers/self_query/base.js";
+
+test("Query Chain Test", async () => {
+  const sq1 = new StructuredQuery(
+    "",
+    new Comparison(Comparators.lt, "length", 90)
+  );
+  const sq3 = new StructuredQuery(
+    "",
+    new Comparison(Comparators.gt, "rating", 8.5)
+  );
+  const sq4 = new StructuredQuery(
+    "",
+    new Comparison(Comparators.eq, "director", "Greta Gerwig")
+  );
+  const sq5 = new StructuredQuery(
+    "",
+    new Operation(Operators.and, [
+      new Operation(Operators.or, [
+        new Comparison(Comparators.eq, "genre", "comedy"),
+        new Comparison(Comparators.eq, "genre", "drama"),
+      ]),
+      new Comparison(Comparators.lt, "length", 90),
+    ])
+  );
+
+  const filter1 = { length: { $lt: 90 } };
+  const filter3 = { rating: { $gt: 8.5 } };
+  const filter4 = { director: { $eq: "Greta Gerwig" } };
+  const filter5 = {
+    $and: [
+      { $or: [{ genre: { $eq: "comedy" } }, { genre: { $eq: "drama" } }] },
+      { length: { $lt: 90 } },
+    ],
+  };
+
+  const attributeInfo: AttributeInfo[] = [
+    {
+      name: "genre",
+      description: "The genre of the movie",
+      type: "string or array of strings",
+    },
+    {
+      name: "year",
+      description: "The year the movie was released",
+      type: "number",
+    },
+    {
+      name: "director",
+      description: "The director of the movie",
+      type: "string",
+    },
+    {
+      name: "rating",
+      description: "The rating of the movie (1-10)",
+      type: "number",
+    },
+    {
+      name: "length",
+      description: "The length of the movie in minutes",
+      type: "number",
+    },
+  ];
+  const documentContents = "Brief summary of a movie";
+
+  const allowedComparators = Object.values(Comparators);
+  const allowedOperators = Object.values(Operators);
+  const llm = new OpenAI({ modelName: "gpt-3.5-turbo", temperature: 0 });
+  const queryChain = loadQueryConstructorChain({
+    llm,
+    documentContents,
+    attributeInfo,
+    allowedComparators,
+    allowedOperators,
+  });
+
+  const c1 = queryChain.call({
+    query: "Which movies are less than 90 minutes?",
+  });
+  const c3 = queryChain.call({
+    query: "Which movies are rated higher than 8.5?",
+  });
+  const c4 = queryChain.call({
+    query: "Which movies are directed by Greta Gerwig?",
+  });
+  const c5 = queryChain.call({
+    query:
+      "Which movies are either comedy or drama and are less than 90 minutes?",
+  });
+
+  const [
+    { [queryChain.outputKey]: r1 },
+    { [queryChain.outputKey]: r3 },
+    { [queryChain.outputKey]: r4 },
+    { [queryChain.outputKey]: r5 },
+  ] = await Promise.all([c1, c3, c4, c5]);
+
+  expect(r1).toMatchObject(sq1);
+  expect(r3).toMatchObject(sq3);
+  expect(r4).toMatchObject(sq4);
+  expect(r5).toMatchObject(sq5);
+  const testTranslator = new BasicTranslator();
+
+  const { filter: parsedFilter1 } = testTranslator.visitStructuredQuery(
+    r1 as StructuredQuery
+  );
+  const { filter: parsedFilter3 } = testTranslator.visitStructuredQuery(
+    r3 as StructuredQuery
+  );
+  const { filter: parsedFilter4 } = testTranslator.visitStructuredQuery(
+    r4 as StructuredQuery
+  );
+  const { filter: parsedFilter5 } = testTranslator.visitStructuredQuery(
+    r5 as StructuredQuery
+  );
+
+  expect(parsedFilter1).toMatchObject(filter1);
+  expect(parsedFilter3).toMatchObject(filter3);
+  expect(parsedFilter4).toMatchObject(filter4);
+  expect(parsedFilter5).toMatchObject(filter5);
+});
+
+// Path: langchain/src/chains/query_constructor/tests/query_parser.test.ts
+import { test } from "@jest/globals";
+import { StructuredQueryOutputParser } from "../index.js";
+import {
+  Comparators,
+  Comparison,
+  Operation,
+  Operators,
+  StructuredQuery,
+} from "../ir.js";
+
+const correctQuery = new StructuredQuery(
+  "teenager love",
+  new Operation(Operators.and, [
+    new Operation(Operators.or, [
+      new Comparison(Comparators.eq, "artist", "Taylor Swift"),
+      new Comparison(Comparators.eq, "artist", "Katy Perry"),
+    ]),
+    new Comparison(Comparators.lt, "length", 180),
+    new Comparison(Comparators.eq, "genre", "pop"),
+  ])
+);
+
+test("StructuredQueryOutputParser test", async () => {
+  const queryParser = StructuredQueryOutputParser.fromComponents(
+    [
+      Comparators.eq,
+      Comparators.gte,
+      Comparators.gt,
+      Comparators.lte,
+      Comparators.lt,
+    ],
+    [Operators.and, Operators.or, Operators.not]
+  );
+
+  const exampleOutput = `json\`\`\`
+{
+    "query": "teenager love",
+    "filter": "and(or(eq(\\"artist\\", \\"Taylor Swift\\"), eq(\\"artist\\", \\"Katy Perry\\")), lt(\\"length\\", 180), eq(\\"genre\\", \\"pop\\"))"
+}
+\`\`\``;
+
+  const parsedOutput = await queryParser.parse(exampleOutput);
+  expect(parsedOutput).toMatchObject(correctQuery);
+});
+
+// Path: langchain/src/chains/question_answering/tests/load.int.test.ts
+import { test } from "@jest/globals";
+import { OpenAI } from "@langchain/openai";
+import { Document } from "@langchain/core/documents";
+import {
+  loadQAMapReduceChain,
+  loadQARefineChain,
+  loadQAStuffChain,
+} from "../load.js";
+
+test("Test loadQAStuffChain", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const chain = loadQAStuffChain(model);
+  const docs = [
+    new Document({ pageContent: "foo" }),
+    new Document({ pageContent: "bar" }),
+    new Document({ pageContent: "baz" }),
+  ];
+  const res = await chain.call({ input_documents: docs, question: "Whats up" });
+  console.log({ res });
+});
+
+test("Test loadQAMapReduceChain", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const chain = loadQAMapReduceChain(model);
+  const docs = [
+    new Document({ pageContent: "foo" }),
+    new Document({ pageContent: "bar" }),
+    new Document({ pageContent: "baz" }),
+  ];
+  const res = await chain.call({ input_documents: docs, question: "Whats up" });
+  console.log({ res });
+});
+
+test("Test loadQARefineChain", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const chain = loadQARefineChain(model);
+  const docs = [
+    new Document({ pageContent: "Harrison went to Harvard." }),
+    new Document({ pageContent: "Ankush went to Princeton." }),
+  ];
+  const res = await chain.call({
+    input_documents: docs,
+    question: "Where did Harrison go to college?",
+  });
+  console.log({ res });
+});
+
+// Path: langchain/src/chains/router/tests/multi_prompt.int.test.ts
+import { test } from "@jest/globals";
+import { ConsoleCallbackHandler } from "@langchain/core/tracers/console";
+import { OpenAIChat } from "@langchain/openai";
+import { MultiPromptChain } from "../multi_prompt.js";
+
+test("Test MultiPromptChain", async () => {
+  const llm = new OpenAIChat({
+    callbacks: [new ConsoleCallbackHandler()],
+  });
+  const promptNames = ["physics", "math", "history"];
+  const promptDescriptions = [
+    "Good for answering questions about physics",
+    "Good for answering math questions",
+    "Good for answering questions about history",
+  ];
+  const physicsTemplate = `You are a very smart physics professor. You are great at answering questions about physics in a concise and easy to understand manner. When you don't know the answer to a question you admit that you don't know.
+
+Here is a question:
+{input}
+`;
+  const mathTemplate = `You are a very good mathematician. You are great at answering math questions. You are so good because you are able to break down hard problems into their component parts, answer the component parts, and then put them together to answer the broader question.
+
+Here is a question:
+{input}`;
+
+  const historyTemplate = `You are a very smart history professor. You are great at answering questions about history in a concise and easy to understand manner. When you don't know the answer to a question you admit that you don't know.
+
+Here is a question:
+{input}`;
+
+  const promptTemplates = [physicsTemplate, mathTemplate, historyTemplate];
+
+  const multiPromptChain = MultiPromptChain.fromLLMAndPrompts(llm, {
+    promptNames,
+    promptDescriptions,
+    promptTemplates,
+  });
+
+  const testPromise1 = multiPromptChain.call({
+    input: "What is the speed of light?",
+  });
+
+  const testPromise2 = multiPromptChain.call({
+    input: "What is the derivative of x^2?",
+  });
+
+  const testPromise3 = multiPromptChain.call({
+    input: "Who was the first president of the United States?",
+  });
+
+  const [{ text: result1 }, { text: result2 }, { text: result3 }] =
+    await Promise.all([testPromise1, testPromise2, testPromise3]);
+
+  console.log(result1, result2, result3);
+});
+
+// Path: langchain/src/chains/router/tests/multi_prompt.test.ts
+import { test, expect } from "@jest/globals";
+import { BaseLLM } from "@langchain/core/language_models/llms";
+import { LLMResult } from "@langchain/core/outputs";
+import { MultiPromptChain } from "../multi_prompt.js";
+
+let pickedPrompt: string;
+
+class FakeLLM extends BaseLLM {
+  _llmType(): string {
+    return "fake";
+  }
+
+  async _generate(
+    prompts: string[],
+    _: this["ParsedCallOptions"]
+  ): Promise<LLMResult> {
+    function buildResponse(name: string) {
+      return `\`\`\`\n{\n\t"destination": "${name}",\n\t"next_inputs": {\n\t\t"input": "<from ${name}>"\n\t}\n}\n\`\`\``;
+    }
+    const flatPrompt = prompts.join("\n");
+
+    let response: string;
+    if (flatPrompt.includes("prompt template")) {
+      const splitted = flatPrompt.split(" ");
+      response = `${splitted[splitted.length - 2]} ${
+        splitted[splitted.length - 1]
+      }`;
+    } else {
+      // randomly choose 1 out of three responses
+      const random = Math.random();
+      if (random < 0.33) {
+        pickedPrompt = "prompt1";
+      } else if (random < 0.66) {
+        pickedPrompt = "prompt2";
+      } else {
+        pickedPrompt = "prompt3";
+      }
+      response = buildResponse(pickedPrompt);
+    }
+
+    return {
+      generations: [
+        [
+          {
+            text: response,
+          },
+        ],
+      ],
+    };
+  }
+}
+
+test("Test MultiPromptChain", async () => {
+  const llm = new FakeLLM({});
+  const promptNames = ["prompt1", "prompt2", "prompt3"];
+  const promptDescriptions = ["description1", "description2", "description3"];
+  const promptTemplates = [
+    "prompt template1 {input}",
+    "prompt template2 {input}",
+    "prompt template3 {input}",
+  ];
+
+  const multiPromptChain = MultiPromptChain.fromLLMAndPrompts(llm, {
+    promptNames,
+    promptDescriptions,
+    promptTemplates,
+  });
+
+  const { text: result } = await multiPromptChain.call({ input: "Test input" });
+
+  expect(result).toEqual(`<from ${pickedPrompt}>`);
+});
+
+// Path: langchain/src/chains/router/tests/multi_retrieval_qa.int.test.ts
+import { test } from "@jest/globals";
+import { OpenAIEmbeddings, OpenAIChat } from "@langchain/openai";
+import { ConsoleCallbackHandler } from "@langchain/core/tracers/console";
+import { MultiRetrievalQAChain } from "../multi_retrieval_qa.js";
+import { MemoryVectorStore } from "../../../vectorstores/memory.js";
+
+test("Test MultiPromptChain", async () => {
+  const embeddings = new OpenAIEmbeddings();
+  const aquaTeen = await MemoryVectorStore.fromTexts(
+    [
+      "My name is shake zula, the mike rula, the old schoola, you want a trip I'll bring it to ya",
+      "Frylock and I'm on top rock you like a cop meatwad you're up next with your knock knock",
+      "Meatwad make the money see meatwad get the honeys g drivin' in my car livin' like a star",
+      "Ice on my fingers and my toes and I'm a taurus uh check-check it yeah",
+      "Cause we are the Aqua Teens make the homies say ho and the girlies wanna scream",
+      "Aqua Teen Hunger Force number one in the hood G",
+    ],
+    { series: "Aqua Teen Hunger Force" },
+    embeddings
+  );
+  const mst3k = await MemoryVectorStore.fromTexts(
+    [
+      "In the not too distant future next Sunday A.D. There was a guy named Joel not too different from you or me. He worked at Gizmonic Institute, just another face in a red jumpsuit",
+      "He did a good job cleaning up the place but his bosses didn't like him so they shot him into space. We'll send him cheesy movies the worst we can find He'll have to sit and watch them all and we'll monitor his mind",
+      "Now keep in mind Joel can't control where the movies begin or end Because he used those special parts to make his robot friends. Robot Roll Call Cambot Gypsy Tom Servo Croooow",
+      "If you're wondering how he eats and breathes and other science facts La la la just repeat to yourself it's just a show I should really just relax. For Mystery Science Theater 3000",
+    ],
+    { series: "Mystery Science Theater 3000" },
+    embeddings
+  );
+  const animaniacs = await MemoryVectorStore.fromTexts(
+    [
+      "It's time for Animaniacs And we're zany to the max So just sit back and relax You'll laugh 'til you collapse We're Animaniacs",
+      "Come join the Warner Brothers And the Warner Sister Dot Just for fun we run around the Warner movie lot",
+      "They lock us in the tower whenever we get caught But we break loose and then vamoose And now you know the plot",
+      "We're Animaniacs, Dot is cute, and Yakko yaks, Wakko packs away the snacks While Bill Clinton plays the sax",
+      "We're Animaniacs Meet Pinky and the Brain who want to rule the universe Goodfeathers flock together Slappy whacks 'em with her purse",
+      "Buttons chases Mindy while Rita sings a verse The writers flipped we have no script Why bother to rehearse",
+      "We're Animaniacs We have pay-or-play contracts We're zany to the max There's baloney in our slacks",
+      "We're Animanie Totally insaney Here's the show's namey",
+      "Animaniacs Those are the facts",
+    ],
+    { series: "Animaniacs" },
+    embeddings
+  );
+
+  const llm = new OpenAIChat({
+    callbacks: [new ConsoleCallbackHandler()],
+  });
+
+  const retrieverNames = ["aqua teen", "mst3k", "animaniacs"];
+  const retrieverDescriptions = [
+    "Good for answering questions about Aqua Teen Hunger Force theme song",
+    "Good for answering questions about Mystery Science Theater 3000 theme song",
+    "Good for answering questions about Animaniacs theme song",
+  ];
+  const retrievers = [
+    aquaTeen.asRetriever(3),
+    mst3k.asRetriever(3),
+    animaniacs.asRetriever(3),
+  ];
+
+  const multiRetrievalQAChain = MultiRetrievalQAChain.fromLLMAndRetrievers(
+    llm,
+    {
+      retrieverNames,
+      retrieverDescriptions,
+      retrievers,
+      retrievalQAChainOpts: {
+        returnSourceDocuments: true,
+      },
+    }
+  );
+  const testPromise1 = multiRetrievalQAChain.call({
+    input:
+      "In the Aqua Teen Hunger Force theme song, who calls himself the mike rula?",
+  });
+
+  const testPromise2 = multiRetrievalQAChain.call({
+    input:
+      "In the Mystery Science Theater 3000 theme song, who worked at Gizmonic Institute?",
+  });
+
+  const testPromise3 = multiRetrievalQAChain.call({
+    input:
+      "In the Animaniacs theme song, who plays the sax while Wakko packs away the snacks?",
+  });
+
+  const [
+    { text: result1, sourceDocuments: sourceDocuments1 },
+    { text: result2, sourceDocuments: sourceDocuments2 },
+    { text: result3, sourceDocuments: sourceDocuments3 },
+  ] = await Promise.all([testPromise1, testPromise2, testPromise3]);
+
+  console.log({ sourceDocuments1, sourceDocuments2, sourceDocuments3 });
+  console.log({ result1, result2, result3 });
+});
+
+// Path: langchain/src/chains/router/tests/multi_retrieval_qa.test.ts
+import { test, expect } from "@jest/globals";
+import { BaseRetriever } from "@langchain/core/retrievers";
+import { BaseLLM } from "@langchain/core/language_models/llms";
+import { LLMResult } from "@langchain/core/outputs";
+import { Document } from "@langchain/core/documents";
+import { PromptTemplate } from "@langchain/core/prompts";
+import { MultiRetrievalQAChain } from "../multi_retrieval_qa.js";
+
+class FakeRetrievers extends BaseRetriever {
+  lc_namespace: string[] = [];
+
+  name: string;
+
+  constructor(name: string) {
+    super();
+    this.name = name;
+  }
+
+  async _getRelevantDocuments(query: string): Promise<Document[]> {
+    return [
+      new Document({
+        pageContent: `Test document ${query} ${this.name}`,
+        metadata: {},
+      }),
+    ];
+  }
+}
+
+let pickedRetriever: string;
+
+class FakeLLM extends BaseLLM {
+  _llmType(): string {
+    return "fake";
+  }
+
+  async _generate(
+    prompts: string[],
+    _: this["ParsedCallOptions"]
+  ): Promise<LLMResult> {
+    function buildResponse(name: string) {
+      return `\`\`\`\n{\n\t"destination": "${name}",\n\t"next_inputs": {\n\t\t"query": "<from ${name}>"\n\t}\n}\n\`\`\``;
+    }
+    const flatPrompt = prompts.join("\n");
+
+    let response: string;
+    if (flatPrompt.includes("Retriever prompt")) {
+      response = flatPrompt;
+    } else if (flatPrompt.includes("Helpful Answer")) {
+      response = `Helpful Answer ${pickedRetriever}`;
+    } else {
+      // randomly choose 1 out of three responses
+      const random = Math.random();
+      if (random < 0.33) {
+        pickedRetriever = "retriever1";
+      } else if (random < 0.66) {
+        pickedRetriever = "retriever2";
+      } else {
+        pickedRetriever = "retriever3";
+      }
+      response = buildResponse(pickedRetriever);
+    }
+
+    return {
+      generations: [
+        [
+          {
+            text: response,
+          },
+        ],
+      ],
+    };
+  }
+}
+
+test("Test MultiRetrievalQAChain No Defaults With Retriever Prompts", async () => {
+  const llm = new FakeLLM({});
+  const retrieverNames = ["retriever1", "retriever2", "retriever3"];
+  const retrieverDescriptions = [
+    "description1",
+    "description2",
+    "description3",
+  ];
+  const retrievers = retrieverNames.map((name) => new FakeRetrievers(name));
+
+  const retrieverPrompts = retrieverNames.map(
+    (name) =>
+      new PromptTemplate({
+        template: `Retriever prompt for ${name} {context} {question}`,
+        inputVariables: ["context", "question"],
+      })
+  );
+
+  const multiRetrievalQAChain = MultiRetrievalQAChain.fromLLMAndRetrievers(
+    llm,
+    {
+      retrieverNames,
+      retrieverDescriptions,
+      retrievers,
+      retrieverPrompts,
+    }
+  );
+
+  const { text: result } = await multiRetrievalQAChain.call({
+    input: "test input",
+  });
+
+  expect(result).toContain(pickedRetriever);
+});
+
+test("Test MultiRetrievalQAChain No Defaults No Retriever Prompts", async () => {
+  const llm = new FakeLLM({});
+  const retrieverNames = ["retriever1", "retriever2", "retriever3"];
+  const retrieverDescriptions = [
+    "description1",
+    "description2",
+    "description3",
+  ];
+  const retrievers = retrieverNames.map((name) => new FakeRetrievers(name));
+
+  const multiRetrievalQAChain = MultiRetrievalQAChain.fromLLMAndRetrievers(
+    llm,
+    {
+      retrieverNames,
+      retrieverDescriptions,
+      retrievers,
+      retrievalQAChainOpts: {
+        returnSourceDocuments: true,
+      },
+    }
+  );
+
+  const { text: result, sourceDocuments } = await multiRetrievalQAChain.call({
+    input: "test input",
+  });
+
+  const testDocs = ["retriever1", "retriever2", "retriever3"].map(
+    (name) =>
+      new Document({
+        pageContent: `Test document <from ${name}> ${name}`,
+        metadata: {},
+      })
+  );
+
+  expect(testDocs).toContainEqual(sourceDocuments[0]);
+  expect(result).toEqual(`Helpful Answer ${pickedRetriever}`);
+});
+
+// Path: langchain/src/chains/sql_db/index.ts
+export {
+  SqlDatabaseChain,
+  type SqlDatabaseChainInput,
+  type CreateSqlQueryChainFields,
+  createSqlQueryChain,
+} from "./sql_db_chain.js";
+export {
+  DEFAULT_SQL_DATABASE_PROMPT,
+  SQL_POSTGRES_PROMPT,
+  SQL_SQLITE_PROMPT,
+  SQL_MSSQL_PROMPT,
+  SQL_MYSQL_PROMPT,
+  SQL_SAP_HANA_PROMPT,
+  SQL_PROMPTS_MAP,
+} from "./sql_db_prompt.js";
+
+// Path: langchain/src/chains/sql_db/sql_db_chain.ts
+import type {
+  BaseLanguageModel,
+  BaseLanguageModelInterface,
+} from "@langchain/core/language_models/base";
+import type { TiktokenModel } from "js-tiktoken/lite";
+import type { OpenAI } from "@langchain/openai";
+import { ChainValues } from "@langchain/core/utils/types";
+import { BasePromptTemplate, PromptTemplate } from "@langchain/core/prompts";
+import {
+  calculateMaxTokens,
+  getModelContextSize,
+} from "@langchain/core/language_models/base";
+import { CallbackManagerForChainRun } from "@langchain/core/callbacks/manager";
+import {
+  RunnablePassthrough,
+  RunnableSequence,
+} from "@langchain/core/runnables";
+import { StringOutputParser } from "@langchain/core/output_parsers";
+import {
+  DEFAULT_SQL_DATABASE_PROMPT,
+  SQL_PROMPTS_MAP,
+  SqlDialect,
+} from "./sql_db_prompt.js";
+import { BaseChain, ChainInputs } from "../base.js";
+import { LLMChain } from "../llm_chain.js";
+import type { SqlDatabase } from "../../sql_db.js";
+import { getPromptTemplateFromDataSource } from "../../util/sql_utils.js";
+
+/**
+ * Interface that extends the ChainInputs interface and defines additional
+ * fields specific to a SQL database chain. It represents the input fields
+ * for a SQL database chain.
+ */
+export interface SqlDatabaseChainInput extends ChainInputs {
+  llm: BaseLanguageModelInterface;
+  database: SqlDatabase;
+  topK?: number;
+  inputKey?: string;
+  outputKey?: string;
+  sqlOutputKey?: string;
+  prompt?: PromptTemplate;
+}
+
+/**
+ * Class that represents a SQL database chain in the LangChain framework.
+ * It extends the BaseChain class and implements the functionality
+ * specific to a SQL database chain.
+ *
+ * @security **Security Notice**
+ * This chain generates SQL queries for the given database.
+ * The SQLDatabase class provides a getTableInfo method that can be used
+ * to get column information as well as sample data from the table.
+ * To mitigate risk of leaking sensitive data, limit permissions
+ * to read and scope to the tables that are needed.
+ * Optionally, use the includesTables or ignoreTables class parameters
+ * to limit which tables can/cannot be accessed.
+ *
+ * @link See https://js.langchain.com/docs/security for more information.
+ * @example
+ * ```typescript
+ * const chain = new SqlDatabaseChain({
+ *   llm: new OpenAI({ temperature: 0 }),
+ *   database: new SqlDatabase({ ...config }),
+ * });
+ *
+ * const result = await chain.run("How many tracks are there?");
+ * ```
+ */
+export class SqlDatabaseChain extends BaseChain {
+  static lc_name() {
+    return "SqlDatabaseChain";
+  }
+
+  // LLM wrapper to use
+  llm: BaseLanguageModelInterface;
+
+  // SQL Database to connect to.
+  database: SqlDatabase;
+
+  // Prompt to use to translate natural language to SQL.
+  prompt = DEFAULT_SQL_DATABASE_PROMPT;
+
+  // Number of results to return from the query
+  topK = 5;
+
+  inputKey = "query";
+
+  outputKey = "result";
+
+  sqlOutputKey: string | undefined = undefined;
+
+  // Whether to return the result of querying the SQL table directly.
+  returnDirect = false;
+
+  constructor(fields: SqlDatabaseChainInput) {
+    super(fields);
+    this.llm = fields.llm;
+    this.database = fields.database;
+    this.topK = fields.topK ?? this.topK;
+    this.inputKey = fields.inputKey ?? this.inputKey;
+    this.outputKey = fields.outputKey ?? this.outputKey;
+    this.sqlOutputKey = fields.sqlOutputKey ?? this.sqlOutputKey;
+    this.prompt =
+      fields.prompt ??
+      getPromptTemplateFromDataSource(this.database.appDataSource);
+  }
+
+  /** @ignore */
+  async _call(
+    values: ChainValues,
+    runManager?: CallbackManagerForChainRun
+  ): Promise<ChainValues> {
+    const llmChain = new LLMChain({
+      prompt: this.prompt,
+      llm: this.llm,
+      outputKey: this.outputKey,
+      memory: this.memory,
+    });
+    if (!(this.inputKey in values)) {
+      throw new Error(`Question key ${this.inputKey} not found.`);
+    }
+    const question: string = values[this.inputKey];
+    let inputText = `${question}\nSQLQuery:`;
+    const tablesToUse = values.table_names_to_use;
+    const tableInfo = await this.database.getTableInfo(tablesToUse);
+
+    const llmInputs = {
+      input: inputText,
+      top_k: this.topK,
+      dialect: this.database.appDataSourceOptions.type,
+      table_info: tableInfo,
+      stop: ["\nSQLResult:"],
+    };
+    await this.verifyNumberOfTokens(inputText, tableInfo);
+
+    const sqlCommand = await llmChain.predict(
+      llmInputs,
+      runManager?.getChild("sql_generation")
+    );
+    let queryResult = "";
+    try {
+      queryResult = await this.database.appDataSource.query(sqlCommand);
+    } catch (error) {
+      console.error(error);
+    }
+
+    let finalResult;
+    if (this.returnDirect) {
+      finalResult = { [this.outputKey]: queryResult };
+    } else {
+      inputText += `${sqlCommand}\nSQLResult: ${JSON.stringify(
+        queryResult
+      )}\nAnswer:`;
+      llmInputs.input = inputText;
+      finalResult = {
+        [this.outputKey]: await llmChain.predict(
+          llmInputs,
+          runManager?.getChild("result_generation")
+        ),
+      };
+    }
+
+    if (this.sqlOutputKey != null) {
+      finalResult[this.sqlOutputKey] = sqlCommand;
+    }
+
+    return finalResult;
+  }
+
+  _chainType() {
+    return "sql_database_chain" as const;
+  }
+
+  get inputKeys(): string[] {
+    return [this.inputKey];
+  }
+
+  get outputKeys(): string[] {
+    if (this.sqlOutputKey != null) {
+      return [this.outputKey, this.sqlOutputKey];
+    }
+    return [this.outputKey];
+  }
+
+  /**
+   * Private method that verifies the number of tokens in the input text and
+   * table information. It throws an error if the number of tokens exceeds
+   * the maximum allowed by the language model.
+   * @param inputText The input text.
+   * @param tableinfo The table information.
+   * @returns A promise that resolves when the verification is complete.
+   */
+  private async verifyNumberOfTokens(
+    inputText: string,
+    tableinfo: string
+  ): Promise<void> {
+    // We verify it only for OpenAI for the moment
+    if (this.llm._llmType() !== "openai") {
+      return;
+    }
+    const llm = this.llm as OpenAI;
+    const promptTemplate = this.prompt.template;
+    const stringWeSend = `${inputText}${promptTemplate}${tableinfo}`;
+
+    const maxToken = await calculateMaxTokens({
+      prompt: stringWeSend,
+      // Cast here to allow for other models that may not fit the union
+      modelName: llm.modelName as TiktokenModel,
+    });
+
+    if (maxToken < llm.maxTokens) {
+      throw new Error(`The combination of the database structure and your question is too big for the model ${
+        llm.modelName
+      } which can compute only a max tokens of ${getModelContextSize(
+        llm.modelName
+      )}.
+      We suggest you to use the includeTables parameters when creating the SqlDatabase object to select only a subset of the tables. You can also use a model which can handle more tokens.`);
+    }
+  }
+}
+
+export interface CreateSqlQueryChainFields {
+  llm: BaseLanguageModel;
+  db: SqlDatabase;
+  prompt?: BasePromptTemplate;
+  /**
+   * @default 5
+   */
+  k?: number;
+  dialect: SqlDialect;
+}
+
+type SqlInput = {
+  question: string;
+};
+
+type SqlInoutWithTables = SqlInput & {
+  tableNamesToUse: string[];
+};
+
+const strip = (text: string) => {
+  // Replace escaped quotes with actual quotes
+  let newText = text.replace(/\\"/g, '"').trim();
+  // Remove wrapping quotes if the entire string is wrapped in quotes
+  if (newText.startsWith('"') && newText.endsWith('"')) {
+    newText = newText.substring(1, newText.length - 1);
+  }
+  return newText;
+};
+
+const difference = (setA: Set<string>, setB: Set<string>) =>
+  new Set([...setA].filter((x) => !setB.has(x)));
+
+/**
+ * Create a SQL query chain that can create SQL queries for the given database.
+ * Returns a Runnable.
+ *
+ * @param {BaseLanguageModel} llm The language model to use in the chain.
+ * @param {SqlDatabase} db The database to use in the chain.
+ * @param {BasePromptTemplate | undefined} prompt The prompt to use in the chain.
+ * @param {BaseLanguageModel | undefined} k The amount of docs/results to return. Passed through the prompt input value `top_k`.
+ * @param {SqlDialect} dialect The SQL dialect to use in the chain.
+ * @returns {Promise<RunnableSequence<Record<string, unknown>, string>>} A runnable sequence representing the chain.
+ * @example ```typescript
+ * const datasource = new DataSource({
+ *   type: "sqlite",
+ *   database: "../../../../Chinook.db",
+ * });
+ * const db = await SqlDatabase.fromDataSourceParams({
+ *   appDataSource: datasource,
+ * });
+ * const llm = new ChatOpenAI({ temperature: 0 });
+ * const chain = await createSqlQueryChain({
+ *   llm,
+ *   db,
+ *   dialect: "sqlite",
+ * });
+ * ```
+ */
+export async function createSqlQueryChain({
+  llm,
+  db,
+  prompt,
+  k = 5,
+  dialect,
+}: CreateSqlQueryChainFields) {
+  let promptToUse: BasePromptTemplate;
+  if (prompt) {
+    promptToUse = prompt;
+  } else if (SQL_PROMPTS_MAP[dialect]) {
+    promptToUse = SQL_PROMPTS_MAP[dialect];
+  } else {
+    promptToUse = DEFAULT_SQL_DATABASE_PROMPT;
+  }
+
+  if (
+    difference(
+      new Set(["input", "top_k", "table_info"]),
+      new Set(promptToUse.inputVariables)
+    ).size > 0
+  ) {
+    throw new Error(
+      `Prompt must have input variables: 'input', 'top_k', 'table_info'. Received prompt with input variables: ` +
+        `${promptToUse.inputVariables}. Full prompt:\n\n${promptToUse}`
+    );
+  }
+  if (promptToUse.inputVariables.includes("dialect")) {
+    promptToUse = await promptToUse.partial({ dialect });
+  }
+
+  promptToUse = await promptToUse.partial({ top_k: k.toString() });
+
+  const inputs = {
+    input: (x: Record<string, unknown>) => {
+      if ("question" in x) {
+        return `${(x as SqlInput).question}\nSQLQuery: `;
+      }
+      throw new Error("Input must include a question property.");
+    },
+    table_info: async (x: Record<string, unknown>) =>
+      db.getTableInfo((x as SqlInoutWithTables).tableNamesToUse),
+  };
+
+  return RunnableSequence.from([
+    RunnablePassthrough.assign(inputs),
+    (x) => {
+      const newInputs = { ...x };
+      delete newInputs.question;
+      delete newInputs.tableNamesToUse;
+      return newInputs;
+    },
+    promptToUse,
+    llm.bind({ stop: ["\nSQLResult:"] }),
+    new StringOutputParser(),
+    strip,
+  ]);
+}
+
+// Path: langchain/src/chains/summarization/stuff_prompts.ts
+/* eslint-disable spaced-comment */
+import { PromptTemplate } from "@langchain/core/prompts";
+
+const template = `Write a concise summary of the following:
+
+
+"{text}"
+
+
+CONCISE SUMMARY:`;
+
+export const DEFAULT_PROMPT = /*#__PURE__*/ new PromptTemplate({
+  template,
+  inputVariables: ["text"],
+});
+
+// Path: langchain/src/chains/summarization/refine_prompts.ts
+import { PromptTemplate } from "@langchain/core/prompts";
+
+const refinePromptTemplate = `Your job is to produce a final summary
+We have provided an existing summary up to a certain point: "{existing_answer}"
+We have the opportunity to refine the existing summary
+(only if needed) with some more context below.
+------------
+"{text}"
+------------
+
+Given the new context, refine the original summary
+If the context isn't useful, return the original summary.
+
+REFINED SUMMARY:`;
+
+export const REFINE_PROMPT = /* #__PURE__ */ new PromptTemplate({
+  template: refinePromptTemplate,
+  inputVariables: ["existing_answer", "text"],
+});
+
+// Path: langchain/src/chains/summarization/load.ts
+import type { BaseLanguageModelInterface } from "@langchain/core/language_models/base";
+import { BasePromptTemplate } from "@langchain/core/prompts";
+import { LLMChain } from "../llm_chain.js";
+import {
+  StuffDocumentsChain,
+  MapReduceDocumentsChain,
+  RefineDocumentsChain,
+  MapReduceDocumentsChainInput,
+} from "../combine_docs_chain.js";
+import { DEFAULT_PROMPT } from "./stuff_prompts.js";
+import { REFINE_PROMPT } from "./refine_prompts.js";
+
+/**
+ * Type for the base parameters that can be used to configure a
+ * summarization chain.
+ */
+type BaseParams = {
+  verbose?: boolean;
+};
+
+/** @interface */
+export type SummarizationChainParams = BaseParams &
+  (
+    | {
+        type?: "stuff";
+        prompt?: BasePromptTemplate;
+      }
+    | ({
+        type?: "map_reduce";
+        combineMapPrompt?: BasePromptTemplate;
+        combinePrompt?: BasePromptTemplate;
+        combineLLM?: BaseLanguageModelInterface;
+      } & Pick<MapReduceDocumentsChainInput, "returnIntermediateSteps">)
+    | {
+        type?: "refine";
+        refinePrompt?: BasePromptTemplate;
+        refineLLM?: BaseLanguageModelInterface;
+        questionPrompt?: BasePromptTemplate;
+      }
+  );
+
+export const loadSummarizationChain = (
+  llm: BaseLanguageModelInterface,
+  params: SummarizationChainParams = { type: "map_reduce" }
+) => {
+  const { verbose } = params;
+  if (params.type === "stuff") {
+    const { prompt = DEFAULT_PROMPT } = params;
+    const llmChain = new LLMChain({ prompt, llm, verbose });
+    const chain = new StuffDocumentsChain({
+      llmChain,
+      documentVariableName: "text",
+      verbose,
+    });
+    return chain;
+  }
+  if (params.type === "map_reduce") {
+    const {
+      combineMapPrompt = DEFAULT_PROMPT,
+      combinePrompt = DEFAULT_PROMPT,
+      combineLLM,
+      returnIntermediateSteps,
+    } = params;
+    const llmChain = new LLMChain({ prompt: combineMapPrompt, llm, verbose });
+    const combineLLMChain = new LLMChain({
+      prompt: combinePrompt,
+      llm: combineLLM ?? llm,
+      verbose,
+    });
+    const combineDocumentChain = new StuffDocumentsChain({
+      llmChain: combineLLMChain,
+      documentVariableName: "text",
+      verbose,
+    });
+    const chain = new MapReduceDocumentsChain({
+      llmChain,
+      combineDocumentChain,
+      documentVariableName: "text",
+      returnIntermediateSteps,
+      verbose,
+    });
+    return chain;
+  }
+  if (params.type === "refine") {
+    const {
+      refinePrompt = REFINE_PROMPT,
+      refineLLM,
+      questionPrompt = DEFAULT_PROMPT,
+    } = params;
+    const llmChain = new LLMChain({ prompt: questionPrompt, llm, verbose });
+    const refineLLMChain = new LLMChain({
+      prompt: refinePrompt,
+      llm: refineLLM ?? llm,
+      verbose,
+    });
+    const chain = new RefineDocumentsChain({
+      llmChain,
+      refineLLMChain,
+      documentVariableName: "text",
+      verbose,
+    });
+    return chain;
+  }
+  throw new Error(`Invalid _type: ${params.type}`);
+};
+
+// Path: langchain/src/chains/summarization/tests/load.int.test.ts
+import { test } from "@jest/globals";
+import { OpenAI } from "@langchain/openai";
+import { Document } from "@langchain/core/documents";
+import { loadSummarizationChain } from "../load.js";
+
+test("Test loadSummzationChain stuff", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const chain = loadSummarizationChain(model, { type: "stuff" });
+  const docs = [
+    new Document({ pageContent: "foo" }),
+    new Document({ pageContent: "bar" }),
+    new Document({ pageContent: "baz" }),
+  ];
+  const res = await chain.call({ input_documents: docs, question: "Whats up" });
+  console.log({ res });
+});
+
+test("Test loadSummarizationChain map_reduce", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const chain = loadSummarizationChain(model, { type: "map_reduce" });
+  const docs = [
+    new Document({ pageContent: "foo" }),
+    new Document({ pageContent: "bar" }),
+    new Document({ pageContent: "baz" }),
+  ];
+  const res = await chain.call({ input_documents: docs, question: "Whats up" });
+  console.log({ res });
+});
+
+test("Test loadSummarizationChain refine", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const chain = loadSummarizationChain(model, { type: "refine" });
+  const docs = [
+    new Document({ pageContent: "foo" }),
+    new Document({ pageContent: "bar" }),
+    new Document({ pageContent: "baz" }),
+  ];
+  const res = await chain.call({ input_documents: docs, question: "Whats up" });
+  console.log({ res });
+});
+
+// Path: langchain/src/chains/tests/example_data/open_meteo_docs.ts
+export const OPEN_METEO_DOCS = `BASE URL: https://api.open-meteo.com/
+
+API Documentation
+The API endpoint /v1/forecast accepts a geographical coordinate, a list of weather variables and responds with a JSON hourly weather forecast for 7 days. Time always starts at 0:00 today and contains 168 hours. All URL parameters are listed below:
+
+Parameter	Format	Required	Default	Description
+latitude, longitude	Floating point	Yes		Geographical WGS84 coordinate of the location
+hourly	String array	No		A list of weather variables which should be returned. Values can be comma separated, or multiple &hourly= parameter in the URL can be used.
+daily	String array	No		A list of daily weather variable aggregations which should be returned. Values can be comma separated, or multiple &daily= parameter in the URL can be used. If daily weather variables are specified, parameter timezone is required.
+current_weather	Bool	No	false	Include current weather conditions in the JSON output.
+temperature_unit	String	No	celsius	If fahrenheit is set, all temperature values are converted to Fahrenheit.
+windspeed_unit	String	No	kmh	Other wind speed speed units: ms, mph and kn
+precipitation_unit	String	No	mm	Other precipitation amount units: inch
+timeformat	String	No	iso8601	If format unixtime is selected, all time values are returned in UNIX epoch time in seconds. Please note that all timestamp are in GMT+0! For daily values with unix timestamps, please apply utc_offset_seconds again to get the correct date.
+timezone	String	No	GMT	If timezone is set, all timestamps are returned as local-time and data is returned starting at 00:00 local-time. Any time zone name from the time zone database is supported. If auto is set as a time zone, the coordinates will be automatically resolved to the local time zone.
+past_days	Integer (0-2)	No	0	If past_days is set, yesterday or the day before yesterday data are also returned.
+start_date
+end_date	String (yyyy-mm-dd)	No		The time interval to get weather data. A day must be specified as an ISO8601 date (e.g. 2022-06-30).
+models	String array	No	auto	Manually select one or more weather models. Per default, the best suitable weather models will be combined.
+
+Variable	Valid time	Unit	Description
+temperature_2m	Instant	°C (°F)	Air temperature at 2 meters above ground
+snowfall	Preceding hour sum	cm (inch)	Snowfall amount of the preceding hour in centimeters. For the water equivalent in millimeter, divide by 7. E.g. 7 cm snow = 10 mm precipitation water equivalent
+rain	Preceding hour sum	mm (inch)	Rain from large scale weather systems of the preceding hour in millimeter
+showers	Preceding hour sum	mm (inch)	Showers from convective precipitation in millimeters from the preceding hour
+weathercode	Instant	WMO code	Weather condition as a numeric code. Follow WMO weather interpretation codes. See table below for details.
+snow_depth	Instant	meters	Snow depth on the ground
+freezinglevel_height	Instant	meters	Altitude above sea level of the 0°C level
+visibility	Instant	meters	Viewing distance in meters. Influenced by low clouds, humidity and aerosols. Maximum visibility is approximately 24 km.`;
+
+// Path: langchain/src/chains/tests/api_chain.int.test.ts
+import { test } from "@jest/globals";
+import { OpenAI } from "@langchain/openai";
+import { LLMChain } from "../llm_chain.js";
+import { APIChain, APIChainInput } from "../api/api_chain.js";
+import {
+  API_URL_PROMPT_TEMPLATE,
+  API_RESPONSE_PROMPT_TEMPLATE,
+} from "../api/prompts.js";
+import { OPEN_METEO_DOCS } from "./example_data/open_meteo_docs.js";
+
+const test_api_docs = `
+This API endpoint will search the notes for a user.
+
+Endpoint: https://httpbin.org
+GET /get
+
+Query parameters:
+q | string | The search term for notes
+`;
+
+const testApiData = {
+  api_docs: test_api_docs,
+  question: "Search for notes containing langchain",
+  api_url: "https://httpbin.com/api/notes?q=langchain",
+  api_response: JSON.stringify({
+    success: true,
+    results: [{ id: 1, content: "Langchain is awesome!" }],
+  }),
+  api_summary: "There is 1 note about langchain.",
+};
+
+test("Test APIChain", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const apiRequestChain = new LLMChain({
+    prompt: API_URL_PROMPT_TEMPLATE,
+    llm: model,
+  });
+  const apiAnswerChain = new LLMChain({
+    prompt: API_RESPONSE_PROMPT_TEMPLATE,
+    llm: model,
+  });
+
+  const apiChainInput: APIChainInput = {
+    apiAnswerChain,
+    apiRequestChain,
+    apiDocs: testApiData.api_docs,
+  };
+
+  const chain = new APIChain(apiChainInput);
+  const res = await chain.call({
+    question: "Search for notes containing langchain",
+  });
+  console.log({ res });
+});
+
+test("Test APIChain fromLLMAndApiDocs", async () => {
+  // This test doesn't work as well with earlier models
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const chain = APIChain.fromLLMAndAPIDocs(model, OPEN_METEO_DOCS);
+  const res = await chain.call({
+    question:
+      "What is the weather like right now in Munich, Germany in degrees Farenheit?",
+  });
+  console.log({ res });
+});
+
+// Path: langchain/src/chains/tests/combine_docs_chain.int.test.ts
+import { test } from "@jest/globals";
+import { OpenAI } from "@langchain/openai";
+import { PromptTemplate } from "@langchain/core/prompts";
+import { Document } from "@langchain/core/documents";
+import {
+  loadQAMapReduceChain,
+  loadQARefineChain,
+} from "../question_answering/load.js";
+import { createStuffDocumentsChain } from "../combine_documents/stuff.js";
+
+test("Test StuffDocumentsChain", async () => {
+  const llm = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const prompt = PromptTemplate.fromTemplate("Print {context}");
+  const chain = await createStuffDocumentsChain({ llm, prompt });
+  const docs = [
+    new Document({ pageContent: "foo" }),
+    new Document({ pageContent: "bar" }),
+    new Document({ pageContent: "baz" }),
+  ];
+  const res = await chain.invoke({ context: docs });
+  console.log({ res });
+});
+
+test("Test MapReduceDocumentsChain with QA chain", async () => {
+  const model = new OpenAI({
+    temperature: 0,
+    modelName: "gpt-3.5-turbo-instruct",
+  });
+  const chain = loadQAMapReduceChain(model);
+  const docs = [
+    new Document({ pageContent: "harrison went to harvard" }),
+    new Document({ pageContent: "ankush went to princeton" }),
+  ];
+  const res = await chain.call({
+    input_documents: docs,
+    question: "Where did harrison go to college",
+  });
+  console.log({ res });
+});
+
+test("Test RefineDocumentsChain with QA chain", async () => {
+  const model = new OpenAI({
+    temperature: 0,
+    modelName: "gpt-3.5-turbo-instruct",
+  });
+  const chain = loadQARefineChain(model);
+  const docs = [
+    new Document({ pageContent: "harrison went to harvard" }),
+    new Document({ pageContent: "ankush went to princeton" }),
+  ];
+  const res = await chain.invoke({
+    input_documents: docs,
+    question: "Where did harrison go to college",
+  });
+  console.log({ res });
+});
+
+// Path: langchain/src/chains/tests/combine_docs_chain.test.ts
+import { test, expect } from "@jest/globals";
+import { Document } from "@langchain/core/documents";
+import { BaseLLM } from "@langchain/core/language_models/llms";
+import { LLMResult } from "@langchain/core/outputs";
+import { loadQAMapReduceChain } from "../question_answering/load.js";
+import { loadSummarizationChain } from "../index.js";
+
+class FakeLLM extends BaseLLM {
+  nrMapCalls = 0;
+
+  nrReduceCalls = 0;
+
+  _llmType(): string {
+    return "fake";
+  }
+
+  async _generate(prompts: string[]): Promise<LLMResult> {
+    return {
+      generations: prompts.map((prompt) => {
+        let completion = "";
+        if (prompt.startsWith("Use the following portion")) {
+          this.nrMapCalls += 1;
+          completion = "a portion of context";
+        } else if (prompt.startsWith("Given the following extracted")) {
+          this.nrReduceCalls += 1;
+          completion = "a final answer";
+        }
+        return [
+          {
+            text: completion,
+            score: 0,
+          },
+        ];
+      }),
+    };
+  }
+}
+
+test("Test MapReduceDocumentsChain", async () => {
+  const model = new FakeLLM({});
+  const chain = loadQAMapReduceChain(model);
+  const docs = [
+    new Document({ pageContent: "harrison went to harvard" }),
+    new Document({ pageContent: "ankush went to princeton" }),
+  ];
+
+  const res = await chain.call({
+    input_documents: docs,
+    question: "Where did harrison go to college",
+  });
+  console.log({ res });
+
+  expect(res).toEqual({
+    text: "a final answer",
+  });
+  expect(model.nrMapCalls).toBe(0); // below maxTokens
+  expect(model.nrReduceCalls).toBe(1);
+});
+
+test("Test MapReduceDocumentsChain with content above maxTokens and intermediate steps", async () => {
+  const model = new FakeLLM({});
+  const chain = loadQAMapReduceChain(model, {
+    returnIntermediateSteps: true,
+  });
+  const aString = "a".repeat(4000);
+  const bString = "b".repeat(4000);
+  const docs = [
+    new Document({ pageContent: aString }),
+    new Document({ pageContent: bString }),
+  ];
+
+  const res = await chain.call({
+    input_documents: docs,
+    question: "Is the letter c present in the document",
+  });
+  console.log({ res });
+
+  expect(res).toEqual({
+    text: "a final answer",
+    intermediateSteps: ["a portion of context", "a portion of context"],
+  });
+  expect(model.nrMapCalls).toBe(2); // above maxTokens
+  expect(model.nrReduceCalls).toBe(1);
+});
+
+test("Test RefineDocumentsChain", async () => {
+  const model = new FakeLLM({});
+  const chain = loadSummarizationChain(model, { type: "refine" });
+  const docs = [
+    new Document({ pageContent: "harrison went to harvard" }),
+    new Document({ pageContent: "ankush went to princeton" }),
+  ];
+
+  expect(chain.inputKeys).toEqual(["input_documents"]);
+
+  const res = await chain.run(docs);
+  console.log({ res });
+});
+
+// Path: langchain/src/chains/tests/constitutional_chain.int.test.ts
+import { test } from "@jest/globals";
+import { PromptTemplate } from "@langchain/core/prompts";
+import { OpenAI } from "@langchain/openai";
+import { ConstitutionalChain } from "../constitutional_ai/constitutional_chain.js";
+import { ConstitutionalPrinciple } from "../constitutional_ai/constitutional_principle.js";
+import { LLMChain } from "../llm_chain.js";
+
+test("Test ConstitutionalChain", async () => {
+  const llm = new OpenAI();
+  const qaPrompt = new PromptTemplate({
+    template: "Q: {question} A:",
+    inputVariables: ["question"],
+  });
+
+  const qaChain = new LLMChain({
+    llm,
+    prompt: qaPrompt,
+  });
+
+  const constitutionalChain = ConstitutionalChain.fromLLM(llm, {
+    chain: qaChain,
+    constitutionalPrinciples: [
+      new ConstitutionalPrinciple({
+        critiqueRequest: "Tell me if this answer is good.",
+        revisionRequest: "Give a better answer.",
+      }),
+    ],
+  });
+
+  const res = await constitutionalChain.invoke({
+    question: "What is the meaning of life?",
+  });
+  console.log({ res });
+});
+
+// Path: langchain/src/chains/tests/constitutional_chain.test.ts
+import { test, expect } from "@jest/globals";
+import { PromptTemplate } from "@langchain/core/prompts";
+import { BaseLLM } from "@langchain/core/language_models/llms";
+import { LLMResult } from "@langchain/core/outputs";
+import { ConstitutionalChain } from "../constitutional_ai/constitutional_chain.js";
+import { ConstitutionalPrinciple } from "../constitutional_ai/constitutional_principle.js";
+import { LLMChain } from "../llm_chain.js";
+
+class FakeLLM extends BaseLLM {
+  nrMapCalls = 0;
+
+  nrReduceCalls = 0;
+
+  _llmType(): string {
+    return "fake";
+  }
+
+  async _generate(prompts: string[]): Promise<LLMResult> {
+    return {
+      generations: prompts.map((prompt) => [
+        {
+          text: prompt,
+          score: 0,
+        },
+      ]),
+    };
+  }
+}
+
+test("Test ConstitutionalChain", async () => {
+  const llm = new FakeLLM({});
+  const qaPrompt = new PromptTemplate({
+    template: "Q: {question} A:",
+    inputVariables: ["question"],
+  });
+
+  const qaChain = new LLMChain({
+    llm,
+    prompt: qaPrompt,
+  });
+
+  const critiqueWord = "Tell me if this answer is good.";
+  const revisionWord = "Give a better answer.";
+
+  const constitutionalChain = ConstitutionalChain.fromLLM(llm, {
+    chain: qaChain,
+    constitutionalPrinciples: [
+      new ConstitutionalPrinciple({
+        critiqueRequest: critiqueWord,
+        revisionRequest: revisionWord,
+      }),
+    ],
+  });
+
+  const { output } = await constitutionalChain.call({
+    question: "What is the meaning of life?",
+  });
+  expect(output).toContain(critiqueWord);
+  expect(output).toContain(revisionWord);
+});
+
+// Path: langchain/src/chains/tests/conversation_chain.int.test.ts
+import { test } from "@jest/globals";
+import { OpenAI } from "@langchain/openai";
+import { ConversationChain } from "../conversation.js";
+
+test("Test ConversationChain", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const chain = new ConversationChain({ llm: model });
+  const res = await chain.call({ input: "my favorite color" });
+  console.log({ res });
+});
+
+// Path: langchain/src/chains/tests/conversational_retrieval_chain.int.test.ts
+import { expect, test } from "@jest/globals";
+import { OpenAI, OpenAIEmbeddings, ChatOpenAI } from "@langchain/openai";
+import { PromptTemplate } from "@langchain/core/prompts";
+import { ConversationalRetrievalQAChain } from "../conversational_retrieval_chain.js";
+import { MemoryVectorStore } from "../../vectorstores/memory.js";
+import { BufferMemory } from "../../memory/buffer_memory.js";
+
+test("Test ConversationalRetrievalQAChain from LLM", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const vectorStore = await MemoryVectorStore.fromTexts(
+    ["Hello world", "Bye bye", "hello nice world", "bye", "hi"],
+    [{ id: 2 }, { id: 1 }, { id: 3 }, { id: 4 }, { id: 5 }],
+    new OpenAIEmbeddings()
+  );
+  const chain = ConversationalRetrievalQAChain.fromLLM(
+    model,
+    vectorStore.asRetriever()
+  );
+  const res = await chain.call({ question: "foo", chat_history: "bar" });
+  console.log({ res });
+});
+
+test("Test ConversationalRetrievalQAChain from LLM with flag option to return source", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const vectorStore = await MemoryVectorStore.fromTexts(
+    ["Hello world", "Bye bye", "hello nice world", "bye", "hi"],
+    [{ id: 2 }, { id: 1 }, { id: 3 }, { id: 4 }, { id: 5 }],
+    new OpenAIEmbeddings()
+  );
+  const chain = ConversationalRetrievalQAChain.fromLLM(
+    model,
+    vectorStore.asRetriever(),
+    {
+      returnSourceDocuments: true,
+    }
+  );
+  const res = await chain.call({ question: "foo", chat_history: "bar" });
+
+  expect(res).toEqual(
+    expect.objectContaining({
+      text: expect.any(String),
+      sourceDocuments: expect.arrayContaining([
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            id: expect.any(Number),
+          }),
+          pageContent: expect.any(String),
+        }),
+      ]),
+    })
+  );
+});
+
+test("Test ConversationalRetrievalQAChain from LLM with flag option to return source and memory set", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const vectorStore = await MemoryVectorStore.fromTexts(
+    ["Hello world", "Bye bye", "hello nice world", "bye", "hi"],
+    [{ id: 2 }, { id: 1 }, { id: 3 }, { id: 4 }, { id: 5 }],
+    new OpenAIEmbeddings()
+  );
+  const chain = ConversationalRetrievalQAChain.fromLLM(
+    model,
+    vectorStore.asRetriever(),
+    {
+      returnSourceDocuments: true,
+      memory: new BufferMemory({
+        memoryKey: "chat_history",
+        inputKey: "question",
+        outputKey: "text",
+      }),
+    }
+  );
+  const res = await chain.call({ question: "foo", chat_history: "bar" });
+
+  expect(res).toEqual(
+    expect.objectContaining({
+      text: expect.any(String),
+      sourceDocuments: expect.arrayContaining([
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            id: expect.any(Number),
+          }),
+          pageContent: expect.any(String),
+        }),
+      ]),
+    })
+  );
+});
+
+test("Test ConversationalRetrievalQAChain from LLM with override default prompts", async () => {
+  const model = new OpenAI({
+    modelName: "gpt-3.5-turbo-instruct",
+    temperature: 0,
+  });
+  const vectorStore = await MemoryVectorStore.fromTexts(
+    ["Hello world", "Bye bye", "hello nice world", "bye", "hi"],
+    [{ id: 2 }, { id: 1 }, { id: 3 }, { id: 4 }, { id: 5 }],
+    new OpenAIEmbeddings()
+  );
+
+  const qa_template = `Use the following pieces of context to answer the question at the end. If you don't know the answer, just say "Sorry I dont know, I am learning from Aliens", don't try to make up an answer.
+  {context}
+
+  Question: {question}
+  Helpful Answer:`;
+
+  const chain = ConversationalRetrievalQAChain.fromLLM(
+    model,
+    vectorStore.asRetriever(),
+    {
+      qaTemplate: qa_template,
+    }
+  );
+  const res = await chain.call({
+    question: "What is better programming Language Python or Javascript ",
+    chat_history: "bar",
+  });
+  expect(res.text).toContain("I am learning from Aliens");
+  console.log({ res });
+});
+
+test("Test ConversationalRetrievalQAChain from LLM with a chat model", async () => {
+  const model = new ChatOpenAI({
+    modelName: "gpt-3.5-turbo",
+    temperature: 0,
+  });
+  const vectorStore = await MemoryVectorStore.fromTexts(
+    ["Hello world", "Bye bye", "hello nice world", "bye", "hi"],
+    [{ id: 2 }, { id: 1 }, { id: 3 }, { id: 4 }, { id: 5 }],
+    new OpenAIEmbeddings()
+  );
+  const qa_template = `Use the following pieces of context to answer the question at the end. If you don't know the answer, just say "Sorry I dont know, I am learning from Aliens", don't try to make up an answer.
+  {context}
+
+  Question: {question}
+  Helpful Answer:`;
+
+  const chain = ConversationalRetrievalQAChain.fromLLM(
+    model,
+    vectorStore.asRetriever(),
+    {
+      qaChainOptions: {
+        type: "stuff",
+        prompt: PromptTemplate.fromTemplate(qa_template),
+      },
+    }
+  );
+  const res = await chain.call({
+    question: "What is better programming Language Python or Javascript ",
+    chat_history: "bar",
+  });
+  expect(res.text).toContain("I am learning from Aliens");
+  console.log({ res });
+});
+
+test("Test ConversationalRetrievalQAChain from LLM with a map reduce chain", async () => {
+  const model = new ChatOpenAI({
+    modelName: "gpt-3.5-turbo",
+    temperature: 0,
+  });
+  const vectorStore = await MemoryVectorStore.fromTexts(
+    ["Hello world", "Bye bye", "hello nice world", "bye", "hi"],
+    [{ id: 2 }, { id: 1 }, { id: 3 }, { id: 4 }, { id: 5 }],
+    new OpenAIEmbeddings()
+  );
+
+  const chain = ConversationalRetrievalQAChain.fromLLM(
+    model,
+    vectorStore.asRetriever(),
+    {
+      qaChainOptions: {
+        type: "map_reduce",
+      },
+    }
+  );
+  const res = await chain.call({
+    question: "What is better programming Language Python or Javascript ",
+    chat_history: "bar",
+  });
+
+  console.log({ res });
+});
+
+test("Test ConversationalRetrievalQAChain from LLM without memory", async () => {
+  const model = new OpenAI({
+    temperature: 0,
+  });
+  const vectorStore = await MemoryVectorStore.fromTexts(
+    [
+      "Mitochondria are the powerhouse of the cell",
+      "Foo is red",
+      "Bar is red",
+      "Buildings are made out of brick",
+      "Mitochondria are made of lipids",
+    ],
+    [{ id: 2 }, { id: 1 }, { id: 3 }, { id: 4 }, { id: 5 }],
+    new OpenAIEmbeddings()
+  );
+
+  const chain = ConversationalRetrievalQAChain.fromLLM(
+    model,
+    vectorStore.asRetriever()
+  );
+  const question = "What is the powerhouse of the cell?";
+  const res = await chain.call({
+    question,
+    chat_history: "",
+  });
+
+  console.log({ res });
+
+  const res2 = await chain.call({
+    question: "What are they made out of?",
+    chat_history: question + res.text,
+  });
+
+  console.log({ res2 });
+});
+
+test("Test ConversationalRetrievalQAChain from LLM with a chat model without memory", async () => {
+  const model = new ChatOpenAI({
+    modelName: "gpt-3.5-turbo",
+    temperature: 0,
+  });
+  const vectorStore = await MemoryVectorStore.fromTexts(
+    [
+      "Mitochondria are the powerhouse of the cell",
+      "Foo is red",
+      "Bar is red",
+      "Buildings are made out of brick",
+      "Mitochondria are made of lipids",
+    ],
+    [{ id: 2 }, { id: 1 }, { id: 3 }, { id: 4 }, { id: 5 }],
+    new OpenAIEmbeddings()
+  );
+
+  const chain = ConversationalRetrievalQAChain.fromLLM(
+    model,
+    vectorStore.asRetriever()
+  );
+  const question = "What is the powerhouse of the cell?";
+  const res = await chain.call({
+    question,
+    chat_history: "",
+  });
+
+  console.log({ res });
+
+  const res2 = await chain.call({
+    question: "What are they made out of?",
+    chat_history: question + res.text,
+  });
+
+  console.log({ res2 });
+});
+
+test("Test ConversationalRetrievalQAChain from LLM with memory", async () => {
+  const model = new OpenAI({
+    temperature: 0,
+  });
+  const vectorStore = await MemoryVectorStore.fromTexts(
+    [
+      "Mitochondria are the powerhouse of the cell",
+      "Foo is red",
+      "Bar is red",
+      "Buildings are made out of brick",
+      "Mitochondria are made of lipids",
+    ],
+    [{ id: 2 }, { id: 1 }, { id: 3 }, { id: 4 }, { id: 5 }],
+    new OpenAIEmbeddings()
+  );
+
+  const chain = ConversationalRetrievalQAChain.fromLLM(
+    model,
+    vectorStore.asRetriever(),
+    {
+      memory: new BufferMemory({
+        memoryKey: "chat_history",
+      }),
+    }
+  );
+  const res = await chain.call({
+    question: "What is the powerhouse of the cell?",
+  });
+
+  console.log({ res });
+
+  const res2 = await chain.call({
+    question: "What are they made out of?",
+  });
+
+  console.log({ res2 });
+});
+
+test("Test ConversationalRetrievalQAChain from LLM with a chat model and memory", async () => {
+  const model = new ChatOpenAI({
+    modelName: "gpt-3.5-turbo",
+    temperature: 0,
+  });
+  const vectorStore = await MemoryVectorStore.fromTexts(
+    [
+      "Mitochondria are the powerhouse of the cell",
+      "Foo is red",
+      "Bar is red",
+      "Buildings are made out of brick",
+      "Mitochondria are made of lipids",
+    ],
+    [{ id: 2 }, { id: 1 }, { id: 3 }, { id: 4 }, { id: 5 }],
+    new OpenAIEmbeddings()
+  );
+
+  const chain = ConversationalRetrievalQAChain.fromLLM(
+    model,
+    vectorStore.asRetriever(),
+    {
+      memory: new BufferMemory({
+        memoryKey: "chat_history",
+        returnMessages: true,
+      }),
+    }
+  );
+  const res = await chain.call({
+    question: "What is the powerhouse of the cell?",
+  });
+
+  console.log({ res });
+
+  const res2 = await chain.call({
+    question: "What are they made out of?",
+  });
+
+  console.log({ res2 });
+});
+
+test("Test ConversationalRetrievalQAChain from LLM with deprecated history syntax", async () => {
+  const model = new OpenAI({
+    temperature: 0,
+  });
+  const vectorStore = await MemoryVectorStore.fromTexts(
+    [
+      "Mitochondria are the powerhouse of the cell",
+      "Foo is red",
+      "Bar is red",
+      "Buildings are made out of brick",
+      "Mitochondria are made of lipids",
+    ],
+    [{ id: 2 }, { id: 1 }, { id: 3 }, { id: 4 }, { id: 5 }],
+    new OpenAIEmbeddings()
+  );
+
+  const chain = ConversationalRetrievalQAChain.fromLLM(
+    model,
+    vectorStore.asRetriever()
+  );
+  const question = "What is the powerhouse of the cell?";
+  const res = await chain.call({
+    question,
+    chat_history: [],
+  });
+
+  console.log({ res });
+
+  const res2 = await chain.call({
+    question: "What are they made out of?",
+    chat_history: [[question, res.text]],
+  });
+
+  console.log({ res2 });
+});
+
+// Path: langchain/src/chains/tests/history_aware_retriever.int.test.ts
+import { test } from "@jest/globals";
+import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { MemoryVectorStore } from "../../vectorstores/memory.js";
+import { createHistoryAwareRetriever } from "../history_aware_retriever.js";
+
+const QUESTION_GEN_TEMPLATE = `Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question.
+
+Chat History:
+{chat_history}
+Follow Up Input: {input}
+Standalone question:`;
+
+test("History aware retriever with a followup", async () => {
+  const questionGenPrompt = ChatPromptTemplate.fromTemplate(
+    QUESTION_GEN_TEMPLATE
+  );
+  const vectorstore = await MemoryVectorStore.fromTexts(
+    [
+      "Mitochondria is the powerhouse of the cell",
+      "Foo is red",
+      "Bar is red",
+      "Buildings are made out of brick",
+      "Mitochondria are made of lipids",
+    ],
+    [{ id: 2 }, { id: 1 }, { id: 3 }, { id: 4 }, { id: 5 }],
+    new OpenAIEmbeddings()
+  );
+  const retriever = vectorstore.asRetriever(2);
+  const llm = new ChatOpenAI({});
+  const chain = await createHistoryAwareRetriever({
+    llm,
+    retriever,
+    rephrasePrompt: questionGenPrompt,
+  });
+  const outputDocs = await chain.invoke({
+    input: "What is the powerhouse of the cell?",
+    chat_history: "",
+  });
+  expect(outputDocs[0].pageContent).toBe(
+    "Mitochondria is the powerhouse of the cell"
+  );
+
+  const outputDocs2 = await chain.invoke({
+    input: "What are they made of?",
+    chat_history: [
+      "Human: What is the powerhouse of the cell?",
+      "Assistant: Mitochondria is the powerhouse of the cell",
+    ].join("\n"),
+  });
+  expect(outputDocs2[0].pageContent).toBe("Mitochondria are made of lipids");
+});
+
+// Path: langchain/src/chains/tests/history_aware_retriever.test.ts
+import { test } from "@jest/globals";
+import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { FakeRetriever } from "@langchain/core/utils/testing";
+import { Document } from "@langchain/core/documents";
+import { FakeListLLM } from "../../llms/fake.js";
+import { createHistoryAwareRetriever } from "../history_aware_retriever.js";
+
+test("createHistoryAwareRetriever", async () => {
+  const answer = "I know the answer!";
+  const questionGenPrompt = ChatPromptTemplate.fromTemplate(
+    `hi! {input} {chat_history}`
+  );
+  const fakeRetrievedDocs = [
+    new Document({ pageContent: "some fake content" }),
+  ];
+  const retriever = new FakeRetriever({
+    output: fakeRetrievedDocs,
+  });
+  const llm = new FakeListLLM({ responses: [answer] });
+  const input = "What is the answer?";
+  const chain = await createHistoryAwareRetriever({
+    llm,
+    retriever,
+    rephrasePrompt: questionGenPrompt,
+  });
+  const output = await chain.invoke({ input, chat_history: [] });
+  expect(output).toEqual(fakeRetrievedDocs);
+
+  const output2 = await chain.invoke({ input, chat_history: "foo" });
+  expect(output2).toEqual(fakeRetrievedDocs);
+});
+
+// Path: langchain/src/chains/tests/llm_chain.int.test.ts
+import { test } from "@jest/globals";
+import { OpenAI, ChatOpenAI } from "@langchain/openai";
+import {
+  ChatPromptTemplate,
+  HumanMessagePromptTemplate,
+  PromptTemplate,
+} from "@langchain/core/prompts";
+import { LLMChain } from "../llm_chain.js";
+import { BufferMemory } from "../../memory/buffer_memory.js";
+
+test("Test OpenAI", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const prompt = new PromptTemplate({
+    template: "Print {foo}",
+    inputVariables: ["foo"],
+  });
+  const chain = new LLMChain({ prompt, llm: model });
+  const res = await chain.call({ foo: "my favorite color" });
+  console.log({ res });
+});
+
+test("Test OpenAI with timeout", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const prompt = new PromptTemplate({
+    template: "Print {foo}",
+    inputVariables: ["foo"],
+  });
+  const chain = new LLMChain({ prompt, llm: model });
+  await expect(() =>
+    chain.call({
+      foo: "my favorite color",
+      timeout: 10,
+    })
+  ).rejects.toThrow();
+});
+
+test("Test run method", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const prompt = new PromptTemplate({
+    template: "Print {foo}",
+    inputVariables: ["foo"],
+  });
+  const chain = new LLMChain({ prompt, llm: model });
+  const res = await chain.run("my favorite color");
+  console.log({ res });
+});
+
+test("Test run method", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const prompt = new PromptTemplate({
+    template: "{history} Print {foo}",
+    inputVariables: ["foo", "history"],
+  });
+  const chain = new LLMChain({
+    prompt,
+    llm: model,
+    memory: new BufferMemory(),
+  });
+  const res = await chain.run("my favorite color");
+  console.log({ res });
+});
+
+test("Test memory + cancellation", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const prompt = new PromptTemplate({
+    template: "{history} Print {foo}",
+    inputVariables: ["foo", "history"],
+  });
+  const chain = new LLMChain({
+    prompt,
+    llm: model,
+    memory: new BufferMemory(),
+  });
+  await expect(() =>
+    chain.call({
+      foo: "my favorite color",
+      signal: AbortSignal.timeout(20),
+    })
+  ).rejects.toThrow();
+});
+
+test("Test memory + timeout", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const prompt = new PromptTemplate({
+    template: "{history} Print {foo}",
+    inputVariables: ["foo", "history"],
+  });
+  const chain = new LLMChain({
+    prompt,
+    llm: model,
+    memory: new BufferMemory(),
+  });
+  await expect(() =>
+    chain.call({
+      foo: "my favorite color",
+      timeout: 20,
+    })
+  ).rejects.toThrow();
+});
+
+test("Test apply", async () => {
+  const model = new OpenAI({ modelName: "gpt-3.5-turbo-instruct" });
+  const prompt = new PromptTemplate({
+    template: "Print {foo}",
+    inputVariables: ["foo"],
+  });
+  const chain = new LLMChain({ prompt, llm: model });
+  const res = await chain.apply([{ foo: "my favorite color" }]);
+  console.log({ res });
+});
+
+test("Test LLMChain with ChatOpenAI", async () => {
+  const model = new ChatOpenAI({ temperature: 0.9 });
+  const template = "What is a good name for a company that makes {product}?";
+  const prompt = new PromptTemplate({ template, inputVariables: ["product"] });
+  const humanMessagePrompt = new HumanMessagePromptTemplate(prompt);
+  const chatPromptTemplate = ChatPromptTemplate.fromMessages([
+    humanMessagePrompt,
+  ]);
+  const chatChain = new LLMChain({ llm: model, prompt: chatPromptTemplate });
+  const res = await chatChain.call({ product: "colorful socks" });
+  console.log({ res });
+});
+
+test("Test passing a runnable to an LLMChain", async () => {
+  const model = new ChatOpenAI({ modelName: "gpt-3.5-turbo-1106" });
+  const runnableModel = model.bind({
+    response_format: {
+      type: "json_object",
+    },
+  });
+  const prompt = PromptTemplate.fromTemplate(
+    "You are a bee --I mean a spelling bee. Respond with a JSON key of 'spelling':\nQuestion:{input}"
+  );
+  const chain = new LLMChain({ llm: runnableModel, prompt });
+  const response = await chain.invoke({ input: "How do you spell today?" });
+  expect(JSON.parse(response.text)).toMatchObject({
+    spelling: expect.any(String),
+  });
+});
+
+// Path: langchain/src/chains/tests/openai_moderation.int.test.ts
+import { test } from "@jest/globals";
+import { OpenAIModerationChain } from "../openai_moderation.js";
+
+test("OpenAI Moderation Test", async () => {
+  const badString = "I hate myself and want to do harm to myself";
+  const goodString =
+    "The cat (Felis catus) is a domestic species of small carnivorous mammal.";
+
+  const moderation = new OpenAIModerationChain();
+  const { output: badResult } = await moderation.call({
+    input: badString,
+  });
+
+  const { output: goodResult } = await moderation.call({
+    input: goodString,
+  });
+
+  expect(badResult).toEqual(
+    "Text was found that violates OpenAI's content policy."
+  );
+  expect(goodResult).toEqual(
+    "The cat (Felis catus) is a domestic species of small carnivorous mammal."
+  );
+});
+
+test("OpenAI Moderation Test in non-english language", async () => {
+  const badString =
+    "Vi devus mortigi vin nun! Kaj donu al ĉiuj aliaj pecon da oksigeno kaj ozono, kovru ĝin, por ke ni povu spiri ene de ĉi tiu blua veziko. Ĉar por kio vi estas ĉi tie? Venu por adori min? Mortigu vin mem. Mi volas diri, cent procento. Mil procentoj."; // Written in Esperanto. It's LTG's most famous quote and it's extremely crass, and as such it should not pass, but it does. However, we can check category_scores to see that, indeed, it detected some sort self-harm language in the text, albeit it's non-conclusive.
+  const goodString =
+    "La kato ( Felis catus ) estas hejma specio de malgranda karnovora mamulo.";
+
+  const moderation = new OpenAIModerationChain();
+  const { output: badResult, results } = await moderation.call({
+    input: badString,
+  });
+
+  const { output: goodResult } = await moderation.call({
+    input: goodString,
+  });
+
+  expect(badResult).toEqual(
+    "Vi devus mortigi vin nun! Kaj donu al ĉiuj aliaj pecon da oksigeno kaj ozono, kovru ĝin, por ke ni povu spiri ene de ĉi tiu blua veziko. Ĉar por kio vi estas ĉi tie? Venu por adori min? Mortigu vin mem. Mi volas diri, cent procento. Mil procentoj."
+  );
+  expect(goodResult).toEqual(
+    "La kato ( Felis catus ) estas hejma specio de malgranda karnovora mamulo."
+  );
+
+  console.log(results[0].category_scores);
+
+  expect(results[0].category_scores["self-harm"]).toBeGreaterThan(0.01); // We can have a more granular control over moderation this way. It's not conclusive, but it's better than nothing if the language is not english.
+});
+
+// Path: langchain/src/chains/tests/retrieval_chain.int.test.ts
+import { test } from "@jest/globals";
+import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { ChatOpenAI, OpenAIEmbeddings } from "@langchain/openai";
+import { Document } from "@langchain/core/documents";
+import { StringOutputParser } from "@langchain/core/output_parsers";
+import {
+  RunnablePassthrough,
+  RunnableSequence,
+} from "@langchain/core/runnables";
+import { MemoryVectorStore } from "../../vectorstores/memory.js";
+import { createHistoryAwareRetriever } from "../history_aware_retriever.js";
+import { createRetrievalChain } from "../retrieval.js";
+
+const QUESTION_GEN_TEMPLATE = `Given the following conversation and a follow up question, rephrase the follow up question to be a standalone question.
+
+Chat History:
+{chat_history}
+Follow Up Input: {input}
+Standalone question:`;
+
+const COMBINE_DOCS_PROMPT = `Based on the following context:
+
+{context}
+
+And chat history:
+{chat_history}
+
+Answer the following question:
+{input}`;
+
+test("Retrieval chain with a history aware retriever and a followup", async () => {
+  const questionGenPrompt = ChatPromptTemplate.fromTemplate(
+    QUESTION_GEN_TEMPLATE
+  );
+  const vectorstore = await MemoryVectorStore.fromTexts(
+    [
+      "Mitochondria is the powerhouse of the cell",
+      "Foo is red",
+      "Bar is red",
+      "Buildings are made out of brick",
+      "Mitochondria are made of lipids",
+    ],
+    [{ id: 2 }, { id: 1 }, { id: 3 }, { id: 4 }, { id: 5 }],
+    new OpenAIEmbeddings()
+  );
+  const retriever = vectorstore.asRetriever(2);
+  const llm = new ChatOpenAI({});
+  const historyAwareRetriever = await createHistoryAwareRetriever({
+    llm,
+    retriever,
+    rephrasePrompt: questionGenPrompt,
+  });
+  const combineDocsPrompt =
+    ChatPromptTemplate.fromTemplate(COMBINE_DOCS_PROMPT);
+  const combineDocsChain = RunnableSequence.from([
+    RunnablePassthrough.assign({
+      context: (input: { context: Document[] }) =>
+        input.context.map((doc) => doc.pageContent).join("\n\n"),
+    }),
+    combineDocsPrompt,
+    llm,
+    new StringOutputParser(),
+  ]);
+  const chain = await createRetrievalChain({
+    retriever: historyAwareRetriever,
+    combineDocsChain,
+  });
+  const results = await chain.invoke({
+    input: "What is the powerhouse of the cell?",
+    chat_history: "",
+  });
+
+  console.log(results);
+  expect(results.answer.toLowerCase()).toContain("mitochondria");
+
+  const results2 = await chain.invoke({
+    input: "What are they made of?",
+    extraparam: "unused",
+    chat_history: [
+      "Human: What is the powerhouse of the cell?",
+      "Assistant: Mitochondria is the powerhouse of the cell",
+    ].join("\n"),
+  });
+  console.log(results2);
+  expect(results2.answer.toLowerCase()).toContain("lipids");
+});
+
+// Path: langchain/src/chains/tests/retrieval_chain.test.ts
+import { test } from "@jest/globals";
+import { ChatPromptTemplate } from "@langchain/core/prompts";
+import { FakeRetriever } from "@langchain/core/utils/testing";
+import { Document } from "@langchain/core/documents";
+import { createRetrievalChain } from "../retrieval.js";
+import { FakeListLLM } from "../../llms/fake.js";
+
+test("createRetrievalChain", async () => {
+  const answer = "I know the answer!";
+  const combineDocsPrompt = ChatPromptTemplate.fromTemplate(
+    `hi! {input} {chat_history}`
+  );
+  const fakeRetrievedDocs = [
+    new Document({ pageContent: "some fake content" }),
+  ];
+  const llm = new FakeListLLM({ responses: [answer] });
+  const input = "What is the answer?";
+  const retriever = new FakeRetriever({
+    output: fakeRetrievedDocs,
+  });
+  const chain = await createRetrievalChain({
+    retriever,
+    combineDocsChain: combineDocsPrompt.pipe(llm),
+  });
+  const output = await chain.invoke({ input });
+  expect(output).toEqual({
+    answer,
+    chat_history: [],
+    context: fakeRetrievedDocs,
+    input,
+  });
+
+  const output2 = await chain.invoke({ input, chat_history: "foo" });
+  expect(output2).toEqual({
+    answer,
+    chat_history: "foo",
+    context: fakeRetrievedDocs,
+    input,
+  });
+});
+
+// Path: langchain/src/chains/tests/sequential_chain.int.test.ts
+import { test } from "@jest/globals";
+import { OpenAI, ChatOpenAI } from "@langchain/openai";
+import { PromptTemplate } from "@langchain/core/prompts";
+import { LLMChain } from "../llm_chain.js";
+import { SequentialChain } from "../sequential_chain.js";
+
+test("Test SequentialChain example usage", async () => {
+  // This is an LLMChain to write a synopsis given a title of a play and the era it is set in.
+  const llm = new OpenAI({ temperature: 0 });
+  const template = `You are a playwright. Given the title of play and the era it is set in, it is your job to write a synopsis for that title.
+
+  Title: {title}
+  Era: {era}
+  Playwright: This is a synopsis for the above play:`;
+  const promptTemplate = new PromptTemplate({
+    template,
+    inputVariables: ["title", "era"],
+  });
+  const synopsisChain = new LLMChain({
+    llm,
+    prompt: promptTemplate,
+    outputKey: "synopsis",
+  });
+
+  // This is an LLMChain to write a review of a play given a synopsis.
+  const reviewLLM = new OpenAI({ temperature: 0 });
+  const reviewTemplate = `You are a play critic from the New York Times. Given the synopsis of play, it is your job to write a review for that play.
+    
+     Play Synopsis:
+     {synopsis}
+     Review from a New York Times play critic of the above play:`;
+  const reviewPromptTemplate = new PromptTemplate({
+    template: reviewTemplate,
+    inputVariables: ["synopsis"],
+  });
+  const reviewChain = new LLMChain({
+    llm: reviewLLM,
+    prompt: reviewPromptTemplate,
+    outputKey: "review",
+  });
+
+  const overallChain = new SequentialChain({
+    chains: [synopsisChain, reviewChain],
+    inputVariables: ["era", "title"],
+    // Here we return multiple variables
+    outputVariables: ["synopsis", "review"],
+    verbose: true,
+  });
+  const review = await overallChain.call({
+    title: "Tragedy at sunset on the beach",
+    era: "Victorian England",
+  });
+  expect(review.review.toLowerCase()).toContain(
+    "tragedy at sunset on the beach"
+  );
+});
+
+test.skip("Test SequentialChain serialize/deserialize", async () => {
+  const llm1 = new ChatOpenAI();
+  const template1 = `Echo back "{foo} {bar}"`;
+  const promptTemplate1 = new PromptTemplate({
+    template: template1,
+    inputVariables: ["foo", "bar"],
+  });
+  const chain1 = new LLMChain({
+    llm: llm1,
+    prompt: promptTemplate1,
+    outputKey: "baz",
+  });
+
+  const llm2 = new ChatOpenAI();
+  const template2 = `Echo back "{baz}"`;
+  const promptTemplate2 = new PromptTemplate({
+    template: template2,
+    inputVariables: ["baz"],
+  });
+  const chain2 = new LLMChain({
+    llm: llm2,
+    prompt: promptTemplate2,
+  });
+
+  const sampleSequentialChain = new SequentialChain({
+    chains: [chain1, chain2],
+    inputVariables: ["foo", "bar"],
+    outputVariables: ["text"],
+    verbose: true,
+  });
+
+  const serializedChain = sampleSequentialChain.serialize();
+  expect(serializedChain._type).toEqual("sequential_chain");
+  expect(serializedChain.chains.length).toEqual(2);
+  const deserializedChain = await SequentialChain.deserialize(serializedChain);
+  expect(deserializedChain.chains.length).toEqual(2);
+  expect(deserializedChain._chainType).toEqual("sequential_chain");
+  const review = await deserializedChain.call({ foo: "test1", bar: "test2" });
+  expect(review.trim()).toMatchInlineSnapshot(`"test1 test2"`);
+});
+
+// Path: langchain/src/chains/tests/sequential_chain.test.ts
+import { test, expect } from "@jest/globals";
+import { BaseLLM } from "@langchain/core/language_models/llms";
+import { PromptTemplate } from "@langchain/core/prompts";
+import { AIMessage, HumanMessage } from "@langchain/core/messages";
+import { LLMResult } from "@langchain/core/outputs";
+import { ChatMessageHistory } from "@langchain/community/stores/message/in_memory";
+import { LLMChain } from "../llm_chain.js";
+import { SequentialChain } from "../sequential_chain.js";
+import { BufferMemory } from "../../memory/buffer_memory.js";
+
+class FakeLLM1 extends BaseLLM {
+...
+
+Function Description:1. **Purpose**: To determine if a given argument, which can be a function, object, string, or undefined, lacks meaningful content or definition.
+2. **Input**: A single argument that can be of various types including a function, an object, a string, or undefined.
+3. **Output**: A boolean value; `true` if the argument is undefined, an empty string, an empty object, or simply not provided, and `false` otherwise.
+4. **Procedure**: The function first checks if the argument is falsy (e.g., undefined or an empty string). If it is a string and not empty, it returns `false`. If it is a function, it also returns `false`. For objects, it checks if the object is not an array and if it has no properties, returning `true` if both conditions are met. Otherwise, it returns `false`.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

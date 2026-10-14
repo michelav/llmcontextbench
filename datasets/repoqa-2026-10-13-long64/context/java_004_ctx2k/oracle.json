@@ -1,0 +1,15 @@
+{
+  "baseId": "java_004",
+  "endByte": 251445,
+  "endLine": 5824,
+  "instanceId": "java_004_ctx2k",
+  "language": "java",
+  "needleName": "writeEncryptedRPCTime",
+  "normalizedLanguage": "java",
+  "path": "src/main/java/com/microsoft/sqlserver/jdbc/IOBuffer.java",
+  "repo": "microsoft/mssql-jdbc",
+  "sequence": 4,
+  "startByte": 250655,
+  "startLine": 5807,
+  "targetFunction": "void writeEncryptedRPCTime(String sName, GregorianCalendar localCalendar, int subSecondNanos, int scale,\n            boolean bOut, SQLServerStatement statement) throws SQLServerException {\n        if (con.getSendTimeAsDatetime()) {\n            throw new SQLServerException(SQLServerException.getErrString(\"R_sendTimeAsDateTimeForAE\"), null);\n        }\n        writeRPCNameValType(sName, bOut, TDSType.BIGVARBINARY);\n\n        if (null == localCalendar)\n            writeEncryptedRPCByteArray(null);\n        else\n            writeEncryptedRPCByteArray(writeEncryptedScaledTemporal(localCalendar, subSecondNanos, scale, SSType.TIME,\n                    (short) 0, statement));\n\n        writeByte(TDSType.TIMEN.byteValue());\n        writeByte((byte) scale);\n        writeCryptoMetaData();\n    }"
+}

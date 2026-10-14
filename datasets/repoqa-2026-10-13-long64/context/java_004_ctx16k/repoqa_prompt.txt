@@ -1,0 +1,1204 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:
+        if (null != cryptoMeta) {
+            // send encrypted data as BIGVARBINARY
+            tdsType = (isShortValue || usePLP) ? TDSType.BIGVARBINARY : TDSType.IMAGE;
+            collation = null;
+        } else
+            switch (jdbcType) {
+                case CHAR:
+                case VARCHAR:
+                case LONGVARCHAR:
+                case CLOB:
+                    tdsType = (isShortValue || usePLP) ? TDSType.BIGVARCHAR : TDSType.TEXT;
+                    if (null == collation)
+                        collation = con.getDatabaseCollation();
+                    break;
+
+                case NCHAR:
+                case NVARCHAR:
+                case LONGNVARCHAR:
+                case NCLOB:
+                    tdsType = (isShortValue || usePLP) ? TDSType.NVARCHAR : TDSType.NTEXT;
+                    if (null == collation)
+                        collation = con.getDatabaseCollation();
+                    break;
+
+                case BINARY:
+                case VARBINARY:
+                case LONGVARBINARY:
+                case BLOB:
+                default:
+                    tdsType = (isShortValue || usePLP) ? TDSType.BIGVARBINARY : TDSType.IMAGE;
+                    collation = null;
+                    break;
+            }
+
+        writeRPCNameValType(sName, bOut, tdsType);
+
+        if (usePLP && !isNonPLP) {
+            writeVMaxHeader(nValueLen, bValueNull, collation);
+
+            // Send the data.
+            if (!bValueNull) {
+                if (nValueLen > 0) {
+                    writeInt(nValueLen);
+                    writeBytes(bValue);
+                }
+
+                // Send the terminator PLP chunk.
+                writeInt(0);
+            }
+        } else // non-PLP type
+        {
+            // Handle Shiloh types here.
+            if (isShortValue) {
+                writeShort((short) DataTypes.SHORT_VARTYPE_MAX_BYTES);
+            } else {
+                writeInt(DataTypes.IMAGE_TEXT_MAX_BYTES);
+            }
+
+            if (null != collation)
+                collation.writeCollation(this);
+
+            // Data and length
+            if (bValueNull) {
+                writeShort((short) -1); // actual len
+            } else {
+                if (isShortValue)
+                    writeShort((short) nValueLen); // actual len
+                else
+                    writeInt(nValueLen); // actual len
+
+                // If length is zero, we're done.
+                if (0 != nValueLen)
+                    writeBytes(bValue);
+            }
+        }
+    }
+
+    /**
+     * Append a timestamp in RPC transmission format as a SQL Server DATETIME data type
+     * 
+     * @param sName
+     *        the optional parameter name
+     * @param cal
+     *        Pure Gregorian calendar containing the timestamp, including its associated time zone
+     * @param subSecondNanos
+     *        the sub-second nanoseconds (0 - 999,999,999)
+     * @param bOut
+     *        boolean true if the data value is being registered as an output parameter
+     *
+     */
+    void writeRPCDateTime(String sName, GregorianCalendar cal, int subSecondNanos,
+            boolean bOut) throws SQLServerException {
+        assert (subSecondNanos >= 0) && (subSecondNanos < Nanos.PER_SECOND) : "Invalid subNanoSeconds value: "
+                + subSecondNanos;
+        assert (cal != null) || (subSecondNanos == 0) : "Invalid subNanoSeconds value when calendar is null: "
+                + subSecondNanos;
+
+        writeRPCNameValType(sName, bOut, TDSType.DATETIMEN);
+        writeByte((byte) 8); // max length of datatype
+
+        if (null == cal) {
+            writeByte((byte) 0); // len of data bytes
+            return;
+        }
+
+        writeByte((byte) 8); // len of data bytes
+
+        // We need to extract the Calendar's current date & time in terms
+        // of the number of days since the SQL Base Date (1/1/1900) plus
+        // the number of milliseconds since midnight in the current day.
+        //
+        // We cannot rely on any pre-calculated value for the number of
+        // milliseconds in a day or the number of milliseconds since the
+        // base date to do this because days with DST changes are shorter
+        // or longer than "normal" days.
+        //
+        // ASSUMPTION: We assume we are dealing with a GregorianCalendar here.
+        // If not, we have no basis in which to compare dates. E.g. if we
+        // are dealing with a Chinese Calendar implementation which does not
+        // use the same value for Calendar.YEAR as the GregorianCalendar,
+        // we cannot meaningfully compute a value relative to 1/1/1900.
+
+        // First, figure out how many days there have been since the SQL Base Date.
+        // These are based on SQL Server algorithms
+        int daysSinceSQLBaseDate = DDC.daysSinceBaseDate(cal.get(Calendar.YEAR), cal.get(Calendar.DAY_OF_YEAR),
+                TDS.BASE_YEAR_1900);
+
+        // Next, figure out the number of milliseconds since midnight of the current day.
+        int millisSinceMidnight = (subSecondNanos + Nanos.PER_MILLISECOND / 2) / Nanos.PER_MILLISECOND + // Millis into
+                                                                                                         // the current
+                                                                                                         // second
+                1000 * cal.get(Calendar.SECOND) + // Seconds into the current minute
+                60 * 1000 * cal.get(Calendar.MINUTE) + // Minutes into the current hour
+                60 * 60 * 1000 * cal.get(Calendar.HOUR_OF_DAY); // Hours into the current day
+
+        // The last millisecond of the current day is always rounded to the first millisecond
+        // of the next day because DATETIME is only accurate to 1/300th of a second.
+        if (millisSinceMidnight >= 1000 * 60 * 60 * 24 - 1) {
+            ++daysSinceSQLBaseDate;
+            millisSinceMidnight = 0;
+        }
+
+        // Last-ditch verification that the value is in the valid range for the
+        // DATETIMEN TDS data type (1/1/1753 to 12/31/9999). If it's not, then
+        // throw an exception now so that statement execution is safely canceled.
+        // Attempting to put an invalid value on the wire would result in a TDS
+        // exception, which would close the connection.
+        // These are based on SQL Server algorithms
+        if (daysSinceSQLBaseDate < DDC.daysSinceBaseDate(1753, 1, TDS.BASE_YEAR_1900)
+                || daysSinceSQLBaseDate >= DDC.daysSinceBaseDate(10000, 1, TDS.BASE_YEAR_1900)) {
+            MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_valueOutOfRange"));
+            Object[] msgArgs = {SSType.DATETIME};
+            throw new SQLServerException(form.format(msgArgs), SQLState.DATA_EXCEPTION_DATETIME_FIELD_OVERFLOW,
+                    DriverError.NOT_SET, null);
+        }
+
+        // And put it all on the wire...
+
+        // Number of days since the SQL Server Base Date (January 1, 1900)
+        writeInt(daysSinceSQLBaseDate);
+
+        // Milliseconds since midnight (at a resolution of three hundredths of a second)
+        writeInt((3 * millisSinceMidnight + 5) / 10);
+    }
+
+    void writeRPCTime(String sName, GregorianCalendar localCalendar, int subSecondNanos, int scale,
+            boolean bOut) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.TIMEN);
+        writeByte((byte) scale);
+
+        if (null == localCalendar) {
+            writeByte((byte) 0);
+            return;
+        }
+
+        writeByte((byte) TDS.timeValueLength(scale));
+        writeScaledTemporal(localCalendar, subSecondNanos, scale, SSType.TIME);
+    }
+
+    void writeRPCDate(String sName, GregorianCalendar localCalendar, boolean bOut) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.DATEN);
+        if (null == localCalendar) {
+            writeByte((byte) 0);
+            return;
+        }
+
+        writeByte((byte) TDS.DAYS_INTO_CE_LENGTH);
+        writeScaledTemporal(localCalendar, 0, // subsecond nanos (none for a date value)
+                0, // scale (dates are not scaled)
+                SSType.DATE);
+    }
+
+    
+void writeEncryptedRPCTime(String sName, GregorianCalendar localCalendar, int subSecondNanos, int scale,
+            boolean bOut, SQLServerStatement statement) throws SQLServerException {
+        if (con.getSendTimeAsDatetime()) {
+            throw new SQLServerException(SQLServerException.getErrString("R_sendTimeAsDateTimeForAE"), null);
+        }
+        writeRPCNameValType(sName, bOut, TDSType.BIGVARBINARY);
+
+        if (null == localCalendar)
+            writeEncryptedRPCByteArray(null);
+        else
+            writeEncryptedRPCByteArray(writeEncryptedScaledTemporal(localCalendar, subSecondNanos, scale, SSType.TIME,
+                    (short) 0, statement));
+
+        writeByte(TDSType.TIMEN.byteValue());
+        writeByte((byte) scale);
+        writeCryptoMetaData();
+    }
+
+    void writeEncryptedRPCDate(String sName, GregorianCalendar localCalendar, boolean bOut,
+            SQLServerStatement statement) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.BIGVARBINARY);
+
+        if (null == localCalendar)
+            writeEncryptedRPCByteArray(null);
+        else
+            writeEncryptedRPCByteArray(writeEncryptedScaledTemporal(localCalendar, 0, // subsecond nanos (none for a
+                                                                                      // date value)
+                    0, // scale (dates are not scaled)
+                    SSType.DATE, (short) 0, statement));
+
+        writeByte(TDSType.DATEN.byteValue());
+        writeCryptoMetaData();
+    }
+
+    void writeEncryptedRPCDateTime(String sName, GregorianCalendar cal, int subSecondNanos, boolean bOut,
+            JDBCType jdbcType, SQLServerStatement statement) throws SQLServerException {
+        assert (subSecondNanos >= 0) && (subSecondNanos < Nanos.PER_SECOND) : "Invalid subNanoSeconds value: "
+                + subSecondNanos;
+        assert (cal != null) || (subSecondNanos == 0) : "Invalid subNanoSeconds value when calendar is null: "
+                + subSecondNanos;
+
+        writeRPCNameValType(sName, bOut, TDSType.BIGVARBINARY);
+
+        if (null == cal)
+            writeEncryptedRPCByteArray(null);
+        else
+            writeEncryptedRPCByteArray(getEncryptedDateTimeAsBytes(cal, subSecondNanos, jdbcType, statement));
+
+        if (JDBCType.SMALLDATETIME == jdbcType) {
+            writeByte(TDSType.DATETIMEN.byteValue());
+            writeByte((byte) 4);
+        } else {
+            writeByte(TDSType.DATETIMEN.byteValue());
+            writeByte((byte) 8);
+        }
+        writeCryptoMetaData();
+    }
+
+    // getEncryptedDateTimeAsBytes is called if jdbcType/ssType is SMALLDATETIME or DATETIME
+    byte[] getEncryptedDateTimeAsBytes(GregorianCalendar cal, int subSecondNanos, JDBCType jdbcType,
+            SQLServerStatement statement) throws SQLServerException {
+        int daysSinceSQLBaseDate = DDC.daysSinceBaseDate(cal.get(Calendar.YEAR), cal.get(Calendar.DAY_OF_YEAR),
+                TDS.BASE_YEAR_1900);
+
+        // Next, figure out the number of milliseconds since midnight of the current day.
+        int millisSinceMidnight = (subSecondNanos + Nanos.PER_MILLISECOND / 2) / Nanos.PER_MILLISECOND + // Millis into
+                                                                                                         // the current
+                                                                                                         // second
+                1000 * cal.get(Calendar.SECOND) + // Seconds into the current minute
+                60 * 1000 * cal.get(Calendar.MINUTE) + // Minutes into the current hour
+                60 * 60 * 1000 * cal.get(Calendar.HOUR_OF_DAY); // Hours into the current day
+
+        // The last millisecond of the current day is always rounded to the first millisecond
+        // of the next day because DATETIME is only accurate to 1/300th of a second.
+        if (millisSinceMidnight >= 1000 * 60 * 60 * 24 - 1) {
+            ++daysSinceSQLBaseDate;
+            millisSinceMidnight = 0;
+        }
+
+        if (JDBCType.SMALLDATETIME == jdbcType) {
+
+            int secondsSinceMidnight = (millisSinceMidnight / 1000);
+            int minutesSinceMidnight = (secondsSinceMidnight / 60);
+
+            // Values that are 29.998 seconds or less are rounded down to the nearest minute
+            minutesSinceMidnight = ((secondsSinceMidnight % 60) > 29.998) ? minutesSinceMidnight + 1
+                                                                          : minutesSinceMidnight;
+
+            // minutesSinceMidnight for (23:59:30)
+            int maxMinutesSinceMidnightSmallDateTime = 1440;
+            // Verification for smalldatetime to be within valid range of (1900.01.01) to (2079.06.06)
+            // smalldatetime for unencrypted does not allow insertion of 2079.06.06 23:59:59 and it is rounded up
+            // to 2079.06.07 00:00:00, therefore, we are checking minutesSinceMidnight for that condition. If it's not
+            // within valid range, then
+            // throw an exception now so that statement execution is safely canceled.
+            // 157 is the calculated day of year from 06-06 , 1440 is minutesince midnight for (23:59:30)
+            if ((daysSinceSQLBaseDate < DDC.daysSinceBaseDate(1900, 1, TDS.BASE_YEAR_1900)
+                    || daysSinceSQLBaseDate > DDC.daysSinceBaseDate(2079, 157, TDS.BASE_YEAR_1900))
+                    || (daysSinceSQLBaseDate == DDC.daysSinceBaseDate(2079, 157, TDS.BASE_YEAR_1900)
+                            && minutesSinceMidnight >= maxMinutesSinceMidnightSmallDateTime)) {
+                MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_valueOutOfRange"));
+                Object[] msgArgs = {SSType.SMALLDATETIME};
+                throw new SQLServerException(form.format(msgArgs), SQLState.DATA_EXCEPTION_DATETIME_FIELD_OVERFLOW,
+                        DriverError.NOT_SET, null);
+            }
+
+            ByteBuffer days = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
+            days.putShort((short) daysSinceSQLBaseDate);
+            ByteBuffer seconds = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
+            seconds.putShort((short) minutesSinceMidnight);
+
+            byte[] value = new byte[4];
+            System.arraycopy(days.array(), 0, value, 0, 2);
+            System.arraycopy(seconds.array(), 0, value, 2, 2);
+            return SQLServerSecurityUtility.encryptWithKey(value, cryptoMeta, con, statement);
+        } else if (JDBCType.DATETIME == jdbcType) {
+            // Last-ditch verification that the value is in the valid range for the
+            // DATETIMEN TDS data type (1/1/1753 to 12/31/9999). If it's not, then
+            // throw an exception now so that statement execution is safely canceled.
+            // Attempting to put an invalid value on the wire would result in a TDS
+            // exception, which would close the connection.
+            // These are based on SQL Server algorithms
+            // And put it all on the wire...
+            if (daysSinceSQLBaseDate < DDC.daysSinceBaseDate(1753, 1, TDS.BASE_YEAR_1900)
+                    || daysSinceSQLBaseDate >= DDC.daysSinceBaseDate(10000, 1, TDS.BASE_YEAR_1900)) {
+                MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_valueOutOfRange"));
+                Object[] msgArgs = {SSType.DATETIME};
+                throw new SQLServerException(form.format(msgArgs), SQLState.DATA_EXCEPTION_DATETIME_FIELD_OVERFLOW,
+                        DriverError.NOT_SET, null);
+            }
+
+            // Number of days since the SQL Server Base Date (January 1, 1900)
+            ByteBuffer days = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
+            days.putInt(daysSinceSQLBaseDate);
+            ByteBuffer seconds = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
+            seconds.putInt((3 * millisSinceMidnight + 5) / 10);
+
+            byte[] value = new byte[8];
+            System.arraycopy(days.array(), 0, value, 0, 4);
+            System.arraycopy(seconds.array(), 0, value, 4, 4);
+            return SQLServerSecurityUtility.encryptWithKey(value, cryptoMeta, con, statement);
+        }
+
+        assert false : "Unexpected JDBCType type " + jdbcType;
+        return null;
+    }
+
+    void writeEncryptedRPCDateTime2(String sName, GregorianCalendar localCalendar, int subSecondNanos, int scale,
+            boolean bOut, SQLServerStatement statement) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.BIGVARBINARY);
+
+        if (null == localCalendar)
+            writeEncryptedRPCByteArray(null);
+        else
+            writeEncryptedRPCByteArray(writeEncryptedScaledTemporal(localCalendar, subSecondNanos, scale,
+                    SSType.DATETIME2, (short) 0, statement));
+
+        writeByte(TDSType.DATETIME2N.byteValue());
+        writeByte((byte) (scale));
+        writeCryptoMetaData();
+    }
+
+    void writeEncryptedRPCDateTimeOffset(String sName, GregorianCalendar utcCalendar, int minutesOffset,
+            int subSecondNanos, int scale, boolean bOut, SQLServerStatement statement) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.BIGVARBINARY);
+
+        if (null == utcCalendar)
+            writeEncryptedRPCByteArray(null);
+        else {
+            assert 0 == utcCalendar.get(Calendar.ZONE_OFFSET);
+            writeEncryptedRPCByteArray(writeEncryptedScaledTemporal(utcCalendar, subSecondNanos, scale,
+                    SSType.DATETIMEOFFSET, (short) minutesOffset, statement));
+        }
+
+        writeByte(TDSType.DATETIMEOFFSETN.byteValue());
+        writeByte((byte) (scale));
+        writeCryptoMetaData();
+
+    }
+
+    void writeRPCDateTime2(String sName, GregorianCalendar localCalendar, int subSecondNanos, int scale,
+            boolean bOut) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.DATETIME2N);
+        writeByte((byte) scale);
+
+        if (null == localCalendar) {
+            writeByte((byte) 0);
+            return;
+        }
+
+        writeByte((byte) TDS.datetime2ValueLength(scale));
+        writeScaledTemporal(localCalendar, subSecondNanos, scale, SSType.DATETIME2);
+    }
+
+    void writeRPCDateTimeOffset(String sName, GregorianCalendar utcCalendar, int minutesOffset, int subSecondNanos,
+            int scale, boolean bOut) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.DATETIMEOFFSETN);
+        writeByte((byte) scale);
+
+        if (null == utcCalendar) {
+            writeByte((byte) 0);
+            return;
+        }
+
+        assert 0 == utcCalendar.get(Calendar.ZONE_OFFSET);
+
+        writeByte((byte) TDS.datetimeoffsetValueLength(scale));
+        writeScaledTemporal(utcCalendar, subSecondNanos, scale, SSType.DATETIMEOFFSET);
+
+        writeShort((short) minutesOffset);
+    }
+
+    /**
+     * Returns subSecondNanos rounded to the maximum precision supported. The maximum fractional scale is
+     * MAX_FRACTIONAL_SECONDS_SCALE(7). Eg1: if you pass 456,790,123 the function would return 456,790,100 Eg2: if you
+     * pass 456,790,150 the function would return 456,790,200 Eg3: if you pass 999,999,951 the function would return
+     * 1,000,000,000 This is done to ensure that we have consistent rounding behaviour in setters and getters. Bug
+     * #507919
+     */
+    private int getRoundedSubSecondNanos(int subSecondNanos) {
+        return ((subSecondNanos + (Nanos.PER_MAX_SCALE_INTERVAL / 2)) / Nanos.PER_MAX_SCALE_INTERVAL)
+                * Nanos.PER_MAX_SCALE_INTERVAL;
+    }
+
+    /**
+     * Writes to the TDS channel a temporal value as an instance instance of one of the scaled temporal SQL types: DATE,
+     * TIME, DATETIME2, or DATETIMEOFFSET.
+     *
+     * @param cal
+     *        Calendar representing the value to write, except for any sub-second nanoseconds
+     * @param subSecondNanos
+     *        the sub-second nanoseconds (0 - 999,999,999)
+     * @param scale
+     *        the scale (in digits: 0 - 7) to use for the sub-second nanos component
+     * @param ssType
+     *        the SQL Server data type (DATE, TIME, DATETIME2, or DATETIMEOFFSET)
+     *
+     * @throws SQLServerException
+     *         if an I/O error occurs or if the value is not in the valid range
+     */
+    private void writeScaledTemporal(GregorianCalendar cal, int subSecondNanos, int scale,
+            SSType ssType) throws SQLServerException {
+
+        assert con.isKatmaiOrLater();
+
+        assert SSType.DATE == ssType || SSType.TIME == ssType || SSType.DATETIME2 == ssType
+                || SSType.DATETIMEOFFSET == ssType : UNEXPECTED_SSTYPE + ssType;
+
+        // First, for types with a time component, write the scaled nanos since midnight
+        if (SSType.TIME == ssType || SSType.DATETIME2 == ssType || SSType.DATETIMEOFFSET == ssType) {
+            assert subSecondNanos >= 0;
+            assert subSecondNanos < Nanos.PER_SECOND;
+            assert scale >= 0;
+            assert scale <= TDS.MAX_FRACTIONAL_SECONDS_SCALE;
+
+            int secondsSinceMidnight = cal.get(Calendar.SECOND) + 60 * cal.get(Calendar.MINUTE)
+                    + 60 * 60 * cal.get(Calendar.HOUR_OF_DAY);
+
+            // Scale nanos since midnight to the desired scale, rounding the value as necessary
+            long divisor = Nanos.PER_MAX_SCALE_INTERVAL
+                    * (long) Math.pow(10, TDS.MAX_FRACTIONAL_SECONDS_SCALE - (double) scale);
+
+            // The scaledNanos variable represents the fractional seconds of the value at the scale
+            // indicated by the scale variable. So, for example, scaledNanos = 3 means 300 nanoseconds
+            // at scale TDS.MAX_FRACTIONAL_SECONDS_SCALE, but 3000 nanoseconds at
+            // TDS.MAX_FRACTIONAL_SECONDS_SCALE - 1
+            long scaledNanos = ((long) Nanos.PER_SECOND * secondsSinceMidnight
+                    + getRoundedSubSecondNanos(subSecondNanos) + divisor / 2) / divisor;
+
+            // SQL Server rounding behavior indicates that it always rounds up unless
+            // we are at the max value of the type(NOT every day), in which case it truncates.
+            // Side effect on Calendar date:
+            // If rounding nanos to the specified scale rolls the value to the next day ...
+            if (Nanos.PER_DAY / divisor == scaledNanos) {
+
+                // If the type is time, always truncate
+                if (SSType.TIME == ssType) {
+                    --scaledNanos;
+                }
+                // If the type is datetime2 or datetimeoffset, truncate only if its the max value supported
+                else {
+                    assert SSType.DATETIME2 == ssType || SSType.DATETIMEOFFSET == ssType : UNEXPECTED_SSTYPE + ssType;
+
+                    // ... then bump the date, provided that the resulting date is still within
+                    // the valid date range.
+                    //
+                    // Extreme edge case (literally, the VERY edge...):
+                    // If nanos overflow rolls the date value out of range (that is, we have a value
+                    // a few nanoseconds later than 9999-12-31 23:59:59) then truncate the nanos
+                    // instead of rolling.
+                    //
+                    // This case is very likely never hit by "real world" applications, but exists
+                    // here as a security measure to ensure that such values don't result in a
+                    // connection-closing TDS exception.
+                    cal.add(Calendar.SECOND, 1);
+
+                    if (cal.get(Calendar.YEAR) <= 9999) {
+                        scaledNanos = 0;
+                    } else {
+                        cal.add(Calendar.SECOND, -1);
+                        --scaledNanos;
+                    }
+                }
+            }
+
+            // Encode the scaled nanos to TDS
+            int encodedLength = TDS.nanosSinceMidnightLength(scale);
+            byte[] encodedBytes = scaledNanosToEncodedBytes(scaledNanos, encodedLength);
+
+            writeBytes(encodedBytes);
+        }
+
+        // Second, for types with a date component, write the days into the Common Era
+        if (SSType.DATE == ssType || SSType.DATETIME2 == ssType || SSType.DATETIMEOFFSET == ssType) {
+            // Computation of the number of days into the Common Era assumes that
+            // the DAY_OF_YEAR field reflects a pure Gregorian calendar - one that
+            // uses Gregorian leap year rules across the entire range of dates.
+            //
+            // For the DAY_OF_YEAR field to accurately reflect pure Gregorian behavior,
+            // we need to use a pure Gregorian calendar for dates that are Julian dates
+            // under a standard Gregorian calendar and for (Gregorian) dates later than
+            // the cutover date in the cutover year.
+            if (cal.getTimeInMillis() < GregorianChange.STANDARD_CHANGE_DATE.getTime()
+                    || cal.getActualMaximum(Calendar.DAY_OF_YEAR) < TDS.DAYS_PER_YEAR) {
+                int year = cal.get(Calendar.YEAR);
+                int month = cal.get(Calendar.MONTH);
+                int date = cal.get(Calendar.DATE);
+
+                // Set the cutover as early as possible (pure Gregorian behavior)
+                cal.setGregorianChange(GregorianChange.PURE_CHANGE_DATE);
+
+                // Initialize the date field by field (preserving the "wall calendar" value)
+                cal.set(year, month, date);
+            }
+
+            int daysIntoCE = DDC.daysSinceBaseDate(cal.get(Calendar.YEAR), cal.get(Calendar.DAY_OF_YEAR), 1);
+
+            // Last-ditch verification that the value is in the valid range for the
+            // DATE/DATETIME2/DATETIMEOFFSET TDS data type (1/1/0001 to 12/31/9999).
+            // If it's not, then throw an exception now so that statement execution
+            // is safely canceled. Attempting to put an invalid value on the wire
+            // would result in a TDS exception, which would close the connection.
+            if (daysIntoCE < 0 || daysIntoCE >= DDC.daysSinceBaseDate(10000, 1, 1)) {
+                MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_valueOutOfRange"));
+                Object[] msgArgs = {ssType};
+                throw new SQLServerException(form.format(msgArgs), SQLState.DATA_EXCEPTION_DATETIME_FIELD_OVERFLOW,
+                        DriverError.NOT_SET, null);
+            }
+
+            byte[] encodedBytes = new byte[3];
+            encodedBytes[0] = (byte) ((daysIntoCE >> 0) & 0xFF);
+            encodedBytes[1] = (byte) ((daysIntoCE >> 8) & 0xFF);
+            encodedBytes[2] = (byte) ((daysIntoCE >> 16) & 0xFF);
+            writeBytes(encodedBytes);
+        }
+    }
+
+    /**
+     * Writes to the TDS channel a temporal value as an instance instance of one of the scaled temporal SQL types: DATE,
+     * TIME, DATETIME2, or DATETIMEOFFSET.
+     *
+     * @param cal
+     *        Calendar representing the value to write, except for any sub-second nanoseconds
+     * @param subSecondNanos
+     *        the sub-second nanoseconds (0 - 999,999,999)
+     * @param scale
+     *        the scale (in digits: 0 - 7) to use for the sub-second nanos component
+     * @param ssType
+     *        the SQL Server data type (DATE, TIME, DATETIME2, or DATETIMEOFFSET)
+     * @param minutesOffset
+     *        the offset value for DATETIMEOFFSET
+     * @param statement
+     *        the SQLServerStatement used for encryption
+     * @throws SQLServerException
+     *         if an I/O error occurs or if the value is not in the valid range
+     */
+    byte[] writeEncryptedScaledTemporal(GregorianCalendar cal, int subSecondNanos, int scale, SSType ssType,
+            short minutesOffset, SQLServerStatement statement) throws SQLServerException {
+        assert con.isKatmaiOrLater();
+
+        assert SSType.DATE == ssType || SSType.TIME == ssType || SSType.DATETIME2 == ssType
+                || SSType.DATETIMEOFFSET == ssType : UNEXPECTED_SSTYPE + ssType;
+
+        // store the time and minutesOffset portion of DATETIME2 and DATETIMEOFFSET to be used with date portion
+        byte[] encodedBytesForEncryption = null;
+
+        int secondsSinceMidnight = 0;
+        long divisor = 0;
+        long scaledNanos = 0;
+
+        // First, for types with a time component, write the scaled nanos since midnight
+        if (SSType.TIME == ssType || SSType.DATETIME2 == ssType || SSType.DATETIMEOFFSET == ssType) {
+            assert subSecondNanos >= 0;
+            assert subSecondNanos < Nanos.PER_SECOND;
+            assert scale >= 0;
+            assert scale <= TDS.MAX_FRACTIONAL_SECONDS_SCALE;
+
+            secondsSinceMidnight = cal.get(Calendar.SECOND) + 60 * cal.get(Calendar.MINUTE)
+                    + 60 * 60 * cal.get(Calendar.HOUR_OF_DAY);
+
+            // Scale nanos since midnight to the desired scale, rounding the value as necessary
+            divisor = Nanos.PER_MAX_SCALE_INTERVAL
+                    * (long) Math.pow(10, TDS.MAX_FRACTIONAL_SECONDS_SCALE - (double) scale);
+
+            // The scaledNanos variable represents the fractional seconds of the value at the scale
+            // indicated by the scale variable. So, for example, scaledNanos = 3 means 300 nanoseconds
+            // at scale TDS.MAX_FRACTIONAL_SECONDS_SCALE, but 3000 nanoseconds at
+            // TDS.MAX_FRACTIONAL_SECONDS_SCALE - 1
+            scaledNanos = (((long) Nanos.PER_SECOND * secondsSinceMidnight + getRoundedSubSecondNanos(subSecondNanos)
+                    + divisor / 2) / divisor) * divisor / 100;
+
+            // for encrypted time value, SQL server cannot do rounding or casting,
+            // So, driver needs to cast it before encryption.
+            if (SSType.TIME == ssType && 864000000000L <= scaledNanos) {
+                scaledNanos = (((long) Nanos.PER_SECOND * secondsSinceMidnight
+                        + getRoundedSubSecondNanos(subSecondNanos)) / divisor) * divisor / 100;
+            }
+
+            // SQL Server rounding behavior indicates that it always rounds up unless
+            // we are at the max value of the type(NOT every day), in which case it truncates.
+            // Side effect on Calendar date:
+            // If rounding nanos to the specified scale rolls the value to the next day ...
+            if (Nanos.PER_DAY / divisor == scaledNanos) {
+
+                // If the type is time, always truncate
+                if (SSType.TIME == ssType) {
+                    --scaledNanos;
+                }
+                // If the type is datetime2 or datetimeoffset, truncate only if its the max value supported
+                else {
+                    assert SSType.DATETIME2 == ssType || SSType.DATETIMEOFFSET == ssType : UNEXPECTED_SSTYPE + ssType;
+
+                    // ... then bump the date, provided that the resulting date is still within
+                    // the valid date range.
+                    //
+                    // Extreme edge case (literally, the VERY edge...):
+                    // If nanos overflow rolls the date value out of range (that is, we have a value
+                    // a few nanoseconds later than 9999-12-31 23:59:59) then truncate the nanos
+                    // instead of rolling.
+                    //
+                    // This case is very likely never hit by "real world" applications, but exists
+                    // here as a security measure to ensure that such values don't result in a
+                    // connection-closing TDS exception.
+                    cal.add(Calendar.SECOND, 1);
+
+                    if (cal.get(Calendar.YEAR) <= 9999) {
+                        scaledNanos = 0;
+                    } else {
+                        cal.add(Calendar.SECOND, -1);
+                        --scaledNanos;
+                    }
+                }
+            }
+
+            // Encode the scaled nanos to TDS
+            int encodedLength = TDS.nanosSinceMidnightLength(TDS.MAX_FRACTIONAL_SECONDS_SCALE);
+            byte[] encodedBytes = scaledNanosToEncodedBytes(scaledNanos, encodedLength);
+
+            if (SSType.TIME == ssType) {
+                return SQLServerSecurityUtility.encryptWithKey(encodedBytes, cryptoMeta, con, statement);
+            } else if (SSType.DATETIME2 == ssType) {
+                // for DATETIME2 sends both date and time part together for encryption
+                encodedBytesForEncryption = new byte[encodedLength + 3];
+                System.arraycopy(encodedBytes, 0, encodedBytesForEncryption, 0, encodedBytes.length);
+            } else if (SSType.DATETIMEOFFSET == ssType) {
+                // for DATETIMEOFFSET sends date, time and offset part together for encryption
+                encodedBytesForEncryption = new byte[encodedLength + 5];
+                System.arraycopy(encodedBytes, 0, encodedBytesForEncryption, 0, encodedBytes.length);
+            }
+        }
+
+        // Second, for types with a date component, write the days into the Common Era
+        if (SSType.DATE == ssType || SSType.DATETIME2 == ssType || SSType.DATETIMEOFFSET == ssType) {
+            // Computation of the number of days into the Common Era assumes that
+            // the DAY_OF_YEAR field reflects a pure Gregorian calendar - one that
+            // uses Gregorian leap year rules across the entire range of dates.
+            //
+            // For the DAY_OF_YEAR field to accurately reflect pure Gregorian behavior,
+            // we need to use a pure Gregorian calendar for dates that are Julian dates
+            // under a standard Gregorian calendar and for (Gregorian) dates later than
+            // the cutover date in the cutover year.
+            if (cal.getTimeInMillis() < GregorianChange.STANDARD_CHANGE_DATE.getTime()
+                    || cal.getActualMaximum(Calendar.DAY_OF_YEAR) < TDS.DAYS_PER_YEAR) {
+                int year = cal.get(Calendar.YEAR);
+                int month = cal.get(Calendar.MONTH);
+                int date = cal.get(Calendar.DATE);
+
+                // Set the cutover as early as possible (pure Gregorian behavior)
+                cal.setGregorianChange(GregorianChange.PURE_CHANGE_DATE);
+
+                // Initialize the date field by field (preserving the "wall calendar" value)
+                cal.set(year, month, date);
+            }
+
+            int daysIntoCE = DDC.daysSinceBaseDate(cal.get(Calendar.YEAR), cal.get(Calendar.DAY_OF_YEAR), 1);
+
+            // Last-ditch verification that the value is in the valid range for the
+            // DATE/DATETIME2/DATETIMEOFFSET TDS data type (1/1/0001 to 12/31/9999).
+            // If it's not, then throw an exception now so that statement execution
+            // is safely canceled. Attempting to put an invalid value on the wire
+            // would result in a TDS exception, which would close the connection.
+            if (daysIntoCE < 0 || daysIntoCE >= DDC.daysSinceBaseDate(10000, 1, 1)) {
+                MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_valueOutOfRange"));
+                Object[] msgArgs = {ssType};
+                throw new SQLServerException(form.format(msgArgs), SQLState.DATA_EXCEPTION_DATETIME_FIELD_OVERFLOW,
+                        DriverError.NOT_SET, null);
+            }
+
+            byte[] encodedBytes = new byte[3];
+            encodedBytes[0] = (byte) ((daysIntoCE >> 0) & 0xFF);
+            encodedBytes[1] = (byte) ((daysIntoCE >> 8) & 0xFF);
+            encodedBytes[2] = (byte) ((daysIntoCE >> 16) & 0xFF);
+
+            byte[] cipherText;
+            if (SSType.DATE == ssType) {
+                cipherText = SQLServerSecurityUtility.encryptWithKey(encodedBytes, cryptoMeta, con, statement);
+            } else if (SSType.DATETIME2 == ssType) {
+                // for Max value, does not round up, do casting instead.
+                if ((3652058 == daysIntoCE) && // 9999-12-31
+                        (864000000000L == scaledNanos)) { // 24:00:00 in nanoseconds
+                    // does not round up
+                    scaledNanos = (((long) Nanos.PER_SECOND * secondsSinceMidnight
+                            + getRoundedSubSecondNanos(subSecondNanos)) / divisor) * divisor / 100;
+
+                    int encodedLength = TDS.nanosSinceMidnightLength(TDS.MAX_FRACTIONAL_SECONDS_SCALE);
+                    byte[] encodedNanoBytes = scaledNanosToEncodedBytes(scaledNanos, encodedLength);
+
+                    // for DATETIME2 sends both date and time part together for encryption
+                    encodedBytesForEncryption = new byte[encodedLength + 3];
+                    System.arraycopy(encodedNanoBytes, 0, encodedBytesForEncryption, 0, encodedNanoBytes.length);
+                }
+
+                if (encodedBytesForEncryption == null) {
+                    MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_NullValue"));
+                    Object[] msgArgs1 = {"encodedBytesForEncryption"};
+                    throw new SQLServerException(form.format(msgArgs1), null);
+                }
+
+                // Copy the 3 byte date value
+                System.arraycopy(encodedBytes, 0, encodedBytesForEncryption, (encodedBytesForEncryption.length - 3), 3);
+
+                cipherText = SQLServerSecurityUtility.encryptWithKey(encodedBytesForEncryption, cryptoMeta, con,
+                        statement);
+            } else {
+                // for Max value, does not round up, do casting instead.
+                if ((3652058 == daysIntoCE) && // 9999-12-31
+                        (864000000000L == scaledNanos)) { // 24:00:00 in nanoseconds
+                    // does not round up
+                    scaledNanos = (((long) Nanos.PER_SECOND * secondsSinceMidnight
+                            + getRoundedSubSecondNanos(subSecondNanos)) / divisor) * divisor / 100;
+
+                    int encodedLength = TDS.nanosSinceMidnightLength(TDS.MAX_FRACTIONAL_SECONDS_SCALE);
+                    byte[] encodedNanoBytes = scaledNanosToEncodedBytes(scaledNanos, encodedLength);
+
+                    // for DATETIMEOFFSET sends date, time and offset part together for encryption
+                    encodedBytesForEncryption = new byte[encodedLength + 5];
+                    System.arraycopy(encodedNanoBytes, 0, encodedBytesForEncryption, 0, encodedNanoBytes.length);
+                }
+
+                if (encodedBytesForEncryption == null) {
+                    MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_NullValue"));
+                    Object[] msgArgs1 = {"encodedBytesForEncryption"};
+                    throw new SQLServerException(form.format(msgArgs1), null);
+                }
+
+                // Copy the 3 byte date value
+                System.arraycopy(encodedBytes, 0, encodedBytesForEncryption, (encodedBytesForEncryption.length - 5), 3);
+                // Copy the 2 byte minutesOffset value
+                System.arraycopy(
+                        ByteBuffer.allocate(Short.SIZE / Byte.SIZE).order(ByteOrder.LITTLE_ENDIAN)
+                                .putShort(minutesOffset).array(),
+                        0, encodedBytesForEncryption, (encodedBytesForEncryption.length - 2), 2);
+
+                cipherText = SQLServerSecurityUtility.encryptWithKey(encodedBytesForEncryption, cryptoMeta, con,
+                        statement);
+            }
+            return cipherText;
+        }
+
+        // Invalid type ssType. This condition should never happen.
+        MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_unknownSSType"));
+        Object[] msgArgs = {ssType};
+        SQLServerException.makeFromDriverError(null, null, form.format(msgArgs), null, true);
+
+        return null;
+    }
+
+    private byte[] scaledNanosToEncodedBytes(long scaledNanos, int encodedLength) {
+        byte[] encodedBytes = new byte[encodedLength];
+        for (int i = 0; i < encodedLength; i++)
+            encodedBytes[i] = (byte) ((scaledNanos >> (8 * i)) & 0xFF);
+        return encodedBytes;
+    }
+
+    /**
+     * Append the data in a stream in RPC transmission format.
+     * 
+     * @param sName
+     *        the optional parameter name
+     * @param stream
+     *        is the stream
+     * @param streamLength
+     *        length of the stream (may be unknown)
+     * @param bOut
+     *        boolean true if the data value is being registered as an output parameter
+     * @param jdbcType
+     *        The JDBC type used to determine whether the value is textual or non-textual.
+     * @param collation
+     *        The SQL collation associated with the value. Null for non-textual SQL Server types.
+     * @throws SQLServerException
+     */
+    void writeRPCInputStream(String sName, InputStream stream, long streamLength, boolean bOut, JDBCType jdbcType,
+            SQLCollation collation) throws SQLServerException {
+        assert null != stream;
+        assert DataTypes.UNKNOWN_STREAM_LENGTH == streamLength || streamLength >= 0;
+
+        // Send long values and values with unknown length
+        // using PLP chunking on Yukon and later.
+        boolean usePLP = (DataTypes.UNKNOWN_STREAM_LENGTH == streamLength
+                || streamLength > DataTypes.SHORT_VARTYPE_MAX_BYTES);
+        if (usePLP) {
+            assert DataTypes.UNKNOWN_STREAM_LENGTH == streamLength || streamLength <= DataTypes.MAX_VARTYPE_MAX_BYTES;
+
+            writeRPCNameValType(sName, bOut, jdbcType.isTextual() ? TDSType.BIGVARCHAR : TDSType.BIGVARBINARY);
+
+            writeVMaxHeader(streamLength, false, jdbcType.isTextual() ? collation : null);
+        }
+
+        // Send non-PLP in all other cases
+        else {
+            // If the length of the InputStream is unknown then we need to buffer the entire stream
+            // in memory so that we can determine its length and send that length to the server
+            // before the stream data itself.
+            if (DataTypes.UNKNOWN_STREAM_LENGTH == streamLength) {
+                // Create ByteArrayOutputStream with initial buffer size of 8K to handle typical
+                // binary field sizes more efficiently. Note we can grow beyond 8000 bytes.
+                ByteArrayOutputStream baos = new ByteArrayOutputStream(8000);
+                streamLength = 0L;
+
+                // Since Shiloh is limited to 64K TDS packets, that's a good upper bound on the maximum
+                // length of InputStream we should try to handle before throwing an exception.
+                long maxStreamLength = 65535L * con.getTDSPacketSize();
+
+                try {
+                    byte[] buff = new byte[8000];
+                    int bytesRead;
+
+                    while (streamLength < maxStreamLength && -1 != (bytesRead = stream.read(buff, 0, buff.length))) {
+                        baos.write(buff);
+                        streamLength += bytesRead;
+                    }
+                } catch (IOException e) {
+                    throw new SQLServerException(e.getMessage(), SQLState.DATA_EXCEPTION_NOT_SPECIFIC,
+                            DriverError.NOT_SET, e);
+                }
+
+                if (streamLength >= maxStreamLength) {
+                    MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_invalidLength"));
+                    Object[] msgArgs = {streamLength};
+                    SQLServerException.makeFromDriverError(null, null, form.format(msgArgs), "", true);
+                }
+
+                assert streamLength <= Integer.MAX_VALUE;
+                stream = new ByteArrayInputStream(baos.toByteArray(), 0, (int) streamLength);
+            }
+
+            assert 0 <= streamLength && streamLength <= DataTypes.IMAGE_TEXT_MAX_BYTES;
+
+            boolean useVarType = streamLength <= DataTypes.SHORT_VARTYPE_MAX_BYTES;
+
+            writeRPCNameValType(sName, bOut,
+                    jdbcType.isTextual() ? (useVarType ? TDSType.BIGVARCHAR : TDSType.TEXT)
+                                         : (useVarType ? TDSType.BIGVARBINARY : TDSType.IMAGE));
+
+            // Write maximum length, optional collation, and actual length
+            if (useVarType) {
+                writeShort((short) DataTypes.SHORT_VARTYPE_MAX_BYTES);
+                if (jdbcType.isTextual())
+                    collation.writeCollation(this);
+                writeShort((short) streamLength);
+            } else {
+                writeInt(DataTypes.IMAGE_TEXT_MAX_BYTES);
+                if (jdbcType.isTextual())
+                    collation.writeCollation(this);
+                writeInt((int) streamLength);
+            }
+        }
+
+        // Write the data
+        writeStream(stream, streamLength, usePLP);
+    }
+
+    /**
+     * Append the XML data in a stream in RPC transmission format.
+     * 
+     * @param sName
+     *        the optional parameter name
+     * @param stream
+     *        is the stream
+     * @param streamLength
+     *        length of the stream (may be unknown)
+     * @param bOut
+     *        boolean true if the data value is being registered as an output parameter
+     * @throws SQLServerException
+     */
+    void writeRPCXML(String sName, InputStream stream, long streamLength, boolean bOut) throws SQLServerException {
+        assert DataTypes.UNKNOWN_STREAM_LENGTH == streamLength || streamLength >= 0;
+        assert DataTypes.UNKNOWN_STREAM_LENGTH == streamLength || streamLength <= DataTypes.MAX_VARTYPE_MAX_BYTES;
+
+        writeRPCNameValType(sName, bOut, TDSType.XML);
+        writeByte((byte) 0); // No schema
+        // Handle null here and return, we're done here if it's null.
+        if (null == stream) {
+            // Null header for v*max types is 0xFFFFFFFFFFFFFFFF.
+            writeLong(0xFFFFFFFFFFFFFFFFL);
+        } else if (DataTypes.UNKNOWN_STREAM_LENGTH == streamLength) {
+            // Append v*max length.
+            // UNKNOWN_PLP_LEN is 0xFFFFFFFFFFFFFFFE
+            writeLong(0xFFFFFFFFFFFFFFFEL);
+
+            // NOTE: Don't send the first chunk length, this will be calculated by caller.
+        } else {
+            // For v*max types with known length, length is <totallength8><chunklength4>
+            // We're sending same total length as chunk length (as we're sending 1 chunk).
+            writeLong(streamLength);
+        }
+        if (null != stream)
+            // Write the data
+            writeStream(stream, streamLength, true);
+    }
+
+    /**
+     * Append the data in a character reader in RPC transmission format.
+     * 
+     * @param sName
+     *        the optional parameter name
+     * @param re
+     *        the reader
+     * @param reLength
+     *        the reader data length (in characters)
+     * @param bOut
+     *        boolean true if the data value is being registered as an output parameter
+     * @param collation
+     *        The SQL collation associated with the value. Null for non-textual SQL Server types.
+     * @throws SQLServerException
+     */
+    void writeRPCReaderUnicode(String sName, Reader re, long reLength, boolean bOut,
+            SQLCollation collation) throws SQLServerException {
+        assert null != re;
+        assert DataTypes.UNKNOWN_STREAM_LENGTH == reLength || reLength >= 0;
+
+        // Textual RPC requires a collation. If none is provided, as is the case when
+        // the SSType is non-textual, then use the database collation by default.
+        if (null == collation)
+            collation = con.getDatabaseCollation();
+
+        // Send long values and values with unknown length
+        // using PLP chunking on Yukon and later.
+        boolean usePLP = (DataTypes.UNKNOWN_STREAM_LENGTH == reLength || reLength > DataTypes.SHORT_VARTYPE_MAX_CHARS);
+        if (usePLP) {
+            assert DataTypes.UNKNOWN_STREAM_LENGTH == reLength || reLength <= DataTypes.MAX_VARTYPE_MAX_CHARS;
+
+            writeRPCNameValType(sName, bOut, TDSType.NVARCHAR);
+
+            writeVMaxHeader(
+                    (DataTypes.UNKNOWN_STREAM_LENGTH == reLength) ? DataTypes.UNKNOWN_STREAM_LENGTH : 2 * reLength, // Length
+                                                                                                                    // (in
+                                                                                                                    // bytes)
+                    false, collation);
+        }
+
+        // Send non-PLP in all other cases
+        else {
+            // Length must be known if we're not sending PLP-chunked data. Yukon is handled above.
+            // For Shiloh, this is enforced in DTV by converting the Reader to some other length-
+            // prefixed value in the setter.
+            assert 0 <= reLength && reLength <= DataTypes.NTEXT_MAX_CHARS;
+
+            // For non-PLP types, use the long TEXT type rather than the short VARCHAR
+            // type if the stream is too long to fit in the latter or if we don't know the length up
+            // front so we have to assume that it might be too long.
+            boolean useVarType = reLength <= DataTypes.SHORT_VARTYPE_MAX_CHARS;
+
+            writeRPCNameValType(sName, bOut, useVarType ? TDSType.NVARCHAR : TDSType.NTEXT);
+
+            // Write maximum length, collation, and actual length of the data
+            if (useVarType) {
+                writeShort((short) DataTypes.SHORT_VARTYPE_MAX_BYTES);
+                collation.writeCollation(this);
+                writeShort((short) (2 * reLength));
+            } else {
+                writeInt(DataTypes.NTEXT_MAX_CHARS);
+                collation.writeCollation(this);
+                writeInt((int) (2 * reLength));
+            }
+        }
+
+        // Write the data
+        writeReader(re, reLength, usePLP);
+    }
+
+    void sendEnclavePackage(String sql, ArrayList<byte[]> enclaveCEKs) throws SQLServerException {
+        if (null != con && con.isAEv2()) {
+            if (null != sql && !sql.isEmpty() && null != enclaveCEKs && !(enclaveCEKs.isEmpty())
+                    && con.enclaveEstablished()) {
+                byte[] b = con.generateEnclavePackage(sql, enclaveCEKs);
+                if (null != b && 0 != b.length) {
+                    this.writeShort((short) b.length);
+                    this.writeBytes(b);
+                } else {
+                    this.writeShort((short) 0);
+                }
+            } else {
+                this.writeShort((short) 0);
+            }
+        }
+    }
+}
+
+
+/**
+ * TDSPacket provides a mechanism for chaining TDS response packets together in a singly-linked list.
+ *
+ * Having both the link and the data in the same class allows TDSReader marks (see below) to automatically hold onto
+ * exactly as much response data as they need, and no more. Java reference semantics ensure that a mark holds onto its
+ * referenced packet and subsequent packets (through next references). When all marked references to a packet go away,
+ * the packet, and any linked unmarked packets, can be reclaimed by GC.
+ */
+final class TDSPacket {
+    final byte[] header = new byte[TDS.PACKET_HEADER_SIZE];
+    final byte[] payload;
+    int payloadLength;
+    volatile TDSPacket next;
+
+    final public String toString() {
+        return "TDSPacket(SPID:" + Util.readUnsignedShortBigEndian(header, TDS.PACKET_HEADER_SPID) + " Seq:"
+                + header[TDS.PACKET_HEADER_SEQUENCE_NUM] + ")";
+    }
+
+    TDSPacket(int size) {
+        payload = new byte[size];
+        payloadLength = 0;
+        next = null;
+    }
+
+    final boolean isEOM() {
+        return TDS.STATUS_BIT_EOM == (header[TDS.PACKET_HEADER_MESSAGE_STATUS] & TDS.STATUS_BIT_EOM);
+    }
+}
+
+
+/**
+ * TDSReaderMark encapsulates a fixed position in the response data stream.
+ *
+ * Response data is quantized into a linked chain of packets. A mark refers to a specific location in a specific packet
+ * and relies on Java's reference semantics to automatically keep all subsequent packets accessible until the mark is
+ * destroyed.
+ */
+final class TDSReaderMark {
+    final TDSPacket packet;
+    final int payloadOffset;
+
+    TDSReaderMark(TDSPacket packet, int payloadOffset) {
+        this.packet = packet;
+        this.payloadOffset = payloadOffset;
+    }
+}
+
+
+/**
+ * TDSReader encapsulates the TDS response data stream.
+ *
+ * Bytes are read from SQL Server into a FIFO of packets. Reader methods traverse the packets to access the data.
+ */
+final class TDSReader implements Serializable {
+
+    /**
+     * Always update serialVersionUID when prompted.
+     */
+    private static final long serialVersionUID = -392905303734809731L;
+
+    private static final Logger logger = Logger.getLogger("com.microsoft.sqlserver.jdbc.internals.TDS.Reader");
+    final private String traceID;
+    private transient ScheduledFuture<?> timeout;
+
+    final public String toString() {
+        return traceID;
+    }
+
+    private final TDSChannel tdsChannel;
+    private final SQLServerConnection con;
+
+    private final TDSCommand command;
+
+    final TDSCommand getCommand() {
+        assert null != command;
+        return command;
+    }
+
+    final SQLServerConnection getConnection() {
+        return con;
+    }
+
+    private transient TDSPacket currentPacket = new TDSPacket(0);
+    private transient TDSPacket lastPacket = currentPacket;
+    private int payloadOffset = 0;
+    private int packetNum = 0;
+
+    private boolean isStreaming = true;
+    private boolean useColumnEncryption = false;
+    private boolean serverSupportsColumnEncryption = false;
+    private boolean serverSupportsDataClassification = false;
+    private byte serverSupportedDataClassificationVersion = TDS.DATA_CLASSIFICATION_NOT_ENABLED;
+    private final transient Lock tdsReaderLock = new ReentrantLock();
+
+    private final byte[] valueBytes = new byte[256];
+
+    protected transient SensitivityClassification sensitivityClassification;
+
+    private static final AtomicInteger lastReaderID = new AtomicInteger(0);
+
+    private static int nextReaderID() {
+        return lastReaderID.incrementAndGet();
+    }
+
+    TDSReader(TDSChannel tdsChannel, SQLServerConnection con, TDSCommand command) {
+        this.tdsChannel = tdsChannel;
+        this.con = con;
+        this.command = command; // may be null
+        // if the logging level is not detailed than fine or more we will not have proper reader IDs.
+        if (logger.isLoggable(Level.FINE))
+            traceID = "TDSReader@" + nextReaderID() + " (" + con.toString() + ")";
+        else
+            traceID = con.toString();
+        if (con.isColumnEncryptionSettingEnabled()) {
+            useColumnEncryption = true;
+        }
+        serverSupportsColumnEncryption = con.getServerSupportsColumnEncryption();
+        serverSupportsDataClassification = con.getServerSupportsDataClassification();
+        serverSupportedDataClassificationVersion = con.getServerSupportedDataClassificationVersion();
+    }
+
+    final boolean isColumnEncryptionSettingEnabled() {
+        return useColumnEncryption;
+    }
+
+    final boolean getServerSupportsColumnEncryption() {
+        return serverSupportsColumnEncryption;
+    }
+
+    final boolean getServerSupportsDataClassification() {
+        return serverSupportsDataClassification;
+    }
+
+    final byte getServerSupportedDataClassificationVersion() {
+        return serverSupportedDataClassificationVersion;
+    }
+
+    final void throwInvalidTDS() throws SQLServerException {
+        if (logger.isLoggable(Level.SEVERE))
+            logger.severe(toString() + " got unexpected value in TDS response at offset:" + payloadOffset);
+        con.throwInvalidTDS();
+    }
+
+    final void throwInvalidTDSToken(String tokenName) throws SQLServerException {
+        if (logger.isLoggable(Level.SEVERE))
+            logger.severe(toString() + " got unexpected value in TDS response at offset:" + payloadOffset);
+        con.throwInvalidTDSToken(tokenName);
+    }
+
+    /**
+     * Ensures that payload data is available to be read, automatically advancing to (and possibly reading) the next
+     * packet.
+     *
+     * @return true if additional data is available to be read false if no more data is available
+     */
+    private boolean ensurePayload() throws SQLServerException {
+        if ((payloadOffset == currentPacket.payloadLength) && (!nextPacket())) {
+            return false;
+        }
+        assert payloadOffset < currentPacket.payloadLength;
+        return true;
+    }
+
+    /**
+     * Advance (and possibly read) the next packet.
+     *
+     * @return true if additional data is available to be read false if no more data is available
+     */
+    private boolean nextPacket() throws SQLServerException {
+        assert null != currentPacket;
+
+        // Shouldn't call this function unless we're at the end of the current packet...
+        TDSPacket consumedPacket = currentPacket;
+        assert payloadOffset == consumedPacket.payloadLength;
+
+        // If no buffered packets are left then maybe we can read one...
+        // This action must be synchronized against against another thread calling
+        // readAllPackets() to read in ALL of the remaining packets of the current response.
+...
+
+Function Description:1. **Purpose**: The function is designed to securely transmit a time value in an encrypted form as part of a remote procedure call (RPC) to a SQL Server, ensuring the confidentiality of the data.
+2. **Input**: The function takes a calendar object representing the time to be encrypted, nanoseconds to add precision, a scale to define the precision of the time value, a boolean indicating if the parameter is an output, and a statement object for SQL operations.
+3. **Output**: There is no direct return value; however, the function writes encrypted time data to a network stream or buffer for SQL Server communication.
+4. **Procedure**: 
+   - Initially, the function checks if the configuration allows sending time as datetime, throwing an exception if not permitted.
+   - It sets the parameter type for the RPC.
+   - If the calendar object is null, it writes a null value; otherwise, it encrypts the time data (including nanoseconds and scale adjustments) and writes this encrypted data.
+   - Finally, it writes metadata related to the encryption and the time type to the stream or buffer.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

@@ -1,0 +1,21 @@
+{
+  "base_id": "java_005",
+  "code_context_ntokens": 16159,
+  "description": "1. **Purpose**: To strip the leading and trailing single quotes from a given string if both are present.\n2. **Input**: A string that may or may not be enclosed in single quotes.\n3. **Output**: The same string but without the leading and trailing single quotes if it started and ended with them; otherwise, the original string is returned unchanged.\n4. **Procedure**: The function first checks the length of the string. It then examines if the first and last characters of the string are single quotes. If both conditions are met, it returns a new string with the first and last characters removed. If not, it returns the original string.",
+  "end_byte": 7747,
+  "end_line": 201,
+  "instance_id": "java_005_ctx16k",
+  "language": "java",
+  "needle_name": "removeSingleQuote",
+  "needle_token_end": 4050,
+  "needle_token_start": 3983,
+  "normalized_language": "java",
+  "path": "src/main/java/com/microsoft/sqlserver/jdbc/SQLServerBulkBatchInsertRecord.java",
+  "position_ratio": 0.25,
+  "repo": "microsoft/mssql-jdbc",
+  "repoqa_description": "Function Description:1. **Purpose**: To strip the leading and trailing single quotes from a given string if both are present.\n2. **Input**: A string that may or may not be enclosed in single quotes.\n3. **Output**: The same string but without the leading and trailing single quotes if it started and ended with them; otherwise, the original string is returned unchanged.\n4. **Procedure**: The function first checks the length of the string. It then examines if the first and last characters of the string are single quotes. If both conditions are met, it returns a new string with the first and last characters removed. If not, it returns the original string.",
+  "requested_context_tokens": 16384,
+  "sequence": 5,
+  "start_byte": 7570,
+  "start_line": 197
+}

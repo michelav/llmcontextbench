@@ -92,3 +92,42 @@ These return path strings, flat deduplicated symbol records with documentation,
 complete code, and file content respectively. Defaults still expose the original
 four operations. Lean transport schemas and normalized results are equivalent.
 Smaller serialized payloads are measured bytes, not demonstrated token savings.
+
+## Long64 dataset version
+
+`datasets/repoqa-2026-10-13-long64/` is the immutable `ctxbench/repoqa` version
+`2026-10-13-long64.1`. It selects five new needles per language from two large
+repositories: `karate` and `mssql-jdbc` (Java), `locust` and
+`pytorch_geometric` (Python), `cargo` and `LibAFL` (Rust), and `date-fns` and
+`langchainjs` (TypeScript). The manifest records the exact repository, needle
+index, source archive hash, generator hash, RepoQA revision, and tokenizer
+revision. `instances.index.json` records requested and actual native token counts.
+
+Regenerate into a **new, empty** directory with the same command, changing only
+`--output` for verification:
+
+```bash
+HF_HUB_OFFLINE=1 tools/repoqa/repoqa_build_dataset \
+  --input datasets/repoqa/raw/repoqa-2026-05-23.json.gz \
+  --output datasets/repoqa-2026-10-13-long64 \
+  --version 2026-10-13-long64.1 --selection-profile long64 --compress-raw \
+  --context-tokens 2048 --context-tokens 4096 --context-tokens 8192 \
+  --context-tokens 16384 --context-tokens 32768 --context-tokens 65536
+```
+
+The generator rejects 64k contexts below 95% of 65,536 native tokens. The
+existing `datasets/repoqa/` version and its results stay intact. Targets differ
+between versions, so compare distributions rather than target-paired outcomes.
+
+`experiment.repoqa-long64.json` and
+`examples/studies/baseline.repoqa-long64.json` define the five-configuration
+long64 baseline. The current study definitions select its three inline and
+local-MCP configurations. `examples/studies/study.long64-budget.json`,
+`study.long64-latency.json`, and `study.long64-reliability.json` use its frozen
+artifact. See `docs/studies.md` for preparation, evaluation, freezing,
+degradation, and held-out execution commands. The four-size profile groups
+2k/4k as small and 8k/16k as large. The six-size profile groups 2k/4k as
+small, 8k/16k as medium, and 32k/64k as large. These groups determine
+calibration estimates; nominal size and target identity do not enter router
+features. Example context limits are study inputs to review against the chosen
+model before paid execution.

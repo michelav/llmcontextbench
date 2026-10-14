@@ -1,0 +1,263 @@
+{
+  "context_builder": "repoqa-native",
+  "context_type": "repoqa_structured_code_context",
+  "files": [
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/profile/profile.py",
+      "symbols": [
+        {
+          "children": [
+            {
+              "children": [],
+              "code": "def __init__(self, log: bool = True, avg_time_divisor: int = 0):\n        self.log = log\n        self.avg_time_divisor = avg_time_divisor",
+              "documentation": null,
+              "end_line": 168,
+              "kind": "method",
+              "name": "__init__",
+              "parent_id": "torch_geometric/profile/profile.py#class:timeit:144",
+              "parent_name": "timeit",
+              "qualified_name": "timeit.__init__",
+              "signature": "def __init__(self, log: bool = True, avg_time_divisor: int = 0)",
+              "start_line": 166,
+              "symbol_id": "torch_geometric/profile/profile.py#method:timeit.__init__:166"
+            },
+            {
+              "children": [],
+              "code": "def __enter__(self):\n        if torch.cuda.is_available():\n            torch.cuda.synchronize()\n        self.t_start = time.time()\n        return self",
+              "documentation": null,
+              "end_line": 174,
+              "kind": "method",
+              "name": "__enter__",
+              "parent_id": "torch_geometric/profile/profile.py#class:timeit:144",
+              "parent_name": "timeit",
+              "qualified_name": "timeit.__enter__",
+              "signature": "def __enter__(self)",
+              "start_line": 170,
+              "symbol_id": "torch_geometric/profile/profile.py#method:timeit.__enter__:170"
+            },
+            {
+              "children": [],
+              "code": "def __exit__(self, *args):\n        if torch.cuda.is_available():\n            torch.cuda.synchronize()\n        self.t_end = time.time()\n        self.duration = self.t_end - self.t_start\n        if self.avg_time_divisor > 1:\n            self.duration = self.duration / self.avg_time_divisor\n        if self.log:  # pragma: no cover\n            print(f'Time: {self.duration:.8f}s', flush=True)",
+              "documentation": null,
+              "end_line": 184,
+              "kind": "method",
+              "name": "__exit__",
+              "parent_id": "torch_geometric/profile/profile.py#class:timeit:144",
+              "parent_name": "timeit",
+              "qualified_name": "timeit.__exit__",
+              "signature": "def __exit__(self, *args)",
+              "start_line": 176,
+              "symbol_id": "torch_geometric/profile/profile.py#method:timeit.__exit__:176"
+            },
+            {
+              "children": [],
+              "code": "def reset(self):\n        r\"\"\"Prints the duration and resets current timer.\"\"\"\n        if self.t_start is None:\n            raise RuntimeError(\"Timer wasn't started.\")\n        else:\n            self.__exit__()\n            self.__enter__()",
+              "documentation": "Prints the duration and resets current timer.",
+              "end_line": 192,
+              "kind": "method",
+              "name": "reset",
+              "parent_id": "torch_geometric/profile/profile.py#class:timeit:144",
+              "parent_name": "timeit",
+              "qualified_name": "timeit.reset",
+              "signature": "def reset(self)",
+              "start_line": 186,
+              "symbol_id": "torch_geometric/profile/profile.py#method:timeit.reset:186"
+            }
+          ],
+          "code": null,
+          "documentation": null,
+          "end_line": 192,
+          "kind": "class",
+          "name": "timeit",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "timeit",
+          "signature": null,
+          "start_line": 144,
+          "symbol_id": "torch_geometric/profile/profile.py#class:timeit:144"
+        },
+        {
+          "children": [],
+          "code": "def get_stats_summary(\n    stats_list: Union[List[GPUStats], List[CUDAStats]]\n) -> Union[GPUStatsSummary, CUDAStatsSummary]:  # pragma: no cover\n    r\"\"\"Creates a summary of collected runtime and memory statistics.\n    Returns a :obj:`GPUStatsSummary` if list of :obj:`GPUStats` was passed,\n    otherwise (list of :obj:`CUDAStats` was passed),\n    returns a :obj:`CUDAStatsSummary`.\n\n    Args:\n        stats_list (Union[List[GPUStats], List[CUDAStats]]): A list of\n            :obj:`GPUStats` or :obj:`CUDAStats` objects, as returned by\n            :meth:`~torch_geometric.profile.profileit`.\n    \"\"\"\n    # calculate common statistics\n    kwargs = dict(\n        time_mean=float(torch.tensor([s.time for s in stats_list]).mean()),\n        time_std=float(torch.tensor([s.time for s in stats_list]).std()),\n        max_allocated_gpu=max([s.max_allocated_gpu for s in stats_list]),\n        max_reserved_gpu=max([s.max_reserved_gpu for s in stats_list]),\n        max_active_gpu=max([s.max_active_gpu for s in stats_list]))\n\n    if all(isinstance(s, CUDAStats) for s in stats_list):\n        return CUDAStatsSummary(\n            **kwargs,\n            min_nvidia_smi_free_cuda=min(\n                [s.nvidia_smi_free_cuda for s in stats_list]),\n            max_nvidia_smi_used_cuda=max(\n                [s.nvidia_smi_used_cuda for s in stats_list]),\n        )\n    else:\n        return GPUStatsSummary(**kwargs)",
+          "documentation": "Creates a summary of collected runtime and memory statistics.\nReturns a :obj:`GPUStatsSummary` if list of :obj:`GPUStats` was passed,\notherwise (list of :obj:`CUDAStats` was passed),\nreturns a :obj:`CUDAStatsSummary`.\n\nArgs:\n    stats_list (Union[List[GPUStats], List[CUDAStats]]): A list of\n        :obj:`GPUStats` or :obj:`CUDAStats` objects, as returned by\n        :meth:`~torch_geometric.profile.profileit`.",
+          "end_line": 225,
+          "kind": "function",
+          "name": "get_stats_summary",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "get_stats_summary",
+          "signature": "def get_stats_summary(\n    stats_list: Union[List[GPUStats], List[CUDAStats]]\n) -> Union[GPUStatsSummary, CUDAStatsSummary]:  # pragma: no cover\n    r\"\"\"Creates a summary of collected runtime and memory statistics.\n    Returns a :obj:`GPUStatsSummary` if list of :obj:`GPUStats` was passed,\n    otherwise (list of :obj:`CUDAStats` was passed),\n    returns a :obj:`CUDAStatsSummary`.\n\n    Args",
+          "start_line": 195,
+          "symbol_id": "torch_geometric/profile/profile.py#function:get_stats_summary:195"
+        },
+        {
+          "children": [],
+          "code": "def read_from_memlab(line_profiler: Any) -> List[float]:  # pragma: no cover\n    from pytorch_memlab.line_profiler.line_records import LineRecords\n\n    # See: https://pytorch.org/docs/stable/cuda.html#torch.cuda.memory_stats\n\n    track_stats = [  # Different statistic can be collected as needed.\n        'allocated_bytes.all.peak',\n        'reserved_bytes.all.peak',\n        'active_bytes.all.peak',\n    ]\n\n    records = LineRecords(line_profiler._raw_line_records,\n                          line_profiler._code_infos)\n    stats = records.display(None, track_stats)._line_records\n    return [byte_to_megabyte(x) for x in stats.values.max(axis=0).tolist()]",
+          "documentation": null,
+          "end_line": 245,
+          "kind": "function",
+          "name": "read_from_memlab",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "read_from_memlab",
+          "signature": "def read_from_memlab(line_profiler: Any) -> List[float]:  # pragma: no cover\n    from pytorch_memlab.line_profiler.line_records import LineRecords\n\n    # See: https://pytorch.org/docs/stable/cuda.html#torch.cuda.memory_stats\n\n    track_stats = [  # Different statistic can be collected as needed.\n        'allocated_bytes.all.peak',\n        'reserved_bytes.all.peak',\n        'active_bytes.all.peak',\n    ]\n\n    records = LineRecords(line_profiler._raw_line_records,\n                          line_profiler._code_infos)\n    stats = records.display(None, track_stats)._line_records\n    return [byte_to_megabyte(x) for x in stats.values.max(axis=0).tolist()]\n\n\ndef trace_handler(p)",
+          "start_line": 231,
+          "symbol_id": "torch_geometric/profile/profile.py#function:read_from_memlab:231"
+        },
+        {
+          "children": [],
+          "code": "def trace_handler(p):\n    print_time_total(p)\n    profile_dir = str(pathlib.Path.cwd()) + '/'\n    timeline_file = profile_dir + 'timeline' + '.json'\n    p.export_chrome_trace(timeline_file)",
+          "documentation": null,
+          "end_line": 252,
+          "kind": "function",
+          "name": "trace_handler",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "trace_handler",
+          "signature": "def trace_handler(p)",
+          "start_line": 248,
+          "symbol_id": "torch_geometric/profile/profile.py#function:trace_handler:248"
+        },
+        {
+          "children": [],
+          "code": "def print_time_total(p):\n    if torch.cuda.is_available():\n        profile_sort = 'self_cuda_time_total'\n    else:\n        profile_sort = 'self_cpu_time_total'\n    output = p.key_averages().table(sort_by=profile_sort)\n    print(output)",
+          "documentation": null,
+          "end_line": 261,
+          "kind": "function",
+          "name": "print_time_total",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "print_time_total",
+          "signature": "def print_time_total(p)",
+          "start_line": 255,
+          "symbol_id": "torch_geometric/profile/profile.py#function:print_time_total:255"
+        },
+        {
+          "children": [],
+          "code": "def rename_profile_file(*args):\n    profile_dir = str(pathlib.Path.cwd()) + '/'\n    timeline_file = profile_dir + 'profile'\n    for arg in args:\n        timeline_file += '-' + arg\n    timeline_file += '.json'\n    os.rename('timeline.json', timeline_file)",
+          "documentation": null,
+          "end_line": 270,
+          "kind": "function",
+          "name": "rename_profile_file",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "rename_profile_file",
+          "signature": "def rename_profile_file(*args)",
+          "start_line": 264,
+          "symbol_id": "torch_geometric/profile/profile.py#function:rename_profile_file:264"
+        },
+        {
+          "children": [],
+          "code": "def torch_profile(export_chrome_trace=True, csv_data=None, write_csv=None):\n    use_cuda = torch.cuda.is_available()\n\n    activities = [ProfilerActivity.CPU]\n    if use_cuda:\n        activities.append(ProfilerActivity.CUDA)\n\n    if export_chrome_trace:\n        p_trace_handler = trace_handler\n    else:\n        p_trace_handler = print_time_total\n\n    p = profile(activities=activities, on_trace_ready=p_trace_handler)\n\n    with p:\n        yield\n        p.step()\n\n    if csv_data is not None and write_csv == 'prof':\n        if use_cuda:\n            profile_sort = 'self_cuda_time_total'\n        else:\n            profile_sort = 'self_cpu_time_total'\n        events = EventList(\n            sorted(\n                p.key_averages(),\n                key=lambda evt: getattr(evt, profile_sort),\n                reverse=True,\n            ), use_cuda=use_cuda)\n\n        save_profile_data(csv_data, events, use_cuda)",
+          "documentation": null,
+          "end_line": 304,
+          "kind": "function",
+          "name": "torch_profile",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "torch_profile",
+          "signature": "def torch_profile(export_chrome_trace=True, csv_data=None, write_csv=None)",
+          "start_line": 274,
+          "symbol_id": "torch_geometric/profile/profile.py#function:torch_profile:274"
+        },
+        {
+          "children": [],
+          "code": "def xpu_profile(export_chrome_trace=True):\n    with torch.autograd.profiler_legacy.profile(use_xpu=True) as profile:\n        yield\n    print(profile.key_averages().table(sort_by='self_xpu_time_total'))\n    if export_chrome_trace:\n        profile.export_chrome_trace('timeline.json')",
+          "documentation": null,
+          "end_line": 313,
+          "kind": "function",
+          "name": "xpu_profile",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "xpu_profile",
+          "signature": "def xpu_profile(export_chrome_trace=True)",
+          "start_line": 308,
+          "symbol_id": "torch_geometric/profile/profile.py#function:xpu_profile:308"
+        },
+        {
+          "children": [],
+          "code": "def format_prof_time(time):\n    # Profile time is in micro seconds, so format it appropriately:\n    return round(time / 1e6, 3)",
+          "documentation": null,
+          "end_line": 318,
+          "kind": "function",
+          "name": "format_prof_time",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "format_prof_time",
+          "signature": "def format_prof_time(time)",
+          "start_line": 316,
+          "symbol_id": "torch_geometric/profile/profile.py#function:format_prof_time:316"
+        },
+        {
+          "children": [],
+          "code": "def save_profile_data(csv_data, events, use_cuda):\n    sum_self_cpu_time_total = sum(\n        [event.self_cpu_time_total for event in events])\n    sum_cpu_time_total = sum([event.self_cpu_time_total for event in events])\n    sum_self_cuda_time_total = sum(\n        [event.self_cuda_time_total for event in events]) if use_cuda else 0\n\n    for e in events[:5]:  # Save top 5 most time consuming operations:\n        csv_data['NAME'].append(e.key)\n        csv_data['SELF CPU %'].append(\n            round(e.self_cpu_time_total * 100.0 / sum_self_cpu_time_total, 3))\n        csv_data['SELF CPU'].append(format_prof_time(e.self_cpu_time_total))\n        csv_data['CPU TOTAL %'].append(\n            round(e.cpu_time_total * 100.0 / sum_cpu_time_total, 3))\n        csv_data['CPU TOTAL'].append(format_prof_time(e.cpu_time_total))\n        csv_data['CPU TIME AVG'].append(format_prof_time(e.cpu_time_total))\n        if use_cuda:\n            csv_data['SELF CUDA %'].append(e.self_cuda_time_total * 100.0 /\n                                           sum_self_cuda_time_total)\n            csv_data['SELF CUDA'].append(\n                format_prof_time(e.self_cuda_time_total))\n            csv_data['CUDA TOTAL'].append(format_prof_time(e.cpu_time_total))\n            csv_data['CUDA TIME AVG'].append(format_prof_time(\n                e.cpu_time_total))\n        csv_data['# OF CALLS'].append(e.count)",
+          "documentation": null,
+          "end_line": 345,
+          "kind": "function",
+          "name": "save_profile_data",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "save_profile_data",
+          "signature": "def save_profile_data(csv_data, events, use_cuda)",
+          "start_line": 321,
+          "symbol_id": "torch_geometric/profile/profile.py#function:save_profile_data:321"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/profile/__init__.py",
+      "symbols": [],
+      "unparsed_code": "r\"\"\"GNN profiling package.\"\"\"\n\nfrom .benchmark import benchmark\nfrom .profile import (\n    get_stats_summary,\n    print_time_total,\n    profileit,\n    rename_profile_file,\n    timeit,\n    torch_profile,\n    trace_handler,\n    xpu_profile,\n)\nfrom .utils import (\n    count_parameters,\n    get_cpu_memory_from_gc,\n    get_data_size,\n    get_gpu_memory_from_gc,\n    get_gpu_memory_from_ipex,\n    get_gpu_memory_from_nvidia_smi,\n    get_model_size,\n)\n\n__all__ = [\n    'profileit',\n    'timeit',\n    'get_stats_summary',\n    'trace_handler',\n    'print_time_total',\n    'rename_profile_file',\n    'torch_profile',\n    'xpu_profile',\n    'count_parameters',\n    'get_model_size',\n    'get_data_size',\n    'get_cpu_memory_from_gc',\n    'get_gpu_memory_from_gc',\n    'get_gpu_memory_from_nvidia_smi',\n    'get_gpu_memory_from_ipex',\n    'benchmark',\n]\n\nclasses = __all__"
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/seed.py",
+      "symbols": [
+        {
+          "children": [],
+          "code": "def seed_everything(seed: int) -> None:\n    r\"\"\"Sets the seed for generating random numbers in :pytorch:`PyTorch`,\n    :obj:`numpy` and :python:`Python`.\n\n    Args:\n        seed (int): The desired seed.\n    \"\"\"\n    random.seed(seed)\n    np.random.seed(seed)\n    torch.manual_seed(seed)\n    torch.cuda.manual_seed_all(seed)",
+          "documentation": "Sets the seed for generating random numbers in :pytorch:`PyTorch`,\n:obj:`numpy` and :python:`Python`.\n\nArgs:\n    seed (int): The desired seed.",
+          "end_line": 17,
+          "kind": "function",
+          "name": "seed_everything",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "seed_everything",
+          "signature": "def seed_everything(seed: int) -> None",
+          "start_line": 7,
+          "symbol_id": "torch_geometric/seed.py#function:seed_everything:7"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "python",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "torch_geometric/transforms/add_metapaths.py",
+      "symbols": [],
+      "unparsed_code": "import warnings\nfrom typing import List, Optional, Tuple, Union, cast\n\nimport torch\nfrom torch import Tensor\n\nfrom torch_geometric import EdgeIndex\nfrom torch_geometric.data import HeteroData\nfrom torch_geometric.data.datapipes import functional_transform\nfrom torch_geometric.transforms import BaseTransform\nfrom torch_geometric.typing import EdgeType\nfrom torch_geometric.utils import coalesce, degree\n\n\n@functional_transform('add_metapaths')\nclass AddMetaPaths(BaseTransform):\n    r\"\"\"Adds additional edge types to a\n    :class:`~torch_geometric.data.HeteroData` object between the source node\n    type and the destination node type of a given :obj:`metapath`, as described\n    in the `\"Heterogenous Graph Attention Networks\"\n    <https://arxiv.org/abs/1903.07293>`_ paper\n    (functional name: :obj:`add_metapaths`).\n\n    Meta-path based neighbors can exploit different aspects of structure\n    information in heterogeneous graphs.\n    Formally, a metapath is a path of the form\n\n    .. math::\n\n        \\mathcal{V}_1 \\xrightarrow{R_1} \\mathcal{V}_2 \\xrightarrow{R_2} \\ldots\n        \\xrightarrow{R_{\\ell-1}} \\mathcal{V}_{\\ell}\n\n    in which :math:`\\mathcal{V}_i` represents node types, and :math:`R_j`\n    represents the edge type connecting two node types.\n    The added edge type is given by the sequential multiplication  of\n    adjacency matrices along the metapath, and is added to the\n    :class:`~torch_geometric.data.HeteroData` object as edge type\n    :obj:`(src_node_type, \"metapath_*\", dst_node_type)`, where\n    :obj:`src_node_type` and :obj:`dst_node_type` denote :math:`\\mathcal{V}_1`\n    and :math:`\\mathcal{V}_{\\ell}`, repectively.\n\n    In addition, a :obj:`metapath_dict` object is added to the\n    :class:`~torch_geometric.data.HeteroData` object which maps the\n    metapath-based edge type to its original metapath.\n\n    .. code-block:: python\n\n        from torch_geometric.datasets import DBLP\n        from torch_geometric.data import HeteroData\n        from torch_geometric.transforms import AddMetaPaths\n\n        data = DBLP(root)[0]\n        # 4 node types: \"paper\", \"author\", \"conference\", and \"term\"\n        # 6 edge types: (\"paper\",\"author\"), (\"author\", \"paper\"),\n        #               (\"paper, \"term\"), (\"paper\", \"conference\"),\n        #               (\"term, \"paper\"), (\"conference\", \"paper\")\n\n        # Add two metapaths:\n        # 1. From \"paper\" to \"paper\" through \"conference\"\n        # 2. From \"author\" to \"conference\" through \"paper\"\n        metapaths = [[(\"paper\", \"conference\"), (\"conference\", \"paper\")],\n                     [(\"author\", \"paper\"), (\"paper\", \"conference\")]]\n        data = AddMetaPaths(metapaths)(data)\n\n        print(data.edge_types)\n        >>> [(\"author\", \"to\", \"paper\"), (\"paper\", \"to\", \"author\"),\n             (\"paper\", \"to\", \"term\"), (\"paper\", \"to\", \"conference\"),\n             (\"term\", \"to\", \"paper\"), (\"conference\", \"to\", \"paper\"),\n             (\"paper\", \"metapath_0\", \"paper\"),\n             (\"author\", \"metapath_1\", \"conference\")]\n\n        print(data.metapath_dict)\n        >>> {(\"paper\", \"metapath_0\", \"paper\"): [(\"paper\", \"conference\"),\n                                                (\"conference\", \"paper\")],\n             (\"author\", \"metapath_1\", \"conference\"): [(\"author\", \"paper\"),\n                                                      (\"paper\", \"conference\")]}\n\n    Args:\n        metapaths (List[List[Tuple[str, str, str]]]): The metapaths described\n            by a list of lists of\n            :obj:`(src_node_type, rel_type, dst_node_type)` tuples.\n        drop_orig_edge_types (bool, optional): If set to :obj:`True`, existing\n            edge types will be dropped. (default: :obj:`False`)\n        keep_same_node_type (bool, optional): If set to :obj:`True`, existing\n            edge types between the same node type are not dropped even in case\n            :obj:`drop_orig_edge_types` is set to :obj:`True`.\n..."
+    }
+  ],
+  "metadata": {
+    "actual_code_context_tokens": 4025,
+    "base_id": "py_005",
+    "instance_id": "py_005_ctx4k",
+    "language": "python",
+    "normalized_language": "python",
+    "position_ratio": 0.25,
+    "requested_context_tokens": 4096,
+    "sequence": 5
+  },
+  "repository": "pyg-team/pytorch_geometric",
+  "workspace_id": "py_005_ctx4k"
+}

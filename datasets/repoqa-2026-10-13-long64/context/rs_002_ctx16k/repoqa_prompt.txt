@@ -1,0 +1,1506 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:mod packages;
+
+pub use packages::Packages;
+
+/// Contains information about how a package should be compiled.
+///
+/// Note on distinction between `CompileOptions` and [`BuildConfig`]:
+/// `BuildConfig` contains values that need to be retained after
+/// [`BuildContext`] is created. The other fields are no longer necessary. Think
+/// of it as `CompileOptions` are high-level settings requested on the
+/// command-line, and `BuildConfig` are low-level settings for actually
+/// driving `rustc`.
+#[derive(Debug, Clone)]
+pub struct CompileOptions {
+    /// Configuration information for a rustc build
+    pub build_config: BuildConfig,
+    /// Feature flags requested by the user.
+    pub cli_features: CliFeatures,
+    /// A set of packages to build.
+    pub spec: Packages,
+    /// Filter to apply to the root package to select which targets will be
+    /// built.
+    pub filter: CompileFilter,
+    /// Extra arguments to be passed to rustdoc (single target only)
+    pub target_rustdoc_args: Option<Vec<String>>,
+    /// The specified target will be compiled with all the available arguments,
+    /// note that this only accounts for the *final* invocation of rustc
+    pub target_rustc_args: Option<Vec<String>>,
+    /// Crate types to be passed to rustc (single target only)
+    pub target_rustc_crate_types: Option<Vec<String>>,
+    /// Whether the `--document-private-items` flags was specified and should
+    /// be forwarded to `rustdoc`.
+    pub rustdoc_document_private_items: bool,
+    /// Whether the build process should check the minimum Rust version
+    /// defined in the cargo metadata for a crate.
+    pub honor_rust_version: bool,
+}
+
+impl CompileOptions {
+    pub fn new(gctx: &GlobalContext, mode: CompileMode) -> CargoResult<CompileOptions> {
+        let jobs = None;
+        let keep_going = false;
+        Ok(CompileOptions {
+            build_config: BuildConfig::new(gctx, jobs, keep_going, &[], mode)?,
+            cli_features: CliFeatures::new_all(false),
+            spec: ops::Packages::Packages(Vec::new()),
+            filter: CompileFilter::Default {
+                required_features_filterable: false,
+            },
+            target_rustdoc_args: None,
+            target_rustc_args: None,
+            target_rustc_crate_types: None,
+            rustdoc_document_private_items: false,
+            honor_rust_version: true,
+        })
+    }
+}
+
+/// Compiles!
+///
+/// This uses the [`DefaultExecutor`]. To use a custom [`Executor`], see [`compile_with_exec`].
+pub fn compile<'a>(ws: &Workspace<'a>, options: &CompileOptions) -> CargoResult<Compilation<'a>> {
+    let exec: Arc<dyn Executor> = Arc::new(DefaultExecutor);
+    compile_with_exec(ws, options, &exec)
+}
+
+/// Like [`compile`] but allows specifying a custom [`Executor`]
+/// that will be able to intercept build calls and add custom logic.
+///
+/// [`compile`] uses [`DefaultExecutor`] which just passes calls through.
+pub fn compile_with_exec<'a>(
+    ws: &Workspace<'a>,
+    options: &CompileOptions,
+    exec: &Arc<dyn Executor>,
+) -> CargoResult<Compilation<'a>> {
+    ws.emit_warnings()?;
+    compile_ws(ws, options, exec)
+}
+
+/// Like [`compile_with_exec`] but without warnings from manifest parsing.
+#[tracing::instrument(skip_all)]
+pub fn compile_ws<'a>(
+    ws: &Workspace<'a>,
+    options: &CompileOptions,
+    exec: &Arc<dyn Executor>,
+) -> CargoResult<Compilation<'a>> {
+    let interner = UnitInterner::new();
+    let bcx = create_bcx(ws, options, &interner)?;
+    if options.build_config.unit_graph {
+        unit_graph::emit_serialized_unit_graph(&bcx.roots, &bcx.unit_graph, ws.gctx())?;
+        return Compilation::new(&bcx);
+    }
+    crate::core::gc::auto_gc(bcx.gctx);
+    let build_runner = BuildRunner::new(&bcx)?;
+    build_runner.compile(exec)
+}
+
+/// Executes `rustc --print <VALUE>`.
+///
+/// * `print_opt_value` is the VALUE passed through.
+pub fn print<'a>(
+    ws: &Workspace<'a>,
+    options: &CompileOptions,
+    print_opt_value: &str,
+) -> CargoResult<()> {
+    let CompileOptions {
+        ref build_config,
+        ref target_rustc_args,
+        ..
+    } = *options;
+    let gctx = ws.gctx();
+    let rustc = gctx.load_global_rustc(Some(ws))?;
+    for (index, kind) in build_config.requested_kinds.iter().enumerate() {
+        if index != 0 {
+            drop_println!(gctx);
+        }
+        let target_info = TargetInfo::new(gctx, &build_config.requested_kinds, &rustc, *kind)?;
+        let mut process = rustc.process();
+        process.args(&target_info.rustflags);
+        if let Some(args) = target_rustc_args {
+            process.args(args);
+        }
+        if let CompileKind::Target(t) = kind {
+            process.arg("--target").arg(t.rustc_target());
+        }
+        process.arg("--print").arg(print_opt_value);
+        process.exec()?;
+    }
+    Ok(())
+}
+
+/// Prepares all required information for the actual compilation.
+///
+/// For how it works and what data it collects,
+/// please see the [module-level documentation](self).
+#[tracing::instrument(skip_all)]
+pub fn create_bcx<'a, 'gctx>(
+    ws: &'a Workspace<'gctx>,
+    options: &'a CompileOptions,
+    interner: &'a UnitInterner,
+) -> CargoResult<BuildContext<'a, 'gctx>> {
+    let CompileOptions {
+        ref build_config,
+        ref spec,
+        ref cli_features,
+        ref filter,
+        ref target_rustdoc_args,
+        ref target_rustc_args,
+        ref target_rustc_crate_types,
+        rustdoc_document_private_items,
+        honor_rust_version,
+    } = *options;
+    let gctx = ws.gctx();
+
+    // Perform some pre-flight validation.
+    match build_config.mode {
+        CompileMode::Test
+        | CompileMode::Build
+        | CompileMode::Check { .. }
+        | CompileMode::Bench
+        | CompileMode::RunCustomBuild => {
+            if ws.gctx().get_env("RUST_FLAGS").is_ok() {
+                gctx.shell().warn(
+                    "Cargo does not read `RUST_FLAGS` environment variable. Did you mean `RUSTFLAGS`?",
+                )?;
+            }
+        }
+        CompileMode::Doc { .. } | CompileMode::Doctest | CompileMode::Docscrape => {
+            if ws.gctx().get_env("RUSTDOC_FLAGS").is_ok() {
+                gctx.shell().warn(
+                    "Cargo does not read `RUSTDOC_FLAGS` environment variable. Did you mean `RUSTDOCFLAGS`?"
+                )?;
+            }
+        }
+    }
+    gctx.validate_term_config()?;
+
+    let mut target_data = RustcTargetData::new(ws, &build_config.requested_kinds)?;
+
+    let specs = spec.to_package_id_specs(ws)?;
+    let has_dev_units = {
+        // Rustdoc itself doesn't need dev-dependencies. But to scrape examples from packages in the
+        // workspace, if any of those packages need dev-dependencies, then we need include dev-dependencies
+        // to scrape those packages.
+        let any_pkg_has_scrape_enabled = ws
+            .members_with_features(&specs, cli_features)?
+            .iter()
+            .any(|(pkg, _)| {
+                pkg.targets()
+                    .iter()
+                    .any(|target| target.is_example() && target.doc_scrape_examples().is_enabled())
+            });
+
+        if filter.need_dev_deps(build_config.mode)
+            || (build_config.mode.is_doc() && any_pkg_has_scrape_enabled)
+        {
+            HasDevUnits::Yes
+        } else {
+            HasDevUnits::No
+        }
+    };
+    let resolve = ops::resolve_ws_with_opts(
+        ws,
+        &mut target_data,
+        &build_config.requested_kinds,
+        cli_features,
+        &specs,
+        has_dev_units,
+        crate::core::resolver::features::ForceAllTargets::No,
+    )?;
+    let WorkspaceResolve {
+        mut pkg_set,
+        workspace_resolve,
+        targeted_resolve: resolve,
+        resolved_features,
+    } = resolve;
+
+    let std_resolve_features = if let Some(crates) = &gctx.cli_unstable().build_std {
+        let (std_package_set, std_resolve, std_features) =
+            standard_lib::resolve_std(ws, &mut target_data, &build_config, crates)?;
+        pkg_set.add_set(std_package_set);
+        Some((std_resolve, std_features))
+    } else {
+        None
+    };
+
+    // Find the packages in the resolver that the user wants to build (those
+    // passed in with `-p` or the defaults from the workspace), and convert
+    // Vec<PackageIdSpec> to a Vec<PackageId>.
+    let to_build_ids = resolve.specs_to_ids(&specs)?;
+    // Now get the `Package` for each `PackageId`. This may trigger a download
+    // if the user specified `-p` for a dependency that is not downloaded.
+    // Dependencies will be downloaded during build_unit_dependencies.
+    let mut to_builds = pkg_set.get_many(to_build_ids)?;
+
+    // The ordering here affects some error messages coming out of cargo, so
+    // let's be test and CLI friendly by always printing in the same order if
+    // there's an error.
+    to_builds.sort_by_key(|p| p.package_id());
+
+    for pkg in to_builds.iter() {
+        pkg.manifest().print_teapot(gctx);
+
+        if build_config.mode.is_any_test()
+            && !ws.is_member(pkg)
+            && pkg.dependencies().iter().any(|dep| !dep.is_transitive())
+        {
+            anyhow::bail!(
+                "package `{}` cannot be tested because it requires dev-dependencies \
+                 and is not a member of the workspace",
+                pkg.name()
+            );
+        }
+    }
+
+    let (extra_args, extra_args_name) = match (target_rustc_args, target_rustdoc_args) {
+        (Some(args), _) => (Some(args.clone()), "rustc"),
+        (_, Some(args)) => (Some(args.clone()), "rustdoc"),
+        _ => (None, ""),
+    };
+
+    if extra_args.is_some() && to_builds.len() != 1 {
+        panic!(
+            "`{}` should not accept multiple `-p` flags",
+            extra_args_name
+        );
+    }
+
+    let profiles = Profiles::new(ws, build_config.requested_profile)?;
+    profiles.validate_packages(
+        ws.profiles(),
+        &mut gctx.shell(),
+        workspace_resolve.as_ref().unwrap_or(&resolve),
+    )?;
+
+    // If `--target` has not been specified, then the unit graph is built
+    // assuming `--target $HOST` was specified. See
+    // `rebuild_unit_graph_shared` for more on why this is done.
+    let explicit_host_kind = CompileKind::Target(CompileTarget::new(&target_data.rustc.host)?);
+    let explicit_host_kinds: Vec<_> = build_config
+        .requested_kinds
+        .iter()
+        .map(|kind| match kind {
+            CompileKind::Host => explicit_host_kind,
+            CompileKind::Target(t) => CompileKind::Target(*t),
+        })
+        .collect();
+
+    // Passing `build_config.requested_kinds` instead of
+    // `explicit_host_kinds` here so that `generate_root_units` can do
+    // its own special handling of `CompileKind::Host`. It will
+    // internally replace the host kind by the `explicit_host_kind`
+    // before setting as a unit.
+    let generator = UnitGenerator {
+        ws,
+        packages: &to_builds,
+        filter,
+        requested_kinds: &build_config.requested_kinds,
+        explicit_host_kind,
+        mode: build_config.mode,
+        resolve: &resolve,
+        workspace_resolve: &workspace_resolve,
+        resolved_features: &resolved_features,
+        package_set: &pkg_set,
+        profiles: &profiles,
+        interner,
+        has_dev_units,
+    };
+    let mut units = generator.generate_root_units()?;
+
+    if let Some(args) = target_rustc_crate_types {
+        override_rustc_crate_types(&mut units, args, interner)?;
+    }
+
+    let should_scrape = build_config.mode.is_doc() && gctx.cli_unstable().rustdoc_scrape_examples;
+    let mut scrape_units = if should_scrape {
+        UnitGenerator {
+            mode: CompileMode::Docscrape,
+            ..generator
+        }
+        .generate_scrape_units(&units)?
+    } else {
+        Vec::new()
+    };
+
+    let std_roots = if let Some(crates) = standard_lib::std_crates(gctx, Some(&units)) {
+        let (std_resolve, std_features) = std_resolve_features.as_ref().unwrap();
+        standard_lib::generate_std_roots(
+            &crates,
+            std_resolve,
+            std_features,
+            &explicit_host_kinds,
+            &pkg_set,
+            interner,
+            &profiles,
+        )?
+    } else {
+        Default::default()
+    };
+
+    let mut unit_graph = build_unit_dependencies(
+        ws,
+        &pkg_set,
+        &resolve,
+        &resolved_features,
+        std_resolve_features.as_ref(),
+        &units,
+        &scrape_units,
+        &std_roots,
+        build_config.mode,
+        &target_data,
+        &profiles,
+        interner,
+    )?;
+
+    // TODO: In theory, Cargo should also dedupe the roots, but I'm uncertain
+    // what heuristics to use in that case.
+    if matches!(build_config.mode, CompileMode::Doc { deps: true, .. }) {
+        remove_duplicate_doc(build_config, &units, &mut unit_graph);
+    }
+
+    let host_kind_requested = build_config
+        .requested_kinds
+        .iter()
+        .any(CompileKind::is_host);
+    // Rebuild the unit graph, replacing the explicit host targets with
+    // CompileKind::Host, removing `artifact_target_for_features` and merging any dependencies
+    // shared with build and artifact dependencies.
+    (units, scrape_units, unit_graph) = rebuild_unit_graph_shared(
+        interner,
+        unit_graph,
+        &units,
+        &scrape_units,
+        host_kind_requested.then_some(explicit_host_kind),
+        &target_data,
+    );
+
+    let mut extra_compiler_args = HashMap::new();
+    if let Some(args) = extra_args {
+        if units.len() != 1 {
+            anyhow::bail!(
+                "extra arguments to `{}` can only be passed to one \
+                 target, consider filtering\nthe package by passing, \
+                 e.g., `--lib` or `--bin NAME` to specify a single target",
+                extra_args_name
+            );
+        }
+        extra_compiler_args.insert(units[0].clone(), args);
+    }
+
+    for unit in units
+        .iter()
+        .filter(|unit| unit.mode.is_doc() || unit.mode.is_doc_test())
+        .filter(|unit| rustdoc_document_private_items || unit.target.is_bin())
+    {
+        // Add `--document-private-items` rustdoc flag if requested or if
+        // the target is a binary. Binary crates get their private items
+        // documented by default.
+        let mut args = vec!["--document-private-items".into()];
+        if unit.target.is_bin() {
+            // This warning only makes sense if it's possible to document private items
+            // sometimes and ignore them at other times. But cargo consistently passes
+            // `--document-private-items`, so the warning isn't useful.
+            args.push("-Arustdoc::private-intra-doc-links".into());
+        }
+        extra_compiler_args
+            .entry(unit.clone())
+            .or_default()
+            .extend(args);
+    }
+
+    if honor_rust_version {
+        let rustc_version = target_data.rustc.version.clone().into();
+
+        let mut incompatible = Vec::new();
+        let mut local_incompatible = false;
+        for unit in unit_graph.keys() {
+            let Some(pkg_msrv) = unit.pkg.rust_version() else {
+                continue;
+            };
+
+            if pkg_msrv.is_compatible_with(&rustc_version) {
+                continue;
+            }
+
+            local_incompatible |= unit.is_local();
+            incompatible.push((unit, pkg_msrv));
+        }
+        if !incompatible.is_empty() {
+            use std::fmt::Write as _;
+
+            let plural = if incompatible.len() == 1 { "" } else { "s" };
+            let mut message = format!(
+                "rustc {rustc_version} is not supported by the following package{plural}:\n"
+            );
+            incompatible.sort_by_key(|(unit, _)| (unit.pkg.name(), unit.pkg.version()));
+            for (unit, msrv) in incompatible {
+                let name = &unit.pkg.name();
+                let version = &unit.pkg.version();
+                writeln!(&mut message, "  {name}@{version} requires rustc {msrv}").unwrap();
+            }
+            if ws.is_ephemeral() {
+                if ws.ignore_lock() {
+                    writeln!(
+                        &mut message,
+                        "Try re-running `cargo install` with `--locked`"
+                    )
+                    .unwrap();
+                }
+            } else if !local_incompatible {
+                writeln!(
+                    &mut message,
+                    "Either upgrade rustc or select compatible dependency versions with
+`cargo update <name>@<current-ver> --precise <compatible-ver>`
+where `<compatible-ver>` is the latest version supporting rustc {rustc_version}",
+                )
+                .unwrap();
+            }
+            return Err(anyhow::Error::msg(message));
+        }
+    }
+
+    let bcx = BuildContext::new(
+        ws,
+        pkg_set,
+        build_config,
+        profiles,
+        extra_compiler_args,
+        target_data,
+        units,
+        unit_graph,
+        scrape_units,
+    )?;
+
+    Ok(bcx)
+}
+
+/// This is used to rebuild the unit graph, sharing host dependencies if possible,
+/// and applying other unit adjustments based on the whole graph.
+///
+/// This will translate any unit's `CompileKind::Target(host)` to
+/// `CompileKind::Host` if `to_host` is not `None` and the kind is equal to `to_host`.
+/// This also handles generating the unit `dep_hash`, and merging shared units if possible.
+///
+/// This is necessary because if normal dependencies used `CompileKind::Host`,
+/// there would be no way to distinguish those units from build-dependency
+/// units or artifact dependency units.
+/// This can cause a problem if a shared normal/build/artifact dependency needs
+/// to link to another dependency whose features differ based on whether or
+/// not it is a normal, build or artifact dependency. If all units used
+/// `CompileKind::Host`, then they would end up being identical, causing a
+/// collision in the `UnitGraph`, and Cargo would end up randomly choosing one
+/// value or the other.
+///
+/// The solution is to keep normal, build and artifact dependencies separate when
+/// building the unit graph, and then run this second pass which will try to
+/// combine shared dependencies safely. By adding a hash of the dependencies
+/// to the `Unit`, this allows the `CompileKind` to be changed back to `Host`
+/// and `artifact_target_for_features` to be removed without fear of an unwanted
+/// collision for build or artifact dependencies.
+///
+/// This is also responsible for adjusting the `strip` profile option to
+/// opportunistically strip if debug is 0 for all dependencies. This helps
+/// remove debuginfo added by the standard library.
+///
+/// This is also responsible for adjusting the `debug` setting for host
+/// dependencies, turning off debug if the user has not explicitly enabled it,
+/// and the unit is not shared with a target unit.
+
+fn rebuild_unit_graph_shared(
+    interner: &UnitInterner,
+    unit_graph: UnitGraph,
+    roots: &[Unit],
+    scrape_units: &[Unit],
+    to_host: Option<CompileKind>,
+    target_data: &RustcTargetData<'_>,
+) -> (Vec<Unit>, Vec<Unit>, UnitGraph) {
+    let mut result = UnitGraph::new();
+    // Map of the old unit to the new unit, used to avoid recursing into units
+    // that have already been computed to improve performance.
+    let mut memo = HashMap::new();
+    let new_roots = roots
+        .iter()
+        .map(|root| {
+            traverse_and_share(
+                interner,
+                &mut memo,
+                &mut result,
+                &unit_graph,
+                root,
+                false,
+                to_host,
+                target_data,
+            )
+        })
+        .collect();
+    // If no unit in the unit graph ended up having scrape units attached as dependencies,
+    // then they won't have been discovered in traverse_and_share and hence won't be in
+    // memo. So we filter out missing scrape units.
+    let new_scrape_units = scrape_units
+        .iter()
+        .map(|unit| memo.get(unit).unwrap().clone())
+        .collect();
+    (new_roots, new_scrape_units, result)
+}
+
+/// Recursive function for rebuilding the graph.
+///
+/// This walks `unit_graph`, starting at the given `unit`. It inserts the new
+/// units into `new_graph`, and returns a new updated version of the given
+/// unit (`dep_hash` is filled in, and `kind` switched if necessary).
+fn traverse_and_share(
+    interner: &UnitInterner,
+    memo: &mut HashMap<Unit, Unit>,
+    new_graph: &mut UnitGraph,
+    unit_graph: &UnitGraph,
+    unit: &Unit,
+    unit_is_for_host: bool,
+    to_host: Option<CompileKind>,
+    target_data: &RustcTargetData<'_>,
+) -> Unit {
+    if let Some(new_unit) = memo.get(unit) {
+        // Already computed, no need to recompute.
+        return new_unit.clone();
+    }
+    let mut dep_hash = StableHasher::new();
+    let new_deps: Vec<_> = unit_graph[unit]
+        .iter()
+        .map(|dep| {
+            let new_dep_unit = traverse_and_share(
+                interner,
+                memo,
+                new_graph,
+                unit_graph,
+                &dep.unit,
+                dep.unit_for.is_for_host(),
+                to_host,
+                target_data,
+            );
+            new_dep_unit.hash(&mut dep_hash);
+            UnitDep {
+                unit: new_dep_unit,
+                ..dep.clone()
+            }
+        })
+        .collect();
+    // Here, we have recursively traversed this unit's dependencies, and hashed them: we can
+    // finalize the dep hash.
+    let new_dep_hash = dep_hash.finish();
+
+    // This is the key part of the sharing process: if the unit is a runtime dependency, whose
+    // target is the same as the host, we canonicalize the compile kind to `CompileKind::Host`.
+    // A possible host dependency counterpart to this unit would have that kind, and if such a unit
+    // exists in the current `unit_graph`, they will unify in the new unit graph map `new_graph`.
+    // The resulting unit graph will be optimized with less units, thanks to sharing these host
+    // dependencies.
+    let canonical_kind = match to_host {
+        Some(to_host) if to_host == unit.kind => CompileKind::Host,
+        _ => unit.kind,
+    };
+
+    let cfg = target_data.cfg(unit.kind);
+    let is_target_windows_msvc = cfg.contains(&Cfg::Name("windows".to_string()))
+        && cfg.contains(&Cfg::KeyPair("target_env".to_string(), "msvc".to_string()));
+    let mut profile = unit.profile.clone();
+    // For MSVC, rustc currently treats -Cstrip=debuginfo same as -Cstrip=symbols, which causes
+    // this optimization to also remove symbols and thus break backtraces.
+    if profile.strip.is_deferred() && !is_target_windows_msvc {
+        // If strip was not manually set, and all dependencies of this unit together
+        // with this unit have debuginfo turned off, we enable debuginfo stripping.
+        // This will remove pre-existing debug symbols coming from the standard library.
+        if !profile.debuginfo.is_turned_on()
+            && new_deps
+                .iter()
+                .all(|dep| !dep.unit.profile.debuginfo.is_turned_on())
+        {
+            profile.strip = profile.strip.strip_debuginfo();
+        }
+    }
+
+    // If this is a build dependency, and it's not shared with runtime dependencies, we can weaken
+    // its debuginfo level to optimize build times. We do nothing if it's an artifact dependency,
+    // as it and its debuginfo may end up embedded in the main program.
+    if unit_is_for_host
+        && to_host.is_some()
+        && profile.debuginfo.is_deferred()
+        && !unit.artifact.is_true()
+    {
+        // We create a "probe" test to see if a unit with the same explicit debuginfo level exists
+        // in the graph. This is the level we'd expect if it was set manually or the default value
+        // set by a profile for a runtime dependency: its canonical value.
+        let canonical_debuginfo = profile.debuginfo.finalize();
+        let mut canonical_profile = profile.clone();
+        canonical_profile.debuginfo = canonical_debuginfo;
+        let unit_probe = interner.intern(
+            &unit.pkg,
+            &unit.target,
+            canonical_profile,
+            to_host.unwrap(),
+            unit.mode,
+            unit.features.clone(),
+            unit.is_std,
+            unit.dep_hash,
+            unit.artifact,
+            unit.artifact_target_for_features,
+        );
+
+        // We can now turn the deferred value into its actual final value.
+        profile.debuginfo = if unit_graph.contains_key(&unit_probe) {
+            // The unit is present in both build time and runtime subgraphs: we canonicalize its
+            // level to the other unit's, thus ensuring reuse between the two to optimize build times.
+            canonical_debuginfo
+        } else {
+            // The unit is only present in the build time subgraph, we can weaken its debuginfo
+            // level to optimize build times.
+            canonical_debuginfo.weaken()
+        }
+    }
+
+    let new_unit = interner.intern(
+        &unit.pkg,
+        &unit.target,
+        profile,
+        canonical_kind,
+        unit.mode,
+        unit.features.clone(),
+        unit.is_std,
+        new_dep_hash,
+        unit.artifact,
+        // Since `dep_hash` is now filled in, there's no need to specify the artifact target
+        // for target-dependent feature resolution
+        None,
+    );
+    assert!(memo.insert(unit.clone(), new_unit.clone()).is_none());
+    new_graph.entry(new_unit.clone()).or_insert(new_deps);
+    new_unit
+}
+
+/// Removes duplicate CompileMode::Doc units that would cause problems with
+/// filename collisions.
+///
+/// Rustdoc only separates units by crate name in the file directory
+/// structure. If any two units with the same crate name exist, this would
+/// cause a filename collision, causing different rustdoc invocations to stomp
+/// on one another's files.
+///
+/// Unfortunately this does not remove all duplicates, as some of them are
+/// either user error, or difficult to remove. Cases that I can think of:
+///
+/// - Same target name in different packages. See the `collision_doc` test.
+/// - Different sources. See `collision_doc_sources` test.
+///
+/// Ideally this would not be necessary.
+fn remove_duplicate_doc(
+    build_config: &BuildConfig,
+    root_units: &[Unit],
+    unit_graph: &mut UnitGraph,
+) {
+    // First, create a mapping of crate_name -> Unit so we can see where the
+    // duplicates are.
+    let mut all_docs: HashMap<String, Vec<Unit>> = HashMap::new();
+    for unit in unit_graph.keys() {
+        if unit.mode.is_doc() {
+            all_docs
+                .entry(unit.target.crate_name())
+                .or_default()
+                .push(unit.clone());
+        }
+    }
+    // Keep track of units to remove so that they can be efficiently removed
+    // from the unit_deps.
+    let mut removed_units: HashSet<Unit> = HashSet::new();
+    let mut remove = |units: Vec<Unit>, reason: &str, cb: &dyn Fn(&Unit) -> bool| -> Vec<Unit> {
+        let (to_remove, remaining_units): (Vec<Unit>, Vec<Unit>) = units
+            .into_iter()
+            .partition(|unit| cb(unit) && !root_units.contains(unit));
+        for unit in to_remove {
+            tracing::debug!(
+                "removing duplicate doc due to {} for package {} target `{}`",
+                reason,
+                unit.pkg,
+                unit.target.name()
+            );
+            unit_graph.remove(&unit);
+            removed_units.insert(unit);
+        }
+        remaining_units
+    };
+    // Iterate over the duplicates and try to remove them from unit_graph.
+    for (_crate_name, mut units) in all_docs {
+        if units.len() == 1 {
+            continue;
+        }
+        // Prefer target over host if --target was not specified.
+        if build_config
+            .requested_kinds
+            .iter()
+            .all(CompileKind::is_host)
+        {
+            // Note these duplicates may not be real duplicates, since they
+            // might get merged in rebuild_unit_graph_shared. Either way, it
+            // shouldn't hurt to remove them early (although the report in the
+            // log might be confusing).
+            units = remove(units, "host/target merger", &|unit| unit.kind.is_host());
+            if units.len() == 1 {
+                continue;
+            }
+        }
+        // Prefer newer versions over older.
+        let mut source_map: HashMap<(InternedString, SourceId, CompileKind), Vec<Unit>> =
+            HashMap::new();
+        for unit in units {
+            let pkg_id = unit.pkg.package_id();
+            // Note, this does not detect duplicates from different sources.
+            source_map
+                .entry((pkg_id.name(), pkg_id.source_id(), unit.kind))
+                .or_default()
+                .push(unit);
+        }
+        let mut remaining_units = Vec::new();
+        for (_key, mut units) in source_map {
+            if units.len() > 1 {
+                units.sort_by(|a, b| a.pkg.version().partial_cmp(b.pkg.version()).unwrap());
+                // Remove any entries with version < newest.
+                let newest_version = units.last().unwrap().pkg.version().clone();
+                let keep_units = remove(units, "older version", &|unit| {
+                    unit.pkg.version() < &newest_version
+                });
+                remaining_units.extend(keep_units);
+            } else {
+                remaining_units.extend(units);
+            }
+        }
+        if remaining_units.len() == 1 {
+            continue;
+        }
+        // Are there other heuristics to remove duplicates that would make
+        // sense? Maybe prefer path sources over all others?
+    }
+    // Also remove units from the unit_deps so there aren't any dangling edges.
+    for unit_deps in unit_graph.values_mut() {
+        unit_deps.retain(|unit_dep| !removed_units.contains(&unit_dep.unit));
+    }
+    // Remove any orphan units that were detached from the graph.
+    let mut visited = HashSet::new();
+    fn visit(unit: &Unit, graph: &UnitGraph, visited: &mut HashSet<Unit>) {
+        if !visited.insert(unit.clone()) {
+            return;
+        }
+        for dep in &graph[unit] {
+            visit(&dep.unit, graph, visited);
+        }
+    }
+    for unit in root_units {
+        visit(unit, unit_graph, &mut visited);
+    }
+    unit_graph.retain(|unit, _| visited.contains(unit));
+}
+
+/// Override crate types for given units.
+///
+/// This is primarily used by `cargo rustc --crate-type`.
+fn override_rustc_crate_types(
+    units: &mut [Unit],
+    args: &[String],
+    interner: &UnitInterner,
+) -> CargoResult<()> {
+    if units.len() != 1 {
+        anyhow::bail!(
+            "crate types to rustc can only be passed to one \
+            target, consider filtering\nthe package by passing, \
+            e.g., `--lib` or `--example` to specify a single target"
+        );
+    }
+
+    let unit = &units[0];
+    let override_unit = |f: fn(Vec<CrateType>) -> TargetKind| {
+        let crate_types = args.iter().map(|s| s.into()).collect();
+        let mut target = unit.target.clone();
+        target.set_kind(f(crate_types));
+        interner.intern(
+            &unit.pkg,
+            &target,
+            unit.profile.clone(),
+            unit.kind,
+            unit.mode,
+            unit.features.clone(),
+            unit.is_std,
+            unit.dep_hash,
+            unit.artifact,
+            unit.artifact_target_for_features,
+        )
+    };
+    units[0] = match unit.target.kind() {
+        TargetKind::Lib(_) => override_unit(TargetKind::Lib),
+        TargetKind::ExampleLib(_) => override_unit(TargetKind::ExampleLib),
+        _ => {
+            anyhow::bail!(
+                "crate types can only be specified for libraries and example libraries.\n\
+                Binaries, tests, and benchmarks are always the `bin` crate type"
+            );
+        }
+    };
+
+    Ok(())
+}
+
+/// Gets all of the features enabled for a package, plus its dependencies'
+/// features.
+///
+/// Dependencies are added as `dep_name/feat_name` because `required-features`
+/// wants to support that syntax.
+pub fn resolve_all_features(
+    resolve_with_overrides: &Resolve,
+    resolved_features: &features::ResolvedFeatures,
+    package_set: &PackageSet<'_>,
+    package_id: PackageId,
+) -> HashSet<String> {
+    let mut features: HashSet<String> = resolved_features
+        .activated_features(package_id, FeaturesFor::NormalOrDev)
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    // Include features enabled for use by dependencies so targets can also use them with the
+    // required-features field when deciding whether to be built or skipped.
+    for (dep_id, deps) in resolve_with_overrides.deps(package_id) {
+        let is_proc_macro = package_set
+            .get_one(dep_id)
+            .expect("packages downloaded")
+            .proc_macro();
+        for dep in deps {
+            let features_for = FeaturesFor::from_for_host(is_proc_macro || dep.is_build());
+            for feature in resolved_features
+                .activated_features_unverified(dep_id, features_for)
+                .unwrap_or_default()
+            {
+                features.insert(format!("{}/{}", dep.name_in_toml(), feature));
+            }
+        }
+    }
+
+    features
+}
+
+// Path: src/cargo/core/compiler/unit_dependencies.rs
+//! Constructs the dependency graph for compilation.
+//!
+//! Rust code is typically organized as a set of Cargo packages. The
+//! dependencies between the packages themselves are stored in the
+//! [`Resolve`] struct. However, we can't use that information as is for
+//! compilation! A package typically contains several targets, or crates,
+//! and these targets has inter-dependencies. For example, you need to
+//! compile the `lib` target before the `bin` one, and you need to compile
+//! `build.rs` before either of those.
+//!
+//! So, we need to lower the `Resolve`, which specifies dependencies between
+//! *packages*, to a graph of dependencies between their *targets*, and this
+//! is exactly what this module is doing! Well, almost exactly: another
+//! complication is that we might want to compile the same target several times
+//! (for example, with and without tests), so we actually build a dependency
+//! graph of [`Unit`]s, which capture these properties.
+
+use std::collections::{HashMap, HashSet};
+
+use tracing::trace;
+
+use crate::core::compiler::artifact::match_artifacts_kind_with_targets;
+use crate::core::compiler::unit_graph::{UnitDep, UnitGraph};
+use crate::core::compiler::{
+    CompileKind, CompileMode, CrateType, RustcTargetData, Unit, UnitInterner,
+};
+use crate::core::dependency::{Artifact, ArtifactTarget, DepKind};
+use crate::core::profiles::{Profile, Profiles, UnitFor};
+use crate::core::resolver::features::{FeaturesFor, ResolvedFeatures};
+use crate::core::resolver::Resolve;
+use crate::core::{Dependency, Package, PackageId, PackageSet, Target, TargetKind, Workspace};
+use crate::ops::resolve_all_features;
+use crate::util::interning::InternedString;
+use crate::util::GlobalContext;
+use crate::CargoResult;
+
+const IS_NO_ARTIFACT_DEP: Option<&'static Artifact> = None;
+
+/// Collection of stuff used while creating the [`UnitGraph`].
+struct State<'a, 'gctx> {
+    ws: &'a Workspace<'gctx>,
+    gctx: &'gctx GlobalContext,
+    /// Stores the result of building the [`UnitGraph`].
+    unit_dependencies: UnitGraph,
+    package_set: &'a PackageSet<'gctx>,
+    usr_resolve: &'a Resolve,
+    usr_features: &'a ResolvedFeatures,
+    /// Like `usr_resolve` but for building standard library (`-Zbuild-std`).
+    std_resolve: Option<&'a Resolve>,
+    /// Like `usr_features` but for building standard library (`-Zbuild-std`).
+    std_features: Option<&'a ResolvedFeatures>,
+    /// `true` while generating the dependencies for the standard library.
+    is_std: bool,
+    /// The mode we are compiling in. Used for preventing from building lib thrice.
+    global_mode: CompileMode,
+    target_data: &'a RustcTargetData<'gctx>,
+    profiles: &'a Profiles,
+    interner: &'a UnitInterner,
+    // Units for `-Zrustdoc-scrape-examples`.
+    scrape_units: &'a [Unit],
+
+    /// A set of edges in `unit_dependencies` where (a, b) means that the
+    /// dependency from a to b was added purely because it was a dev-dependency.
+    /// This is used during `connect_run_custom_build_deps`.
+    dev_dependency_edges: HashSet<(Unit, Unit)>,
+}
+
+/// A boolean-like to indicate if a `Unit` is an artifact or not.
+#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum IsArtifact {
+    Yes,
+    No,
+}
+
+impl IsArtifact {
+    pub fn is_true(&self) -> bool {
+        matches!(self, IsArtifact::Yes)
+    }
+}
+
+/// Then entry point for building a dependency graph of compilation units.
+///
+/// You can find some information for arguments from doc of [`State`].
+#[tracing::instrument(skip_all)]
+pub fn build_unit_dependencies<'a, 'gctx>(
+    ws: &'a Workspace<'gctx>,
+    package_set: &'a PackageSet<'gctx>,
+    resolve: &'a Resolve,
+    features: &'a ResolvedFeatures,
+    std_resolve: Option<&'a (Resolve, ResolvedFeatures)>,
+    roots: &[Unit],
+    scrape_units: &[Unit],
+    std_roots: &HashMap<CompileKind, Vec<Unit>>,
+    global_mode: CompileMode,
+    target_data: &'a RustcTargetData<'gctx>,
+    profiles: &'a Profiles,
+    interner: &'a UnitInterner,
+) -> CargoResult<UnitGraph> {
+    if roots.is_empty() {
+        // If -Zbuild-std, don't attach units if there is nothing to build.
+        // Otherwise, other parts of the code may be confused by seeing units
+        // in the dep graph without a root.
+        return Ok(HashMap::new());
+    }
+    let (std_resolve, std_features) = match std_resolve {
+        Some((r, f)) => (Some(r), Some(f)),
+        None => (None, None),
+    };
+    let mut state = State {
+        ws,
+        gctx: ws.gctx(),
+        unit_dependencies: HashMap::new(),
+        package_set,
+        usr_resolve: resolve,
+        usr_features: features,
+        std_resolve,
+        std_features,
+        is_std: false,
+        global_mode,
+        target_data,
+        profiles,
+        interner,
+        scrape_units,
+        dev_dependency_edges: HashSet::new(),
+    };
+
+    let std_unit_deps = calc_deps_of_std(&mut state, std_roots)?;
+
+    deps_of_roots(roots, &mut state)?;
+    super::links::validate_links(state.resolve(), &state.unit_dependencies)?;
+    // Hopefully there aren't any links conflicts with the standard library?
+
+    if let Some(std_unit_deps) = std_unit_deps {
+        attach_std_deps(&mut state, std_roots, std_unit_deps);
+    }
+
+    connect_run_custom_build_deps(&mut state);
+
+    // Dependencies are used in tons of places throughout the backend, many of
+    // which affect the determinism of the build itself. As a result be sure
+    // that dependency lists are always sorted to ensure we've always got a
+    // deterministic output.
+    for list in state.unit_dependencies.values_mut() {
+        list.sort();
+    }
+    trace!("ALL UNIT DEPENDENCIES {:#?}", state.unit_dependencies);
+
+    Ok(state.unit_dependencies)
+}
+
+/// Compute all the dependencies for the standard library.
+fn calc_deps_of_std(
+    state: &mut State<'_, '_>,
+    std_roots: &HashMap<CompileKind, Vec<Unit>>,
+) -> CargoResult<Option<UnitGraph>> {
+    if std_roots.is_empty() {
+        return Ok(None);
+    }
+    // Compute dependencies for the standard library.
+    state.is_std = true;
+    for roots in std_roots.values() {
+        deps_of_roots(roots, state)?;
+    }
+    state.is_std = false;
+    Ok(Some(std::mem::take(&mut state.unit_dependencies)))
+}
+
+/// Add the standard library units to the `unit_dependencies`.
+fn attach_std_deps(
+    state: &mut State<'_, '_>,
+    std_roots: &HashMap<CompileKind, Vec<Unit>>,
+    std_unit_deps: UnitGraph,
+) {
+    // Attach the standard library as a dependency of every target unit.
+    let mut found = false;
+    for (unit, deps) in state.unit_dependencies.iter_mut() {
+        if !unit.kind.is_host() && !unit.mode.is_run_custom_build() {
+            deps.extend(std_roots[&unit.kind].iter().map(|unit| UnitDep {
+                unit: unit.clone(),
+                unit_for: UnitFor::new_normal(unit.kind),
+                extern_crate_name: unit.pkg.name(),
+                dep_name: None,
+                // TODO: Does this `public` make sense?
+                public: true,
+                noprelude: true,
+            }));
+            found = true;
+        }
+    }
+    // And also include the dependencies of the standard library itself. Don't
+    // include these if no units actually needed the standard library.
+    if found {
+        for (unit, deps) in std_unit_deps.into_iter() {
+            if let Some(other_unit) = state.unit_dependencies.insert(unit, deps) {
+                panic!("std unit collision with existing unit: {:?}", other_unit);
+            }
+        }
+    }
+}
+
+/// Compute all the dependencies of the given root units.
+/// The result is stored in state.unit_dependencies.
+fn deps_of_roots(roots: &[Unit], state: &mut State<'_, '_>) -> CargoResult<()> {
+    for unit in roots.iter() {
+        // Dependencies of tests/benches should not have `panic` set.
+        // We check the global test mode to see if we are running in `cargo
+        // test` in which case we ensure all dependencies have `panic`
+        // cleared, and avoid building the lib thrice (once with `panic`, once
+        // without, once for `--test`). In particular, the lib included for
+        // Doc tests and examples are `Build` mode here.
+        let root_compile_kind = unit.kind;
+        let unit_for = if unit.mode.is_any_test() || state.global_mode.is_rustc_test() {
+            if unit.target.proc_macro() {
+                // Special-case for proc-macros, which are forced to for-host
+                // since they need to link with the proc_macro crate.
+                UnitFor::new_host_test(state.gctx, root_compile_kind)
+            } else {
+                UnitFor::new_test(state.gctx, root_compile_kind)
+            }
+        } else if unit.target.is_custom_build() {
+            // This normally doesn't happen, except `clean` aggressively
+            // generates all units.
+            UnitFor::new_host(false, root_compile_kind)
+        } else if unit.target.proc_macro() {
+            UnitFor::new_host(true, root_compile_kind)
+        } else if unit.target.for_host() {
+            // Plugin should never have panic set.
+            UnitFor::new_compiler(root_compile_kind)
+        } else {
+            UnitFor::new_normal(root_compile_kind)
+        };
+        deps_of(unit, state, unit_for)?;
+    }
+
+    Ok(())
+}
+
+/// Compute the dependencies of a single unit, recursively computing all
+/// transitive dependencies.
+///
+/// The result is stored in `state.unit_dependencies`.
+fn deps_of(unit: &Unit, state: &mut State<'_, '_>, unit_for: UnitFor) -> CargoResult<()> {
+    // Currently the `unit_dependencies` map does not include `unit_for`. This should
+    // be safe for now. `TestDependency` only exists to clear the `panic`
+    // flag, and you'll never ask for a `unit` with `panic` set as a
+    // `TestDependency`. `CustomBuild` should also be fine since if the
+    // requested unit's settings are the same as `Any`, `CustomBuild` can't
+    // affect anything else in the hierarchy.
+    if !state.unit_dependencies.contains_key(unit) {
+        let unit_deps = compute_deps(unit, state, unit_for)?;
+        state
+            .unit_dependencies
+            .insert(unit.clone(), unit_deps.clone());
+        for unit_dep in unit_deps {
+            deps_of(&unit_dep.unit, state, unit_dep.unit_for)?;
+        }
+    }
+    Ok(())
+}
+
+/// Returns the direct unit dependencies for the given `Unit`.
+fn compute_deps(
+    unit: &Unit,
+    state: &mut State<'_, '_>,
+    unit_for: UnitFor,
+) -> CargoResult<Vec<UnitDep>> {
+    if unit.mode.is_run_custom_build() {
+        return compute_deps_custom_build(unit, unit_for, state);
+    } else if unit.mode.is_doc() {
+        // Note: this does not include doc test.
+        return compute_deps_doc(unit, state, unit_for);
+    }
+
+    let mut ret = Vec::new();
+    let mut dev_deps = Vec::new();
+    for (dep_pkg_id, deps) in state.deps(unit, unit_for) {
+        let Some(dep_lib) = calc_artifact_deps(unit, unit_for, dep_pkg_id, &deps, state, &mut ret)?
+        else {
+            continue;
+        };
+        let dep_pkg = state.get(dep_pkg_id);
+        let mode = check_or_build_mode(unit.mode, dep_lib);
+        let dep_unit_for = unit_for.with_dependency(unit, dep_lib, unit_for.root_compile_kind());
+
+        let start = ret.len();
+        if state.gctx.cli_unstable().dual_proc_macros
+            && dep_lib.proc_macro()
+            && !unit.kind.is_host()
+        {
+            let unit_dep = new_unit_dep(
+                state,
+                unit,
+                dep_pkg,
+                dep_lib,
+                dep_unit_for,
+                unit.kind,
+                mode,
+                IS_NO_ARTIFACT_DEP,
+            )?;
+            ret.push(unit_dep);
+            let unit_dep = new_unit_dep(
+                state,
+                unit,
+                dep_pkg,
+                dep_lib,
+                dep_unit_for,
+                CompileKind::Host,
+                mode,
+                IS_NO_ARTIFACT_DEP,
+            )?;
+            ret.push(unit_dep);
+        } else {
+            let unit_dep = new_unit_dep(
+                state,
+                unit,
+                dep_pkg,
+                dep_lib,
+                dep_unit_for,
+                unit.kind.for_target(dep_lib),
+                mode,
+                IS_NO_ARTIFACT_DEP,
+            )?;
+            ret.push(unit_dep);
+        }
+
+        // If the unit added was a dev-dependency unit, then record that in the
+        // dev-dependencies array. We'll add this to
+        // `state.dev_dependency_edges` at the end and process it later in
+        // `connect_run_custom_build_deps`.
+        if deps.iter().all(|d| !d.is_transitive()) {
+            for dep in ret[start..].iter() {
+                dev_deps.push((unit.clone(), dep.unit.clone()));
+            }
+        }
+    }
+    state.dev_dependency_edges.extend(dev_deps);
+
+    // If this target is a build script, then what we've collected so far is
+    // all we need. If this isn't a build script, then it depends on the
+    // build script if there is one.
+    if unit.target.is_custom_build() {
+        return Ok(ret);
+    }
+    ret.extend(dep_build_script(unit, unit_for, state)?);
+
+    // If this target is a binary, test, example, etc, then it depends on
+    // the library of the same package. The call to `resolve.deps` above
+    // didn't include `pkg` in the return values, so we need to special case
+    // it here and see if we need to push `(pkg, pkg_lib_target)`.
+    if unit.target.is_lib() && unit.mode != CompileMode::Doctest {
+        return Ok(ret);
+    }
+    ret.extend(maybe_lib(unit, state, unit_for)?);
+
+    // If any integration tests/benches are being run, make sure that
+    // binaries are built as well.
+    if !unit.mode.is_check()
+        && unit.mode.is_any_test()
+        && (unit.target.is_test() || unit.target.is_bench())
+    {
+        let id = unit.pkg.package_id();
+        ret.extend(
+            unit.pkg
+                .targets()
+                .iter()
+                .filter(|t| {
+                    // Skip binaries with required features that have not been selected.
+                    match t.required_features() {
+                        Some(rf) if t.is_bin() => {
+                            let features = resolve_all_features(
+                                state.resolve(),
+                                state.features(),
+                                state.package_set,
+                                id,
+                            );
+                            rf.iter().all(|f| features.contains(f))
+                        }
+                        None if t.is_bin() => true,
+                        _ => false,
+                    }
+                })
+                .map(|t| {
+                    new_unit_dep(
+                        state,
+                        unit,
+                        &unit.pkg,
+                        t,
+                        UnitFor::new_normal(unit_for.root_compile_kind()),
+                        unit.kind.for_target(t),
+                        CompileMode::Build,
+                        IS_NO_ARTIFACT_DEP,
+                    )
+                })
+                .collect::<CargoResult<Vec<UnitDep>>>()?,
+        );
+    }
+
+    Ok(ret)
+}
+
+/// Find artifacts for all `deps` of `unit` and add units that build these artifacts
+/// to `ret`.
+fn calc_artifact_deps<'a>(
+    unit: &Unit,
+    unit_for: UnitFor,
+    dep_id: PackageId,
+    deps: &[&Dependency],
+    state: &State<'a, '_>,
+    ret: &mut Vec<UnitDep>,
+) -> CargoResult<Option<&'a Target>> {
+    let mut has_artifact_lib = false;
+    let mut maybe_non_artifact_lib = false;
+    let artifact_pkg = state.get(dep_id);
+    for dep in deps {
+        let Some(artifact) = dep.artifact() else {
+            maybe_non_artifact_lib = true;
+            continue;
+        };
+        has_artifact_lib |= artifact.is_lib();
+        // Custom build scripts (build/compile) never get artifact dependencies,
+        // but the run-build-script step does (where it is handled).
+        if !unit.target.is_custom_build() {
+            debug_assert!(
+                !unit.mode.is_run_custom_build(),
+                "BUG: This should be handled in a separate branch"
+            );
+            ret.extend(artifact_targets_to_unit_deps(
+                unit,
+                unit_for.with_artifact_features(artifact),
+                state,
+                artifact
+                    .target()
+                    .and_then(|t| match t {
+                        ArtifactTarget::BuildDependencyAssumeTarget => None,
+                        ArtifactTarget::Force(kind) => Some(CompileKind::Target(kind)),
+                    })
+                    .unwrap_or(unit.kind),
+                artifact_pkg,
+                dep,
+            )?);
+        }
+    }
+    if has_artifact_lib || maybe_non_artifact_lib {
+        Ok(artifact_pkg.targets().iter().find(|t| t.is_lib()))
+    } else {
+        Ok(None)
+    }
+}
+
+/// Returns the dependencies needed to run a build script.
+///
+/// The `unit` provided must represent an execution of a build script, and
+/// the returned set of units must all be run before `unit` is run.
+fn compute_deps_custom_build(
+    unit: &Unit,
+    unit_for: UnitFor,
+    state: &State<'_, '_>,
+) -> CargoResult<Vec<UnitDep>> {
+    if let Some(links) = unit.pkg.manifest().links() {
+        if state
+            .target_data
+            .script_override(links, unit.kind)
+            .is_some()
+        {
+            // Overridden build scripts don't have any dependencies.
+            return Ok(Vec::new());
+        }
+    }
+    // All dependencies of this unit should use profiles for custom builds.
+    // If this is a build script of a proc macro, make sure it uses host
+    // features.
+    let script_unit_for = unit_for.for_custom_build();
+    // When not overridden, then the dependencies to run a build script are:
+    //
+    // 1. Compiling the build script itself.
+    // 2. For each immediate dependency of our package which has a `links`
+    //    key, the execution of that build script.
+    //
+    // We don't have a great way of handling (2) here right now so this is
+    // deferred until after the graph of all unit dependencies has been
+    // constructed.
+    let compile_script_unit = new_unit_dep(
+        state,
+        unit,
+        &unit.pkg,
+        &unit.target,
+        script_unit_for,
+        // Build scripts always compiled for the host.
+        CompileKind::Host,
+        CompileMode::Build,
+        IS_NO_ARTIFACT_DEP,
+    )?;
+
+    let mut result = vec![compile_script_unit];
+
+    // Include any artifact dependencies.
+    //
+    // This is essentially the same as `calc_artifact_deps`, but there are some
+    // subtle differences that require this to be implemented differently.
+    //
+    // Produce units that build all required artifact kinds (like binaries,
+    // static libraries, etc) with the correct compile target.
+    //
+    // Computing the compile target for artifact units is more involved as it has to handle
+    // various target configurations specific to artifacts, like `target = "target"` and
+    // `target = "<triple>"`, which makes knowing the root units compile target
+    // `root_unit_compile_target` necessary.
+    let root_unit_compile_target = unit_for.root_compile_kind();
+    let unit_for = UnitFor::new_host(/*host_features*/ true, root_unit_compile_target);
+    for (dep_pkg_id, deps) in state.deps(unit, script_unit_for) {
+        for dep in deps {
+            if dep.kind() != DepKind::Build || dep.artifact().is_none() {
+                continue;
+            }
+            let artifact_pkg = state.get(dep_pkg_id);
+            let artifact = dep.artifact().expect("artifact dep");
+            let resolved_artifact_compile_kind = artifact
+                .target()
+                .map(|target| target.to_resolved_compile_kind(root_unit_compile_target));
+
+            result.extend(artifact_targets_to_unit_deps(
+                unit,
+                unit_for.with_artifact_features_from_resolved_compile_kind(
+                    resolved_artifact_compile_kind,
+                ),
+                state,
+                resolved_artifact_compile_kind.unwrap_or(CompileKind::Host),
+                artifact_pkg,
+                dep,
+            )?);
+        }
+    }
+
+    Ok(result)
+}
+
+/// Given a `parent` unit containing a dependency `dep` whose package is `artifact_pkg`,
+/// find all targets in `artifact_pkg` which refer to the `dep`s artifact declaration
+/// and turn them into units.
+/// Due to the nature of artifact dependencies, a single dependency in a manifest can
+/// cause one or more targets to be build, for instance with
+/// `artifact = ["bin:a", "bin:b", "staticlib"]`, which is very different from normal
+/// dependencies which cause only a single unit to be created.
+///
+/// `compile_kind` is the computed kind for the future artifact unit
+/// dependency, only the caller can pick the correct one.
+fn artifact_targets_to_unit_deps(
+    parent: &Unit,
+    parent_unit_for: UnitFor,
+    state: &State<'_, '_>,
+    compile_kind: CompileKind,
+    artifact_pkg: &Package,
+    dep: &Dependency,
+) -> CargoResult<Vec<UnitDep>> {
+    let ret =
+        match_artifacts_kind_with_targets(dep, artifact_pkg.targets(), parent.pkg.name().as_str())?
+            .into_iter()
+            .map(|(_artifact_kind, target)| target)
+            .flat_map(|target| {
+                // We split target libraries into individual units, even though rustc is able
+                // to produce multiple kinds in an single invocation for the sole reason that
+                // each artifact kind has its own output directory, something we can't easily
+                // teach rustc for now.
+                match target.kind() {
+                    TargetKind::Lib(kinds) => Box::new(
+                        kinds
+                            .iter()
+                            .filter(|tk| matches!(tk, CrateType::Cdylib | CrateType::Staticlib))
+                            .map(|target_kind| {
+                                new_unit_dep(
+                                    state,
+                                    parent,
+                                    artifact_pkg,
+                                    target
+                                        .clone()
+                                        .set_kind(TargetKind::Lib(vec![target_kind.clone()])),
+                                    parent_unit_for,
+                                    compile_kind,
+                                    CompileMode::Build,
+                                    dep.artifact(),
+                                )
+                            }),
+                    ) as Box<dyn Iterator<Item = _>>,
+                    _ => Box::new(std::iter::once(new_unit_dep(
+                        state,
+                        parent,
+                        artifact_pkg,
+                        target,
+                        parent_unit_for,
+                        compile_kind,
+                        CompileMode::Build,
+                        dep.artifact(),
+                    ))),
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+    Ok(ret)
+}
+
+/// Returns the dependencies necessary to document a package.
+fn compute_deps_doc(
+    unit: &Unit,
+    state: &mut State<'_, '_>,
+    unit_for: UnitFor,
+) -> CargoResult<Vec<UnitDep>> {
+    // To document a library, we depend on dependencies actually being
+...
+
+Function Description:1. **Purpose**: The function is designed to optimize and adjust a graph of build units by sharing host dependencies where possible, and applying specific transformations to units based on the entire graph's context. This helps in managing dependencies that might conflict due to different required features or compile kinds, and ensures efficient compilation by reducing redundancy.
+
+2. **Input**: The function takes several parameters including an interner for units, the original graph of units, an array of root units, an array of units that need to be scraped, an optional compile kind to transform target dependencies to host dependencies, and target data containing information about the Rust compiler version.
+
+3. **Output**: It returns a tuple containing an updated list of root units, an updated list of units that need scraping, and the newly constructed unit graph which has been optimized and adjusted.
+
+4. **Procedure**: 
+   - Initializes a new, empty graph and a memoization map to track already processed units.
+   - Iterates over the root units, transforming each by potentially sharing dependencies and adjusting compile kinds as specified, updating the new graph accordingly.
+   - Ensures that units which require scraping but were not attached as dependencies in the original graph traversal are included by fetching them from the memoization map.
+   - The result is a new graph where shared dependencies are merged safely, compile kinds are adjusted where applicable, and units are optimized for compilation without unnecessary redundancy or conflicts.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

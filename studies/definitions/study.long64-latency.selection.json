@@ -1,0 +1,35 @@
+{
+  "method": "baseline-bin-mean-crossover-v1",
+  "frozenBaseline": "/home/michel/repos/doutorado/llmcontextbench/baselines/repoqa-long64/frozen.json",
+  "frozenSha256": "9f854dab2215c1641501fb3058741adda6b98691d535baf2fd90bc8f98b8acda",
+  "latencyLimitMs": 6000.0,
+  "marginMs": 1000,
+  "roundToMs": 1000,
+  "delayMs": 5000,
+  "bins": [
+    {
+      "sizeBin": "large",
+      "inlineMeanMs": 3627.828709729632,
+      "fastestAlternative": "local-mcp-lean",
+      "alternativeMeanMs": 6818.680060104877,
+      "thresholdMs": 6818.680060104877,
+      "minimumDelayMs": 4190.851350375246
+    },
+    {
+      "sizeBin": "medium",
+      "inlineMeanMs": 3337.0364211887136,
+      "fastestAlternative": "local-mcp-lean",
+      "alternativeMeanMs": 6704.416493126094,
+      "thresholdMs": 6704.416493126094,
+      "minimumDelayMs": 4367.38007193738
+    },
+    {
+      "sizeBin": "small",
+      "inlineMeanMs": 3133.9039951675054,
+      "fastestAlternative": "local-mcp-default",
+      "alternativeMeanMs": 6581.178472936396,
+      "thresholdMs": 6581.178472936396,
+      "minimumDelayMs": 4447.274477768891
+    }
+  ]
+}

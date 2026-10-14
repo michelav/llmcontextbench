@@ -1,0 +1,3337 @@
+// Repository: AFLplusplus/LibAFL
+
+// Path: libafl/src/events/launcher.rs
+//! The [`Launcher`] launches multiple fuzzer instances in parallel.
+//! Thanks to it, we won't need a `for` loop in a shell script...
+//!
+//! It will hide child output, unless the settings indicate otherwise, or the `LIBAFL_DEBUG_OUTPUT` env variable is set.
+//!
+//! To use multiple [`Launcher`]`s` for individual configurations,
+//! we can set `spawn_broker` to `false` on all but one.
+//!
+//! To connect multiple nodes together via TCP, we can use the `remote_broker_addr`.
+//! (this requires the `llmp_bind_public` compile-time feature for `LibAFL`).
+//!
+//! On `Unix` systems, the [`Launcher`] will use `fork` if the `fork` feature is used for `LibAFL`.
+//! Else, it will start subsequent nodes with the same commandline, and will set special `env` variables accordingly.
+
+use alloc::string::ToString;
+#[cfg(feature = "std")]
+use core::marker::PhantomData;
+#[cfg(all(unix, feature = "std", feature = "fork"))]
+use core::time::Duration;
+use core::{
+    fmt::{self, Debug, Formatter},
+    num::NonZeroUsize,
+};
+#[cfg(feature = "std")]
+use std::net::SocketAddr;
+#[cfg(all(feature = "std", any(windows, not(feature = "fork"))))]
+use std::process::Stdio;
+#[cfg(all(unix, feature = "std", feature = "fork"))]
+use std::{fs::File, os::unix::io::AsRawFd};
+
+#[cfg(all(feature = "std", any(windows, not(feature = "fork"))))]
+use libafl_bolts::os::startable_self;
+#[cfg(all(unix, feature = "std", feature = "fork"))]
+use libafl_bolts::{
+    core_affinity::get_core_ids,
+...
+// Path: libafl/src/events/simple.rs
+//! A very simple event manager, that just supports log outputs, but no multiprocessing
+
+use alloc::{boxed::Box, vec::Vec};
+#[cfg(all(unix, not(miri), feature = "std"))]
+use core::ptr::addr_of_mut;
+use core::{fmt::Debug, marker::PhantomData};
+#[cfg(feature = "std")]
+use core::{
+    sync::atomic::{compiler_fence, Ordering},
+    time::Duration,
+};
+
+#[cfg(all(feature = "std", any(windows, not(feature = "fork"))))]
+use libafl_bolts::os::startable_self;
+#[cfg(all(unix, feature = "std", not(miri)))]
+use libafl_bolts::os::unix_signals::setup_signal_handler;
+#[cfg(all(feature = "std", feature = "fork", unix))]
+use libafl_bolts::os::{fork, ForkResult};
+use libafl_bolts::ClientId;
+#[cfg(feature = "std")]
+use libafl_bolts::{shmem::ShMemProvider, staterestore::StateRestorer};
+#[cfg(feature = "std")]
+use serde::{de::DeserializeOwned, Serialize};
+
+use super::{CustomBufEventResult, CustomBufHandlerFn, HasCustomBufHandlers, ProgressReporter};
+#[cfg(all(unix, feature = "std"))]
+use crate::events::EVENTMGR_SIGHANDLER_STATE;
+use crate::{
+    events::{
+        BrokerEventResult, Event, EventFirer, EventManager, EventManagerId, EventProcessor,
+        EventRestarter, HasEventManagerId,
+    },
+    inputs::UsesInput,
+    monitors::Monitor,
+    state::{HasExecutions, HasLastReportTime, HasMetadata, State, UsesState},
+    Error,
+};
+#[cfg(feature = "std")]
+use crate::{
+    monitors::{ClientStats, SimplePrintingMonitor},
+    state::{HasCorpus, HasSolutions},
+};
+
+/// The llmp connection from the actual fuzzer to the process supervising it
+const _ENV_FUZZER_SENDER: &str = "_AFL_ENV_FUZZER_SENDER";
+const _ENV_FUZZER_RECEIVER: &str = "_AFL_ENV_FUZZER_RECEIVER";
+/// The llmp (2 way) connection from a fuzzer to the broker (broadcasting all other fuzzer messages)
+const _ENV_FUZZER_BROKER_CLIENT_INITIAL: &str = "_AFL_ENV_FUZZER_BROKER_CLIENT";
+
+/// A simple, single-threaded event manager that just logs
+pub struct SimpleEventManager<MT, S>
+where
+    S: UsesInput,
+{
+    /// The monitor
+    monitor: MT,
+    /// The events that happened since the last `handle_in_broker`
+    events: Vec<Event<S::Input>>,
+    /// The custom buf handler
+    custom_buf_handlers: Vec<Box<CustomBufHandlerFn<S>>>,
+    phantom: PhantomData<S>,
+}
+
+impl<MT, S> Debug for SimpleEventManager<MT, S>
+where
+    MT: Debug,
+    S: UsesInput,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SimpleEventManager")
+            //.field("custom_buf_handlers", self.custom_buf_handlers)
+            .field("monitor", &self.monitor)
+            .field("events", &self.events)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<MT, S> UsesState for SimpleEventManager<MT, S>
+where
+    S: State,
+{
+    type State = S;
+}
+
+impl<MT, S> EventFirer for SimpleEventManager<MT, S>
+where
+    MT: Monitor,
+    S: State,
+{
+    fn fire(
+        &mut self,
+        _state: &mut Self::State,
+        event: Event<<Self::State as UsesInput>::Input>,
+    ) -> Result<(), Error> {
+        match Self::handle_in_broker(&mut self.monitor, &event)? {
+            BrokerEventResult::Forward => self.events.push(event),
+            BrokerEventResult::Handled => (),
+        };
+        Ok(())
+    }
+}
+
+impl<MT, S> EventRestarter for SimpleEventManager<MT, S>
+where
+    MT: Monitor,
+    S: State,
+{
+}
+
+impl<E, MT, S, Z> EventProcessor<E, Z> for SimpleEventManager<MT, S>
+where
+    MT: Monitor,
+    S: State,
+{
+    fn process(
+        &mut self,
+        _fuzzer: &mut Z,
+        state: &mut S,
+        _executor: &mut E,
+    ) -> Result<usize, Error> {
+        let count = self.events.len();
+        while let Some(event) = self.events.pop() {
+            self.handle_in_client(state, event)?;
+        }
+        Ok(count)
+    }
+}
+
+impl<E, MT, S, Z> EventManager<E, Z> for SimpleEventManager<MT, S>
+where
+    MT: Monitor,
+    S: State + HasExecutions + HasLastReportTime + HasMetadata,
+{
+}
+
+impl<MT, S> HasCustomBufHandlers for SimpleEventManager<MT, S>
+where
+    MT: Monitor, //CE: CustomEvent<I, OT>,
+    S: State,
+{
+    /// Adds a custom buffer handler that will run for each incoming `CustomBuf` event.
+    fn add_custom_buf_handler(
+        &mut self,
+        handler: Box<
+            dyn FnMut(&mut Self::State, &str, &[u8]) -> Result<CustomBufEventResult, Error>,
+        >,
+    ) {
+        self.custom_buf_handlers.push(handler);
+    }
+}
+
+impl<MT, S> ProgressReporter for SimpleEventManager<MT, S>
+where
+    MT: Monitor,
+    S: State + HasExecutions + HasMetadata + HasLastReportTime,
+{
+}
+
+impl<MT, S> HasEventManagerId for SimpleEventManager<MT, S>
+where
+    MT: Monitor,
+    S: UsesInput,
+{
+    fn mgr_id(&self) -> EventManagerId {
+        EventManagerId(0)
+    }
+}
+
+#[cfg(feature = "std")]
+impl<S> SimpleEventManager<SimplePrintingMonitor, S>
+where
+    S: UsesInput,
+{
+    /// Creates a [`SimpleEventManager`] that just prints to `stdout`.
+    #[must_use]
+    pub fn printing() -> Self {
+        Self::new(SimplePrintingMonitor::new())
+    }
+}
+
+impl<MT, S> SimpleEventManager<MT, S>
+where
+    MT: Monitor, //TODO CE: CustomEvent,
+    S: UsesInput,
+{
+    /// Creates a new [`SimpleEventManager`].
+    pub fn new(monitor: MT) -> Self {
+        Self {
+            monitor,
+            events: vec![],
+            custom_buf_handlers: vec![],
+            phantom: PhantomData,
+        }
+    }
+
+    /// Handle arriving events in the broker
+    #[allow(clippy::unnecessary_wraps)]
+    fn handle_in_broker(
+        monitor: &mut MT,
+        event: &Event<S::Input>,
+    ) -> Result<BrokerEventResult, Error> {
+        match event {
+            Event::NewTestcase {
+                input: _,
+                client_config: _,
+                exit_kind: _,
+                corpus_size,
+                observers_buf: _,
+                time,
+                executions,
+                forward_id: _,
+            } => {
+                monitor.client_stats_insert(ClientId(0));
+                monitor
+                    .client_stats_mut_for(ClientId(0))
+                    .update_corpus_size(*corpus_size as u64);
+                monitor
+                    .client_stats_mut_for(ClientId(0))
+                    .update_executions(*executions, *time);
+                monitor.display(event.name(), ClientId(0));
+                Ok(BrokerEventResult::Handled)
+            }
+            Event::UpdateExecStats {
+                time,
+                executions,
+                phantom: _,
+            } => {
+                // TODO: The monitor buffer should be added on client add.
+                monitor.client_stats_insert(ClientId(0));
+                let client = monitor.client_stats_mut_for(ClientId(0));
+
+                client.update_executions(*executions, *time);
+
+                monitor.display(event.name(), ClientId(0));
+                Ok(BrokerEventResult::Handled)
+            }
+            Event::UpdateUserStats {
+                name,
+                value,
+                phantom: _,
+            } => {
+                monitor.client_stats_insert(ClientId(0));
+                monitor
+                    .client_stats_mut_for(ClientId(0))
+                    .update_user_stats(name.clone(), value.clone());
+                monitor.aggregate(name);
+                monitor.display(event.name(), ClientId(0));
+                Ok(BrokerEventResult::Handled)
+            }
+            #[cfg(feature = "introspection")]
+            Event::UpdatePerfMonitor {
+                time,
+                executions,
+                introspection_monitor,
+                phantom: _,
+            } => {
+                // TODO: The monitor buffer should be added on client add.
+                monitor.client_stats_insert(ClientId(0));
+                let client = monitor.client_stats_mut_for(ClientId(0));
+                client.update_executions(*executions, *time);
+                client.update_introspection_monitor((**introspection_monitor).clone());
+                monitor.display(event.name(), ClientId(0));
+                Ok(BrokerEventResult::Handled)
+            }
+            Event::Objective {
+                objective_size,
+                executions,
+                time,
+            } => {
+                monitor.client_stats_insert(ClientId(0));
+                monitor
+                    .client_stats_mut_for(ClientId(0))
+                    .update_objective_size(*objective_size as u64);
+                monitor
+                    .client_stats_mut_for(ClientId(0))
+                    .update_executions(*executions, *time);
+                monitor.display(event.name(), ClientId(0));
+                Ok(BrokerEventResult::Handled)
+            }
+            Event::Log {
+                severity_level,
+                message,
+                phantom: _,
+            } => {
+                let (_, _) = (message, severity_level);
+                log::log!((*severity_level).into(), "{message}");
+                Ok(BrokerEventResult::Handled)
+            }
+            Event::CustomBuf { .. } => Ok(BrokerEventResult::Forward),
+            //_ => Ok(BrokerEventResult::Forward),
+        }
+    }
+
+    // Handle arriving events in the client
+    #[allow(clippy::needless_pass_by_value, clippy::unused_self)]
+    fn handle_in_client(&mut self, state: &mut S, event: Event<S::Input>) -> Result<(), Error> {
+        if let Event::CustomBuf { tag, buf } = &event {
+            for handler in &mut self.custom_buf_handlers {
+                handler(state, tag, buf)?;
+            }
+            Ok(())
+        } else {
+            Err(Error::unknown(format!(
+                "Received illegal message that message should not have arrived: {event:?}."
+            )))
+        }
+    }
+}
+
+/// Provides a `builder` which can be used to build a [`SimpleRestartingEventManager`], which is a combination of a
+/// `restarter` and `runner`, that can be used on systems both with and without `fork` support. The
+/// `restarter` will start a new process each time the child crashes or times out.
+#[cfg(feature = "std")]
+#[allow(clippy::default_trait_access)]
+#[derive(Debug)]
+pub struct SimpleRestartingEventManager<MT, S, SP>
+where
+    S: UsesInput,
+    SP: ShMemProvider, //CE: CustomEvent<I, OT>,
+{
+    /// The actual simple event mgr
+    simple_event_mgr: SimpleEventManager<MT, S>,
+    /// [`StateRestorer`] for restarts
+    staterestorer: StateRestorer<SP>,
+}
+
+#[cfg(feature = "std")]
+impl<MT, S, SP> UsesState for SimpleRestartingEventManager<MT, S, SP>
+where
+    S: State,
+    SP: ShMemProvider,
+{
+    type State = S;
+}
+
+#[cfg(feature = "std")]
+impl<MT, S, SP> EventFirer for SimpleRestartingEventManager<MT, S, SP>
+where
+    MT: Monitor,
+    S: State,
+    SP: ShMemProvider,
+{
+    fn fire(
+        &mut self,
+        _state: &mut Self::State,
+        event: Event<<Self::State as UsesInput>::Input>,
+    ) -> Result<(), Error> {
+        self.simple_event_mgr.fire(_state, event)
+    }
+}
+
+#[cfg(feature = "std")]
+impl<MT, S, SP> EventRestarter for SimpleRestartingEventManager<MT, S, SP>
+where
+    MT: Monitor,
+    S: State,
+    SP: ShMemProvider,
+{
+    /// Reset the single page (we reuse it over and over from pos 0), then send the current state to the next runner.
+    fn on_restart(&mut self, state: &mut S) -> Result<(), Error> {
+        state.on_restart()?;
+
+        // First, reset the page to 0 so the next iteration can read read from the beginning of this page
+        self.staterestorer.reset();
+        self.staterestorer.save(&(
+            state,
+            self.simple_event_mgr.monitor.start_time(),
+            self.simple_event_mgr.monitor.client_stats(),
+        ))
+    }
+
+    fn send_exiting(&mut self) -> Result<(), Error> {
+        self.staterestorer.send_exiting();
+        Ok(())
+    }
+}
+
+#[cfg(feature = "std")]
+impl<E, MT, S, SP, Z> EventProcessor<E, Z> for SimpleRestartingEventManager<MT, S, SP>
+where
+    MT: Monitor,
+    S: State + HasExecutions,
+    SP: ShMemProvider,
+{
+    fn process(
+        &mut self,
+        fuzzer: &mut Z,
+        state: &mut Self::State,
+        executor: &mut E,
+    ) -> Result<usize, Error> {
+        self.simple_event_mgr.process(fuzzer, state, executor)
+    }
+}
+
+#[cfg(feature = "std")]
+impl<E, MT, S, SP, Z> EventManager<E, Z> for SimpleRestartingEventManager<MT, S, SP>
+where
+    MT: Monitor,
+    S: State + HasExecutions + HasMetadata + HasLastReportTime + Serialize,
+    SP: ShMemProvider,
+{
+}
+
+#[cfg(feature = "std")]
+impl<MT, S, SP> HasCustomBufHandlers for SimpleRestartingEventManager<MT, S, SP>
+where
+    MT: Monitor,
+    S: State,
+    SP: ShMemProvider,
+{
+    fn add_custom_buf_handler(
+        &mut self,
+        handler: Box<dyn FnMut(&mut S, &str, &[u8]) -> Result<CustomBufEventResult, Error>>,
+    ) {
+        self.simple_event_mgr.add_custom_buf_handler(handler);
+    }
+}
+
+#[cfg(feature = "std")]
+impl<MT, S, SP> ProgressReporter for SimpleRestartingEventManager<MT, S, SP>
+where
+    MT: Monitor,
+    S: State + HasExecutions + HasMetadata + HasLastReportTime,
+    SP: ShMemProvider,
+{
+}
+
+#[cfg(feature = "std")]
+impl<MT, S, SP> HasEventManagerId for SimpleRestartingEventManager<MT, S, SP>
+where
+    MT: Monitor,
+    S: UsesInput,
+    SP: ShMemProvider,
+{
+    fn mgr_id(&self) -> EventManagerId {
+        self.simple_event_mgr.mgr_id()
+    }
+}
+
+#[cfg(feature = "std")]
+#[allow(clippy::type_complexity, clippy::too_many_lines)]
+impl<MT, S, SP> SimpleRestartingEventManager<MT, S, SP>
+where
+    S: UsesInput,
+    SP: ShMemProvider,
+    MT: Monitor, //TODO CE: CustomEvent,
+{
+    /// Creates a new [`SimpleEventManager`].
+    
+fn launched(monitor: MT, staterestorer: StateRestorer<SP>) -> Self {
+        Self {
+            staterestorer,
+            simple_event_mgr: SimpleEventManager::new(monitor),
+        }
+    }
+
+    /// Internal function, returns true when shuttdown is requested by a `SIGINT` signal
+    #[inline]
+    #[allow(clippy::unused_self)]
+    fn is_shutting_down() -> bool {
+        #[cfg(unix)]
+        unsafe {
+            core::ptr::read_volatile(core::ptr::addr_of!(EVENTMGR_SIGHANDLER_STATE.shutting_down))
+        }
+
+        #[cfg(windows)]
+        false
+    }
+
+    /// Launch the simple restarting manager.
+    /// This [`EventManager`] is simple and single threaded,
+    /// but can still used shared maps to recover from crashes and timeouts.
+    #[allow(clippy::similar_names)]
+    pub fn launch(mut monitor: MT, shmem_provider: &mut SP) -> Result<(Option<S>, Self), Error>
+    where
+        S: DeserializeOwned + Serialize + HasCorpus + HasSolutions,
+        MT: Debug,
+    {
+        // We start ourself as child process to actually fuzz
+        let mut staterestorer = if std::env::var(_ENV_FUZZER_SENDER).is_err() {
+            // First, create a place to store state in, for restarts.
+            #[cfg(unix)]
+            let staterestorer: StateRestorer<SP> =
+                StateRestorer::new(shmem_provider.new_shmem(256 * 1024 * 1024)?);
+            #[cfg(not(unix))]
+            let staterestorer: StateRestorer<SP> =
+                StateRestorer::new(shmem_provider.new_shmem(256 * 1024 * 1024)?);
+
+            //let staterestorer = { LlmpSender::new(shmem_provider.clone(), 0, false)? };
+            staterestorer.write_to_env(_ENV_FUZZER_SENDER)?;
+
+            // We setup signal handlers to clean up shmem segments used by state restorer
+            #[cfg(all(unix, not(miri)))]
+            if let Err(_e) =
+                unsafe { setup_signal_handler(addr_of_mut!(EVENTMGR_SIGHANDLER_STATE)) }
+            {
+                // We can live without a proper ctrl+c signal handler. Print and ignore.
+                log::error!("Failed to setup signal handlers: {_e}");
+            }
+
+            let mut ctr: u64 = 0;
+            // Client->parent loop
+            loop {
+                log::info!("Spawning next client (id {ctr})");
+
+                // On Unix, we fork
+                #[cfg(all(unix, feature = "fork"))]
+                let child_status = {
+                    shmem_provider.pre_fork()?;
+                    match unsafe { fork() }? {
+                        ForkResult::Parent(handle) => {
+                            unsafe {
+                                // The parent will later exit through is_shutting down below
+                                // if the process exits gracefully, it cleans up the shmem.
+                                EVENTMGR_SIGHANDLER_STATE.set_exit_from_main();
+                            }
+                            shmem_provider.post_fork(false)?;
+                            handle.status()
+                        }
+                        ForkResult::Child => {
+                            shmem_provider.post_fork(true)?;
+                            break staterestorer;
+                        }
+                    }
+                };
+
+                // Same, as fork version, mark this main thread as the shmem allocator
+                // then it will not call exit or exitprocess in the sigint handler
+                // so that it exits after cleaning up the shmem segments
+                #[cfg(all(unix, not(feature = "fork")))]
+                unsafe {
+                    EVENTMGR_SIGHANDLER_STATE.set_exit_from_main();
+                }
+
+                // On Windows (or in any case without forks), we spawn ourself again
+                #[cfg(any(windows, not(feature = "fork")))]
+                let child_status = startable_self()?.status()?;
+                #[cfg(all(unix, not(feature = "fork")))]
+                let child_status = child_status.code().unwrap_or_default();
+
+                compiler_fence(Ordering::SeqCst);
+
+                if staterestorer.wants_to_exit() || Self::is_shutting_down() {
+                    return Err(Error::shutting_down());
+                }
+
+                #[allow(clippy::manual_assert)]
+                if !staterestorer.has_content() {
+                    #[cfg(unix)]
+                    if child_status == 137 {
+                        // Out of Memory, see https://tldp.org/LDP/abs/html/exitcodes.html
+                        // and https://github.com/AFLplusplus/LibAFL/issues/32 for discussion.
+                        panic!("Fuzzer-respawner: The fuzzed target crashed with an out of memory error! Fix your harness, or switch to another executor (for example, a forkserver).");
+                    }
+
+                    // Storing state in the last round did not work
+                    panic!("Fuzzer-respawner: Storing state in crashed fuzzer instance did not work, no point to spawn the next client! This can happen if the child calls `exit()`, in that case make sure it uses `abort()`, if it got killed unrecoverable (OOM), or if there is a bug in the fuzzer itself. (Child exited with: {child_status})");
+                }
+
+                ctr = ctr.wrapping_add(1);
+            }
+        } else {
+            // We are the newly started fuzzing instance (i.e. on Windows), first, connect to our own restore map.
+            // We get here *only on Windows*, if we were started by a restarting fuzzer.
+            // A staterestorer and a receiver for single communication
+            StateRestorer::from_env(shmem_provider, _ENV_FUZZER_SENDER)?
+        };
+
+        // If we're restarting, deserialize the old state.
+        let (state, mgr) = match staterestorer.restore::<(S, Duration, Vec<ClientStats>)>()? {
+            None => {
+                log::info!("First run. Let's set it all up");
+                // Mgr to send and receive msgs from/to all other fuzzer instances
+                (
+                    None,
+                    SimpleRestartingEventManager::launched(monitor, staterestorer),
+                )
+            }
+            // Restoring from a previous run, deserialize state and corpus.
+            Some((state, start_time, clients_stats)) => {
+                log::info!("Subsequent run. Loaded previous state.");
+                // We reset the staterestorer, the next staterestorer and receiver (after crash) will reuse the page from the initial message.
+                staterestorer.reset();
+
+                // reload the state of the monitor to display the correct stats after restarts
+                monitor.set_start_time(start_time);
+                *monitor.client_stats_mut() = clients_stats;
+
+                (
+                    Some(state),
+                    SimpleRestartingEventManager::launched(monitor, staterestorer),
+                )
+            }
+        };
+
+        /* TODO: Not sure if this is needed
+        // We commit an empty NO_RESTART message to this buf, against infinite loops,
+        // in case something crashes in the fuzzer.
+        staterestorer.send_buf(_LLMP_TAG_NO_RESTART, []);
+        */
+
+        Ok((state, mgr))
+    }
+}
+
+// Path: libafl/src/events/mod.rs
+//! An [`EventManager`] manages all events that go to other instances of the fuzzer.
+//! The messages are commonly information about new Testcases as well as stats and other [`Event`]s.
+
+pub mod hooks;
+
+pub mod simple;
+pub use simple::*;
+#[cfg(all(unix, feature = "std"))]
+pub mod centralized;
+#[cfg(all(unix, feature = "std"))]
+pub use centralized::*;
+#[cfg(feature = "std")]
+#[allow(clippy::ignored_unit_patterns)]
+pub mod launcher;
+#[allow(clippy::ignored_unit_patterns)]
+pub mod llmp;
+pub use llmp::*;
+
+#[cfg(feature = "tcp_manager")]
+#[allow(clippy::ignored_unit_patterns)]
+pub mod tcp;
+#[cfg(feature = "scalability_introspection")]
+use alloc::string::ToString;
+use alloc::{boxed::Box, string::String, vec::Vec};
+use core::{
+    fmt,
+    hash::{BuildHasher, Hasher},
+    marker::PhantomData,
+    time::Duration,
+};
+
+use ahash::RandomState;
+#[cfg(feature = "std")]
+pub use launcher::*;
+#[cfg(all(unix, feature = "std"))]
+use libafl_bolts::os::unix_signals::{siginfo_t, ucontext_t, Handler, Signal};
+use libafl_bolts::{current_time, ClientId};
+use serde::{Deserialize, Serialize};
+#[cfg(feature = "std")]
+use uuid::Uuid;
+
+#[cfg(feature = "introspection")]
+use crate::state::HasClientPerfMonitor;
+use crate::{
+    executors::ExitKind,
+    inputs::Input,
+    monitors::UserStats,
+    observers::ObserversTuple,
+    state::{HasExecutions, HasLastReportTime, HasMetadata, State},
+    Error,
+};
+#[cfg(feature = "scalability_introspection")]
+use crate::{
+    monitors::{AggregatorOps, UserStatsValue},
+    state::HasScalabilityMonitor,
+};
+
+/// Check if ctrl-c is sent with this struct
+#[cfg(all(unix, feature = "std"))]
+pub static mut EVENTMGR_SIGHANDLER_STATE: ShutdownSignalData = ShutdownSignalData {
+    shutting_down: false,
+    exit_from_main: false,
+};
+
+/// A signal handler for releasing `StateRestore` `ShMem`
+/// This struct holds a pointer to `StateRestore` and clean up the `ShMem` segment used by it.
+#[cfg(all(unix, feature = "std"))]
+#[derive(Debug, Clone)]
+pub struct ShutdownSignalData {
+    shutting_down: bool,
+    exit_from_main: bool,
+}
+
+#[cfg(all(unix, feature = "std"))]
+impl ShutdownSignalData {
+    /// Set the flag to true, indicating that this process has allocated shmem
+    pub fn set_exit_from_main(&mut self) {
+        unsafe {
+            core::ptr::write_volatile(core::ptr::addr_of_mut!(self.exit_from_main), true);
+        }
+    }
+}
+
+/// Shutdown handler. `SigTerm`, `SigInterrupt`, `SigQuit` call this
+/// We can't handle SIGKILL in the signal handler, this means that you shouldn't kill your fuzzer with `kill -9` because then the shmem segments are never freed
+#[cfg(all(unix, feature = "std"))]
+impl Handler for ShutdownSignalData {
+    fn handle(
+        &mut self,
+        _signal: Signal,
+        _info: &mut siginfo_t,
+        _context: Option<&mut ucontext_t>,
+    ) {
+        /*
+        println!(
+            "in handler! {} {}",
+            self.exit_from_main,
+            std::process::id()
+        );
+        */
+        // if this process has not allocated any shmem. then simply exit()
+        if !self.exit_from_main {
+            unsafe {
+                #[cfg(unix)]
+                libc::_exit(0);
+
+                #[cfg(windows)]
+                windows::Win32::System::Threading::ExitProcess(1);
+            }
+        }
+
+        // else wait till the next is_shutting_down() is called. then the process will exit throught main().
+        unsafe {
+            core::ptr::write_volatile(core::ptr::addr_of_mut!(self.shutting_down), true);
+        }
+    }
+
+    fn signals(&self) -> Vec<Signal> {
+        vec![Signal::SigTerm, Signal::SigInterrupt, Signal::SigQuit]
+    }
+}
+
+/// A per-fuzzer unique `ID`, usually starting with `0` and increasing
+/// by `1` in multiprocessed [`EventManager`]s, such as [`self::llmp::LlmpEventManager`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+pub struct EventManagerId(
+    /// The id
+    pub usize,
+);
+
+#[cfg(feature = "introspection")]
+use crate::monitors::ClientPerfMonitor;
+use crate::{inputs::UsesInput, stages::HasCurrentStage, state::UsesState};
+
+/// The log event severity
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub enum LogSeverity {
+    /// Debug severity
+    Debug,
+    /// Information
+    Info,
+    /// Warning
+    Warn,
+    /// Error
+    Error,
+}
+
+impl From<LogSeverity> for log::Level {
+    fn from(value: LogSeverity) -> Self {
+        match value {
+            LogSeverity::Debug => log::Level::Debug,
+            LogSeverity::Info => log::Level::Info,
+            LogSeverity::Warn => log::Level::Trace,
+            LogSeverity::Error => log::Level::Error,
+        }
+    }
+}
+
+impl fmt::Display for LogSeverity {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LogSeverity::Debug => write!(f, "Debug"),
+            LogSeverity::Info => write!(f, "Info"),
+            LogSeverity::Warn => write!(f, "Warn"),
+            LogSeverity::Error => write!(f, "Error"),
+        }
+    }
+}
+
+/// The result of a custom buf handler added using [`HasCustomBufHandlers::add_custom_buf_handler`]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CustomBufEventResult {
+    /// Exit early from event handling
+    Handled,
+    /// Call the next handler, if available
+    Next,
+}
+
+/// Indicate if an event worked or not
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
+pub enum BrokerEventResult {
+    /// The broker handled this. No need to pass it on.
+    Handled,
+    /// Pass this message along to the clients.
+    Forward,
+}
+
+/// Distinguish a fuzzer by its config
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventConfig {
+    /// Always assume unique setups for fuzzer configs
+    AlwaysUnique,
+    /// Create a fuzzer config from a name hash
+    FromName {
+        /// The name hash
+        name_hash: u64,
+    },
+    /// Create a fuzzer config from a build-time [`Uuid`]
+    #[cfg(feature = "std")]
+    BuildID {
+        /// The build-time [`Uuid`]
+        id: Uuid,
+    },
+}
+
+impl EventConfig {
+    /// Create a new [`EventConfig`] from a name hash
+    #[must_use]
+    pub fn from_name(name: &str) -> Self {
+        let mut hasher = RandomState::with_seeds(0, 0, 0, 0).build_hasher(); //AHasher::new_with_keys(0, 0);
+        hasher.write(name.as_bytes());
+        EventConfig::FromName {
+            name_hash: hasher.finish(),
+        }
+    }
+
+    /// Create a new [`EventConfig`] from a build-time [`Uuid`]
+    #[cfg(feature = "std")]
+    #[must_use]
+    pub fn from_build_id() -> Self {
+        EventConfig::BuildID {
+            id: libafl_bolts::build_id::get(),
+        }
+    }
+
+    /// Match if the currenti [`EventConfig`] matches another given config
+    #[must_use]
+    pub fn match_with(&self, other: &EventConfig) -> bool {
+        match self {
+            EventConfig::AlwaysUnique => false,
+            EventConfig::FromName { name_hash: a } => match other {
+                #[cfg(not(feature = "std"))]
+                EventConfig::AlwaysUnique => false,
+                EventConfig::FromName { name_hash: b } => a == b,
+                #[cfg(feature = "std")]
+                EventConfig::AlwaysUnique | EventConfig::BuildID { id: _ } => false,
+            },
+            #[cfg(feature = "std")]
+            EventConfig::BuildID { id: a } => match other {
+                EventConfig::AlwaysUnique | EventConfig::FromName { name_hash: _ } => false,
+                EventConfig::BuildID { id: b } => a == b,
+            },
+        }
+    }
+}
+
+impl From<&str> for EventConfig {
+    #[must_use]
+    fn from(name: &str) -> Self {
+        Self::from_name(name)
+    }
+}
+
+impl From<String> for EventConfig {
+    #[must_use]
+    fn from(name: String) -> Self {
+        Self::from_name(&name)
+    }
+}
+
+/*
+/// A custom event, for own messages, with own handler.
+pub trait CustomEvent<I>: SerdeAny
+where
+    I: Input,
+{
+    /// Returns the name of this event
+    fn name(&self) -> &str;
+    /// This method will be called in the broker
+    fn handle_in_broker(&self) -> Result<BrokerEventResult, Error>;
+    /// This method will be called in the clients after handle_in_broker (unless BrokerEventResult::Handled) was returned in handle_in_broker
+    fn handle_in_client(&self) -> Result<(), Error>;
+}
+*/
+
+// TODO remove forward_id as not anymore needed for centralized
+/// Events sent around in the library
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(bound = "I: serde::de::DeserializeOwned")]
+pub enum Event<I>
+where
+    I: Input,
+{
+    // TODO use an ID to keep track of the original index in the sender Corpus
+    // The sender can then use it to send Testcase metadata with CustomEvent
+    /// A fuzzer found a new testcase. Rejoice!
+    NewTestcase {
+        /// The input for the new testcase
+        input: I,
+        /// The state of the observers when this testcase was found
+        observers_buf: Option<Vec<u8>>,
+        /// The exit kind
+        exit_kind: ExitKind,
+        /// The new corpus size of this client
+        corpus_size: usize,
+        /// The client config for this observers/testcase combination
+        client_config: EventConfig,
+        /// The time of generation of the event
+        time: Duration,
+        /// The executions of this client
+        executions: u64,
+        /// The original sender if, if forwarded
+        forward_id: Option<ClientId>,
+    },
+    /// New stats event to monitor.
+    UpdateExecStats {
+        /// The time of generation of the [`Event`]
+        time: Duration,
+        /// The executions of this client
+        executions: u64,
+        /// [`PhantomData`]
+        phantom: PhantomData<I>,
+    },
+    /// New user stats event to monitor.
+    UpdateUserStats {
+        /// Custom user monitor name
+        name: String,
+        /// Custom user monitor value
+        value: UserStats,
+        /// [`PhantomData`]
+        phantom: PhantomData<I>,
+    },
+    /// New monitor with performance monitor.
+    #[cfg(feature = "introspection")]
+    UpdatePerfMonitor {
+        /// The time of generation of the event
+        time: Duration,
+        /// The executions of this client
+        executions: u64,
+        /// Current performance statistics
+        introspection_monitor: Box<ClientPerfMonitor>,
+
+        /// phantomm data
+        phantom: PhantomData<I>,
+    },
+    /// A new objective was found
+    Objective {
+        /// Objective corpus size
+        objective_size: usize,
+        /// The total number of executions when this objective is found
+        executions: u64,
+        /// The time when this event was created
+        time: Duration,
+    },
+    /// Write a new log
+    Log {
+        /// the severity level
+        severity_level: LogSeverity,
+        /// The message
+        message: String,
+        /// `PhantomData`
+        phantom: PhantomData<I>,
+    },
+    /// Sends a custom buffer to other clients
+    CustomBuf {
+        /// The buffer
+        buf: Vec<u8>,
+        /// Tag of this buffer
+        tag: String,
+    },
+    /*/// A custom type
+    Custom {
+        // TODO: Allow custom events
+        // custom_event: Box<dyn CustomEvent<I, OT>>,
+    },*/
+}
+
+impl<I> Event<I>
+where
+    I: Input,
+{
+    fn name(&self) -> &str {
+        match self {
+            Event::NewTestcase {
+                input: _,
+                client_config: _,
+                corpus_size: _,
+                exit_kind: _,
+                observers_buf: _,
+                time: _,
+                executions: _,
+                forward_id: _,
+            } => "Testcase",
+            Event::UpdateExecStats {
+                time: _,
+                executions: _,
+                phantom: _,
+            } => "Client Heartbeat",
+            Event::UpdateUserStats {
+                name: _,
+                value: _,
+                phantom: _,
+            } => "UserStats",
+            #[cfg(feature = "introspection")]
+            Event::UpdatePerfMonitor {
+                time: _,
+                executions: _,
+                introspection_monitor: _,
+                phantom: _,
+            } => "PerfMonitor",
+            Event::Objective { .. } => "Objective",
+            Event::Log {
+                severity_level: _,
+                message: _,
+                phantom: _,
+            } => "Log",
+            Event::CustomBuf { .. } => "CustomBuf",
+            /*Event::Custom {
+                sender_id: _, /*custom_event} => custom_event.name()*/
+            } => "todo",*/
+        }
+    }
+}
+
+/// [`EventFirer`] fire an event.
+pub trait EventFirer: UsesState {
+    /// Send off an [`Event`] to the broker
+    ///
+    /// For multi-processed managers, such as [`llmp::LlmpEventManager`],
+    /// this serializes the [`Event`] and commits it to the [`llmp`] page.
+    /// In this case, if you `fire` faster than the broker can consume
+    /// (for example for each [`Input`], on multiple cores)
+    /// the [`llmp`] shared map may fill up and the client will eventually OOM or [`panic`].
+    /// This should not happen for a normal use-case.
+    fn fire(
+        &mut self,
+        state: &mut Self::State,
+        event: Event<<Self::State as UsesInput>::Input>,
+    ) -> Result<(), Error>;
+
+    /// Send off an [`Event::Log`] event to the broker.
+    /// This is a shortcut for [`EventFirer::fire`] with [`Event::Log`] as argument.
+    fn log(
+        &mut self,
+        state: &mut Self::State,
+        severity_level: LogSeverity,
+        message: String,
+    ) -> Result<(), Error> {
+        self.fire(
+            state,
+            Event::Log {
+                severity_level,
+                message,
+                phantom: PhantomData,
+            },
+        )
+    }
+
+    /// Serialize all observers for this type and manager
+    fn serialize_observers<OT>(&mut self, observers: &OT) -> Result<Option<Vec<u8>>, Error>
+    where
+        OT: ObserversTuple<Self::State> + Serialize,
+    {
+        Ok(Some(postcard::to_allocvec(observers)?))
+    }
+
+    /// Get the configuration
+    fn configuration(&self) -> EventConfig {
+        EventConfig::AlwaysUnique
+    }
+}
+
+/// [`ProgressReporter`] report progress to the broker.
+pub trait ProgressReporter: EventFirer
+where
+    Self::State: HasMetadata + HasExecutions + HasLastReportTime,
+{
+    /// Given the last time, if `monitor_timeout` seconds passed, send off an info/monitor/heartbeat message to the broker.
+    /// Returns the new `last` time (so the old one, unless `monitor_timeout` time has passed and monitor have been sent)
+    /// Will return an [`crate::Error`], if the stats could not be sent.
+    fn maybe_report_progress(
+        &mut self,
+        state: &mut Self::State,
+        monitor_timeout: Duration,
+    ) -> Result<(), Error> {
+        let Some(last_report_time) = state.last_report_time() else {
+            // this is the first time we execute, no need to report progress just yet.
+            *state.last_report_time_mut() = Some(current_time());
+            return Ok(());
+        };
+        let cur = current_time();
+        // default to 0 here to avoid crashes on clock skew
+        if cur.checked_sub(*last_report_time).unwrap_or_default() > monitor_timeout {
+            // report_progress sets a new `last_report_time` internally.
+            self.report_progress(state)?;
+        }
+        Ok(())
+    }
+
+    /// Send off an info/monitor/heartbeat message to the broker.
+    /// Will return an [`crate::Error`], if the stats could not be sent.
+    fn report_progress(&mut self, state: &mut Self::State) -> Result<(), Error> {
+        let executions = *state.executions();
+        let cur = current_time();
+
+        // Default no introspection implmentation
+        #[cfg(not(feature = "introspection"))]
+        self.fire(
+            state,
+            Event::UpdateExecStats {
+                executions,
+                time: cur,
+                phantom: PhantomData,
+            },
+        )?;
+
+        // If performance monitor are requested, fire the `UpdatePerfMonitor` event
+        #[cfg(feature = "introspection")]
+        {
+            state
+                .introspection_monitor_mut()
+                .set_current_time(libafl_bolts::cpu::read_time_counter());
+
+            // Send the current monitor over to the manager. This `.clone` shouldn't be
+            // costly as `ClientPerfMonitor` impls `Copy` since it only contains `u64`s
+            self.fire(
+                state,
+                Event::UpdatePerfMonitor {
+                    executions,
+                    time: cur,
+                    introspection_monitor: Box::new(state.introspection_monitor().clone()),
+                    phantom: PhantomData,
+                },
+            )?;
+        }
+
+        // If we are measuring scalability stuff..
+        #[cfg(feature = "scalability_introspection")]
+        {
+            let imported_with_observer = state.scalability_monitor().testcase_with_observers;
+            let imported_without_observer = state.scalability_monitor().testcase_without_observers;
+
+            self.fire(
+                state,
+                Event::UpdateUserStats {
+                    name: "total imported".to_string(),
+                    value: UserStats::new(
+                        UserStatsValue::Number(
+                            (imported_with_observer + imported_without_observer) as u64,
+                        ),
+                        AggregatorOps::Avg,
+                    ),
+                    phantom: PhantomData,
+                },
+            )?;
+        }
+
+        *state.last_report_time_mut() = Some(cur);
+
+        Ok(())
+    }
+}
+
+/// Restartable trait
+pub trait EventRestarter: UsesState {
+    /// For restarting event managers, implement a way to forward state to their next peers.
+    /// You *must* ensure that [`HasCurrentStage::on_restart`] will be invoked in this method, by you
+    /// or an internal [`EventRestarter`], before the state is saved for recovery.
+    #[inline]
+    fn on_restart(&mut self, state: &mut Self::State) -> Result<(), Error> {
+        state.on_restart()?;
+        self.await_restart_safe();
+        Ok(())
+    }
+
+    /// Send information that this client is exiting.
+    /// No need to restart us any longer, and no need to print an error, either.
+    fn send_exiting(&mut self) -> Result<(), Error> {
+        Ok(())
+    }
+
+    /// Block until we are safe to exit, usually called inside `on_restart`.
+    #[inline]
+    fn await_restart_safe(&mut self) {}
+}
+
+/// [`EventProcessor`] process all the incoming messages
+pub trait EventProcessor<E, Z>: UsesState {
+    /// Lookup for incoming events and process them.
+    /// Return the number of processes events or an error
+    fn process(
+        &mut self,
+        fuzzer: &mut Z,
+        state: &mut Self::State,
+        executor: &mut E,
+    ) -> Result<usize, Error>;
+}
+/// The id of this [`EventManager`].
+/// For multi processed [`EventManager`]s,
+/// each connected client should have a unique ids.
+pub trait HasEventManagerId {
+    /// The id of this manager. For Multiprocessed [`EventManager`]s,
+    /// each client should have a unique ids.
+    fn mgr_id(&self) -> EventManagerId;
+}
+
+/// [`EventManager`] is the main communications hub.
+/// For the "normal" multi-processed mode, you may want to look into [`LlmpRestartingEventManager`]
+pub trait EventManager<E, Z>:
+    EventFirer + EventProcessor<E, Z> + EventRestarter + HasEventManagerId + ProgressReporter
+where
+    Self::State: HasMetadata + HasExecutions + HasLastReportTime,
+{
+}
+
+/// The handler function for custom buffers exchanged via [`EventManager`]
+type CustomBufHandlerFn<S> = dyn FnMut(&mut S, &str, &[u8]) -> Result<CustomBufEventResult, Error>;
+
+/// Supports custom buf handlers to handle `CustomBuf` events.
+pub trait HasCustomBufHandlers: UsesState {
+    /// Adds a custom buffer handler that will run for each incoming `CustomBuf` event.
+    fn add_custom_buf_handler(&mut self, handler: Box<CustomBufHandlerFn<Self::State>>);
+}
+
+/// An eventmgr for tests, and as placeholder if you really don't need an event manager.
+#[derive(Copy, Clone, Debug)]
+pub struct NopEventManager<S> {
+    phantom: PhantomData<S>,
+}
+
+impl<S> NopEventManager<S> {
+    /// Creates a new [`NopEventManager`]
+    #[must_use]
+    pub fn new() -> Self {
+        NopEventManager {
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<S> Default for NopEventManager<S> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<S> UsesState for NopEventManager<S>
+where
+    S: State,
+{
+    type State = S;
+}
+
+impl<S> EventFirer for NopEventManager<S>
+where
+    S: State,
+{
+    fn fire(
+        &mut self,
+        _state: &mut Self::State,
+        _event: Event<<Self::State as UsesInput>::Input>,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+impl<S> EventRestarter for NopEventManager<S> where S: State {}
+
+impl<E, S, Z> EventProcessor<E, Z> for NopEventManager<S>
+where
+    S: State + HasExecutions,
+{
+    fn process(
+        &mut self,
+        _fuzzer: &mut Z,
+        _state: &mut Self::State,
+        _executor: &mut E,
+    ) -> Result<usize, Error> {
+        Ok(0)
+    }
+}
+
+impl<E, S, Z> EventManager<E, Z> for NopEventManager<S> where
+    S: State + HasExecutions + HasLastReportTime + HasMetadata
+{
+}
+
+impl<S> HasCustomBufHandlers for NopEventManager<S>
+where
+    S: State,
+{
+    fn add_custom_buf_handler(
+        &mut self,
+        _handler: Box<
+            dyn FnMut(&mut Self::State, &str, &[u8]) -> Result<CustomBufEventResult, Error>,
+        >,
+    ) {
+    }
+}
+
+impl<S> ProgressReporter for NopEventManager<S> where
+    S: State + HasExecutions + HasLastReportTime + HasMetadata
+{
+}
+
+impl<S> HasEventManagerId for NopEventManager<S> {
+    fn mgr_id(&self) -> EventManagerId {
+        EventManagerId(0)
+    }
+}
+
+/// An [`EventManager`] type that wraps another manager, but captures a `monitor` type as well.
+/// This is useful to keep the same API between managers with and without an internal `monitor`.
+#[derive(Copy, Clone, Debug)]
+pub struct MonitorTypedEventManager<EM, M> {
+    inner: EM,
+    phantom: PhantomData<M>,
+}
+
+impl<EM, M> MonitorTypedEventManager<EM, M> {
+    /// Creates a new [`EventManager`] that wraps another manager, but captures a `monitor` type as well.
+    #[must_use]
+    pub fn new(inner: EM) -> Self {
+        MonitorTypedEventManager {
+            inner,
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<EM, M> UsesState for MonitorTypedEventManager<EM, M>
+where
+    EM: UsesState,
+{
+    type State = EM::State;
+}
+
+impl<EM, M> EventFirer for MonitorTypedEventManager<EM, M>
+where
+    EM: EventFirer,
+{
+    #[inline]
+    fn fire(
+        &mut self,
+        state: &mut Self::State,
+        event: Event<<Self::State as UsesInput>::Input>,
+    ) -> Result<(), Error> {
+        self.inner.fire(state, event)
+    }
+
+    #[inline]
+    fn log(
+        &mut self,
+        state: &mut Self::State,
+        severity_level: LogSeverity,
+        message: String,
+    ) -> Result<(), Error> {
+        self.inner.log(state, severity_level, message)
+    }
+
+    #[inline]
+    fn serialize_observers<OT>(&mut self, observers: &OT) -> Result<Option<Vec<u8>>, Error>
+    where
+        OT: ObserversTuple<Self::State> + Serialize,
+    {
+        self.inner.serialize_observers(observers)
+    }
+
+    #[inline]
+    fn configuration(&self) -> EventConfig {
+        self.inner.configuration()
+    }
+}
+
+impl<EM, M> EventRestarter for MonitorTypedEventManager<EM, M>
+where
+    EM: EventRestarter,
+{
+    #[inline]
+    fn on_restart(&mut self, state: &mut Self::State) -> Result<(), Error> {
+        self.inner.on_restart(state)
+    }
+
+    #[inline]
+    fn send_exiting(&mut self) -> Result<(), Error> {
+        self.inner.send_exiting()
+    }
+
+    #[inline]
+    fn await_restart_safe(&mut self) {
+        self.inner.await_restart_safe();
+    }
+}
+
+impl<E, EM, M, Z> EventProcessor<E, Z> for MonitorTypedEventManager<EM, M>
+where
+    EM: EventProcessor<E, Z>,
+{
+    #[inline]
+    fn process(
+        &mut self,
+        fuzzer: &mut Z,
+        state: &mut Self::State,
+        executor: &mut E,
+    ) -> Result<usize, Error> {
+        self.inner.process(fuzzer, state, executor)
+    }
+}
+
+impl<E, EM, M, Z> EventManager<E, Z> for MonitorTypedEventManager<EM, M>
+where
+    EM: EventManager<E, Z>,
+    EM::State: HasLastReportTime + HasExecutions + HasMetadata,
+{
+}
+
+impl<EM, M> HasCustomBufHandlers for MonitorTypedEventManager<EM, M>
+where
+    Self: UsesState,
+    EM: HasCustomBufHandlers<State = Self::State>,
+{
+    #[inline]
+    fn add_custom_buf_handler(
+        &mut self,
+        handler: Box<
+            dyn FnMut(&mut Self::State, &str, &[u8]) -> Result<CustomBufEventResult, Error>,
+        >,
+    ) {
+        self.inner.add_custom_buf_handler(handler);
+    }
+}
+
+impl<EM, M> ProgressReporter for MonitorTypedEventManager<EM, M>
+where
+    Self: UsesState,
+    EM: ProgressReporter<State = Self::State>,
+    EM::State: HasLastReportTime + HasExecutions + HasMetadata,
+{
+    #[inline]
+    fn maybe_report_progress(
+        &mut self,
+        state: &mut Self::State,
+        monitor_timeout: Duration,
+    ) -> Result<(), Error> {
+        self.inner.maybe_report_progress(state, monitor_timeout)
+    }
+
+    #[inline]
+    fn report_progress(&mut self, state: &mut Self::State) -> Result<(), Error> {
+        self.inner.report_progress(state)
+    }
+}
+
+impl<EM, M> HasEventManagerId for MonitorTypedEventManager<EM, M>
+where
+    EM: HasEventManagerId,
+{
+    #[inline]
+    fn mgr_id(&self) -> EventManagerId {
+        self.inner.mgr_id()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use core::ptr::addr_of_mut;
+
+    use libafl_bolts::{current_time, tuples::tuple_list, Named};
+    use tuple_list::tuple_list_type;
+
+    use crate::{
+        events::{Event, EventConfig},
+        executors::ExitKind,
+        inputs::bytes::BytesInput,
+        observers::StdMapObserver,
+    };
+
+    static mut MAP: [u32; 4] = [0; 4];
+
+    #[test]
+    fn test_event_serde() {
+        let obv = unsafe {
+            StdMapObserver::from_mut_ptr("test", addr_of_mut!(MAP) as *mut u32, MAP.len())
+        };
+        let map = tuple_list!(obv);
+        let observers_buf = postcard::to_allocvec(&map).unwrap();
+
+        let i = BytesInput::new(vec![0]);
+        let e = Event::NewTestcase {
+            input: i,
+            observers_buf: Some(observers_buf),
+            exit_kind: ExitKind::Ok,
+            corpus_size: 123,
+            client_config: EventConfig::AlwaysUnique,
+            time: current_time(),
+            executions: 0,
+            forward_id: None,
+        };
+
+        let serialized = postcard::to_allocvec(&e).unwrap();
+
+        let d = postcard::from_bytes::<Event<BytesInput>>(&serialized).unwrap();
+        match d {
+            Event::NewTestcase {
+                input: _,
+                observers_buf,
+                corpus_size: _,
+                exit_kind: _,
+                client_config: _,
+                time: _,
+                executions: _,
+                forward_id: _,
+            } => {
+                let o: tuple_list_type!(StdMapObserver::<u32, false>) =
+                    postcard::from_bytes(observers_buf.as_ref().unwrap()).unwrap();
+                assert_eq!("test", o.0.name());
+            }
+            _ => panic!("mistmatch"),
+        };
+    }
+}
+
+// Path: libafl/src/feedbacks/list.rs
+use alloc::string::{String, ToString};
+use core::{fmt::Debug, hash::Hash, marker::PhantomData};
+
+use hashbrown::HashSet;
+use libafl_bolts::{Error, HasRefCnt, Named};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
+use crate::{
+    events::EventFirer,
+    executors::ExitKind,
+    feedbacks::Feedback,
+    observers::{ListObserver, ObserversTuple},
+    state::{HasNamedMetadata, State},
+};
+
+/// The metadata to remember past observed value
+#[derive(Default, Serialize, Deserialize, Clone, Debug)]
+#[serde(bound = "T: DeserializeOwned")]
+#[cfg_attr(
+    any(not(feature = "serdeany_autoreg"), miri),
+    allow(clippy::unsafe_derive_deserialize)
+)]
+pub struct ListFeedbackMetadata<T>
+where
+    T: Default + Copy + 'static + Serialize + Eq + Hash,
+{
+    /// Contains the information of past observed set of values.
+    pub set: HashSet<T>,
+    /// A refcount used to know when we can remove this metadata
+    pub tcref: isize,
+}
+
+impl<T> ListFeedbackMetadata<T>
+where
+    T: Default + Copy + 'static + Serialize + Eq + Hash,
+{
+    /// The constructor
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            set: HashSet::<T>::new(),
+            tcref: 0,
+        }
+    }
+
+    /// Reset the inner hashset
+    pub fn reset(&mut self) -> Result<(), Error> {
+        self.set.clear();
+        Ok(())
+    }
+}
+
+impl<T> HasRefCnt for ListFeedbackMetadata<T>
+where
+    T: Default + Copy + 'static + Serialize + Eq + Hash,
+{
+    fn refcnt(&self) -> isize {
+        self.tcref
+    }
+
+    fn refcnt_mut(&mut self) -> &mut isize {
+        &mut self.tcref
+    }
+}
+
+/// Consider interesting a testcase if the list in `ListObserver` is not empty.
+#[derive(Clone, Debug)]
+pub struct ListFeedback<T>
+where
+    T: Hash + Eq,
+{
+    name: String,
+    observer_name: String,
+    novelty: HashSet<T>,
+    phantom: PhantomData<T>,
+}
+
+libafl_bolts::impl_serdeany!(
+    ListFeedbackMetadata<T: Debug + Default + Copy + 'static + Serialize + DeserializeOwned + Eq + Hash>,
+    <u8>,<u16>,<u32>,<u64>,<i8>,<i16>,<i32>,<i64>,<bool>,<char>,<usize>
+);
+
+impl<S, T> Feedback<S> for ListFeedback<T>
+where
+    S: State + HasNamedMetadata,
+    T: Debug + Serialize + Hash + Eq + DeserializeOwned + Default + Copy + 'static,
+{
+    fn init_state(&mut self, state: &mut S) -> Result<(), Error> {
+        // eprintln!("self.name {:#?}", &self.name);
+        state.add_named_metadata(&self.name, ListFeedbackMetadata::<T>::default());
+        Ok(())
+    }
+    #[allow(clippy::wrong_self_convention)]
+    fn is_interesting<EM, OT>(
+        &mut self,
+        state: &mut S,
+        _manager: &mut EM,
+        _input: &S::Input,
+        observers: &OT,
+        _exit_kind: &ExitKind,
+    ) -> Result<bool, Error>
+    where
+        EM: EventFirer<State = S>,
+        OT: ObserversTuple<S>,
+    {
+        // TODO Replace with match_name_type when stable
+        let observer = observers
+            .match_name::<ListObserver<T>>(&self.observer_name)
+            .unwrap();
+        // TODO register the list content in a testcase metadata
+        self.novelty.clear();
+        // can't fail
+        let history_set = state
+            .named_metadata_map_mut()
+            .get_mut::<ListFeedbackMetadata<T>>(&self.name)
+            .unwrap();
+        for v in observer.list() {
+            if !history_set.set.contains(v) {
+                self.novelty.insert(*v);
+            }
+        }
+        Ok(!self.novelty.is_empty())
+    }
+
+    fn append_metadata<EM, OT>(
+        &mut self,
+        state: &mut S,
+        _manager: &mut EM,
+        _observers: &OT,
+        _testcase: &mut crate::corpus::Testcase<<S>::Input>,
+    ) -> Result<(), Error>
+    where
+        OT: ObserversTuple<S>,
+        EM: EventFirer<State = S>,
+    {
+        let history_set = state
+            .named_metadata_map_mut()
+            .get_mut::<ListFeedbackMetadata<T>>(&self.name)
+            .unwrap();
+
+        for v in &self.novelty {
+            history_set.set.insert(*v);
+        }
+        Ok(())
+    }
+}
+
+impl<T> Named for ListFeedback<T>
+where
+    T: Debug + Serialize + Hash + Eq + DeserializeOwned,
+{
+    #[inline]
+    fn name(&self) -> &str {
+        self.name.as_str()
+    }
+}
+
+impl<T> ListFeedback<T>
+where
+    T: Debug + Serialize + Hash + Eq + DeserializeOwned,
+{
+    /// Creates a new [`ListFeedback`], deciding if the given [`ListObserver`] value of a run is interesting.
+    #[must_use]
+    pub fn new(observer: &ListObserver<T>) -> Self {
+        Self {
+            name: observer.name().to_string(),
+            observer_name: observer.name().to_string(),
+            novelty: HashSet::<T>::new(),
+            phantom: PhantomData,
+        }
+    }
+}
+
+// Path: libafl/src/feedbacks/differential.rs
+//! Diff Feedback, comparing the content of two observers of the same type.
+//!
+
+use alloc::string::{String, ToString};
+use core::{
+    fmt::{self, Debug, Formatter},
+    marker::PhantomData,
+};
+
+use libafl_bolts::{tuples::MatchName, Named};
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    events::EventFirer,
+    executors::ExitKind,
+    feedbacks::Feedback,
+    inputs::Input,
+    observers::{Observer, ObserversTuple},
+    state::{HasMetadata, State},
+    Error,
+};
+
+/// The result of a differential test between two observers.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DiffResult {
+    /// The two observers report the same outcome.
+    Equal,
+    /// The two observers report different outcomes.
+    Diff,
+}
+
+impl DiffResult {
+    /// Returns `true` if the two observers report the same outcome.
+    #[must_use]
+    pub fn is_equal(&self) -> bool {
+        match self {
+            DiffResult::Equal => true,
+            DiffResult::Diff => false,
+        }
+    }
+
+    /// Returns `true` if the two observers report different outcomes.
+    #[must_use]
+    pub fn is_diff(&self) -> bool {
+        !self.is_equal()
+    }
+}
+
+/// A [`DiffFeedback`] compares the content of two [`Observer`]s using the given compare function.
+#[derive(Serialize, Deserialize)]
+pub struct DiffFeedback<F, I, O1, O2, S>
+where
+    F: FnMut(&O1, &O2) -> DiffResult,
+{
+    /// This feedback's name
+    name: String,
+    /// The first observer to compare against
+    o1_name: String,
+    /// The second observer to compare against
+    o2_name: String,
+    /// The function used to compare the two observers
+    compare_fn: F,
+    phantomm: PhantomData<(O1, O2, I, S)>,
+}
+
+impl<F, I, O1, O2, S> DiffFeedback<F, I, O1, O2, S>
+where
+    F: FnMut(&O1, &O2) -> DiffResult,
+    O1: Named,
+    O2: Named,
+{
+    /// Create a new [`DiffFeedback`] using two observers and a test function.
+    pub fn new(name: &str, o1: &O1, o2: &O2, compare_fn: F) -> Result<Self, Error> {
+        let o1_name = o1.name().to_string();
+        let o2_name = o2.name().to_string();
+        if o1_name == o2_name {
+            Err(Error::illegal_argument(format!(
+                "DiffFeedback: observer names must be different (both were {o1_name})"
+            )))
+        } else {
+            Ok(Self {
+                o1_name,
+                o2_name,
+                name: name.to_string(),
+                compare_fn,
+                phantomm: PhantomData,
+            })
+        }
+    }
+}
+
+impl<F, I, O1, O2, S> Named for DiffFeedback<F, I, O1, O2, S>
+where
+    F: FnMut(&O1, &O2) -> DiffResult,
+    O1: Named,
+    O2: Named,
+{
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl<F, I, O1, O2, S> Debug for DiffFeedback<F, I, O1, O2, S>
+where
+    F: FnMut(&O1, &O2) -> DiffResult,
+    O1: Named,
+    O2: Named,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "DiffFeedback {{ name: {}, o1: {}, o2: {} }}",
+            self.name, self.o1_name, self.o2_name
+        )
+    }
+}
+
+impl<F, I, O1, O2, S> Feedback<S> for DiffFeedback<F, I, O1, O2, S>
+where
+    F: FnMut(&O1, &O2) -> DiffResult,
+    I: Input,
+    S: HasMetadata + State<Input = I>,
+    O1: Observer<S>,
+    O2: Observer<S>,
+{
+    #[allow(clippy::wrong_self_convention)]
+    fn is_interesting<EM, OT>(
+        &mut self,
+        _state: &mut S,
+        _manager: &mut EM,
+        _input: &I,
+        observers: &OT,
+        _exit_kind: &ExitKind,
+    ) -> Result<bool, Error>
+    where
+        EM: EventFirer<State = S>,
+        OT: ObserversTuple<S> + MatchName,
+    {
+        fn err(name: &str) -> Error {
+            Error::illegal_argument(format!("DiffFeedback: observer {name} not found"))
+        }
+        let o1: &O1 = observers
+            .match_name(&self.o1_name)
+            .ok_or_else(|| err(&self.o1_name))?;
+        let o2: &O2 = observers
+            .match_name(&self.o2_name)
+            .ok_or_else(|| err(&self.o2_name))?;
+
+        Ok((self.compare_fn)(o1, o2) == DiffResult::Diff)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use alloc::string::{String, ToString};
+    use core::marker::PhantomData;
+
+    use libafl_bolts::{tuples::tuple_list, Named};
+
+    use crate::{
+        events::EventFirer,
+        executors::ExitKind,
+        feedbacks::{differential::DiffResult, DiffFeedback, Feedback},
+        inputs::{BytesInput, UsesInput},
+        observers::Observer,
+        state::{NopState, State, UsesState},
+    };
+
+    #[derive(Debug)]
+    struct NopObserver {
+        name: String,
+        value: bool,
+    }
+    impl NopObserver {
+        fn new(name: &str, value: bool) -> Self {
+            Self {
+                name: name.to_string(),
+                value,
+            }
+        }
+    }
+    impl<S> Observer<S> for NopObserver where S: UsesInput {}
+    impl PartialEq for NopObserver {
+        fn eq(&self, other: &Self) -> bool {
+            self.value == other.value
+        }
+    }
+    impl Named for NopObserver {
+        fn name(&self) -> &str {
+            &self.name
+        }
+    }
+
+    struct NopEventFirer<S> {
+        phantom: PhantomData<S>,
+    }
+    impl<S> UsesState for NopEventFirer<S>
+    where
+        S: State,
+    {
+        type State = S;
+    }
+    impl<S> EventFirer for NopEventFirer<S>
+    where
+        S: State,
+    {
+        fn fire(
+            &mut self,
+            _state: &mut S,
+            _event: crate::events::Event<S::Input>,
+        ) -> Result<(), crate::Error> {
+            Ok(())
+        }
+    }
+
+    fn test_diff(should_equal: bool) {
+        let mut nop_state = NopState::new();
+
+        let o1 = NopObserver::new("o1", true);
+        let o2 = NopObserver::new("o2", should_equal);
+
+        let mut diff_feedback = DiffFeedback::new("diff_feedback", &o1, &o2, |o1, o2| {
+            if o1 == o2 {
+                DiffResult::Equal
+            } else {
+                DiffResult::Diff
+            }
+        })
+        .unwrap();
+        let observers = tuple_list![o1, o2];
+        assert_eq!(
+            !should_equal,
+            diff_feedback
+                .is_interesting(
+                    &mut nop_state,
+                    &mut NopEventFirer {
+                        phantom: PhantomData
+                    },
+                    &BytesInput::new(vec![0]),
+                    &observers,
+                    &ExitKind::Ok
+                )
+                .unwrap()
+        );
+    }
+
+    #[test]
+    fn test_diff_eq() {
+        test_diff(true);
+    }
+
+    #[test]
+    fn test_diff_neq() {
+        test_diff(false);
+    }
+}
+
+// Path: libafl/src/feedbacks/transferred.rs
+//! Feedbacks and associated metadata for detecting whether a given testcase was transferred from
+//! another node.
+
+use libafl_bolts::{impl_serdeany, Error, Named};
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    events::EventFirer,
+    executors::ExitKind,
+    feedbacks::Feedback,
+    observers::ObserversTuple,
+    state::{HasMetadata, State},
+};
+
+/// Constant name of the [`TransferringMetadata`].
+pub const TRANSFERRED_FEEDBACK_NAME: &str = "transferred_feedback_internal";
+
+/// Metadata which denotes whether we are currently transferring an input. Implementors of
+/// multi-node communication systems (like [`crate::events::LlmpEventManager`]) should wrap any
+/// [`crate::EvaluatorObservers::evaluate_input_with_observers`] or
+/// [`crate::ExecutionProcessor::process_execution`] calls with setting this metadata to true/false
+/// before and after.
+#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
+pub struct TransferringMetadata {
+    transferring: bool,
+}
+
+impl_serdeany!(TransferringMetadata);
+
+impl TransferringMetadata {
+    /// Indicate to the metadata that we are currently transferring data.
+    pub fn set_transferring(&mut self, transferring: bool) {
+        self.transferring = transferring;
+    }
+}
+
+/// Simple feedback which may be used to test whether the testcase was transferred from another node
+/// in a multi-node fuzzing arrangement.
+#[derive(Copy, Clone, Debug)]
+pub struct TransferredFeedback;
+
+impl Named for TransferredFeedback {
+    fn name(&self) -> &str {
+        TRANSFERRED_FEEDBACK_NAME
+    }
+}
+
+impl<S> Feedback<S> for TransferredFeedback
+where
+    S: HasMetadata + State,
+{
+    fn init_state(&mut self, state: &mut S) -> Result<(), Error> {
+        state.add_metadata(TransferringMetadata { transferring: true });
+        Ok(())
+    }
+
+    fn is_interesting<EM, OT>(
+        &mut self,
+        state: &mut S,
+        _manager: &mut EM,
+        _input: &S::Input,
+        _observers: &OT,
+        _exit_kind: &ExitKind,
+    ) -> Result<bool, Error>
+    where
+        EM: EventFirer<State = S>,
+        OT: ObserversTuple<S>,
+    {
+        Ok(state.metadata::<TransferringMetadata>()?.transferring)
+    }
+}
+
+// Path: libafl/src/feedbacks/new_hash_feedback.rs
+//! The ``NewHashFeedback`` uses the backtrace hash and a hashset to only keep novel cases
+
+use alloc::string::{String, ToString};
+use std::{fmt::Debug, marker::PhantomData};
+
+use hashbrown::HashSet;
+use libafl_bolts::Named;
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    events::EventFirer,
+    executors::ExitKind,
+    feedbacks::{Feedback, HasObserverName},
+    inputs::UsesInput,
+    observers::{ObserverWithHashField, ObserversTuple},
+    state::{HasNamedMetadata, State},
+    Error,
+};
+
+/// The prefix of the metadata names
+pub const NEWHASHFEEDBACK_PREFIX: &str = "newhashfeedback_metadata_";
+
+/// A state that implements this trait has a hash set
+pub trait HashSetState<T> {
+    /// creates a new instance with a specific hashset
+    fn with_hash_set(hash_set: HashSet<T>) -> Self;
+    /// updates the `hash_set` with the given value
+    fn update_hash_set(&mut self, value: T) -> Result<bool, Error>;
+}
+
+/// The state of [`NewHashFeedback`]
+#[derive(Default, Serialize, Deserialize, Clone, Debug)]
+#[allow(clippy::unsafe_derive_deserialize)]
+pub struct NewHashFeedbackMetadata {
+    /// Contains information about untouched entries
+    pub hash_set: HashSet<u64>,
+}
+
+#[rustfmt::skip]
+libafl_bolts::impl_serdeany!(NewHashFeedbackMetadata);
+
+impl NewHashFeedbackMetadata {
+    /// Create a new [`NewHashFeedbackMetadata`]
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Create a new [`NewHashFeedbackMetadata`] with the given initial capacity
+    #[must_use]
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            hash_set: HashSet::with_capacity(capacity),
+        }
+    }
+
+    /// Reset the internal state
+    pub fn reset(&mut self) -> Result<(), Error> {
+        self.hash_set.clear();
+        Ok(())
+    }
+}
+
+impl HashSetState<u64> for NewHashFeedbackMetadata {
+    /// Create new [`NewHashFeedbackMetadata`] using a name and a hash set.
+    #[must_use]
+    fn with_hash_set(hash_set: HashSet<u64>) -> Self {
+        Self { hash_set }
+    }
+
+    fn update_hash_set(&mut self, value: u64) -> Result<bool, Error> {
+        let r = self.hash_set.insert(value);
+        // log::trace!("Got r={}, the hashset is {:?}", r, &self.hash_set);
+        Ok(r)
+    }
+}
+
+/// A [`NewHashFeedback`] maintains a hashset of already seen stacktraces and considers interesting unseen ones
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct NewHashFeedback<O, S> {
+    name: String,
+    observer_name: String,
+    /// Initial capacity of hash set
+    capacity: usize,
+    o_type: PhantomData<(O, S)>,
+}
+
+impl<O, S> Feedback<S> for NewHashFeedback<O, S>
+where
+    O: ObserverWithHashField + Named,
+    S: State + HasNamedMetadata,
+{
+    fn init_state(&mut self, state: &mut S) -> Result<(), Error> {
+        state.add_named_metadata(
+            &self.name,
+            NewHashFeedbackMetadata::with_capacity(self.capacity),
+        );
+        Ok(())
+    }
+
+    #[allow(clippy::wrong_self_convention)]
+    fn is_interesting<EM, OT>(
+        &mut self,
+        state: &mut S,
+        _manager: &mut EM,
+        _input: &<S as UsesInput>::Input,
+        observers: &OT,
+        _exit_kind: &ExitKind,
+    ) -> Result<bool, Error>
+    where
+        EM: EventFirer<State = S>,
+        OT: ObserversTuple<S>,
+    {
+        let observer = observers
+            .match_name::<O>(&self.observer_name)
+            .expect("A NewHashFeedback needs a BacktraceObserver");
+
+        let backtrace_state = state
+            .named_metadata_map_mut()
+            .get_mut::<NewHashFeedbackMetadata>(&self.name)
+            .unwrap();
+
+        match observer.hash() {
+            Some(hash) => {
+                let res = backtrace_state
+                    .update_hash_set(hash)
+                    .expect("Failed to update the hash state");
+                Ok(res)
+            }
+            None => {
+                // We get here if the hash was not updated, i.e the first run or if no crash happens
+                Ok(false)
+            }
+        }
+    }
+}
+
+impl<O, S> Named for NewHashFeedback<O, S> {
+    #[inline]
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl<O, S> HasObserverName for NewHashFeedback<O, S> {
+    #[inline]
+    fn observer_name(&self) -> &str {
+        &self.observer_name
+    }
+}
+
+/// Default capacity for the [`HashSet`] in [`NewHashFeedback`].
+///
+/// This is reasonably large on the assumption that you expect there to be many
+/// runs of the target, producing many different feedbacks.
+const DEFAULT_CAPACITY: usize = 4096;
+
+impl<O, S> NewHashFeedback<O, S>
+where
+    O: ObserverWithHashField + Named,
+{
+    /// Returns a new [`NewHashFeedback`].
+    /// Setting an observer name that doesn't exist would eventually trigger a panic.
+    #[must_use]
+    pub fn with_names(name: &str, observer_name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            observer_name: observer_name.to_string(),
+            capacity: DEFAULT_CAPACITY,
+            o_type: PhantomData,
+        }
+    }
+
+    /// Returns a new [`NewHashFeedback`].
+    #[must_use]
+    pub fn new(observer: &O) -> Self {
+        Self::with_capacity(observer, DEFAULT_CAPACITY)
+    }
+
+    /// Returns a new [`NewHashFeedback`] that will create a hash set with the
+    /// given initial capacity.
+    #[must_use]
+    pub fn with_capacity(observer: &O, capacity: usize) -> Self {
+        Self {
+            name: NEWHASHFEEDBACK_PREFIX.to_string() + observer.name(),
+            observer_name: observer.name().to_string(),
+            capacity,
+            o_type: PhantomData,
+        }
+    }
+}
+
+// Path: libafl/src/observers/concolic/mod.rs
+//! # Concolic Tracing
+#[cfg(feature = "std")]
+use alloc::vec::Vec;
+use core::{
+    fmt::{Debug, Display, Error, Formatter},
+    num::NonZeroUsize,
+};
+
+#[cfg(feature = "std")]
+use serde::{Deserialize, Serialize};
+
+/// A `SymExprRef` identifies a [`SymExpr`] in a trace. Reading a `SymExpr` from a trace will always also yield its
+/// `SymExprRef`, which can be used later in the trace to identify the `SymExpr`.
+/// It is also never zero, which allows for efficient use of `Option<SymExprRef>`.
+///
+/// In a trace, `SymExprRef`s are monotonically increasing and start at 1.
+/// `SymExprRef`s are not valid across traces.
+pub type SymExprRef = NonZeroUsize;
+
+/// [`Location`]s are code locations encountered during concolic tracing, that are constructed from pointers, but not always in a meaningful way.
+/// Therefore, a location is an opaque value that can only be compared against itself.
+///
+/// It is possible to get at the underlying value using [`Into::into`], should this restriction be too inflexible for your usecase.
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[repr(transparent)]
+pub struct Location(usize);
+
+impl Debug for Location {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+        Debug::fmt(&self.0, f)
+    }
+}
+
+impl Display for Location {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl From<Location> for usize {
+    fn from(l: Location) -> Self {
+        l.0
+    }
+}
+
+impl From<usize> for Location {
+    fn from(v: usize) -> Self {
+        Self(v)
+    }
+}
+
+/// `SymExpr` represents a message in the serialization format.
+/// The messages in the format are a perfect mirror of the methods that are called on the runtime during execution.
+#[cfg(feature = "std")]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[allow(missing_docs)]
+pub enum SymExpr {
+    InputByte {
+        offset: usize,
+        value: u8,
+    },
+
+    Integer {
+        value: u64,
+        bits: u8,
+    },
+    Integer128 {
+        high: u64,
+        low: u64,
+    },
+    Float {
+        value: f64,
+        is_double: bool,
+    },
+    NullPointer,
+    True,
+    False,
+    Bool {
+        value: bool,
+    },
+
+    Neg {
+        op: SymExprRef,
+    },
+    Add {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    Sub {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    Mul {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    UnsignedDiv {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    SignedDiv {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    UnsignedRem {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    SignedRem {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    ShiftLeft {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    LogicalShiftRight {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    ArithmeticShiftRight {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+
+    SignedLessThan {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    SignedLessEqual {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    SignedGreaterThan {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    SignedGreaterEqual {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    UnsignedLessThan {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    UnsignedLessEqual {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    UnsignedGreaterThan {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    UnsignedGreaterEqual {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+
+    Not {
+        op: SymExprRef,
+    },
+    Equal {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    NotEqual {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+
+    BoolAnd {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    BoolOr {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    BoolXor {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+
+    And {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    Or {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    Xor {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+
+    FloatOrdered {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatOrderedGreaterThan {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatOrderedGreaterEqual {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatOrderedLessThan {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatOrderedLessEqual {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatOrderedEqual {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatOrderedNotEqual {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+
+    FloatUnordered {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatUnorderedGreaterThan {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatUnorderedGreaterEqual {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatUnorderedLessThan {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatUnorderedLessEqual {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatUnorderedEqual {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatUnorderedNotEqual {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatNeg {
+        op: SymExprRef,
+    },
+    FloatAbs {
+        op: SymExprRef,
+    },
+    FloatAdd {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatSub {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatMul {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatDiv {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    FloatRem {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+
+    Ite {
+        cond: SymExprRef,
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    Sext {
+        op: SymExprRef,
+        bits: u8,
+    },
+    Zext {
+        op: SymExprRef,
+        bits: u8,
+    },
+    Trunc {
+        op: SymExprRef,
+        bits: u8,
+    },
+    IntToFloat {
+        op: SymExprRef,
+        is_double: bool,
+        is_signed: bool,
+    },
+    FloatToFloat {
+        op: SymExprRef,
+        to_double: bool,
+    },
+    BitsToFloat {
+        op: SymExprRef,
+        to_double: bool,
+    },
+    FloatToBits {
+        op: SymExprRef,
+    },
+    FloatToSignedInteger {
+        op: SymExprRef,
+        bits: u8,
+    },
+    FloatToUnsignedInteger {
+        op: SymExprRef,
+        bits: u8,
+    },
+    BoolToBit {
+        op: SymExprRef,
+    },
+
+    Concat {
+        a: SymExprRef,
+        b: SymExprRef,
+    },
+    Extract {
+        op: SymExprRef,
+        first_bit: usize,
+        last_bit: usize,
+    },
+    Insert {
+        target: SymExprRef,
+        to_insert: SymExprRef,
+        offset: u64,
+        little_endian: bool,
+    },
+
+    PathConstraint {
+        constraint: SymExprRef,
+        taken: bool,
+        location: Location,
+    },
+
+    /// These expressions won't be referenced again
+    ExpressionsUnreachable {
+        exprs: Vec<SymExprRef>,
+    },
+
+    /// Location information regarding a call. Tracing this information is optional.
+    Call {
+        location: Location,
+    },
+    /// Location information regarding a return. Tracing this information is optional.
+    Return {
+        location: Location,
+    },
+    /// Location information regarding a basic block. Tracing this information is optional.
+    BasicBlock {
+        location: Location,
+    },
+}
+
+#[cfg(feature = "std")]
+pub mod serialization_format;
+
+/// The environment name used to identify the hitmap for the concolic runtime.
+pub const HITMAP_ENV_NAME: &str = "LIBAFL_CONCOLIC_HITMAP";
+
+/// The name of the environment variable that contains the byte offsets to be symbolized.
+pub const SELECTIVE_SYMBOLICATION_ENV_NAME: &str = "LIBAFL_SELECTIVE_SYMBOLICATION";
+
+/// The name of the environment variable that signals the runtime to concretize floating point operations.
+pub const NO_FLOAT_ENV_NAME: &str = "LIBAFL_CONCOLIC_NO_FLOAT";
+
+/// The name of the environment variable that signals the runtime to perform expression pruning.
+pub const EXPRESSION_PRUNING: &str = "LIBAFL_CONCOLIC_EXPRESSION_PRUNING";
+
+#[cfg(feature = "std")]
+mod metadata;
+#[cfg(feature = "std")]
+pub use metadata::ConcolicMetadata;
+
+#[cfg(feature = "std")]
+mod observer;
+#[cfg(feature = "std")]
+pub use observer::ConcolicObserver;
+
+// Path: libafl/src/observers/concolic/serialization_format.rs
+//! # Concolic Tracing Serialization Format
+//! ## Design Goals
+//! * The serialization format for concolic tracing was developed with the goal of being space and time efficient.
+//! * Additionally, it should be easy to maintain and extend.
+//! * It does not have to be compatible with other programming languages.
+//! * It should be resilient to crashes. Since we are fuzzing, we are expecting the traced program to crash at some
+//! point.
+//!
+//! The format as implemented fulfils these design goals.
+//! Specifically:
+//! * it requires only constant memory space for serialization, which allows for tracing complex and/or
+//! long-running programs.
+//! * the trace itself requires little space. A typical binary operation (such as an add) typically takes just 3 bytes.
+//! * it easy to encode. There is no translation between the interface of the runtime itself and the trace it generates.
+//! * it is similarly easy to decode and can be easily translated into an in-memory AST without overhead, because
+//! expressions are decoded from leaf to root instead of root to leaf.
+//! * At its core, it is just [`SymExpr`]s, which can be added to, modified and removed from with ease. The
+//! definitions are automatically shared between the runtime and the consuming program, since both depend on the same
+//! `LibAFL`.
+//!
+//! ## Techniques
+//! The serialization format applies multiple techniques to achieve its goals.
+//! * It uses bincode for efficient binary serialization. Crucially, bincode uses variable length integer encoding,
+//! allowing it encode small integers use fewer bytes.
+//! * References to previous expressions are stored relative to the current expressions id. The vast majority of
+//! expressions refer to other expressions that were defined close to their use. Therefore, encoding relative references
+//! keeps references small. Therefore, they make optimal use of bincodes variable length integer encoding.
+//! * Ids of expressions ([`SymExprRef`]s) are implicitly derived by their position in the message stream. Effectively,
+//! a counter is used to identify expressions.
+//! * The current length of the trace in bytes in serialized in a fixed format at the beginning of the trace.
+//! This length is updated regularly when the trace is in a consistent state. This allows the reader to avoid reading
+//! malformed data if the traced process crashed.
+//!
+//! ## Example
+//! The expression `SymExpr::BoolAnd { a: SymExpr::True, b: SymExpr::False }` would be encoded as:
+//! 1. 1 byte to identify `SymExpr::True` (a)
+//! 2. 1 byte to identify `SymExpr::False` (b)
+//! 3. 1 byte to identify `SymExpr::BoolAnd`
+//! 4. 1 byte to reference a
+//! 5. 1 byte to reference b
+//!
+//! ... making for a total of 5 bytes.
+
+#![cfg(feature = "std")]
+
+use std::{
+    fmt::{self, Debug, Formatter},
+    io::{self, Cursor, Read, Seek, SeekFrom, Write},
+};
+
+use bincode::{DefaultOptions, Options};
+pub use bincode::{ErrorKind, Result};
+
+use super::{SymExpr, SymExprRef};
+
+fn serialization_options() -> DefaultOptions {
+    DefaultOptions::new()
+}
+
+/// A `MessageFileReader` reads a stream of [`SymExpr`] and their corresponding [`SymExprRef`]s from any [`Read`].
+pub struct MessageFileReader<R: Read> {
+    reader: R,
+    deserializer_config: DefaultOptions,
+    current_id: usize,
+}
+
+impl<R: Read> Debug for MessageFileReader<R> {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "MessageFileReader {{ current_id: {} }}", self.current_id)
+    }
+}
+
+impl<R: Read> MessageFileReader<R> {
+    /// Construct from the given reader.
+    pub fn from_reader(reader: R) -> Self {
+        Self {
+            reader,
+            deserializer_config: serialization_options(),
+            current_id: 1,
+        }
+    }
+
+    /// Parse the next message out of the stream.
+    /// [`Option::None`] is returned once the stream is depleted.
+    /// IO and serialization errors are passed to the caller using [`bincode::Result`].
+    /// Finally, the returned tuple contains the message itself as a [`SymExpr`] and the [`SymExprRef`] associated
+    /// with this message.
+    /// The `SymExprRef` may be used by following messages to refer back to this message.
+    pub fn next_message(&mut self) -> Option<Result<(SymExprRef, SymExpr)>> {
+        match self.deserializer_config.deserialize_from(&mut self.reader) {
+            Ok(mut message) => {
+                let message_id = self.transform_message(&mut message);
+                Some(Ok((message_id, message)))
+            }
+            Err(e) => match *e {
+                ErrorKind::Io(ref io_err) => match io_err.kind() {
+                    io::ErrorKind::UnexpectedEof => None,
+                    _ => Some(Err(e)),
+                },
+                _ => Some(Err(e)),
+            },
+        }
+    }
+
+    /// Makes the given `SymExprRef` absolute accoring to the `current_id` counter.
+    /// See [`MessageFileWriter::make_relative`] for the inverse function.
+    fn make_absolute(&self, expr: SymExprRef) -> SymExprRef {
+        SymExprRef::new(self.current_id - expr.get()).unwrap()
+    }
+
+    /// This transforms the given message from it's serialized form into its in-memory form, making relative references
+    /// absolute and counting the `SymExprRef`s.
+    #[allow(clippy::too_many_lines)]
+    fn transform_message(&mut self, message: &mut SymExpr) -> SymExprRef {
+        let ret = self.current_id;
+        match message {
+            SymExpr::InputByte { .. }
+            | SymExpr::Integer { .. }
+            | SymExpr::Integer128 { .. }
+            | SymExpr::Float { .. }
+            | SymExpr::NullPointer
+            | SymExpr::True
+            | SymExpr::False
+            | SymExpr::Bool { .. } => {
+                self.current_id += 1;
+            }
+            SymExpr::Neg { op }
+            | SymExpr::FloatAbs { op }
+            | SymExpr::FloatNeg { op }
+            | SymExpr::Not { op }
+            | SymExpr::Sext { op, .. }
+            | SymExpr::Zext { op, .. }
+            | SymExpr::Trunc { op, .. }
+            | SymExpr::IntToFloat { op, .. }
+            | SymExpr::FloatToFloat { op, .. }
+            | SymExpr::BitsToFloat { op, .. }
+            | SymExpr::FloatToBits { op }
+            | SymExpr::FloatToSignedInteger { op, .. }
+            | SymExpr::FloatToUnsignedInteger { op, .. }
+            | SymExpr::BoolToBit { op, .. }
+            | SymExpr::Extract { op, .. } => {
+                *op = self.make_absolute(*op);
+                self.current_id += 1;
+            }
+            SymExpr::Add { a, b }
+            | SymExpr::Sub { a, b }
+            | SymExpr::Mul { a, b }
+            | SymExpr::UnsignedDiv { a, b }
+            | SymExpr::SignedDiv { a, b }
+            | SymExpr::UnsignedRem { a, b }
+            | SymExpr::SignedRem { a, b }
+            | SymExpr::ShiftLeft { a, b }
+            | SymExpr::LogicalShiftRight { a, b }
+            | SymExpr::ArithmeticShiftRight { a, b }
+            | SymExpr::SignedLessThan { a, b }
+            | SymExpr::SignedLessEqual { a, b }
+            | SymExpr::SignedGreaterThan { a, b }
+            | SymExpr::SignedGreaterEqual { a, b }
+            | SymExpr::UnsignedLessThan { a, b }
+            | SymExpr::UnsignedLessEqual { a, b }
+            | SymExpr::UnsignedGreaterThan { a, b }
+            | SymExpr::UnsignedGreaterEqual { a, b }
+            | SymExpr::Equal { a, b }
+            | SymExpr::NotEqual { a, b }
+            | SymExpr::BoolAnd { a, b }
+            | SymExpr::BoolOr { a, b }
+            | SymExpr::BoolXor { a, b }
+            | SymExpr::And { a, b }
+            | SymExpr::Or { a, b }
+            | SymExpr::Xor { a, b }
+            | SymExpr::FloatOrdered { a, b }
+            | SymExpr::FloatOrderedGreaterThan { a, b }
+            | SymExpr::FloatOrderedGreaterEqual { a, b }
+            | SymExpr::FloatOrderedLessThan { a, b }
+            | SymExpr::FloatOrderedLessEqual { a, b }
+            | SymExpr::FloatOrderedEqual { a, b }
+            | SymExpr::FloatOrderedNotEqual { a, b }
+            | SymExpr::FloatUnordered { a, b }
+            | SymExpr::FloatUnorderedGreaterThan { a, b }
+            | SymExpr::FloatUnorderedGreaterEqual { a, b }
+            | SymExpr::FloatUnorderedLessThan { a, b }
+            | SymExpr::FloatUnorderedLessEqual { a, b }
+            | SymExpr::FloatUnorderedEqual { a, b }
+            | SymExpr::FloatUnorderedNotEqual { a, b }
+            | SymExpr::FloatAdd { a, b }
+            | SymExpr::FloatSub { a, b }
+            | SymExpr::FloatMul { a, b }
+            | SymExpr::FloatDiv { a, b }
+            | SymExpr::FloatRem { a, b }
+            | SymExpr::Concat { a, b }
+            | SymExpr::Insert {
+                target: a,
+                to_insert: b,
+                ..
+            } => {
+                *a = self.make_absolute(*a);
+                *b = self.make_absolute(*b);
+                self.current_id += 1;
+            }
+            SymExpr::PathConstraint { constraint: op, .. } => {
+                *op = self.make_absolute(*op);
+            }
+            SymExpr::ExpressionsUnreachable { exprs } => {
+                for expr in exprs {
+                    *expr = self.make_absolute(*expr);
+                }
+            }
+            SymExpr::Call { .. } | SymExpr::Return { .. } | SymExpr::BasicBlock { .. } => {}
+            SymExpr::Ite { cond, a, b } => {
+                *cond = self.make_absolute(*cond);
+                *a = self.make_absolute(*a);
+                *b = self.make_absolute(*b);
+                self.current_id += 1;
+            }
+        }
+        SymExprRef::new(ret).unwrap()
+    }
+}
+
+/// A `MessageFileWriter` writes a stream of [`SymExpr`] to any [`Write`]. For each written expression, it returns
+/// a [`SymExprRef`] which should be used to refer back to it.
+pub struct MessageFileWriter<W: Write> {
+    id_counter: usize,
+    writer: W,
+    writer_start_position: u64,
+    serialization_options: DefaultOptions,
+}
+
+impl<W> Debug for MessageFileWriter<W>
+where
+    W: Write,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("MessageFileWriter")
+            .field("id_counter", &self.id_counter)
+            .field("writer_start_position", &self.writer_start_position)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<W: Write + Seek> MessageFileWriter<W> {
+    /// Create a `MessageFileWriter` from the given [`Write`].
+    pub fn from_writer(mut writer: W) -> io::Result<Self> {
+        let writer_start_position = writer.stream_position()?;
+        // write dummy trace length
+        writer.write_all(&0_u64.to_le_bytes())?;
+        Ok(Self {
+            id_counter: 1,
+            writer,
+            writer_start_position,
+            serialization_options: serialization_options(),
+        })
+    }
+
+    fn write_trace_size(&mut self) -> io::Result<()> {
+        // calculate size of trace
+        let end_pos = self.writer.stream_position()?;
+        let trace_header_len = 0_u64.to_le_bytes().len() as u64;
+        assert!(
+            end_pos >= self.writer_start_position + trace_header_len,
+            "our end position can not be before our start position"
+        );
+        let trace_length = end_pos - self.writer_start_position - trace_header_len;
+
+        // write trace size to beginning of trace
+        self.writer
+            .seek(SeekFrom::Start(self.writer_start_position))?;
+        self.writer.write_all(&trace_length.to_le_bytes())?;
+        // rewind to previous position
+        self.writer.seek(SeekFrom::Start(end_pos))?;
+        Ok(())
+    }
+
+    /// Updates the trace header which stores the total length of the trace in bytes.
+    pub fn update_trace_header(&mut self) -> io::Result<()> {
+        self.write_trace_size()?;
+        Ok(())
+    }
+
+    fn make_relative(&self, expr: SymExprRef) -> SymExprRef {
+        SymExprRef::new(self.id_counter - expr.get()).unwrap()
+    }
+
+    /// Writes a message to the stream and returns the [`SymExprRef`] that should be used to refer back to this message.
+    /// May error when the underlying `Write` errors or when there is a serialization error.
+    #[allow(clippy::too_many_lines)]
+    pub fn write_message(&mut self, mut message: SymExpr) -> Result<SymExprRef> {
+        let current_id = self.id_counter;
+        match &mut message {
+            SymExpr::InputByte { .. }
+            | SymExpr::Integer { .. }
+            | SymExpr::Integer128 { .. }
+            | SymExpr::Float { .. }
+            | SymExpr::NullPointer
+            | SymExpr::True
+            | SymExpr::False
+            | SymExpr::Bool { .. } => {
+                self.id_counter += 1;
+            }
+            SymExpr::Neg { op }
+            | SymExpr::FloatAbs { op }
+            | SymExpr::FloatNeg { op }
+            | SymExpr::Not { op }
+            | SymExpr::Sext { op, .. }
+            | SymExpr::Zext { op, .. }
+            | SymExpr::Trunc { op, .. }
+            | SymExpr::IntToFloat { op, .. }
+            | SymExpr::FloatToFloat { op, .. }
+            | SymExpr::BitsToFloat { op, .. }
+            | SymExpr::FloatToBits { op }
+            | SymExpr::FloatToSignedInteger { op, .. }
+            | SymExpr::FloatToUnsignedInteger { op, .. }
+            | SymExpr::BoolToBit { op, .. }
+            | SymExpr::Extract { op, .. } => {
+                *op = self.make_relative(*op);
+                self.id_counter += 1;
+            }
+            SymExpr::Add { a, b }
+            | SymExpr::Sub { a, b }
+            | SymExpr::Mul { a, b }
+            | SymExpr::UnsignedDiv { a, b }
+            | SymExpr::SignedDiv { a, b }
+            | SymExpr::UnsignedRem { a, b }
+            | SymExpr::SignedRem { a, b }
+            | SymExpr::ShiftLeft { a, b }
+            | SymExpr::LogicalShiftRight { a, b }
+            | SymExpr::ArithmeticShiftRight { a, b }
+            | SymExpr::SignedLessThan { a, b }
+            | SymExpr::SignedLessEqual { a, b }
+            | SymExpr::SignedGreaterThan { a, b }
+            | SymExpr::SignedGreaterEqual { a, b }
+            | SymExpr::UnsignedLessThan { a, b }
+            | SymExpr::UnsignedLessEqual { a, b }
+            | SymExpr::UnsignedGreaterThan { a, b }
+            | SymExpr::UnsignedGreaterEqual { a, b }
+            | SymExpr::Equal { a, b }
+            | SymExpr::NotEqual { a, b }
+            | SymExpr::BoolAnd { a, b }
+            | SymExpr::BoolOr { a, b }
+            | SymExpr::BoolXor { a, b }
+            | SymExpr::And { a, b }
+            | SymExpr::Or { a, b }
+            | SymExpr::Xor { a, b }
+            | SymExpr::FloatOrdered { a, b }
+            | SymExpr::FloatOrderedGreaterThan { a, b }
+            | SymExpr::FloatOrderedGreaterEqual { a, b }
+            | SymExpr::FloatOrderedLessThan { a, b }
+            | SymExpr::FloatOrderedLessEqual { a, b }
+            | SymExpr::FloatOrderedEqual { a, b }
+            | SymExpr::FloatOrderedNotEqual { a, b }
+            | SymExpr::FloatUnordered { a, b }
+            | SymExpr::FloatUnorderedGreaterThan { a, b }
+            | SymExpr::FloatUnorderedGreaterEqual { a, b }
+            | SymExpr::FloatUnorderedLessThan { a, b }
+            | SymExpr::FloatUnorderedLessEqual { a, b }
+            | SymExpr::FloatUnorderedEqual { a, b }
+            | SymExpr::FloatUnorderedNotEqual { a, b }
+            | SymExpr::FloatAdd { a, b }
+            | SymExpr::FloatSub { a, b }
+            | SymExpr::FloatMul { a, b }
+            | SymExpr::FloatDiv { a, b }
+            | SymExpr::FloatRem { a, b }
+            | SymExpr::Concat { a, b }
+            | SymExpr::Insert {
+                target: a,
+                to_insert: b,
+                ..
+            } => {
+                *a = self.make_relative(*a);
+                *b = self.make_relative(*b);
+                self.id_counter += 1;
+            }
+            SymExpr::PathConstraint { constraint: op, .. } => {
+                *op = self.make_relative(*op);
+            }
+            SymExpr::ExpressionsUnreachable { exprs } => {
+                for expr in exprs {
+                    *expr = self.make_relative(*expr);
+                }
+            }
+            SymExpr::Call { .. } | SymExpr::Return { .. } | SymExpr::BasicBlock { .. } => {}
+            SymExpr::Ite { cond, a, b } => {
+                *cond = self.make_relative(*cond);
+                *a = self.make_relative(*a);
+                *b = self.make_relative(*b);
+            }
+        }
+        self.serialization_options
+            .serialize_into(&mut self.writer, &message)?;
+        // for every path constraint, make sure we can later decode it in case we crash by updating the trace header
+        if let SymExpr::PathConstraint { .. } = &message {
+            self.write_trace_size()?;
+        }
+        Ok(SymExprRef::new(current_id).unwrap())
+    }
+}
+
+use libafl_bolts::shmem::{ShMem, ShMemCursor, ShMemProvider, StdShMemProvider};
+
+/// The default environment variable name to use for the shared memory used by the concolic tracing
+pub const DEFAULT_ENV_NAME: &str = "SHARED_MEMORY_MESSAGES";
+
+/// The default shared memory size used by the concolic tracing.
+///
+/// This amounts to 1GiB of memory, which is considered to be enough for any reasonable trace. It is also assumed
+/// that the memory will not be physically mapped until accessed, alleviating resource concerns.
+pub const DEFAULT_SIZE: usize = 1024 * 1024 * 1024;
+
+impl<'buffer> MessageFileReader<Cursor<&'buffer [u8]>> {
+    /// Creates a new `MessageFileReader` from the given buffer.
+    /// It is expected that trace in this buffer is not length prefixed and the buffer itself should have the exact
+    /// length of the trace (ie. contain no partial message).
+    /// See also [`MessageFileReader::from_length_prefixed_buffer`].
+    #[must_use]
+    pub fn from_buffer(buffer: &'buffer [u8]) -> Self {
+        Self::from_reader(Cursor::new(buffer))
+    }
+
+    /// Creates a new `MessageFileReader` from the given buffer, expecting the contained trace to be prefixed by the
+    /// trace length (as generated by the [`MessageFileWriter`]).
+    /// See also [`MessageFileReader::from_buffer`].
+    pub fn from_length_prefixed_buffer(mut buffer: &'buffer [u8]) -> io::Result<Self> {
+        let mut len_buf = 0_u64.to_le_bytes();
+        buffer.read_exact(&mut len_buf)?;
+        let buffer_len = u64::from_le_bytes(len_buf);
+        usize::try_from(buffer_len).unwrap();
+        let buffer_len = buffer_len as usize;
+        let (buffer, _) = buffer.split_at(buffer_len);
+        Ok(Self::from_buffer(buffer))
+    }
+
+    /// Gets the currently used buffer. If the buffer was length prefixed, the returned buffer does not contain the
+    /// prefix and is exactly as many bytes long as the prefix specified. Effectively, the length prefix is removed and
+    /// used to limit the buffer.
+    #[must_use]
+    pub fn get_buffer(&self) -> &[u8] {
+        self.reader.get_ref()
+    }
+}
+
+impl<T: ShMem> MessageFileWriter<ShMemCursor<T>> {
+    /// Creates a new `MessageFileWriter` from the given [`ShMemCursor`].
+    pub fn from_shmem(shmem: T) -> io::Result<Self> {
+        Self::from_writer(ShMemCursor::new(shmem))
+    }
+}
+
+impl MessageFileWriter<ShMemCursor<<StdShMemProvider as ShMemProvider>::ShMem>> {
+    /// Creates a new `MessageFileWriter` by reading a [`ShMem`] from the given environment variable.
+    pub fn from_stdshmem_env_with_name(env_name: impl AsRef<str>) -> io::Result<Self> {
+        Self::from_shmem(
+            StdShMemProvider::new()
+                .expect("unable to initialize StdShMemProvider")
+                .existing_from_env(env_name.as_ref())
+                .expect("unable to get shared memory from env"),
+        )
+    }
+
+    /// Creates a new `MessageFileWriter` by reading a [`ShMem`] using [`DEFAULT_ENV_NAME`].
+    pub fn from_stdshmem_default_env() -> io::Result<Self> {
+        Self::from_stdshmem_env_with_name(DEFAULT_ENV_NAME)
+    }
+}
+
+/// A writer that will write messages to a shared memory buffer.
+pub type StdShMemMessageFileWriter =
+    MessageFileWriter<ShMemCursor<<StdShMemProvider as ShMemProvider>::ShMem>>;
+
+#[cfg(test)]
+mod serialization_tests {
+    use alloc::vec::Vec;
+    use std::io::Cursor;
+
+    use super::{MessageFileReader, MessageFileWriter, SymExpr};
+
+    /// This test intends to ensure that the serialization format can efficiently encode the required information.
+    /// This is mainly useful to fail if any changes should be made in the future that (inadvertently) reduce
+    /// serialization efficiency.
+    #[test]
+    fn efficient_serialization() {
+        let mut buf = Vec::new();
+        {
+            let mut cursor = Cursor::new(&mut buf);
+            let mut writer = MessageFileWriter::from_writer(&mut cursor).unwrap();
+            let a = writer.write_message(SymExpr::True).unwrap();
+            let b = writer.write_message(SymExpr::True).unwrap();
+            writer.write_message(SymExpr::And { a, b }).unwrap();
+            writer.update_trace_header().unwrap();
+        }
+        let expected_size = 8 + // the header takes 8 bytes to encode the length of the trace
+                            1 + // tag to create SymExpr::True (a)
+                            1 + // tag to create SymExpr::True (b)
+                            1 + // tag to create SymExpr::And
+                            1 + // reference to a
+                            1; // reference to b
+        assert_eq!(buf.len(), expected_size);
+    }
+
+    /// This test intends to verify that a trace written by [`MessageFileWriter`] can indeed be read back by
+    /// [`MessageFileReader`].
+    #[test]
+    fn serialization_roundtrip() {
+        let mut buf = Vec::new();
+        {
+            let mut cursor = Cursor::new(&mut buf);
+            let mut writer = MessageFileWriter::from_writer(&mut cursor).unwrap();
+            let a = writer.write_message(SymExpr::True).unwrap();
+            let b = writer.write_message(SymExpr::True).unwrap();
+            writer.write_message(SymExpr::And { a, b }).unwrap();
+            writer.update_trace_header().unwrap();
+        }
+        let mut reader = MessageFileReader::from_length_prefixed_buffer(&buf).unwrap();
+        let (first_bool_id, first_bool) = reader.next_message().unwrap().unwrap();
+        assert_eq!(first_bool, SymExpr::True);
+        let (second_bool_id, second_bool) = reader.next_message().unwrap().unwrap();
+        assert_eq!(second_bool, SymExpr::True);
+        let (_, and) = reader.next_message().unwrap().unwrap();
+        assert_eq!(
+            and,
+            SymExpr::And {
+                a: first_bool_id,
+                b: second_bool_id
+            }
+        );
+        assert!(reader.next_message().is_none());
+    }
+}
+
+// Path: libafl/src/observers/concolic/metadata.rs
+use alloc::vec::Vec;
+
+use serde::{Deserialize, Serialize};
+
+use crate::observers::concolic::{serialization_format::MessageFileReader, SymExpr, SymExprRef};
+
+/// A metadata holding a buffer of a concolic trace.
+#[derive(Default, Serialize, Deserialize, Debug)]
+#[allow(clippy::unsafe_derive_deserialize)]
+pub struct ConcolicMetadata {
+    /// Constraints data
+    buffer: Vec<u8>,
+}
+
+impl ConcolicMetadata {
+    /// Iterates over all messages in the buffer. Does not consume the buffer.
+    pub fn iter_messages(&self) -> impl Iterator<Item = (SymExprRef, SymExpr)> + '_ {
+        let mut parser = MessageFileReader::from_buffer(&self.buffer);
+        std::iter::from_fn(move || parser.next_message()).flatten()
+    }
+
+    pub(crate) fn from_buffer(buffer: Vec<u8>) -> Self {
+        Self { buffer }
+    }
+}
+
+libafl_bolts::impl_serdeany!(ConcolicMetadata);
+
+// Path: libafl/src/observers/concolic/observer.rs
+use alloc::string::String;
+
+use libafl_bolts::Named;
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    inputs::UsesInput,
+    observers::{
+        concolic::{serialization_format::MessageFileReader, ConcolicMetadata},
+        Observer,
+    },
+};
+
+/// A standard [`ConcolicObserver`] observer, observing constraints written into a memory buffer.
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ConcolicObserver<'map> {
+    #[serde(skip)]
+    map: &'map [u8],
+    name: String,
+}
+
+impl<'map, S> Observer<S> for ConcolicObserver<'map> where S: UsesInput {}
+
+impl<'map> ConcolicObserver<'map> {
+    /// Create the concolic observer metadata for this run
+    #[must_use]
+    pub fn create_metadata_from_current_map(&self) -> ConcolicMetadata {
+        let reader = MessageFileReader::from_length_prefixed_buffer(self.map)
+            .expect("constructing the message reader from a memory buffer should not fail");
+        ConcolicMetadata::from_buffer(reader.get_buffer().to_vec())
+    }
+}
+
+impl<'map> Named for ConcolicObserver<'map> {
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl<'map> ConcolicObserver<'map> {
+    /// Creates a new [`ConcolicObserver`] with the given name and memory buffer.
+    #[must_use]
+    pub fn new(name: String, map: &'map [u8]) -> Self {
+        Self { map, name }
+    }
+}
+
+// Path: libafl/src/feedbacks/concolic.rs
+//! Concolic feedback for concolic fuzzing.
+//! It is used to attach concolic tracing metadata to the testcase.
+//! This feedback should be used in combination with another feedback as this feedback always considers testcases
+//! to be not interesting.
+//! Requires a [`ConcolicObserver`] to observe the concolic trace.
+use alloc::{borrow::ToOwned, string::String};
+use core::{fmt::Debug, marker::PhantomData};
+
+use libafl_bolts::Named;
+
+use crate::{
+    corpus::Testcase,
+    events::EventFirer,
+    executors::ExitKind,
+    feedbacks::Feedback,
+    inputs::UsesInput,
+    observers::{concolic::ConcolicObserver, ObserversTuple},
+    state::{HasMetadata, State},
+    Error,
+};
+
+/// The concolic feedback. It is used to attach concolic tracing metadata to the testcase.
+/// This feedback should be used in combination with another feedback as this feedback always considers testcases
+/// to be not interesting.
+/// Requires a [`ConcolicObserver`] to observe the concolic trace.
+#[derive(Debug)]
+pub struct ConcolicFeedback<S> {
+    name: String,
+    phantom: PhantomData<S>,
+}
+
+impl<S> ConcolicFeedback<S> {
+    /// Creates a concolic feedback from an observer
+    #[allow(unused)]
+    #[must_use]
+    pub fn from_observer(observer: &ConcolicObserver) -> Self {
+        Self {
+            name: observer.name().to_owned(),
+            phantom: PhantomData,
+        }
+    }
+}
+
+impl<S> Named for ConcolicFeedback<S> {
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
+impl<S> Feedback<S> for ConcolicFeedback<S>
+where
+    S: State,
+{
+    #[allow(clippy::wrong_self_convention)]
+    fn is_interesting<EM, OT>(
+        &mut self,
+        _state: &mut S,
+        _manager: &mut EM,
+        _input: &<S as UsesInput>::Input,
+        _observers: &OT,
+        _exit_kind: &ExitKind,
+    ) -> Result<bool, Error>
+    where
+        EM: EventFirer<State = S>,
+        OT: ObserversTuple<S>,
+    {
+        Ok(false)
+    }
+
+    fn append_metadata<EM, OT>(
+        &mut self,
+        _state: &mut S,
+        _manager: &mut EM,
+        observers: &OT,
+        testcase: &mut Testcase<S::Input>,
+    ) -> Result<(), Error>
+    where
+        OT: ObserversTuple<S>,
+...

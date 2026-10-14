@@ -12,7 +12,7 @@ from ctxbench.benchmark.executor import _build_tool_runtime_factories
 def packets(local_duration=100):
     rows = []
     for cid in ('inline-code-full', 'local-mcp-repoqa-ops'):
-        for size in SizeBin:
+        for size in (SizeBin.SMALL, SizeBin.LARGE):
             for _ in range(16):
                 observation = Observation(cid, size, 'success', local_duration if cid.startswith('local') else 150,
                                           TokenUsage(10, Provenance.REPORTED))

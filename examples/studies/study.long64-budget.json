@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "baseline": "../../baselines/repoqa-long64/frozen.json",
+  "configurations": [
+    "inline-code-full",
+    "local-mcp-default",
+    "local-mcp-lean"
+  ],
+  "seeds": [201, 202, 203],
+  "repeats": 1,
+  "tokenBudget": 1000000,
+  "minimumCalibrationPassRate": 0.75,
+  "policies": {
+    "budget": {"type": "budget"},
+    "inline": {"type": "fixed", "configuration": "inline-code-full"},
+    "mcp-default": {"type": "fixed", "configuration": "local-mcp-default"},
+    "mcp-lean": {"type": "fixed", "configuration": "local-mcp-lean"}
+  },
+  "scenarios": {
+    "stationary": []
+  },
+  "comparisons": [
+    ["budget", "inline"],
+    ["budget", "mcp-default"],
+    ["budget", "mcp-lean"]
+  ]
+}

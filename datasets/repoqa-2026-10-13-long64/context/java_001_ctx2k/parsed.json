@@ -1,0 +1,137 @@
+{
+  "context_builder": "repoqa-native",
+  "context_type": "repoqa_structured_code_context",
+  "files": [
+    {
+      "language": "java",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "karate-core/src/main/java/com/intuit/karate/MatchStep.java",
+      "symbols": [
+        {
+          "children": [],
+          "code": "private static int min(int a, int b) {\n        if (a == -1) {\n            return b;\n        }\n        if (b == -1) {\n            return a;\n        }\n        return Math.min(a, b);\n    }",
+          "documentation": null,
+          "end_line": 131,
+          "kind": "method",
+          "name": "min",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "min",
+          "signature": "private static int min(int a, int b) {\n        if (a == -1) {\n            return b;\n        }\n        if (b == -1) {\n            return a;\n        }\n        return Math.min(a, b);\n    }",
+          "start_line": 123,
+          "symbol_id": "karate-core/src/main/java/com/intuit/karate/MatchStep.java#method:min:123"
+        },
+        {
+          "children": [],
+          "code": "private static Match.Type getType(boolean each, boolean not, boolean contains, boolean only, boolean any, boolean deep) {\n        if (each) {\n            if (contains) {\n                if (only) {\n                    return Match.Type.EACH_CONTAINS_ONLY;\n                }\n                if (any) {\n                    return Match.Type.EACH_CONTAINS_ANY;\n                }\n                if (deep) {\n                    if (not) {\n                        throw new RuntimeException(\"'each !contains deep' is not yet supported, use 'each contains deep' instead\");\n                    }\n                    return Match.Type.EACH_CONTAINS_DEEP;\n                }\n                return not ? Match.Type.EACH_NOT_CONTAINS : Match.Type.EACH_CONTAINS;\n            }\n            return not ? Match.Type.EACH_NOT_EQUALS : Match.Type.EACH_EQUALS;\n        }\n        if (contains) {\n            if (only) {\n                return deep ? Match.Type.CONTAINS_ONLY_DEEP : Match.Type.CONTAINS_ONLY;\n            }\n            if (any) {\n                return Match.Type.CONTAINS_ANY;\n            }\n            if (deep) {\n                if (not) {\n                    throw new RuntimeException(\"'!contains deep' is not yet supported, use 'contains deep' instead\");\n                }\n                return Match.Type.CONTAINS_DEEP;\n            }\n            return not ? Match.Type.NOT_CONTAINS : Match.Type.CONTAINS;\n        }\n        return not ? Match.Type.NOT_EQUALS : Match.Type.EQUALS;\n    }",
+          "documentation": null,
+          "end_line": 168,
+          "kind": "method",
+          "name": "getType",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "getType",
+          "signature": "private static Match.Type getType(boolean each, boolean not, boolean contains, boolean only, boolean any, boolean deep) {\n        if (each) {\n            if (contains) {\n                if (only) {\n                    return Match.Type.EACH_CONTAINS_ONLY;\n                }\n                if (any) {\n                    return Match.Type.EACH_CONTAINS_ANY;\n                }\n                if (deep) {\n                    if (not) {\n                        throw new RuntimeException(\"'each !contains deep' is not yet supported, use 'each contains deep' instead\");\n                    }\n                    return Match.Type.EACH_CONTAINS_DEEP;\n                }\n                return not ? Match.Type.EACH_NOT_CONTAINS : Match.Type.EACH_CONTAINS;\n            }\n            return not ? Match.Type.EACH_NOT_EQUALS : Match.Type.EACH_EQUALS;\n        }\n        if (contains) {\n            if (only) {\n                return deep ? Match.Type.CONTAINS_ONLY_DEEP : Match.Type.CONTAINS_ONLY;\n            }\n            if (any) {\n                return Match.Type.CONTAINS_ANY;\n            }\n            if (deep) {\n                if (not) {\n                    throw new RuntimeException(\"'!contains deep' is not yet supported, use 'contains deep' instead\");\n                }\n                return Match.Type.CONTAINS_DEEP;\n            }\n            return not ? Match.Type.NOT_CONTAINS : Match.Type.CONTAINS;\n        }\n        return not ? Match.Type.NOT_EQUALS : Match.Type.EQUALS;\n    }",
+          "start_line": 133,
+          "symbol_id": "karate-core/src/main/java/com/intuit/karate/MatchStep.java#method:getType:133"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "java",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "karate-core/src/main/java/com/intuit/karate/PerfContext.java",
+      "symbols": [
+        {
+          "children": [],
+          "code": "public interface PerfContext {\n    \n    void capturePerfEvent(String name, long startTime, long endTime);\n    \n}",
+          "documentation": "@author pthomas3",
+          "end_line": 34,
+          "kind": "interface",
+          "name": "PerfContext",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "PerfContext",
+          "signature": "public interface PerfContext",
+          "start_line": 30,
+          "symbol_id": "karate-core/src/main/java/com/intuit/karate/PerfContext.java#interface:PerfContext:30"
+        },
+        {
+          "children": [],
+          "code": "void capturePerfEvent(String name, long startTime, long endTime);",
+          "documentation": null,
+          "end_line": 32,
+          "kind": "method",
+          "name": "capturePerfEvent",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "capturePerfEvent",
+          "signature": "void capturePerfEvent(String name, long startTime, long endTime);",
+          "start_line": 32,
+          "symbol_id": "karate-core/src/main/java/com/intuit/karate/PerfContext.java#method:capturePerfEvent:32"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "java",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "karate-core/src/main/java/com/intuit/karate/cli/Main.java",
+      "symbols": [
+        {
+          "children": [],
+          "code": "public class Main { // backwards compatibility for vs-code karate-runner plugin\n\n    public static void main(String[] args) {\n        com.intuit.karate.Main.main(args);\n    }\n\n}",
+          "documentation": "@author pthomas3",
+          "end_line": 36,
+          "kind": "class",
+          "name": "Main",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "Main",
+          "signature": "public class Main { // backwards compatibility for vs-code karate-runner plugin",
+          "start_line": 30,
+          "symbol_id": "karate-core/src/main/java/com/intuit/karate/cli/Main.java#class:Main:30"
+        },
+        {
+          "children": [],
+          "code": "public static void main(String[] args) {\n        com.intuit.karate.Main.main(args);\n    }",
+          "documentation": null,
+          "end_line": 34,
+          "kind": "method",
+          "name": "main",
+          "parent_id": null,
+          "parent_name": null,
+          "qualified_name": "main",
+          "signature": "public static void main(String[] args) {\n        com.intuit.karate.Main.main(args);\n    }",
+          "start_line": 32,
+          "symbol_id": "karate-core/src/main/java/com/intuit/karate/cli/Main.java#method:main:32"
+        }
+      ],
+      "unparsed_code": null
+    },
+    {
+      "language": "java",
+      "parse_error": null,
+      "parse_status": "ok_filtered",
+      "path": "karate-core/src/main/java/com/intuit/karate/cli/IdeMain.java",
+      "symbols": [],
+      "unparsed_code": "/*\n * The MIT License\n *\n * Copyright 2022 Karate Labs Inc.\n *\n * Permission is hereby granted, free of charge, to any person obtaining a copy\n * of this software and associated documentation files (the \"Software\"), to deal\n * in the Software without restriction, including without limitation the rights\n * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n * copies of the Software, and to permit persons to whom the Software is\n * furnished to do so, subject to the following conditions:\n *\n * The above copyright notice and this permission notice shall be included in\n * all copies or substantial portions of the Software.\n *\n * THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN\n * THE SOFTWARE.\n */\npackage com.intuit.karate.cli;\n\nimport com.intuit.karate.Main;\nimport com.intuit.karate.Runner;\nimport com.intuit.karate.StringUtils;\n\nimport java.util.ArrayList;\n..."
+    }
+  ],
+  "metadata": {
+    "actual_code_context_tokens": 1953,
+    "base_id": "java_001",
+    "instance_id": "java_001_ctx2k",
+    "language": "java",
+    "normalized_language": "java",
+    "position_ratio": 0.05,
+    "requested_context_tokens": 2048,
+    "sequence": 1
+  },
+  "repository": "karatelabs/karate",
+  "workspace_id": "java_001_ctx2k"
+}

@@ -1,0 +1,942 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:                    return "S0001"; // table already exists
+                case 208:
+                    return "S0002"; // table not found
+                case 1205:
+                    return "40001"; // deadlock detected
+                default: {
+                    String dbState = databaseState.toString();
+                    /*
+                     * Length allowed for SQL State is 5 characters as per SQLSTATE specifications. Append trailing
+                     * zeroes as needed based on length of database error State as length of databaseState is between 1
+                     * to 3 digits.
+                     */
+                    StringBuilder trailingZeroes = new StringBuilder("S");
+                    for (int i = 0; i < 4 - dbState.length(); i++) {
+                        trailingZeroes.append("0");
+                    }
+                    return trailingZeroes.append(dbState).toString();
+                }
+            }
+        }
+    }
+
+    /**
+     * Appends ClientConnectionId to an error message if applicable.
+     * 
+     * @param errMsg
+     *        the original error message
+     * @param conn
+     *        the SQLServerConnection object
+     * @return error string concatenated by ClientConnectionId(in string format) if applicable, otherwise, return
+     *         original error string.
+     */
+    
+static String checkAndAppendClientConnId(String errMsg, SQLServerConnection conn) {
+        if (null != conn && conn.isConnected()) {
+            UUID clientConnId = conn.getClientConIdInternal();
+            if (null != clientConnId) {
+                StringBuilder sb = (errMsg != null) ? new StringBuilder(errMsg) : new StringBuilder();
+                // This syntax of adding connection id is matched in a retry logic. If anything changes here, make
+                // necessary changes to enableSSL() function's exception handling mechanism.
+                sb.append(LOG_CLIENT_CONNECTION_ID_PREFIX);
+                sb.append(clientConnId.toString());
+                return sb.toString();
+            }
+        }
+        return (errMsg != null) ? errMsg : "";
+
+    }
+
+    static void throwNotSupportedException(SQLServerConnection con, Object obj) throws SQLServerException {
+        SQLServerException.makeFromDriverError(con, obj, SQLServerException.getErrString("R_notSupported"), null,
+                false);
+    }
+
+    static void throwFeatureNotSupportedException() throws SQLFeatureNotSupportedException {
+        throw new SQLFeatureNotSupportedException(SQLServerException.getErrString("R_notSupported"));
+    }
+
+    /**
+     * Returns SQLServerError object containing detailed info about exception as received from SQL Server. This API
+     * returns null if no server error has occurred.
+     * 
+     * @return SQLServerError
+     */
+    public SQLServerError getSQLServerError() {
+        return sqlServerError;
+    }
+}
+
+// Path: src/main/java/com/microsoft/sqlserver/jdbc/SQLServerEncryptionType.java
+/*
+ * Microsoft JDBC Driver for SQL Server Copyright(c) Microsoft Corporation All rights reserved. This program is made
+ * available under the terms of the MIT License. See the LICENSE file in the project root for more information.
+ */
+
+package com.microsoft.sqlserver.jdbc;
+
+import java.text.MessageFormat;
+
+
+/**
+ * 
+ * Encryption types supported
+ *
+ */
+enum SQLServerEncryptionType {
+    DETERMINISTIC((byte) 1),
+    RANDOMIZED((byte) 2),
+    PLAINTEXT((byte) 0);
+
+    final byte value;
+    private static final SQLServerEncryptionType[] VALUES = values();
+
+    SQLServerEncryptionType(byte val) {
+        this.value = val;
+    }
+
+    byte getValue() {
+        return this.value;
+    }
+
+    static SQLServerEncryptionType of(byte val) throws SQLServerException {
+        for (SQLServerEncryptionType type : VALUES)
+            if (val == type.value)
+                return type;
+
+        // Invalid type.
+        MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_unknownColumnEncryptionType"));
+        Object[] msgArgs = {val};
+        SQLServerException.makeFromDriverError(null, null, form.format(msgArgs), null, true);
+
+        // Make the compiler happy.
+        return null;
+    }
+}
+
+// Path: src/main/java/com/microsoft/sqlserver/jdbc/AE.java
+/*
+ * Microsoft JDBC Driver for SQL Server Copyright(c) Microsoft Corporation All rights reserved. This program is made
+ * available under the terms of the MIT License. See the LICENSE file in the project root for more information.
+ */
+
+package com.microsoft.sqlserver.jdbc;
+
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.List;
+
+
+/**
+ * Represents a single encrypted value for a CEK. It contains the encrypted CEK,the store type, name,the key path and
+ * encryption algorithm.
+ */
+class EncryptionKeyInfo {
+    EncryptionKeyInfo(byte[] encryptedKeyVal, int dbId, int keyId, int keyVersion, byte[] mdVersion, String keyPathVal,
+            String keyStoreNameVal, String algorithmNameVal) {
+        encryptedKey = encryptedKeyVal;
+        databaseId = dbId;
+        cekId = keyId;
+        cekVersion = keyVersion;
+        cekMdVersion = mdVersion;
+        keyPath = keyPathVal;
+        keyStoreName = keyStoreNameVal;
+        algorithmName = algorithmNameVal;
+    }
+
+    byte[] encryptedKey; // the encrypted "column encryption key"
+    int databaseId;
+    int cekId;
+    int cekVersion;
+    byte[] cekMdVersion;
+    String keyPath;
+    String keyStoreName;
+    String algorithmName;
+    byte normalizationRuleVersion;
+}
+
+
+/**
+ * Represents a unique CEK as an entry in the CekTable. A unique (plaintext is unique) CEK can have multiple encrypted
+ * CEKs when using multiple CMKs. These encrypted CEKs are represented by a member ArrayList.
+ */
+class CekTableEntry {
+    static final private java.util.logging.Logger aeLogger = java.util.logging.Logger
+            .getLogger("com.microsoft.sqlserver.jdbc.AE");
+
+    List<EncryptionKeyInfo> columnEncryptionKeyValues;
+    int ordinal;
+    int databaseId;
+    int cekId;
+    int cekVersion;
+    byte[] cekMdVersion;
+
+    List<EncryptionKeyInfo> getColumnEncryptionKeyValues() {
+        return columnEncryptionKeyValues;
+    }
+
+    int getOrdinal() {
+        return ordinal;
+    }
+
+    int getDatabaseId() {
+        return databaseId;
+    }
+
+    int getCekId() {
+        return cekId;
+    }
+
+    int getCekVersion() {
+        return cekVersion;
+    }
+
+    byte[] getCekMdVersion() {
+        return cekMdVersion;
+    }
+
+    CekTableEntry(int ordinalVal) {
+        ordinal = ordinalVal;
+        databaseId = 0;
+        cekId = 0;
+        cekVersion = 0;
+        cekMdVersion = null;
+        columnEncryptionKeyValues = new ArrayList<>();
+    }
+
+    int getSize() {
+        return columnEncryptionKeyValues.size();
+    }
+
+    void add(byte[] encryptedKey, int dbId, int keyId, int keyVersion, byte[] mdVersion, String keyPath,
+            String keyStoreName, String algorithmName) {
+
+        assert null != columnEncryptionKeyValues : "columnEncryptionKeyValues should already be initialized.";
+
+        aeLogger.fine("Retrieving CEK values");
+
+        EncryptionKeyInfo encryptionKey = new EncryptionKeyInfo(encryptedKey, dbId, keyId, keyVersion, mdVersion,
+                keyPath, keyStoreName, algorithmName);
+        columnEncryptionKeyValues.add(encryptionKey);
+
+        if (0 == databaseId) {
+            databaseId = dbId;
+            cekId = keyId;
+            cekVersion = keyVersion;
+            cekMdVersion = mdVersion;
+        } else {
+            assert (databaseId == dbId);
+            assert (cekId == keyId);
+            assert (cekVersion == keyVersion);
+            assert ((null != cekMdVersion) && (null != mdVersion) && (cekMdVersion.length == mdVersion.length));
+        }
+    }
+}
+
+
+/**
+ * Contains all CEKs, each row represents one unique CEK (represented by CekTableEntry).
+ */
+class CekTable implements Serializable {
+    /**
+     * Always update serialVersionUID when prompted.
+     */
+    private static final long serialVersionUID = -4568542970907052239L;
+
+    private transient CekTableEntry[] keyList;
+
+    CekTable(int tableSize) {
+        keyList = new CekTableEntry[tableSize];
+    }
+
+    int getSize() {
+        return keyList.length;
+    }
+
+    CekTableEntry getCekTableEntry(int index) {
+        return keyList[index];
+    }
+
+    void setCekTableEntry(int index, CekTableEntry entry) {
+        keyList[index] = entry;
+    }
+}
+
+
+/**
+ * Represents Encryption related information of the cipher data.
+ */
+class CryptoMetadata {
+    TypeInfo baseTypeInfo;
+    CekTableEntry cekTableEntry;
+    byte cipherAlgorithmId;
+    String cipherAlgorithmName;
+    SQLServerEncryptionType encryptionType;
+    byte normalizationRuleVersion;
+    SQLServerEncryptionAlgorithm cipherAlgorithm = null;
+    EncryptionKeyInfo encryptionKeyInfo;
+    short ordinal;
+
+    CekTableEntry getCekTableEntry() {
+        return cekTableEntry;
+    }
+
+    void setCekTableEntry(CekTableEntry cekTableEntryObj) {
+        cekTableEntry = cekTableEntryObj;
+    }
+
+    TypeInfo getBaseTypeInfo() {
+        return baseTypeInfo;
+    }
+
+    void setBaseTypeInfo(TypeInfo baseTypeInfoObj) {
+        baseTypeInfo = baseTypeInfoObj;
+    }
+
+    SQLServerEncryptionAlgorithm getEncryptionAlgorithm() {
+        return cipherAlgorithm;
+    }
+
+    void setEncryptionAlgorithm(SQLServerEncryptionAlgorithm encryptionAlgorithmObj) {
+        cipherAlgorithm = encryptionAlgorithmObj;
+    }
+
+    EncryptionKeyInfo getEncryptionKeyInfo() {
+        return encryptionKeyInfo;
+    }
+
+    void setEncryptionKeyInfo(EncryptionKeyInfo encryptionKeyInfoObj) {
+        encryptionKeyInfo = encryptionKeyInfoObj;
+    }
+
+    byte getEncryptionAlgorithmId() {
+        return cipherAlgorithmId;
+    }
+
+    String getEncryptionAlgorithmName() {
+        return cipherAlgorithmName;
+    }
+
+    SQLServerEncryptionType getEncryptionType() {
+        return encryptionType;
+    }
+
+    byte getNormalizationRuleVersion() {
+        return normalizationRuleVersion;
+    }
+
+    short getOrdinal() {
+        return ordinal;
+    }
+
+    CryptoMetadata(CekTableEntry cekTableEntryObj, short ordinalVal, byte cipherAlgorithmIdVal,
+            String cipherAlgorithmNameVal, byte encryptionTypeVal,
+            byte normalizationRuleVersionVal) throws SQLServerException {
+        cekTableEntry = cekTableEntryObj;
+        ordinal = ordinalVal;
+        cipherAlgorithmId = cipherAlgorithmIdVal;
+        cipherAlgorithmName = cipherAlgorithmNameVal;
+        encryptionType = SQLServerEncryptionType.of(encryptionTypeVal);
+        normalizationRuleVersion = normalizationRuleVersionVal;
+        encryptionKeyInfo = null;
+    }
+
+    boolean isAlgorithmInitialized() {
+        return null != cipherAlgorithm;
+    }
+}
+
+
+// Fields in the first resultset of "sp_describe_parameter_encryption"
+// We expect the server to return the fields in the resultset in the same order as mentioned below.
+// If the server changes the below order, then transparent parameter encryption will break.
+enum DescribeParameterEncryptionResultSet1 {
+    KEYORDINAL,
+    DBID,
+    KEYID,
+    KEYVERSION,
+    KEYMDVERSION,
+    ENCRYPTEDKEY,
+    PROVIDERNAME,
+    KEYPATH,
+    KEYENCRYPTIONALGORITHM,
+    ISREQUESTEDBYENCLAVE,
+    ENCLAVECMKSIGNATURE;
+
+    int value() {
+        // Column indexing starts from 1;
+        return ordinal() + 1;
+    }
+}
+
+
+// Fields in the second resultset of "sp_describe_parameter_encryption"
+// We expect the server to return the fields in the resultset in the same order as mentioned below.
+// If the server changes the below order, then transparent parameter encryption will break.
+enum DescribeParameterEncryptionResultSet2 {
+    PARAMETERORDINAL,
+    PARAMETERNAME,
+    COLUMNENCRYPTIONALGORITHM,
+    COLUMNENCRYPTIONTYPE,
+    COLUMNENCRYPTIONKEYORDINAL,
+    NORMALIZATIONRULEVERSION;
+
+    int value() {
+        // Column indexing starts from 1;
+        return ordinal() + 1;
+    }
+}
+
+
+enum ColumnEncryptionVersion {
+    AE_NOTSUPPORTED,
+    AE_V1,
+    AE_V2,
+    AE_V3;
+
+    int value() {
+        // Column indexing starts from 1;
+        return ordinal() + 1;
+    }
+}
+
+// Path: src/main/java/com/microsoft/sqlserver/jdbc/ActivityCorrelator.java
+/*
+ * Microsoft JDBC Driver for SQL Server Copyright(c) Microsoft Corporation All rights reserved. This program is made
+ * available under the terms of the MIT License. See the LICENSE file in the project root for more information.
+ */
+
+package com.microsoft.sqlserver.jdbc;
+
+import java.util.UUID;
+
+
+/**
+ * ActivityCorrelator provides the APIs to access the ActivityId in TLS
+ */
+final class ActivityCorrelator {
+
+    private static ThreadLocal<ActivityId> t_ActivityId = new ThreadLocal<ActivityId>() {
+        @Override
+        protected ActivityId initialValue() {
+            return new ActivityId();
+        }
+    };
+
+    static ActivityId getCurrent() {
+        return t_ActivityId.get();
+    }
+
+    // Increment the Sequence number of the ActivityId in TLS
+    // and return the ActivityId with new Sequence number
+    static ActivityId getNext() {
+        return getCurrent().getIncrement();
+    }
+
+    /*
+     * Prevent instantiation.
+     */
+    private ActivityCorrelator() {}
+}
+
+
+class ActivityId {
+    private final UUID id;
+    private long sequence;
+    // Cache the string since it gets frequently referenced.
+    private String cachedToString;
+
+    ActivityId() {
+        id = UUID.randomUUID();
+        // getNext() is called during prelogin and will be the logical "first call" after
+        // instantiation, incrementing this to >= 1 before any activity logs are written.
+        sequence = 0;
+    }
+
+    UUID getId() {
+        return id;
+    }
+
+    long getSequence() {
+        // Edge case: A new thread re-uses an existing connection. Ensure sequence > 0.
+        if (sequence == 0L) {
+            ++sequence;
+        }
+
+        return sequence;
+    }
+
+    ActivityId getIncrement() {
+        cachedToString = null;
+        if (sequence < 0xffffffffl) // to get to 32-bit unsigned
+        {
+            ++sequence;
+        } else {
+            sequence = 0;
+        }
+
+        return this;
+    }
+
+    @Override
+    public String toString() {
+        if (cachedToString == null) {
+            StringBuilder sb = new StringBuilder(38);
+            sb.append(id.toString());
+            sb.append("-");
+            sb.append(getSequence());
+            cachedToString = sb.toString();
+        }
+
+        return cachedToString.toString();
+    }
+}
+
+// Path: src/main/java/com/microsoft/sqlserver/jdbc/SQLJdbcVersion.java
+/*
+ * Microsoft JDBC Driver for SQL Server Copyright(c) Microsoft Corporation All rights reserved. This program is made
+ * available under the terms of the MIT License. See the LICENSE file in the project root for more information.
+ */
+
+package com.microsoft.sqlserver.jdbc;
+
+final class SQLJdbcVersion {
+    static final int MAJOR = 12;
+    static final int MINOR = 7;
+    static final int PATCH = 0;
+    static final int BUILD = 0;
+    /*
+     * Used to load mssql-jdbc_auth DLL.
+     * 1. Set to "-preview" for preview release.
+     * 2. Set to "" (empty String) for official release.
+     */
+    static final String RELEASE_EXT = "-preview";
+
+    private SQLJdbcVersion() {
+        throw new UnsupportedOperationException(SQLServerException.getErrString("R_notSupported"));
+    }
+}
+
+// Path: src/main/java/com/microsoft/sqlserver/jdbc/StringUtils.java
+/*
+ * Microsoft JDBC Driver for SQL Server Copyright(c) Microsoft Corporation All rights reserved. This program is made
+ * available under the terms of the MIT License. See the LICENSE file in the project root for more information.
+ */
+
+package com.microsoft.sqlserver.jdbc;
+
+/**
+ * Provides a utility class for Strings.
+ * 
+ * @since 6.1.2
+ */
+public class StringUtils {
+
+    /**
+     * string containing a space
+     */
+    public static final String SPACE = " ";
+
+    /**
+     * empty string
+     */
+    public static final String EMPTY = "";
+
+    /**
+     * Developer should not create {@code StringUtils} instance in standard programming. Instead, the class should be
+     * used as {@code StringUtils.isEmpty("String")}
+     */
+    private StringUtils() {
+        // Hiding constructor.
+    }
+
+    /**
+     * Returns if String is null
+     * 
+     * @param charSequence
+     *        {@link CharSequence} Can provide null
+     * @return {@link Boolean} if provided char sequence is null or empty / blank
+     * @since 6.1.2
+     */
+    public static boolean isEmpty(final CharSequence charSequence) {
+        return charSequence == null || charSequence.length() == 0;
+    }
+
+    /**
+     * Returns if String is numeric or not.
+     * 
+     * @param str
+     *        {@link String}
+     * @return {@link Boolean} if provided String is numeric or not.
+     */
+    public static boolean isNumeric(final String str) {
+        return !isEmpty(str) && str.matches("\\d+(\\.\\d+)?");
+    }
+
+    /**
+     * Returns if string is integer or not
+     * 
+     * @param str
+     *        {@link String}
+     * @return {@link Boolean} if provided String is Integer or not.
+     */
+    public static boolean isInteger(final String str) {
+        try {
+            Integer.parseInt(str);
+            return true;
+        } catch (NumberFormatException e) {
+            // Nothing. this is not integer.
+        }
+        return false;
+    }
+
+}
+
+// Path: src/main/java/com/microsoft/sqlserver/jdbc/MaxResultBufferParser.java
+/*
+ * Microsoft JDBC Driver for SQL Server Copyright(c) Microsoft Corporation All rights reserved. This program is made
+ * available under the terms of the MIT License. See the LICENSE file in the project root for more information.
+ */
+
+package com.microsoft.sqlserver.jdbc;
+
+import java.lang.management.ManagementFactory;
+import java.text.MessageFormat;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+
+
+/**
+ * Parser created to parse String value from Connection String to equivalent number of bytes for JDBC Driver to work on.
+ */
+public class MaxResultBufferParser {
+
+    private static final Logger logger = Logger.getLogger("com.microsoft.sqlserver.jdbc.MaxResultBufferParser");
+    private static final String[] PERCENT_PHRASES = {"percent", "pct", "p"};
+    private static final String ERROR_MESSAGE = "MaxResultBuffer property is badly formatted: {0}.";
+
+    private MaxResultBufferParser() {}
+
+    /**
+     *
+     * Returns number of bytes for maxResultBuffer property
+     *
+     * @param input
+     *        String value for maxResultProperty provided in Connection String
+     * @return 'maxResultBuffer' property as number of bytes
+     * @throws SQLServerException
+     *         Is Thrown when maxResultProperty's syntax is wrong
+     */
+    public static long validateMaxResultBuffer(String input) throws SQLServerException {
+        String numberString;
+        long number = -1;
+
+        // check for null values and empty String "", if so return -1 (default value)
+        if (StringUtils.isEmpty(input) || input.equals("-1")) {
+            return number;
+        }
+
+        // check if input is number
+        if (!StringUtils.isEmpty(input) && input.matches("-?\\d+(\\.\\d+)?")) {
+            try {
+                number = Long.parseLong(input);
+            } catch (NumberFormatException e) {
+                if (logger.isLoggable(Level.SEVERE)) {
+                    logger.log(Level.SEVERE, ERROR_MESSAGE, new Object[] {input});
+                }
+                throwNewInvalidMaxResultBufferParameterException(e, input);
+            }
+            return adjustMemory(number, 1);
+        } else {
+            // check PERCENT_PHRASES
+            for (String percentPhrase : PERCENT_PHRASES) {
+                if (input.endsWith(percentPhrase)) {
+                    numberString = input.substring(0, input.length() - percentPhrase.length());
+                    try {
+                        number = Long.parseLong(numberString);
+                    } catch (NumberFormatException e) {
+                        if (logger.isLoggable(Level.SEVERE)) {
+                            logger.log(Level.SEVERE, ERROR_MESSAGE, new Object[] {input});
+                        }
+                        throwNewInvalidMaxResultBufferParameterException(e, numberString);
+                    }
+                    return adjustMemoryPercentage(number);
+                }
+            }
+
+            // check if prefix was supplied
+            long multiplier = getMultiplier(input);
+            numberString = input.substring(0, input.length() - 1);
+
+            try {
+                number = Long.parseLong(numberString);
+            } catch (NumberFormatException e) {
+                if (logger.isLoggable(Level.SEVERE)) {
+                    logger.log(Level.SEVERE, ERROR_MESSAGE, new Object[] {input});
+                }
+                throwNewInvalidMaxResultBufferParameterException(e, numberString);
+            }
+            return adjustMemory(number, multiplier);
+        }
+    }
+
+    private static void checkForNegativeValue(long value) throws SQLServerException {
+        if (value <= 0) {
+            Object[] objectToThrow = new Object[] {value};
+            MessageFormat form = new MessageFormat(
+                    SQLServerException.getErrString("R_maxResultBufferNegativeParameterValue"));
+            if (logger.isLoggable(Level.SEVERE)) {
+                logger.log(Level.SEVERE, SQLServerException.getErrString("R_maxResultBufferNegativeParameterValue"),
+                        objectToThrow);
+            }
+            throw new SQLServerException(form.format(objectToThrow), new Throwable());
+        }
+    }
+
+    private static long getMultiplier(String input) throws SQLServerException {
+        long multiplier = 1;
+        switch (Character.toUpperCase(input.charAt(input.length() - 1))) {
+            case 'K':
+                multiplier = 1_000L;
+                break;
+            case 'M':
+                multiplier = 1_000_000L;
+                break;
+            case 'G':
+                multiplier = 1_000_000_000L;
+                break;
+            case 'T':
+                multiplier = 1_000_000_000_000L;
+                break;
+            default:
+                if (logger.isLoggable(Level.SEVERE)) {
+                    logger.log(Level.SEVERE, ERROR_MESSAGE, new Object[] {input});
+                }
+                throwNewInvalidMaxResultBufferParameterException(null, input);
+        }
+        return multiplier;
+    }
+
+    private static long adjustMemoryPercentage(long percentage) throws SQLServerException {
+        checkForNegativeValue(percentage);
+        if (percentage > 90)
+            return (long) (0.9 * getMaxMemory());
+        else
+            return (long) ((percentage) / 100.0 * getMaxMemory());
+    }
+
+    private static long adjustMemory(long size, long multiplier) throws SQLServerException {
+        checkForNegativeValue(size);
+        if (size * multiplier > 0.9 * getMaxMemory())
+            return (long) (0.9 * getMaxMemory());
+        else
+            return size * multiplier;
+    }
+
+    private static long getMaxMemory() {
+        return ManagementFactory.getMemoryMXBean().getHeapMemoryUsage().getMax();
+    }
+
+    private static void throwNewInvalidMaxResultBufferParameterException(Throwable cause,
+            Object... arguments) throws SQLServerException {
+        MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_maxResultBufferInvalidSyntax"));
+        throw new SQLServerException(form.format(arguments), cause);
+    }
+
+}
+
+// Path: src/main/java/mssql/security/provider/MD4.java
+/*
+ * Microsoft JDBC Driver for SQL Server Copyright(c) Microsoft Corporation All rights reserved. This program is made
+ * available under the terms of the MIT License. See the LICENSE file in the project root for more information.
+ */
+
+/**
+ * This code is extracted from org.bouncycastle.crypto.digests.MD4Digest and modified to remove dependencies.
+ */
+package mssql.security.provider;
+
+public class MD4 {
+    private final byte[] xBuf = new byte[4];
+    private int xBufOff;
+    private long byteCount;
+    private static final int DIGEST_LENGTH = 16;
+    private int H1, H2, H3, H4; // IV's
+    private int[] X = new int[16];
+    private int xOff;
+
+    /**
+     * Standard constructor
+     */
+    public MD4() {
+        reset();
+    }
+
+    /**
+     * Copy constructor. This will copy the state of the provided message digest.
+     */
+    public MD4(MD4 t) {
+        System.arraycopy(t.xBuf, 0, xBuf, 0, t.xBuf.length);
+
+        xBufOff = t.xBufOff;
+        byteCount = t.byteCount;
+
+        copyIn(t);
+    }
+
+    private void copyIn(MD4 t) {
+        System.arraycopy(t.xBuf, 0, xBuf, 0, t.xBuf.length);
+
+        xBufOff = t.xBufOff;
+        byteCount = t.byteCount;
+
+        H1 = t.H1;
+        H2 = t.H2;
+        H3 = t.H3;
+        H4 = t.H4;
+
+        System.arraycopy(t.X, 0, X, 0, t.X.length);
+        xOff = t.xOff;
+    }
+
+    public String getAlgorithmName() {
+        return "MD4";
+    }
+
+    public int getDigestSize() {
+        return DIGEST_LENGTH;
+    }
+
+    protected void processWord(byte[] in, int inOff) {
+        X[xOff++] = (in[inOff] & 0xff) | ((in[inOff + 1] & 0xff) << 8) | ((in[inOff + 2] & 0xff) << 16)
+                | ((in[inOff + 3] & 0xff) << 24);
+
+        if (xOff == 16) {
+            processBlock();
+        }
+    }
+
+    protected void processLength(long bitLength) {
+        if (xOff > 14) {
+            processBlock();
+        }
+
+        X[14] = (int) (bitLength & 0xffffffff);
+        X[15] = (int) (bitLength >>> 32);
+    }
+
+    private void unpackWord(int word, byte[] out, int outOff) {
+        out[outOff] = (byte) word;
+        out[outOff + 1] = (byte) (word >>> 8);
+        out[outOff + 2] = (byte) (word >>> 16);
+        out[outOff + 3] = (byte) (word >>> 24);
+    }
+
+    public void update(byte in) {
+        xBuf[xBufOff++] = in;
+
+        if (xBufOff == xBuf.length) {
+            processWord(xBuf, 0);
+            xBufOff = 0;
+        }
+
+        byteCount++;
+    }
+
+    public void update(byte[] in, int inOff, int len) {
+        len = Math.max(0, len);
+
+        //
+        // fill the current word
+        //
+        int i = 0;
+        if (xBufOff != 0) {
+            while (i < len) {
+                xBuf[xBufOff++] = in[inOff + i++];
+                if (xBufOff == 4) {
+                    processWord(xBuf, 0);
+                    xBufOff = 0;
+                    break;
+                }
+            }
+        }
+
+        //
+        // process whole words.
+        //
+        int limit = ((len - i) & ~3) + i;
+        for (; i < limit; i += 4) {
+            processWord(in, inOff + i);
+        }
+
+        //
+        // load in the remainder.
+        //
+        while (i < len) {
+            xBuf[xBufOff++] = in[inOff + i++];
+        }
+
+        byteCount += len;
+    }
+
+    public void finish() {
+        long bitLength = (byteCount << 3);
+
+        //
+        // add the pad bytes.
+        //
+        update((byte) 128);
+
+        while (xBufOff != 0) {
+            update((byte) 0);
+        }
+
+        processLength(bitLength);
+
+        processBlock();
+    }
+
+    public int doFinal(byte[] out, int outOff) {
+        finish();
+
+        unpackWord(H1, out, outOff);
+        unpackWord(H2, out, outOff + 4);
+        unpackWord(H3, out, outOff + 8);
+        unpackWord(H4, out, outOff + 12);
+
+        reset();
+
+        return DIGEST_LENGTH;
+    }
+
+    /**
+     * reset the chaining variables to the IV values.
+     */
+    public void reset() {
+        byteCount = 0;
+
+        xBufOff = 0;
+        for (int i = 0; i < xBuf.length; i++) {
+            xBuf[i] = 0;
+        }
+
+        H1 = 0x67452301;
+        H2 = 0xefcdab89;
+        H3 = 0x98badcfe;
+        H4 = 0x10325476;
+
+        xOff = 0;
+
+        for (int i = 0; i != X.length; i++) {
+            X[i] = 0;
+        }
+    }
+
+    //
+...
+
+Function Description:1. **Purpose**: To enhance an error message by appending a unique connection identifier if the connection is active and the identifier is available.
+2. **Input**: A string representing an error message and a connection object.
+3. **Output**: A string which is either the original error message or the error message appended with a unique connection identifier.
+4. **Procedure**: The function first checks if the connection object is not null and is active. If so, it retrieves the unique connection identifier. If the identifier is available, it appends this identifier to the original error message using a specific format. If the connection is not active or the identifier is not available, it returns the original error message.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

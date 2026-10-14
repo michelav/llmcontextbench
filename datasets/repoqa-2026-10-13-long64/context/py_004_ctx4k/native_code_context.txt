@@ -1,0 +1,329 @@
+                x_i=x[neg_edge_index[1]],
+                x_j=x[neg_edge_index[0]],
+                num_nodes=x.size(0),
+                return_logits=True,
+            )
+
+            self.att_x = torch.cat([pos_att, neg_att], dim=0)
+            self.att_y = self.att_x.new_zeros(self.att_x.size(0))
+            self.att_y[:pos_edge_index.size(1)] = 1.
+
+        if self.concat is True:
+            out = out.view(-1, self.heads * self.out_channels)
+        else:
+            out = out.mean(dim=1)
+
+        if self.bias is not None:
+            out = out + self.bias
+
+        return out
+
+    def message(self, edge_index_i: Tensor, x_i: Tensor, x_j: Tensor,
+                size_i: Optional[int]) -> Tensor:
+        alpha = self.get_attention(edge_index_i, x_i, x_j, num_nodes=size_i)
+        alpha = F.dropout(alpha, p=self.dropout, training=self.training)
+        return x_j * alpha.view(-1, self.heads, 1)
+
+    def negative_sampling(self, edge_index: Tensor, num_nodes: int,
+                          batch: OptTensor = None) -> Tensor:
+
+        num_neg_samples = int(self.neg_sample_ratio * self.edge_sample_ratio *
+                              edge_index.size(1))
+
+        if not self.is_undirected and not is_undirected(
+                edge_index, num_nodes=num_nodes):
+            edge_index = to_undirected(edge_index, num_nodes=num_nodes)
+
+        if batch is None:
+            neg_edge_index = negative_sampling(edge_index, num_nodes,
+                                               num_neg_samples=num_neg_samples)
+        else:
+            neg_edge_index = batched_negative_sampling(
+                edge_index, batch, num_neg_samples=num_neg_samples)
+
+        return neg_edge_index
+
+    
+def positive_sampling(self, edge_index: Tensor) -> Tensor:
+        pos_edge_index, _ = dropout_edge(edge_index,
+                                         p=1. - self.edge_sample_ratio,
+                                         training=self.training)
+        return pos_edge_index
+
+    def get_attention(self, edge_index_i: Tensor, x_i: Tensor, x_j: Tensor,
+                      num_nodes: Optional[int],
+                      return_logits: bool = False) -> Tensor:
+
+        if self.attention_type == 'MX':
+            logits = (x_i * x_j).sum(dim=-1)
+            if return_logits:
+                return logits
+
+            alpha = (x_j * self.att_l).sum(-1) + (x_i * self.att_r).sum(-1)
+            alpha = alpha * logits.sigmoid()
+
+        else:  # self.attention_type == 'SD'
+            alpha = (x_i * x_j).sum(dim=-1) / math.sqrt(self.out_channels)
+            if return_logits:
+                return alpha
+
+        alpha = F.leaky_relu(alpha, self.negative_slope)
+        alpha = softmax(alpha, edge_index_i, num_nodes=num_nodes)
+        return alpha
+
+    def get_attention_loss(self) -> Tensor:
+        r"""Computes the self-supervised graph attention loss."""
+        if not self.training:
+            return torch.tensor([0], device=self.lin.weight.device)
+
+        return F.binary_cross_entropy_with_logits(
+            self.att_x.mean(dim=-1),
+            self.att_y,
+        )
+
+    def __repr__(self) -> str:
+        return (f'{self.__class__.__name__}({self.in_channels}, '
+                f'{self.out_channels}, heads={self.heads}, '
+                f'type={self.attention_type})')
+
+# Path: torch_geometric/nn/conv/tag_conv.py
+import torch
+from torch import Tensor
+
+from torch_geometric.nn.conv import MessagePassing
+from torch_geometric.nn.conv.gcn_conv import gcn_norm
+from torch_geometric.nn.dense.linear import Linear
+from torch_geometric.nn.inits import zeros
+from torch_geometric.typing import Adj, OptTensor, SparseTensor
+from torch_geometric.utils import spmm
+
+
+class TAGConv(MessagePassing):
+    r"""The topology adaptive graph convolutional networks operator from the
+    `"Topology Adaptive Graph Convolutional Networks"
+    <https://arxiv.org/abs/1710.10370>`_ paper.
+
+    .. math::
+        \mathbf{X}^{\prime} = \sum_{k=0}^K \left( \mathbf{D}^{-1/2} \mathbf{A}
+        \mathbf{D}^{-1/2} \right)^k \mathbf{X} \mathbf{W}_{k},
+
+    where :math:`\mathbf{A}` denotes the adjacency matrix and
+    :math:`D_{ii} = \sum_{j=0} A_{ij}` its diagonal degree matrix.
+    The adjacency matrix can include other values than :obj:`1` representing
+    edge weights via the optional :obj:`edge_weight` tensor.
+
+    Args:
+        in_channels (int): Size of each input sample, or :obj:`-1` to derive
+            the size from the first input(s) to the forward method.
+        out_channels (int): Size of each output sample.
+        K (int, optional): Number of hops :math:`K`. (default: :obj:`3`)
+        bias (bool, optional): If set to :obj:`False`, the layer will not learn
+            an additive bias. (default: :obj:`True`)
+        normalize (bool, optional): Whether to apply symmetric normalization.
+            (default: :obj:`True`)
+        **kwargs (optional): Additional arguments of
+            :class:`torch_geometric.nn.conv.MessagePassing`.
+
+    Shapes:
+        - **input:**
+          node_features :math:`(|\mathcal{V}|, F_{in})`,
+          edge_index :math:`(2, |\mathcal{E}|)`,
+          edge_weights :math:`(|\mathcal{E}|)` *(optional)*
+        - **output:** node features :math:`(|\mathcal{V}|, F_{out})`
+    """
+    def __init__(self, in_channels: int, out_channels: int, K: int = 3,
+                 bias: bool = True, normalize: bool = True, **kwargs):
+        kwargs.setdefault('aggr', 'add')
+        super().__init__(**kwargs)
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.K = K
+        self.normalize = normalize
+
+        self.lins = torch.nn.ModuleList([
+            Linear(in_channels, out_channels, bias=False) for _ in range(K + 1)
+        ])
+
+        if bias:
+            self.bias = torch.nn.Parameter(torch.empty(out_channels))
+        else:
+            self.register_parameter('bias', None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        super().reset_parameters()
+        for lin in self.lins:
+            lin.reset_parameters()
+        zeros(self.bias)
+
+    def forward(self, x: Tensor, edge_index: Adj,
+                edge_weight: OptTensor = None) -> Tensor:
+
+        if self.normalize:
+            if isinstance(edge_index, Tensor):
+                edge_index, edge_weight = gcn_norm(  # yapf: disable
+                    edge_index, edge_weight, x.size(self.node_dim),
+                    improved=False, add_self_loops=False, flow=self.flow,
+                    dtype=x.dtype)
+
+            elif isinstance(edge_index, SparseTensor):
+                edge_index = gcn_norm(  # yapf: disable
+                    edge_index, edge_weight, x.size(self.node_dim),
+                    add_self_loops=False, flow=self.flow, dtype=x.dtype)
+
+        out = self.lins[0](x)
+        for lin in self.lins[1:]:
+            # propagate_type: (x: Tensor, edge_weight: OptTensor)
+            x = self.propagate(edge_index, x=x, edge_weight=edge_weight)
+            out = out + lin.forward(x)
+
+        if self.bias is not None:
+            out = out + self.bias
+
+        return out
+
+    def message(self, x_j: Tensor, edge_weight: OptTensor) -> Tensor:
+        return x_j if edge_weight is None else edge_weight.view(-1, 1) * x_j
+
+    def message_and_aggregate(self, adj_t: Adj, x: Tensor) -> Tensor:
+        return spmm(adj_t, x, reduce=self.aggr)
+
+    def __repr__(self) -> str:
+        return (f'{self.__class__.__name__}({self.in_channels}, '
+                f'{self.out_channels}, K={self.K})')
+
+# Path: torch_geometric/nn/conv/transformer_conv.py
+import math
+import typing
+from typing import Optional, Tuple, Union
+
+import torch
+import torch.nn.functional as F
+from torch import Tensor
+
+from torch_geometric.nn.conv import MessagePassing
+from torch_geometric.nn.dense.linear import Linear
+from torch_geometric.typing import (
+    Adj,
+    NoneType,
+    OptTensor,
+    PairTensor,
+    SparseTensor,
+)
+from torch_geometric.utils import softmax
+
+if typing.TYPE_CHECKING:
+    from typing import overload
+else:
+    from torch.jit import _overload_method as overload
+
+
+class TransformerConv(MessagePassing):
+    r"""The graph transformer operator from the `"Masked Label Prediction:
+    Unified Message Passing Model for Semi-Supervised Classification"
+    <https://arxiv.org/abs/2009.03509>`_ paper.
+
+    .. math::
+        \mathbf{x}^{\prime}_i = \mathbf{W}_1 \mathbf{x}_i +
+        \sum_{j \in \mathcal{N}(i)} \alpha_{i,j} \mathbf{W}_2 \mathbf{x}_{j},
+
+    where the attention coefficients :math:`\alpha_{i,j}` are computed via
+    multi-head dot product attention:
+
+    .. math::
+        \alpha_{i,j} = \textrm{softmax} \left(
+        \frac{(\mathbf{W}_3\mathbf{x}_i)^{\top} (\mathbf{W}_4\mathbf{x}_j)}
+        {\sqrt{d}} \right)
+
+    Args:
+        in_channels (int or tuple): Size of each input sample, or :obj:`-1` to
+            derive the size from the first input(s) to the forward method.
+            A tuple corresponds to the sizes of source and target
+            dimensionalities.
+        out_channels (int): Size of each output sample.
+        heads (int, optional): Number of multi-head-attentions.
+            (default: :obj:`1`)
+        concat (bool, optional): If set to :obj:`False`, the multi-head
+            attentions are averaged instead of concatenated.
+            (default: :obj:`True`)
+        beta (bool, optional): If set, will combine aggregation and
+            skip information via
+
+            .. math::
+                \mathbf{x}^{\prime}_i = \beta_i \mathbf{W}_1 \mathbf{x}_i +
+                (1 - \beta_i) \underbrace{\left(\sum_{j \in \mathcal{N}(i)}
+                \alpha_{i,j} \mathbf{W}_2 \vec{x}_j \right)}_{=\mathbf{m}_i}
+
+            with :math:`\beta_i = \textrm{sigmoid}(\mathbf{w}_5^{\top}
+            [ \mathbf{W}_1 \mathbf{x}_i, \mathbf{m}_i, \mathbf{W}_1
+            \mathbf{x}_i - \mathbf{m}_i ])` (default: :obj:`False`)
+        dropout (float, optional): Dropout probability of the normalized
+            attention coefficients which exposes each node to a stochastically
+            sampled neighborhood during training. (default: :obj:`0`)
+        edge_dim (int, optional): Edge feature dimensionality (in case
+            there are any). Edge features are added to the keys after
+            linear transformation, that is, prior to computing the
+            attention dot product. They are also added to final values
+            after the same linear transformation. The model is:
+
+            .. math::
+                \mathbf{x}^{\prime}_i = \mathbf{W}_1 \mathbf{x}_i +
+                \sum_{j \in \mathcal{N}(i)} \alpha_{i,j} \left(
+                \mathbf{W}_2 \mathbf{x}_{j} + \mathbf{W}_6 \mathbf{e}_{ij}
+                \right),
+
+            where the attention coefficients :math:`\alpha_{i,j}` are now
+            computed via:
+
+            .. math::
+                \alpha_{i,j} = \textrm{softmax} \left(
+                \frac{(\mathbf{W}_3\mathbf{x}_i)^{\top}
+                (\mathbf{W}_4\mathbf{x}_j + \mathbf{W}_6 \mathbf{e}_{ij})}
+                {\sqrt{d}} \right)
+
+            (default :obj:`None`)
+        bias (bool, optional): If set to :obj:`False`, the layer will not learn
+            an additive bias. (default: :obj:`True`)
+        root_weight (bool, optional): If set to :obj:`False`, the layer will
+            not add the transformed root node features to the output and the
+            option  :attr:`beta` is set to :obj:`False`. (default: :obj:`True`)
+        **kwargs (optional): Additional arguments of
+            :class:`torch_geometric.nn.conv.MessagePassing`.
+    """
+    _alpha: OptTensor
+
+    def __init__(
+        self,
+        in_channels: Union[int, Tuple[int, int]],
+        out_channels: int,
+        heads: int = 1,
+        concat: bool = True,
+        beta: bool = False,
+        dropout: float = 0.,
+        edge_dim: Optional[int] = None,
+        bias: bool = True,
+        root_weight: bool = True,
+        **kwargs,
+    ):
+        kwargs.setdefault('aggr', 'add')
+        super().__init__(node_dim=0, **kwargs)
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.heads = heads
+        self.beta = beta and root_weight
+        self.root_weight = root_weight
+        self.concat = concat
+        self.dropout = dropout
+        self.edge_dim = edge_dim
+        self._alpha = None
+
+        if isinstance(in_channels, int):
+            in_channels = (in_channels, in_channels)
+
+        self.lin_key = Linear(in_channels[0], heads * out_channels)
+        self.lin_query = Linear(in_channels[1], heads * out_channels)
+        self.lin_value = Linear(in_channels[0], heads * out_channels)
+...

@@ -1,0 +1,1466 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:// Path: src/isBefore/test.ts
+import { describe, expect, it } from "vitest";
+import { isBefore } from "./index.js";
+
+describe("isBefore", () => {
+  it("returns true if the first date is before the second one", () => {
+    const result = isBefore(
+      new Date(1987, 1 /* Feb */, 11),
+      new Date(1989, 6 /* Jul */, 10),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the first date is after the second one", () => {
+    const result = isBefore(
+      new Date(1989, 6 /* Jul */, 10),
+      new Date(1987, 1 /* Feb */, 11),
+    );
+    expect(result).toBe(false);
+  });
+
+...
+// Path: src/isDate/test.ts
+import { afterEach, describe, expect, it } from "vitest";
+import { assertType } from "../_lib/test/index.js";
+import { isDate } from "./index.js";
+
+describe("isDate", () => {
+  it("returns true if the given value is a date object", () => {
+    expect(isDate(new Date())).toBe(true);
+  });
+
+  it("returns true if the given value is an Invalid Date", () => {
+    expect(isDate(new Date(NaN))).toBe(true);
+  });
+
+  it("ensures that the passed argument is an instance of Date", () => {
+    const date: unknown = new Date();
+
+    if (isDate(date)) {
+      assertType<Date>(date);
+    } else {
+      assertType<unknown>(date);
+    }
+  });
+
+  describe("with date passed from another iframe", () => {
+    // If in the browser, run the test in an iframe
+    if (typeof window !== "undefined") {
+      afterEach(() => {
+        const iframe = document.getElementById("iframe");
+        iframe && iframe.remove();
+      });
+
+      it("returns true for a date passed from another iframe", () =>
+        new Promise((resolve) => {
+          const iframe = document.createElement("iframe");
+          iframe.id = "iframe";
+          iframe.addEventListener("load", () => {
+            execScript("window.date = new Date()");
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- It's ok we're messing with iframes
+            expect(isDate((iframe.contentWindow as any).date)).toBe(true);
+            resolve(void 0);
+          });
+          if (!document.body) throw new Error("document.body is not defined");
+          document.body.appendChild(iframe);
+        }));
+    } else {
+      it.skip("returns true for a date passed from another iframe");
+    }
+
+    
+function execScript(scriptText: string) {
+      const iframe = document.querySelector("iframe#iframe");
+      if (!iframe || !(iframe instanceof HTMLIFrameElement)) {
+        throw new Error("Can't execute the script because iframe isn't found");
+      }
+      const doc = iframe.contentDocument!;
+      const script = doc.createElement("script");
+      script.innerText = scriptText;
+      // @ts-expect-error - We're messing with iframes
+      if (!(doc.body instanceof iframe.contentWindow.HTMLBodyElement)) {
+        throw new Error(
+          "Can't execute the script because iframe does not have body",
+        );
+      }
+      doc.body.append(script);
+    }
+  });
+
+  it("returns false if the given value is not a date object", () => {
+    expect(!isDate(new Date().getTime())).toBe(true);
+    expect(!isDate(new Date().toISOString())).toBe(true);
+    expect(!isDate({})).toBe(true);
+    expect(!isDate(null)).toBe(true);
+    expect(!isDate(0)).toBe(true);
+  });
+});
+
+// Path: src/isEqual/test.ts
+import { describe, expect, it } from "vitest";
+import { isEqual } from "./index.js";
+
+describe("isEqual", () => {
+  it("returns true if the given dates are equal", () => {
+    const result = isEqual(
+      new Date(1987, 1 /* Feb */, 11),
+      new Date(1987, 1 /* Feb */, 11),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given dates are not equal", () => {
+    const result = isEqual(
+      new Date(1989, 6 /* Jul */, 10),
+      new Date(1987, 1 /* Feb */, 11),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isEqual(
+      new Date(1987, 1 /* Feb */, 11).getTime(),
+      new Date(1987, 1 /* Feb */, 11).getTime(),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the first date is `Invalid Date`", () => {
+    const result = isEqual(new Date(NaN), new Date(1989, 6 /* Jul */, 10));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the second date is `Invalid Date`", () => {
+    const result = isEqual(new Date(1987, 1 /* Feb */, 11), new Date(NaN));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the both dates are `Invalid Date`", () => {
+    const result = isEqual(new Date(NaN), new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isExists/test.ts
+import { describe, expect, it } from "vitest";
+import { isExists } from "./index.js";
+
+describe("isValid", () => {
+  it("returns true if the given date is valid", () => {
+    const result = isExists(2018, 0, 31);
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is invalid", () => {
+    const result = isExists(2018, 1 /* Feb */, 31);
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isFirstDayOfMonth/test.ts
+import { describe, expect, it } from "vitest";
+import { isFirstDayOfMonth } from "./index.js";
+
+describe("isFirstDayOfMonth", () => {
+  it("returns true if the given date is in the last day of month", () => {
+    const result = isFirstDayOfMonth(new Date(2014, 9 /* Oct */, 1));
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is not in the last day of month", () => {
+    const result = isFirstDayOfMonth(new Date(2014, 9 /* Oct */, 2));
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const date = new Date(2014, 9 /* Oct */, 1).getTime();
+    const result = isFirstDayOfMonth(date);
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is `Invalid Date`", () => {
+    const result = isFirstDayOfMonth(new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isFriday/test.ts
+import { describe, expect, it } from "vitest";
+import { isFriday } from "./index.js";
+
+describe("isFriday", () => {
+  it("returns true if the given date is Friday", () => {
+    const result = isFriday(new Date(2014, 8 /* Sep */, 26));
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is not Friday", () => {
+    const result = isFriday(new Date(2014, 8 /* Sep */, 25));
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isFriday(new Date(2014, 1 /* Feb */, 14).getTime());
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is `Invalid Date`", () => {
+    const result = isFriday(new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isFuture/test.ts
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import sinon from "sinon";
+import { isFuture } from "./index.js";
+
+describe("isFuture", () => {
+  let clock: sinon.SinonFakeTimers;
+  beforeEach(() => {
+    clock = sinon.useFakeTimers(new Date(2014, 8 /* Sep */, 25).getTime());
+  });
+
+  afterEach(() => {
+    clock.restore();
+  });
+
+  it("returns true if the given date is in the future", () => {
+    const result = isFuture(new Date(2014, 9 /* Oct */, 31));
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is in the past", () => {
+    const result = isFuture(new Date(2014, 8 /* Sep */, 1));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the given date is now", () => {
+    const result = isFuture(new Date(2014, 8 /* Sep */, 25));
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isFuture(new Date(2014, 9 /* Oct */, 31).getTime());
+    expect(result).toBe(true);
+  });
+});
+
+// Path: src/isLastDayOfMonth/test.ts
+import { describe, expect, it } from "vitest";
+import { isLastDayOfMonth } from "./index.js";
+
+describe("isLastDayOfMonth", () => {
+  it("returns true if the given date is in the last day of month", () => {
+    const result = isLastDayOfMonth(new Date(2014, 9 /* Oct */, 31));
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is not in the last day of month", () => {
+    const result = isLastDayOfMonth(new Date(2014, 9 /* Oct */, 30));
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const date = new Date(2014, 9 /* Oct */, 31).getTime();
+    const result = isLastDayOfMonth(date);
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is `Invalid Date`", () => {
+    const result = isLastDayOfMonth(new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isLeapYear/test.ts
+import { describe, expect, it } from "vitest";
+import { isLeapYear } from "./index.js";
+
+describe("isLeapYear", () => {
+  it("returns true if the given date is in the leap year", () => {
+    const result = isLeapYear(new Date(2012, 6 /* Jul */, 2));
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is not in the leap year", () => {
+    const result = isLeapYear(new Date(2014, 6 /* Jul */, 2));
+    expect(result).toBe(false);
+  });
+
+  it("works for the years divisible by 100 but not by 400", () => {
+    const result = isLeapYear(new Date(2100, 6 /* Jul */, 2));
+    expect(result).toBe(false);
+  });
+
+  it("works for the years divisible by 400", () => {
+    const result = isLeapYear(new Date(2000, 6 /* Jul */, 2));
+    expect(result).toBe(true);
+  });
+
+  it("accepts a timestamp", () => {
+    const date = new Date(2012, 6 /* Jul */, 2).getTime();
+    const result = isLeapYear(date);
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is `Invalid Date`", () => {
+    const result = isLeapYear(new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isMatch/test.ts
+import { describe, expect, it } from "vitest";
+import { isMatch } from "./index.js";
+import { eo } from "../locale/eo/index.js";
+
+describe("isMatch", () => {
+  it("accepts a dd-MM-yyyy format against 22-02-1998", () => {
+    expect(isMatch("22-02-1998", "dd-MM-yyyy")).toBe(true);
+  });
+
+  it("reject a yyyy-dd-MM format against 22-02-1998", () => {
+    expect(!isMatch("22-02-1998", "yyyy-dd-MM")).toBe(true);
+  });
+
+  it("accepts a date & format with locale", () => {
+    expect(isMatch("28-a de februaro", "do 'de' MMMM", {
+      locale: eo,
+    })).toBe(true);
+  });
+});
+
+// Path: src/isMonday/test.ts
+import { describe, expect, it } from "vitest";
+import { isMonday } from "./index.js";
+
+describe("isMonday", () => {
+  it("returns true if the given date is Monday", () => {
+    const result = isMonday(new Date(2014, 8 /* Sep */, 22));
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is not Monday", () => {
+    const result = isMonday(new Date(2014, 8 /* Sep */, 25));
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isMonday(new Date(2014, 1 /* Feb */, 10).getTime());
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is `Invalid Date`", () => {
+    const result = isMonday(new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isPast/test.ts
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import sinon from "sinon";
+import { isPast } from "./index.js";
+
+describe("isPast", () => {
+  let clock: sinon.SinonFakeTimers;
+  beforeEach(() => {
+    clock = sinon.useFakeTimers(new Date(2014, 8 /* Sep */, 25).getTime());
+  });
+
+  afterEach(() => {
+    clock.restore();
+  });
+
+  it("returns true if the given date is in the past", () => {
+    const result = isPast(new Date(2014, 6 /* Jul */, 2));
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is in the future", () => {
+    const result = isPast(new Date(2014, 11 /* Dec */, 31));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the given date is now", () => {
+    const result = isPast(new Date(2014, 8 /* Sep */, 25));
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isPast(new Date(2014, 6 /* Jul */, 2).getTime());
+    expect(result).toBe(true);
+  });
+});
+
+// Path: src/isSameDay/test.ts
+import { describe, expect, it } from "vitest";
+import { isSameDay } from "./index.js";
+
+describe("isSameDay", () => {
+  it("returns true if the given dates have the same day", () => {
+    const result = isSameDay(
+      new Date(2014, 8 /* Sep */, 4, 6, 0),
+      new Date(2014, 8 /* Sep */, 4, 18, 0),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given dates have different days", () => {
+    const result = isSameDay(
+      new Date(2014, 8 /* Sep */, 4, 23, 59),
+      new Date(2014, 8 /* Sep */, 5, 0, 0),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isSameDay(
+      new Date(2014, 8 /* Sep */, 4, 6, 0).getTime(),
+      new Date(2014, 8 /* Sep */, 4, 18, 0).getTime(),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the first date is `Invalid Date`", () => {
+    const result = isSameDay(new Date(NaN), new Date(1989, 6 /* Jul */, 10));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the second date is `Invalid Date`", () => {
+    const result = isSameDay(new Date(1987, 1 /* Feb */, 11), new Date(NaN));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the both dates are `Invalid Date`", () => {
+    const result = isSameDay(new Date(NaN), new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isSameHour/test.ts
+import { describe, expect, it } from "vitest";
+import { isSameHour } from "./index.js";
+
+describe("isSameHour", () => {
+  it("returns true if the given dates have the same hour", () => {
+    const result = isSameHour(
+      new Date(2014, 8 /* Sep */, 4, 6, 0),
+      new Date(2014, 8 /* Sep */, 4, 6, 30),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given dates have different hours", () => {
+    const result = isSameHour(
+      new Date(2014, 8 /* Sep */, 4, 6, 0),
+      new Date(2014, 8 /* Sep */, 4, 5, 0),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isSameHour(
+      new Date(2014, 8 /* Sep */, 4, 18, 0).getTime(),
+      new Date(2014, 8 /* Sep */, 4, 18, 45).getTime(),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the first date is `Invalid Date`", () => {
+    const result = isSameHour(new Date(NaN), new Date(1989, 6 /* Jul */, 10));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the second date is `Invalid Date`", () => {
+    const result = isSameHour(new Date(1987, 1 /* Feb */, 11), new Date(NaN));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the both dates are `Invalid Date`", () => {
+    const result = isSameHour(new Date(NaN), new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isSameISOWeek/test.ts
+import { describe, expect, it } from "vitest";
+import { isSameISOWeek } from "./index.js";
+
+describe("isSameISOWeek", () => {
+  it("returns true if the given dates have the same ISO week", () => {
+    const result = isSameISOWeek(
+      new Date(2014, 8 /* Sep */, 1),
+      new Date(2014, 8 /* Sep */, 7),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given dates have different ISO weeks", () => {
+    const result = isSameISOWeek(
+      new Date(2014, 8 /* Sep */, 1),
+      new Date(2014, 8 /* Sep */, 14),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isSameISOWeek(
+      new Date(2014, 5 /* Jun */, 30).getTime(),
+      new Date(2014, 6 /* Jul */, 2).getTime(),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the first date is `Invalid Date`", () => {
+    const result = isSameISOWeek(
+      new Date(NaN),
+      new Date(1989, 6 /* Jul */, 10),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the second date is `Invalid Date`", () => {
+    const result = isSameISOWeek(
+      new Date(1987, 1 /* Feb */, 11),
+      new Date(NaN),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the both dates are `Invalid Date`", () => {
+    const result = isSameISOWeek(new Date(NaN), new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isSameISOWeekYear/test.ts
+import { describe, expect, it } from "vitest";
+import { isSameISOWeekYear } from "./index.js";
+
+describe("isSameISOWeekYear", () => {
+  it("returns true if the given dates have the same ISO week-numbering year", () => {
+    const result = isSameISOWeekYear(
+      new Date(2003, 11 /* Dec */, 29),
+      new Date(2005, 0 /* Jan */, 2),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given dates have different ISO week-numbering years", () => {
+    const result = isSameISOWeekYear(
+      new Date(2014, 11 /* Dec */, 28),
+      new Date(2014, 11 /* Dec */, 29),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isSameISOWeekYear(
+      new Date(2003, 11 /* Dec */, 29).getTime(),
+      new Date(2005, 0 /* Jan */, 2).getTime(),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("handles dates before 100 AD", () => {
+    const firstDate = new Date(0);
+    firstDate.setFullYear(5, 0 /* Jan */, 1);
+    firstDate.setHours(0, 0, 0, 0);
+    const secondDate = new Date(0);
+    secondDate.setFullYear(5, 0 /* Jan */, 2);
+    secondDate.setHours(0, 0, 0, 0);
+    const result = isSameISOWeekYear(firstDate, secondDate);
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the first date is `Invalid Date`", () => {
+    const result = isSameISOWeekYear(
+      new Date(NaN),
+      new Date(1989, 6 /* Jul */, 10),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the second date is `Invalid Date`", () => {
+    const result = isSameISOWeekYear(
+      new Date(1987, 1 /* Feb */, 11),
+      new Date(NaN),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the both dates are `Invalid Date`", () => {
+    const result = isSameISOWeekYear(new Date(NaN), new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isSameMinute/test.ts
+import { describe, expect, it } from "vitest";
+import { isSameMinute } from "./index.js";
+
+describe("isSameMinute", () => {
+  it("returns true if the given dates have the same minute", () => {
+    const result = isSameMinute(
+      new Date(2014, 8 /* Sep */, 4, 6, 30),
+      new Date(2014, 8 /* Sep */, 4, 6, 30, 15),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given dates have different minutes", () => {
+    const result = isSameMinute(
+      new Date(2014, 8 /* Sep */, 4, 6, 30, 59),
+      new Date(2014, 8 /* Sep */, 4, 6, 31),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isSameMinute(
+      new Date(2014, 8 /* Sep */, 4, 18, 45).getTime(),
+      new Date(2014, 8 /* Sep */, 4, 18, 45, 30).getTime(),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the first date is `Invalid Date`", () => {
+    const result = isSameMinute(new Date(NaN), new Date(1989, 6 /* Jul */, 10));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the second date is `Invalid Date`", () => {
+    const result = isSameMinute(new Date(1987, 1 /* Feb */, 11), new Date(NaN));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the both dates are `Invalid Date`", () => {
+    const result = isSameMinute(new Date(NaN), new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isSameMonth/test.ts
+import { describe, expect, it } from "vitest";
+import { isSameMonth } from "./index.js";
+
+describe("isSameMonth", () => {
+  it("returns true if the given dates have the same month (and year)", () => {
+    const result = isSameMonth(
+      new Date(2014, 8 /* Sep */, 2),
+      new Date(2014, 8 /* Sep */, 25),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given dates have different months", () => {
+    const result = isSameMonth(
+      new Date(2014, 8 /* Sep */, 2),
+      new Date(2013, 8 /* Sep */, 25),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isSameMonth(
+      new Date(2014, 8 /* Sep */, 2).getTime(),
+      new Date(2014, 8 /* Sep */, 25).getTime(),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the first date is `Invalid Date`", () => {
+    const result = isSameMonth(new Date(NaN), new Date(1989, 6 /* Jul */, 10));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the second date is `Invalid Date`", () => {
+    const result = isSameMonth(new Date(1987, 1 /* Feb */, 11), new Date(NaN));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the both dates are `Invalid Date`", () => {
+    const result = isSameMonth(new Date(NaN), new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isSameQuarter/test.ts
+import { describe, expect, it } from "vitest";
+import { isSameQuarter } from "./index.js";
+
+describe("isSameQuarter", () => {
+  it("returns true if the given dates have the same quarter (and year)", () => {
+    const result = isSameQuarter(
+      new Date(2014, 0 /* Jan */, 1),
+      new Date(2014, 2 /* Mar */, 8),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given dates have different quarters", () => {
+    const result = isSameQuarter(
+      new Date(2014, 0 /* Jan */, 1),
+      new Date(2013, 8 /* Sep */, 25),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isSameQuarter(
+      new Date(2014, 6 /* Jul */, 2).getTime(),
+      new Date(2014, 8 /* Sep */, 25).getTime(),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the first date is `Invalid Date`", () => {
+    const result = isSameQuarter(
+      new Date(NaN),
+      new Date(1989, 6 /* Jul */, 10),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the second date is `Invalid Date`", () => {
+    const result = isSameQuarter(
+      new Date(1987, 1 /* Feb */, 11),
+      new Date(NaN),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the both dates are `Invalid Date`", () => {
+    const result = isSameQuarter(new Date(NaN), new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isSameSecond/test.ts
+import { describe, expect, it } from "vitest";
+import { isSameSecond } from "./index.js";
+
+describe("isSameSecond", () => {
+  it("returns true if the given dates have the same second", () => {
+    const result = isSameSecond(
+      new Date(2014, 8 /* Sep */, 4, 6, 30, 15),
+      new Date(2014, 8 /* Sep */, 4, 6, 30, 15, 500),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given dates have different seconds", () => {
+    const result = isSameSecond(
+      new Date(2014, 8 /* Sep */, 4, 6, 30, 58, 999),
+      new Date(2014, 8 /* Sep */, 4, 6, 30, 59),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isSameSecond(
+      new Date(2014, 8 /* Sep */, 4, 18, 45, 30).getTime(),
+      new Date(2014, 8 /* Sep */, 4, 18, 45, 30, 400).getTime(),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the first date is `Invalid Date`", () => {
+    const result = isSameSecond(new Date(NaN), new Date(1989, 6 /* Jul */, 10));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the second date is `Invalid Date`", () => {
+    const result = isSameSecond(new Date(1987, 1 /* Feb */, 11), new Date(NaN));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the both dates are `Invalid Date`", () => {
+    const result = isSameSecond(new Date(NaN), new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isSameWeek/test.ts
+import { describe, expect, it } from "vitest";
+import { isSameWeek } from "./index.js";
+
+describe("isSameWeek", () => {
+  it("returns true if the given dates have the same week", () => {
+    const result = isSameWeek(
+      new Date(2014, 7 /* Aug */, 31),
+      new Date(2014, 8 /* Sep */, 4),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given dates have different weeks", () => {
+    const result = isSameWeek(
+      new Date(2014, 7 /* Aug */, 30),
+      new Date(2014, 8 /* Sep */, 4),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("allows to specify which day is the first day of the week", () => {
+    const result = isSameWeek(
+      new Date(2014, 7 /* Aug */, 31),
+      new Date(2014, 8 /* Sep */, 4),
+      { weekStartsOn: 1 },
+    );
+    expect(result).toBe(false);
+  });
+
+  it("allows to specify which day is the first day of the week in locale", () => {
+    const result = isSameWeek(
+      new Date(2014, 7 /* Aug */, 31),
+      new Date(2014, 8 /* Sep */, 4),
+      {
+        locale: {
+          options: { weekStartsOn: 1 },
+        },
+      },
+    );
+    expect(result).toBe(false);
+  });
+
+  it("`options.weekStartsOn` overwrites the first day of the week specified in locale", () => {
+    const result = isSameWeek(
+      new Date(2014, 7 /* Aug */, 31),
+      new Date(2014, 8 /* Sep */, 4),
+      {
+        weekStartsOn: 1,
+        locale: {
+          options: { weekStartsOn: 0 },
+        },
+      },
+    );
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isSameWeek(
+      new Date(2014, 7 /* Aug */, 31).getTime(),
+      new Date(2014, 8 /* Sep */, 4).getTime(),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the first date is `Invalid Date`", () => {
+    const result = isSameWeek(new Date(NaN), new Date(1989, 6 /* Jul */, 10));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the second date is `Invalid Date`", () => {
+    const result = isSameWeek(new Date(1987, 1 /* Feb */, 11), new Date(NaN));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the both dates are `Invalid Date`", () => {
+    const result = isSameWeek(new Date(NaN), new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isSameYear/test.ts
+import { describe, expect, it } from "vitest";
+import { isSameYear } from "./index.js";
+
+describe("isSameYear", () => {
+  it("returns true if the given dates have the same year", () => {
+    const result = isSameYear(
+      new Date(2014, 8 /* Sep */, 2),
+      new Date(2014, 8 /* Sep */, 25),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given dates have different years", () => {
+    const result = isSameYear(
+      new Date(2014, 8 /* Sep */, 2),
+      new Date(2013, 8 /* Sep */, 25),
+    );
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isSameYear(
+      new Date(2014, 8 /* Sep */, 2).getTime(),
+      new Date(2014, 8 /* Sep */, 25).getTime(),
+    );
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the first date is `Invalid Date`", () => {
+    const result = isSameYear(new Date(NaN), new Date(1989, 6 /* Jul */, 10));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the second date is `Invalid Date`", () => {
+    const result = isSameYear(new Date(1987, 1 /* Feb */, 11), new Date(NaN));
+    expect(result).toBe(false);
+  });
+
+  it("returns false if the both dates are `Invalid Date`", () => {
+    const result = isSameYear(new Date(NaN), new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isSaturday/test.ts
+import { describe, expect, it } from "vitest";
+import { isSaturday } from "./index.js";
+
+describe("isSaturday", () => {
+  it("returns true if the given date is Saturday", () => {
+    const result = isSaturday(new Date(2014, 8 /* Sep */, 27));
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is not Saturday", () => {
+    const result = isSaturday(new Date(2014, 8 /* Sep */, 25));
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isSaturday(new Date(2014, 1 /* Feb */, 15).getTime());
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is `Invalid Date`", () => {
+    const result = isSaturday(new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isSunday/test.ts
+import { describe, expect, it } from "vitest";
+import { isSunday } from "./index.js";
+
+describe("isSunday", () => {
+  it("returns true if the given date is Sunday", () => {
+    const result = isSunday(new Date(2014, 8 /* Sep */, 21));
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is not Sunday", () => {
+    const result = isSunday(new Date(2014, 8 /* Sep */, 25));
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isSunday(new Date(2014, 1 /* Feb */, 9).getTime());
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is `Invalid Date`", () => {
+    const result = isSunday(new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isThisHour/test.ts
+import { UTCDate } from "@date-fns/utc";
+import sinon from "sinon";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { isThisHour } from "./index.js";
+
+describe("isThisHour", () => {
+  let clock: sinon.SinonFakeTimers;
+  beforeEach(() => {
+    clock = sinon.useFakeTimers(
+      new Date(2014, 8 /* Sep */, 25, 18, 15, 15, 500).getTime(),
+    );
+  });
+
+  afterEach(() => {
+    clock.restore();
+  });
+
+  it("returns true if the given date and the current date have the same hour", () => {
+    const date = new Date(2014, 8 /* Sep */, 25, 18);
+    expect(isThisHour(date)).toBe(true);
+  });
+
+  it("returns false if the given date and the current date have different hours", () => {
+    const date = new Date(2014, 8 /* Sep */, 25, 19);
+    expect(isThisHour(date)).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const date = new Date(2014, 8 /* Sep */, 25, 18, 45).getTime();
+    expect(isThisHour(date)).toBe(true);
+  });
+
+  it("respects date extensions", () => {
+    expect(isThisHour(new UTCDate(+new Date(2014, 8 /* Sep */, 25, 18)))).toBe(
+      true,
+    );
+  });
+});
+
+// Path: src/isThisISOWeek/test.ts
+import { UTCDate } from "@date-fns/utc";
+import sinon from "sinon";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { isThisISOWeek } from "./index.js";
+
+describe("isSameISOWeek", () => {
+  let clock: sinon.SinonFakeTimers;
+  beforeEach(() => {
+    clock = sinon.useFakeTimers(new Date(2014, 8 /* Sep */, 25).getTime());
+  });
+
+  afterEach(() => {
+    clock.restore();
+  });
+
+  it("returns true if the given date and the current date have the same ISO week", () => {
+    const date = new Date(2014, 8 /* Sep */, 22);
+    expect(isThisISOWeek(date)).toBe(true);
+  });
+
+  it("returns false if the given date and the current date have different ISO weeks", () => {
+    const date = new Date(2014, 8 /* Sep */, 21);
+    expect(isThisISOWeek(date)).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const date = new Date(2014, 8 /* Sep */, 29).getTime();
+    expect(isThisISOWeek(date)).toBe(false);
+  });
+
+  it("respects date extensions", () => {
+    expect(isThisISOWeek(new UTCDate(+new Date(2014, 8 /* Sep */, 25)))).toBe(
+      true,
+    );
+  });
+});
+
+// Path: src/isThisMinute/test.ts
+import { UTCDate } from "@date-fns/utc";
+import sinon from "sinon";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { isThisMinute } from "./index.js";
+
+describe("isThisMinute", () => {
+  let clock: sinon.SinonFakeTimers;
+  beforeEach(() => {
+    clock = sinon.useFakeTimers(
+      new Date(2014, 8 /* Sep */, 25, 18, 30, 15, 500).getTime(),
+    );
+  });
+
+  afterEach(() => {
+    clock.restore();
+  });
+
+  it("returns true if the given date and the current date have the same minute", () => {
+    const date = new Date(2014, 8 /* Sep */, 25, 18, 30);
+    expect(isThisMinute(date)).toBe(true);
+  });
+
+  it("returns false if the given date and the current date have different minutes", () => {
+    const date = new Date(2014, 8 /* Sep */, 25, 18, 31);
+    expect(isThisMinute(date)).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const date = new Date(2014, 8 /* Sep */, 25, 18, 30, 30).getTime();
+    expect(isThisMinute(date)).toBe(true);
+  });
+
+  it("respects date extensions", () => {
+    expect(
+      isThisMinute(
+        new UTCDate(+new Date(2014, 8 /* Sep */, 25, 18, 30, 15, 500)),
+      ),
+    ).toBe(true);
+  });
+});
+
+// Path: src/isThisMonth/test.ts
+import { UTCDate } from "@date-fns/utc";
+import sinon from "sinon";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { isThisMonth } from "./index.js";
+
+describe("isThisMonth", () => {
+  let clock: sinon.SinonFakeTimers;
+  beforeEach(() => {
+    clock = sinon.useFakeTimers(new Date(2014, 8 /* Sep */, 1).getTime());
+  });
+
+  afterEach(() => {
+    clock.restore();
+  });
+
+  it("returns true if the given date and the current date have the same month (and year)", () => {
+    const date = new Date(2014, 8 /* Sep */, 15);
+    expect(isThisMonth(date)).toBe(true);
+  });
+
+  it("returns false if the given date and the current date have different months", () => {
+    const date = new Date(2013, 7 /* Aug */, 31);
+    expect(isThisMonth(date)).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const date = new Date(2014, 8 /* Sep */, 30).getTime();
+    expect(isThisMonth(date)).toBe(true);
+  });
+
+  it("respects date extensions", () => {
+    expect(isThisMonth(new UTCDate(+new Date(2014, 8 /* Sep */, 1)))).toBe(
+      true,
+    );
+  });
+});
+
+// Path: src/isThisQuarter/test.ts
+import { UTCDate } from "@date-fns/utc";
+import sinon from "sinon";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { isThisQuarter } from "./index.js";
+
+describe("isThisQuarter", () => {
+  let clock: sinon.SinonFakeTimers;
+  beforeEach(() => {
+    clock = sinon.useFakeTimers(new Date(2014, 6 /* Jul */, 1).getTime());
+  });
+
+  afterEach(() => {
+    clock.restore();
+  });
+
+  it("returns true if the given date and the current date have the same quarter (and year)", () => {
+    const date = new Date(2014, 6 /* Jul */, 2);
+    expect(isThisQuarter(date)).toBe(true);
+  });
+
+  it("returns false if the given date and the current date have different quarters", () => {
+    const date = new Date(2014, 1 /* Feb */, 11);
+    expect(isThisQuarter(date)).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const date = new Date(2014, 6 /* Jul */, 2).getTime();
+    expect(isThisQuarter(date)).toBe(true);
+  });
+
+  it("respects date extensions", () => {
+    expect(isThisQuarter(new UTCDate(+new Date(2014, 6 /* Jul */, 1)))).toBe(
+      true,
+    );
+  });
+});
+
+// Path: src/isThisSecond/test.ts
+import { UTCDate } from "@date-fns/utc";
+import sinon from "sinon";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { isThisSecond } from "./index.js";
+
+describe("isThisSecond", () => {
+  let clock: sinon.SinonFakeTimers;
+  beforeEach(() => {
+    clock = sinon.useFakeTimers(
+      new Date(2014, 8 /* Sep */, 25, 18, 30, 15, 500).getTime(),
+    );
+  });
+
+  afterEach(() => {
+    clock.restore();
+  });
+
+  it("returns true if the given date and the current date have the same second", () => {
+    const date = new Date(2014, 8 /* Sep */, 25, 18, 30, 15);
+    expect(isThisSecond(date)).toBe(true);
+  });
+
+  it("returns false if the given date and the current date have different seconds", () => {
+    const date = new Date(2014, 8 /* Sep */, 25, 18, 30, 16);
+    expect(isThisSecond(date)).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const date = new Date(2014, 8 /* Sep */, 25, 18, 30, 15, 250).getTime();
+    expect(isThisSecond(date)).toBe(true);
+  });
+
+  it("respects date extensions", () => {
+    expect(
+      isThisSecond(
+        new UTCDate(+new Date(2014, 8 /* Sep */, 25, 18, 30, 15, 500)),
+      ),
+    ).toBe(true);
+  });
+});
+
+// Path: src/isThisWeek/test.ts
+import { UTCDate } from "@date-fns/utc";
+import sinon from "sinon";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { isThisWeek } from "./index.js";
+
+describe("isThisWeek", () => {
+  let clock: sinon.SinonFakeTimers;
+  beforeEach(() => {
+    clock = sinon.useFakeTimers(new Date(2014, 8 /* Sep */, 21).getTime());
+  });
+
+  afterEach(() => {
+    clock.restore();
+  });
+
+  it("returns true if the given date and the current date have the same week", () => {
+    const date = new Date(2014, 8 /* Sep */, 21);
+    expect(isThisWeek(date)).toBe(true);
+  });
+
+  it("returns false if the given date and the current date have different weeks", () => {
+    const date = new Date(2014, 8 /* Sep */, 29);
+    expect(isThisWeek(date)).toBe(false);
+  });
+
+  it("allows to specify which day is the first day of the week", () => {
+    const date = new Date(2014, 8 /* Sep */, 22);
+    expect(isThisWeek(date, { weekStartsOn: 1 })).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const date = new Date(2014, 8 /* Sep */, 21).getTime();
+    expect(isThisWeek(date)).toBe(true);
+  });
+
+  it("respects date extensions", () => {
+    expect(isThisWeek(new UTCDate(+new Date(2014, 8 /* Sep */, 21)))).toBe(
+      true,
+    );
+  });
+});
+
+// Path: src/isThisYear/test.ts
+import { UTCDate } from "@date-fns/utc";
+import sinon from "sinon";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { isThisYear } from "./index.js";
+
+describe("isThisYear", () => {
+  let clock: sinon.SinonFakeTimers;
+  beforeEach(() => {
+    clock = sinon.useFakeTimers(new Date(2014, 0 /* Jan */, 1).getTime());
+  });
+
+  afterEach(() => {
+    clock.restore();
+  });
+
+  it("returns true if the given date and the current date have the same year", () => {
+    const date = new Date(2014, 6 /* Jul */, 2);
+    expect(isThisYear(date)).toBe(true);
+  });
+
+  it("returns false if the given date and the current date have different years", () => {
+    const date = new Date(2015, 6 /* Jul */, 2);
+    expect(isThisYear(date)).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const date = new Date(2014, 6 /* Jul */, 2).getTime();
+    expect(isThisYear(date)).toBe(true);
+  });
+
+  it("respects date extensions", () => {
+    expect(isThisYear(new UTCDate(+new Date(2014, 0 /* Jan */, 1)))).toBe(true);
+  });
+});
+
+// Path: src/isThursday/test.ts
+import { describe, expect, it } from "vitest";
+import { isThursday } from "./index.js";
+
+describe("isThursday", () => {
+  it("returns true if the given date is Thursday", () => {
+    const result = isThursday(new Date(2014, 8 /* Sep */, 25));
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is not Thursday", () => {
+    const result = isThursday(new Date(2014, 8 /* Sep */, 24));
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isThursday(new Date(2014, 1 /* Feb */, 13).getTime());
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is `Invalid Date`", () => {
+    const result = isThursday(new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isToday/test.ts
+import { UTCDate } from "@date-fns/utc";
+import sinon from "sinon";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { isToday } from "./index.js";
+
+describe("isToday", () => {
+  let clock: sinon.SinonFakeTimers;
+  beforeEach(() => {
+    clock = sinon.useFakeTimers(new Date(2014, 8 /* Sep */, 25).getTime());
+  });
+
+  afterEach(() => {
+    clock.restore();
+  });
+
+  it("returns true if the given date is today", () => {
+    const result = isToday(new Date(2014, 8 /* Sep */, 25));
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is not today", () => {
+    const result = isToday(new Date(2014, 8 /* Sep */, 26));
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isToday(new Date(2014, 8 /* Sep */, 25).getTime());
+    expect(result).toBe(true);
+  });
+
+  it("respects date extensions", () => {
+    expect(isToday(new UTCDate(+new Date(2014, 8 /* Sep */, 25)))).toBe(true);
+  });
+});
+
+// Path: src/isTomorrow/test.ts
+import { UTCDate } from "@date-fns/utc";
+import sinon from "sinon";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { isTomorrow } from "./index.js";
+
+describe("isTomorrow", () => {
+  let clock: sinon.SinonFakeTimers;
+  beforeEach(() => {
+    clock = sinon.useFakeTimers(new Date(2014, 8 /* Aug */, 25).getTime());
+  });
+
+  afterEach(() => {
+    clock.restore();
+  });
+
+  it("returns true if the given date is tomorrow", () => {
+    const result = isTomorrow(new Date(2014, 8 /* Sep */, 26));
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is not tomorrow", () => {
+    const result = isTomorrow(new Date(2014, 8 /* Sep */, 25));
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isTomorrow(new Date(2014, 8 /* Sep */, 26).getTime());
+    expect(result).toBe(true);
+  });
+
+  it("respects date extensions", () => {
+    expect(isTomorrow(new UTCDate(+new Date(2014, 8 /* Aug */, 26)))).toBe(
+      true,
+    );
+  });
+});
+
+// Path: src/isTuesday/test.ts
+import { describe, expect, it } from "vitest";
+import { isTuesday } from "./index.js";
+
+describe("isTuesday", () => {
+  it("returns true if the given date is Tuesday", () => {
+    const result = isTuesday(new Date(2014, 8 /* Sep */, 23));
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is not Tuesday", () => {
+    const result = isTuesday(new Date(2014, 8 /* Sep */, 25));
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isTuesday(new Date(2014, 1 /* Feb */, 11).getTime());
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is `Invalid Date`", () => {
+    const result = isTuesday(new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isValid/test.ts
+import { describe, expect, it } from "vitest";
+import { isValid } from "./index.js";
+
+describe("isValid", () => {
+  it("returns true if the given date is valid", () => {
+    const result = isValid(new Date());
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is invalid", () => {
+    const result = isValid(new Date(""));
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    expect(isValid(new Date(2014, 1 /* Feb */, 11).getTime())).toBe(true);
+    expect(isValid(NaN)).toBe(false);
+  });
+
+  it("treats null as an invalid date", () => {
+    const result = isValid(null);
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isWednesday/test.ts
+import { describe, expect, it } from "vitest";
+import { isWednesday } from "./index.js";
+
+describe("isWednesday", () => {
+  it("returns true if the given date is Wednesday", () => {
+    const result = isWednesday(new Date(2014, 8 /* Sep */, 24));
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is not Wednesday", () => {
+    const result = isWednesday(new Date(2014, 8 /* Sep */, 25));
+    expect(result).toBe(false);
+  });
+
+  it("accepts a timestamp", () => {
+    const result = isWednesday(new Date(2014, 1 /* Feb */, 12).getTime());
+    expect(result).toBe(true);
+  });
+
+  it("returns false if the given date is `Invalid Date`", () => {
+    const result = isWednesday(new Date(NaN));
+    expect(result).toBe(false);
+  });
+});
+
+// Path: src/isWeekend/test.ts
+...
+
+Function Description:1. **Purpose**: The function is designed to dynamically execute JavaScript code within the context of an iframe's document, primarily for testing or manipulating the iframe's environment.
+2. **Input**: A string containing the JavaScript code to be executed.
+3. **Output**: There is no direct output from the function itself; however, the effects of the executed script can modify the state or content of the iframe's document.
+4. **Procedure**: The function first locates an iframe element by its ID. It then checks if the iframe and its document body are properly accessible. If they are, it creates a new script element, sets its text content to the provided JavaScript code, and appends this script to the body of the iframe's document, thereby executing the code within the iframe's context.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

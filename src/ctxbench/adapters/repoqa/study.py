@@ -14,6 +14,18 @@ CONFIGURATIONS = ('inline-code-full', 'local-mcp-repoqa-ops')
 ARMS = ('always-inline', 'always-local-mcp', 'frozen-router', 'adaptive-router')
 SPLIT_SEED = 20260929
 EPISODE_SEEDS = (20261001, 20261002, 20261003)
+SIZE_PROFILES = {
+    'standard': frozenset((2048, 4096, 8192, 16384)),
+    'long64': frozenset((2048, 4096, 8192, 16384, 32768, 65536)),
+}
+
+
+def size_profile(variants: dict[str, set[int]]) -> str:
+    profiles = [name for name, sizes in SIZE_PROFILES.items()
+                if variants and all(values == sizes for values in variants.values())]
+    if len(profiles) != 1:
+        raise ValueError('each target must contain all four variants or all six variants')
+    return profiles[0]
 
 
 def digest(value) -> str:
@@ -65,8 +77,7 @@ def split_targets(index: list[dict]) -> dict:
     for item in index:
         groups[item['normalizedLanguage']].add(item['baseId'])
         variants[item['baseId']].add(item['requestedContextTokens'])
-    if any(v != {2048, 4096, 8192, 16384} for v in variants.values()):
-        raise ValueError('each target must contain all four variants')
+    size_profile(variants)
     rng = random.Random(SPLIT_SEED)
     calibration = [rng.choice(sorted(groups[language])) for language in sorted(groups)]
     return {'seed': SPLIT_SEED, 'calibration': calibration,
@@ -82,9 +93,10 @@ def ordered_workload(index: list[dict], targets: list[str], seed: int) -> list[d
     for size in sorted(bins):
         bins[size].sort(key=lambda x: x['instanceId'])
         rng.shuffle(bins[size])
-    if len(bins) != 4 or len({len(v) for v in bins.values()}) != 1:
+    if len(bins) not in (4, 6) or len({len(v) for v in bins.values()}) != 1:
         raise ValueError('workload requires balanced variants')
-    # Every phase boundary is divisible by four. Each block contains each size once.
+    if set(bins) not in SIZE_PROFILES.values():
+        raise ValueError('workload requires a supported size profile')
     result = []
     for i in range(len(next(iter(bins.values())))):
         block = [bins[size][i] for size in sorted(bins)]

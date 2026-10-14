@@ -1,0 +1,15 @@
+{
+  "baseId": "py_003",
+  "endByte": 1407,
+  "endLine": 44,
+  "instanceId": "py_003_ctx32k",
+  "language": "python",
+  "needleName": "maybe_init_stream",
+  "normalizedLanguage": "python",
+  "path": "torch_geometric/loader/prefetch.py",
+  "repo": "pyg-team/pytorch_geometric",
+  "sequence": 3,
+  "startByte": 1171,
+  "startLine": 37,
+  "targetFunction": "def maybe_init_stream(self) -> None:\n        if self.is_gpu:\n            self.stream = self.module.Stream()\n            self.stream_context = partial(\n                self.module.stream,\n                stream=self.stream,\n            )"
+}

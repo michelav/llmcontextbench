@@ -1,0 +1,21 @@
+{
+  "base_id": "java_001",
+  "code_context_ntokens": 31885,
+  "description": "1. **Purpose**: The function is designed to determine the smallest of two given integers, specifically handling cases where either or both might be a special value indicating absence or invalidity.\n2. **Input**: Two integers, where a value of `-1` typically represents an invalid or absent value.\n3. **Output**: Returns the smallest valid integer of the two provided. If both are invalid (`-1`), it returns `-1`.\n4. **Procedure**: The function checks if either of the integers is `-1`, which indicates an invalid or absent value. If one integer is `-1`, the function returns the other integer. If both are valid, it returns the smaller integer using a standard comparison.",
+  "end_byte": 5157,
+  "end_line": 131,
+  "instance_id": "java_001_ctx32k",
+  "language": "java",
+  "needle_name": "min",
+  "needle_token_end": 1628,
+  "needle_token_start": 1566,
+  "normalized_language": "java",
+  "path": "karate-core/src/main/java/com/intuit/karate/MatchStep.java",
+  "position_ratio": 0.05,
+  "repo": "karatelabs/karate",
+  "repoqa_description": "Function Description:1. **Purpose**: The function is designed to determine the smallest of two given integers, specifically handling cases where either or both might be a special value indicating absence or invalidity.\n2. **Input**: Two integers, where a value of `-1` typically represents an invalid or absent value.\n3. **Output**: Returns the smallest valid integer of the two provided. If both are invalid (`-1`), it returns `-1`.\n4. **Procedure**: The function checks if either of the integers is `-1`, which indicates an invalid or absent value. If one integer is `-1`, the function returns the other integer. If both are valid, it returns the smaller integer using a standard comparison.",
+  "requested_context_tokens": 32768,
+  "sequence": 1,
+  "start_byte": 4972,
+  "start_line": 122
+}

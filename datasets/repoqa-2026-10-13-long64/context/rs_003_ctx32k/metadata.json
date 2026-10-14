@@ -1,0 +1,21 @@
+{
+  "base_id": "rs_003",
+  "code_context_ntokens": 32570,
+  "description": "1. **Purpose**: The function is designed to prepare and configure the child process after a fork operation in a multi-process execution environment. It sets up shared memory, initializes timers, and runs necessary pre-execution hooks for observers and other components.\n2. **Input**: It takes references to the fuzzer state manager, the current state, the event manager, and the input to be processed.\n3. **Output**: Returns a result indicating success or an error if any step in the setup fails.\n4. **Procedure**: \n   - Initializes shared memory for the child process.\n   - Calls entry functions for target execution and pre-execution hooks.\n   - Executes observer pre-execution hooks.\n   - Depending on the operating system, sets up a timer using either `timer_settime` on Linux or `setitimer` on other Unix-like systems to manage execution time limits.",
+  "end_byte": 4484,
+  "end_line": 141,
+  "instance_id": "rs_003_ctx32k",
+  "language": "rust",
+  "needle_name": "pre_run_target_child",
+  "needle_token_end": 1861,
+  "needle_token_start": 1405,
+  "normalized_language": "rust",
+  "path": "libafl/src/executors/inprocess_fork/inner.rs",
+  "position_ratio": 0.05,
+  "repo": "AFLplusplus/LibAFL",
+  "repoqa_description": "Function Description:1. **Purpose**: The function is designed to prepare and configure the child process after a fork operation in a multi-process execution environment. It sets up shared memory, initializes timers, and runs necessary pre-execution hooks for observers and other components.\n2. **Input**: It takes references to the fuzzer state manager, the current state, the event manager, and the input to be processed.\n3. **Output**: Returns a result indicating success or an error if any step in the setup fails.\n4. **Procedure**: \n   - Initializes shared memory for the child process.\n   - Calls entry functions for target execution and pre-execution hooks.\n   - Executes observer pre-execution hooks.\n   - Depending on the operating system, sets up a timer using either `timer_settime` on Linux or `setitimer` on other Unix-like systems to manage execution time limits.",
+  "requested_context_tokens": 32768,
+  "sequence": 3,
+  "start_byte": 3142,
+  "start_line": 107
+}

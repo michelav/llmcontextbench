@@ -13,6 +13,7 @@ POLICY_VERSION = "2"
 
 class SizeBin(StrEnum):
     SMALL = "small"
+    MEDIUM = "medium"
     LARGE = "large"
 
 

@@ -1,5 +1,5 @@
 {
-  "id": "datasets/repoqa",
+  "id": "repoqa-adaptive-study",
   "name": "RepoQA adaptive research prototype",
   "output": "outputs",
   "dataset": {
@@ -15,18 +15,11 @@
   },
   "scope": {
     "instances": [],
-    "tasks": [
-      "snf_retrieve_function"
-    ]
+    "tasks": ["snf_retrieve_function"]
   },
   "factors": {
-    "model": [
-      "answer"
-    ],
-    "configuration": [
-      "inline-code-full",
-      "local-mcp-repoqa-ops"
-    ]
+    "model": ["answer"],
+    "configuration": ["inline-code-full", "local-mcp-repoqa-ops"]
   },
   "params": {
     "common": {}
@@ -63,12 +56,7 @@
     },
     "repoqa-default": {
       "type": "operations",
-      "operations": [
-        "list_files",
-        "list_symbols",
-        "get_symbol",
-        "read_file"
-      ]
+      "operations": ["list_files", "list_symbols", "get_symbol", "read_file"]
     }
   }
 }

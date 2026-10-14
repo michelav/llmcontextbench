@@ -16,6 +16,10 @@
       "provider": "openai",
       "name": "gpt-5.4-mini"
     },
+    "gpt3": {
+      "provider": "openai",
+      "name": "gpt-6-luna"
+    },
     "gemini1": {
       "provider": "google",
       "name": "gemini-2.5-flash-lite"
@@ -27,21 +31,15 @@
   },
   "scope": {
     "instances": [],
-    "tasks": [
-      "snf_retrieve_function"
-    ]
+    "tasks": ["snf_retrieve_function"]
   },
   "factors": {
-    "model": [
-      "gpt1",
-      "gpt2",
-      "gemini1",
-      "gemini2"
-    ],
+    "model": ["gpt3"],
     "configuration": [
       "inline-code",
-      "local-function-json",
-      "local-mcp-json"
+      "local-mcp-json",
+      "local-mcp-lean",
+      "local-function-lean"
     ]
   },
   "params": {
@@ -81,13 +79,32 @@
       "strategy": "local_mcp",
       "representation": "json",
       "surface": "repoqa-default"
+    },
+    "local-mcp-lean": {
+      "strategy": "local_mcp",
+      "representation": "json",
+      "surface": "repoqa-lean"
+    },
+    "local-function-lean": {
+      "strategy": "local_function",
+      "representation": "json",
+      "surface": "repoqa-lean"
     }
   },
   "surfaces": {
-    "full": {"type": "full_context"},
+    "full": { "type": "full_context" },
     "repoqa-default": {
       "type": "operations",
       "operations": ["list_files", "list_symbols", "get_symbol", "read_file"]
+    },
+    "repoqa-lean": {
+      "type": "operations",
+      "operations": [
+        "list_files_lean",
+        "list_symbols_lean",
+        "get_symbol_lean",
+        "read_file_lean"
+      ]
     }
   }
 }

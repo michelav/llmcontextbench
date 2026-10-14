@@ -1,0 +1,127 @@
+        writeScaledTemporal(localCalendar, subSecondNanos, scale, SSType.TIME);
+    }
+
+    void writeRPCDate(String sName, GregorianCalendar localCalendar, boolean bOut) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.DATEN);
+        if (null == localCalendar) {
+            writeByte((byte) 0);
+            return;
+        }
+
+        writeByte((byte) TDS.DAYS_INTO_CE_LENGTH);
+        writeScaledTemporal(localCalendar, 0, // subsecond nanos (none for a date value)
+                0, // scale (dates are not scaled)
+                SSType.DATE);
+    }
+
+    
+void writeEncryptedRPCTime(String sName, GregorianCalendar localCalendar, int subSecondNanos, int scale,
+            boolean bOut, SQLServerStatement statement) throws SQLServerException {
+        if (con.getSendTimeAsDatetime()) {
+            throw new SQLServerException(SQLServerException.getErrString("R_sendTimeAsDateTimeForAE"), null);
+        }
+        writeRPCNameValType(sName, bOut, TDSType.BIGVARBINARY);
+
+        if (null == localCalendar)
+            writeEncryptedRPCByteArray(null);
+        else
+            writeEncryptedRPCByteArray(writeEncryptedScaledTemporal(localCalendar, subSecondNanos, scale, SSType.TIME,
+                    (short) 0, statement));
+
+        writeByte(TDSType.TIMEN.byteValue());
+        writeByte((byte) scale);
+        writeCryptoMetaData();
+    }
+
+    void writeEncryptedRPCDate(String sName, GregorianCalendar localCalendar, boolean bOut,
+            SQLServerStatement statement) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.BIGVARBINARY);
+
+        if (null == localCalendar)
+            writeEncryptedRPCByteArray(null);
+        else
+            writeEncryptedRPCByteArray(writeEncryptedScaledTemporal(localCalendar, 0, // subsecond nanos (none for a
+                                                                                      // date value)
+                    0, // scale (dates are not scaled)
+                    SSType.DATE, (short) 0, statement));
+
+        writeByte(TDSType.DATEN.byteValue());
+        writeCryptoMetaData();
+    }
+
+    void writeEncryptedRPCDateTime(String sName, GregorianCalendar cal, int subSecondNanos, boolean bOut,
+            JDBCType jdbcType, SQLServerStatement statement) throws SQLServerException {
+        assert (subSecondNanos >= 0) && (subSecondNanos < Nanos.PER_SECOND) : "Invalid subNanoSeconds value: "
+                + subSecondNanos;
+        assert (cal != null) || (subSecondNanos == 0) : "Invalid subNanoSeconds value when calendar is null: "
+                + subSecondNanos;
+
+        writeRPCNameValType(sName, bOut, TDSType.BIGVARBINARY);
+
+        if (null == cal)
+            writeEncryptedRPCByteArray(null);
+        else
+            writeEncryptedRPCByteArray(getEncryptedDateTimeAsBytes(cal, subSecondNanos, jdbcType, statement));
+
+        if (JDBCType.SMALLDATETIME == jdbcType) {
+            writeByte(TDSType.DATETIMEN.byteValue());
+            writeByte((byte) 4);
+        } else {
+            writeByte(TDSType.DATETIMEN.byteValue());
+            writeByte((byte) 8);
+        }
+        writeCryptoMetaData();
+    }
+
+    // getEncryptedDateTimeAsBytes is called if jdbcType/ssType is SMALLDATETIME or DATETIME
+    byte[] getEncryptedDateTimeAsBytes(GregorianCalendar cal, int subSecondNanos, JDBCType jdbcType,
+            SQLServerStatement statement) throws SQLServerException {
+        int daysSinceSQLBaseDate = DDC.daysSinceBaseDate(cal.get(Calendar.YEAR), cal.get(Calendar.DAY_OF_YEAR),
+                TDS.BASE_YEAR_1900);
+
+        // Next, figure out the number of milliseconds since midnight of the current day.
+        int millisSinceMidnight = (subSecondNanos + Nanos.PER_MILLISECOND / 2) / Nanos.PER_MILLISECOND + // Millis into
+                                                                                                         // the current
+                                                                                                         // second
+                1000 * cal.get(Calendar.SECOND) + // Seconds into the current minute
+                60 * 1000 * cal.get(Calendar.MINUTE) + // Minutes into the current hour
+                60 * 60 * 1000 * cal.get(Calendar.HOUR_OF_DAY); // Hours into the current day
+
+        // The last millisecond of the current day is always rounded to the first millisecond
+        // of the next day because DATETIME is only accurate to 1/300th of a second.
+        if (millisSinceMidnight >= 1000 * 60 * 60 * 24 - 1) {
+            ++daysSinceSQLBaseDate;
+            millisSinceMidnight = 0;
+        }
+
+        if (JDBCType.SMALLDATETIME == jdbcType) {
+
+            int secondsSinceMidnight = (millisSinceMidnight / 1000);
+            int minutesSinceMidnight = (secondsSinceMidnight / 60);
+
+            // Values that are 29.998 seconds or less are rounded down to the nearest minute
+            minutesSinceMidnight = ((secondsSinceMidnight % 60) > 29.998) ? minutesSinceMidnight + 1
+                                                                          : minutesSinceMidnight;
+
+            // minutesSinceMidnight for (23:59:30)
+            int maxMinutesSinceMidnightSmallDateTime = 1440;
+            // Verification for smalldatetime to be within valid range of (1900.01.01) to (2079.06.06)
+            // smalldatetime for unencrypted does not allow insertion of 2079.06.06 23:59:59 and it is rounded up
+            // to 2079.06.07 00:00:00, therefore, we are checking minutesSinceMidnight for that condition. If it's not
+            // within valid range, then
+            // throw an exception now so that statement execution is safely canceled.
+            // 157 is the calculated day of year from 06-06 , 1440 is minutesince midnight for (23:59:30)
+            if ((daysSinceSQLBaseDate < DDC.daysSinceBaseDate(1900, 1, TDS.BASE_YEAR_1900)
+                    || daysSinceSQLBaseDate > DDC.daysSinceBaseDate(2079, 157, TDS.BASE_YEAR_1900))
+                    || (daysSinceSQLBaseDate == DDC.daysSinceBaseDate(2079, 157, TDS.BASE_YEAR_1900)
+                            && minutesSinceMidnight >= maxMinutesSinceMidnightSmallDateTime)) {
+                MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_valueOutOfRange"));
+                Object[] msgArgs = {SSType.SMALLDATETIME};
+                throw new SQLServerException(form.format(msgArgs), SQLState.DATA_EXCEPTION_DATETIME_FIELD_OVERFLOW,
+                        DriverError.NOT_SET, null);
+            }
+
+            ByteBuffer days = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
+            days.putShort((short) daysSinceSQLBaseDate);
+            ByteBuffer seconds = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
+...

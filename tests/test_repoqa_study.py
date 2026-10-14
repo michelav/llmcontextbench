@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from ctxbench.adapters.repoqa.study import digest, ordered_workload, split_targets, tree_hash
+from ctxbench.adapters.repoqa.study import digest, ordered_workload, split_targets, tree_hash, size_profile
+from ctxbench.adapters.repoqa.workload import prepare_request_features
+from ctxbench.adaptive.types import SizeBin
 
 
 def test_real_split_and_balanced_order():
@@ -23,6 +25,27 @@ def test_real_split_and_balanced_order():
 def test_missing_variant_rejected():
     with pytest.raises(ValueError, match='four variants'):
         split_targets([{'normalizedLanguage': 'python', 'baseId': 'x', 'requestedContextTokens': 2048}])
+
+
+def test_six_size_profile_and_balanced_order():
+    index = [{'normalizedLanguage': language, 'baseId': f'{language}_{target}',
+              'instanceId': f'{language}_{target}_ctx{size // 1024}k',
+              'requestedContextTokens': size}
+             for language in ('java', 'python') for target in range(2)
+             for size in (2048, 4096, 8192, 16384, 32768, 65536)]
+    variants = {item['baseId']: {row['requestedContextTokens'] for row in index
+                                  if row['baseId'] == item['baseId']} for item in index}
+    assert size_profile(variants) == 'long64'
+    split = split_targets(index)
+    workload = ordered_workload(index, split['heldOut'], 123)
+    assert len(workload) == 12
+    assert len({row['variant'] for row in workload[:6]}) == 6
+    assert digest(workload) == digest(ordered_workload(list(reversed(index)), split['heldOut'], 123))
+    for variant, expected in (('2k', SizeBin.SMALL), ('4k', SizeBin.SMALL),
+                              ('8k', SizeBin.MEDIUM), ('16k', SizeBin.MEDIUM),
+                              ('32k', SizeBin.LARGE), ('64k', SizeBin.LARGE)):
+        assert prepare_request_features(1, 100, variant, 'long64').size_bin == expected
+    assert prepare_request_features(1, 100, '8k').size_bin == SizeBin.LARGE
 
 
 def test_tree_hash_covers_content_and_paths(tmp_path):

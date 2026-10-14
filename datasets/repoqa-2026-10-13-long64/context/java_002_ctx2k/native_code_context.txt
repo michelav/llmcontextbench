@@ -1,0 +1,202 @@
+        String searchPath = create ? stripNameSpacePrefixes(path) : path;
+        XPathExpression expr = compile(searchPath);
+        Node result;
+        try {
+            result = (Node) expr.evaluate(node, XPathConstants.NODE);
+        } catch (XPathExpressionException e) {
+            throw new RuntimeException(e);
+        }
+        if (result == null && create) {
+            Document doc = node.getNodeType() == Node.DOCUMENT_NODE ? (Document) node : node.getOwnerDocument();
+            return createNodeByPath(doc, path);
+        } else {
+            return result;
+        }
+    }
+
+    
+public static Node createNodeByPath(Document doc, String path) {
+        int pos = path.lastIndexOf('/');
+        if (pos == 0) { // root
+            Node root = doc.getDocumentElement();
+            if (root == null) {
+                root = createElement(doc, path.substring(1), null, null);
+                doc.appendChild(root);
+            }
+            return root;
+        }
+        String left = path.substring(0, pos);
+        Node parent = getNodeByPath(doc, left, true);
+        String right = path.substring(pos + 1);
+        if (right.startsWith("@")) { // attribute
+            Element parentElement = (Element) parent;
+            right = right.substring(1);
+            parentElement.setAttribute(right, "");
+            return parentElement.getAttributeNode(right);
+        } else {
+            int bracketPos = right.indexOf('[');
+            if (bracketPos != -1) { // index, we assume it is 1 and still append
+                right = right.substring(0, bracketPos);
+            }
+            Element element = createElement(parent, right, null, null);
+            parent.appendChild(element);
+            return element;
+        }
+    }
+
+    public static String getTextValueByPath(Node node, String path) {
+        XPathExpression expr = compile(path);
+        try {
+            return expr.evaluate(node);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    public static void setByPath(Node doc, String path, String value) {
+        Node node = getNodeByPath(doc, path, true);
+        if (node.getNodeType() == Node.ATTRIBUTE_NODE) {
+            node.setNodeValue(value);
+        } else if (node.hasChildNodes() && node.getFirstChild().getNodeType() == Node.TEXT_NODE) {
+            node.getFirstChild().setTextContent(value);
+        } else if (node.getNodeType() == Node.ELEMENT_NODE) {
+            node.setTextContent(value);
+        }
+    }
+
+    public static void removeByPath(Document doc, String path) {
+        Node node = getNodeByPath(doc, path, false);
+        if (node == null) {
+            return;
+        }
+        if (node.getNodeType() == Node.ATTRIBUTE_NODE) {
+            Element parent = ((Attr) node).getOwnerElement();
+            parent.removeAttribute(node.getNodeName());
+        } else {
+            Node parent = node.getParentNode();
+            if (parent != null) {
+                parent.removeChild(node);
+            }
+        }
+    }
+
+    public static void setByPath(Document doc, String path, Node in) {
+        if (in.getNodeType() == Node.DOCUMENT_NODE) {
+            in = in.getFirstChild();
+        }
+        Node node = getNodeByPath(doc, path, true);
+        if (node == null) {
+            throw new RuntimeException("no results for xpath: " + path);
+        }
+        Node newNode = doc.importNode(in, true);
+        if (node.hasChildNodes() && node.getFirstChild().getNodeType() == Node.TEXT_NODE) {
+            node.replaceChild(newNode, node.getFirstChild());
+        } else {
+            node.appendChild(newNode);
+        }
+    }
+
+    public static DocumentContext toJsonDoc(Node node) {
+        return JsonPath.parse(toObject(node));
+    }
+
+    private static Map<String, Object> getAttributes(Node node) {
+        NamedNodeMap attribs = node.getAttributes();
+        int attribCount = attribs.getLength();
+        Map<String, Object> map = new LinkedHashMap<>(attribCount);
+        for (int j = 0; j < attribCount; j++) {
+            Node attrib = attribs.item(j);
+            map.put(attrib.getNodeName(), attrib.getNodeValue());
+        }
+        return map;
+    }
+
+    public static int getChildElementCount(Node node) {
+        NodeList nodes = node.getChildNodes();
+        int childCount = nodes.getLength();
+        int childElementCount = 0;
+        for (int i = 0; i < childCount; i++) {
+            Node child = nodes.item(i);
+            if (child.getNodeType() == Node.ELEMENT_NODE) {
+                childElementCount++;
+            }
+        }
+        return childElementCount;
+    }
+
+    private static Object getElementAsObject(Node node, boolean removeNamespace) {
+        int childElementCount = getChildElementCount(node);
+        if (childElementCount == 0) {
+            return StringUtils.trimToNull(node.getTextContent());
+        }
+        Map<String, Object> map = new LinkedHashMap<>(childElementCount);
+        NodeList nodes = node.getChildNodes();
+        int childCount = nodes.getLength();
+        for (int i = 0; i < childCount; i++) {
+            Node child = nodes.item(i);
+            if (child.getNodeType() != Node.ELEMENT_NODE) {
+                continue;
+            }
+            String childName = removeNamespace
+                    ? child.getNodeName().replaceFirst("(^.*:)", "") : child.getNodeName();
+            Object childValue = toObject(child, removeNamespace);
+            // auto detect repeating elements
+            if (map.containsKey(childName)) {
+                Object temp = map.get(childName);
+                if (temp instanceof List) {
+                    List list = (List) temp;
+                    list.add(childValue);
+                } else {
+                    List list = new ArrayList(childCount);
+                    map.put(childName, list);
+                    list.add(temp);
+                    list.add(childValue);
+                }
+            } else {
+                map.put(childName, childValue);
+            }
+        }
+        return map;
+    }
+
+    public static Object toObject(Node node) {
+        return toObject(node, false);
+    }
+
+    public static Object toObject(Node node, boolean removeNamespace) {
+        if (node.getNodeType() == Node.DOCUMENT_NODE) {
+            Map<String, Object> map = new LinkedHashMap<>(1);
+            node = node.getFirstChild();
+            if (node == null) {
+                return map;
+            }
+            while (node.getNodeType() != Node.ELEMENT_NODE) { // ignore comments etc
+                node = node.getNextSibling();
+            }
+            String name = removeNamespace
+                    ? node.getNodeName().replaceFirst("(^.*:)", "") : node.getNodeName();
+            map.put(name, toObject(node, removeNamespace));
+            return map;
+        }
+        Object value = getElementAsObject(node, removeNamespace);
+        if (node.hasAttributes()) {
+            Map<String, Object> attribs = getAttributes(node);
+            if (removeNamespace) {
+                attribs.keySet().removeIf(key -> "xmlns".equals(key) || key.startsWith("xmlns:"));
+            }
+            if (attribs.size() > 0) {
+                Map<String, Object> wrapper = new LinkedHashMap<>(2);
+                wrapper.put("_", value);
+                wrapper.put("@", attribs);
+                return wrapper;
+            } else {
+                //namespaces were the only attributes
+                return value;
+            }
+        } else {
+            return value;
+        }
+    }
+
+    public static Document fromMap(Map<String, Object> map) {
+...

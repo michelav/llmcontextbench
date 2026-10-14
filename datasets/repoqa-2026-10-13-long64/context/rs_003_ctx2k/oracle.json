@@ -1,0 +1,15 @@
+{
+  "baseId": "rs_003",
+  "endByte": 4484,
+  "endLine": 141,
+  "instanceId": "rs_003_ctx2k",
+  "language": "rust",
+  "needleName": "pre_run_target_child",
+  "normalizedLanguage": "rust",
+  "path": "libafl/src/executors/inprocess_fork/inner.rs",
+  "repo": "AFLplusplus/LibAFL",
+  "sequence": 3,
+  "startByte": 3142,
+  "startLine": 107,
+  "targetFunction": "pub(super) unsafe fn pre_run_target_child(\n        &mut self,\n        fuzzer: &mut Z,\n        state: &mut <GenericInProcessForkExecutorInner<HT, OT, S, SP, EM, Z> as UsesState>::State,\n        mgr: &mut EM,\n        input: &<GenericInProcessForkExecutorInner<HT, OT, S, SP, EM, Z> as UsesInput>::Input,\n    ) -> Result<(), Error> {\n        self.shmem_provider.post_fork(true)?;\n\n        self.enter_target(fuzzer, state, mgr, input);\n        self.hooks.pre_exec_all(state, input);\n\n        self.observers\n            .pre_exec_child_all(state, input)\n            .expect(\"Failed to run post_exec on observers\");\n\n        #[cfg(target_os = \"linux\")]\n        {\n            let mut timerid: libc::timer_t = null_mut();\n            // creates a new per-process interval timer\n            // we can't do this from the parent, timerid is unique to each process.\n            libc::timer_create(libc::CLOCK_MONOTONIC, null_mut(), addr_of_mut!(timerid));\n\n            // log::info!(\"Set timer! {:#?} {timerid:#?}\", self.itimerspec);\n            let _: i32 = libc::timer_settime(timerid, 0, addr_of_mut!(self.itimerspec), null_mut());\n        }\n        #[cfg(not(target_os = \"linux\"))]\n        {\n            setitimer(ITIMER_REAL, &mut self.itimerval, null_mut());\n        }\n        // log::trace!(\"{v:#?} {}\", nix::errno::errno());\n\n        Ok(())\n    }"
+}

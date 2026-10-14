@@ -10,7 +10,7 @@ import sys
 from statistics import mean
 
 from ctxbench.adapters.repoqa.package import RepoQADatasetAdapter
-from ctxbench.adapters.repoqa.study import digest, tree_hash, initial_budget, ordered_workload
+from ctxbench.adapters.repoqa.study import digest, tree_hash, initial_budget, ordered_workload, size_profile
 from ctxbench.adapters.repoqa.workload import prepare_request_features
 from ctxbench.adaptive.recovery import sealed_read, sealed_write, episode_lock
 from ctxbench.benchmark.models import Experiment, DatasetProvenance, TrialSpec
@@ -114,8 +114,9 @@ def prepare(*, definition, output):
         groups[item['normalizedLanguage']].add(item['baseId'])
         languages[item['baseId']].add(item['normalizedLanguage'])
         variants[item['baseId']].add(item['requestedContextTokens'])
-    if any(v != {2048, 4096, 8192, 16384} for v in variants.values()) or any(len(v) != 1 for v in languages.values()):
-        raise ValueError('each target requires four supported variants and one language')
+    profile = size_profile(variants)
+    if any(len(v) != 1 for v in languages.values()):
+        raise ValueError('each target requires one language')
     rng = random.Random(definition.split.seed)
     calibration = []
     for language in sorted(groups):
@@ -135,7 +136,7 @@ def prepare(*, definition, output):
                     raise ValueError(f'unpaired setting: {field}')
         context = adapter.get_context(first.instanceId, first.taskId, 'code').content
         variant = f"{item['requestedContextTokens'] // 1024}k"
-        features = prepare_request_features(1, len(context.encode()), variant)
+        features = prepare_request_features(1, len(context.encode()), variant, profile)
         requests[first.instanceId] = {'instanceId': first.instanceId, 'target': item['baseId'],
             'language': item['normalizedLanguage'], 'variant': variant, 'sizeBin': str(features.size_bin),
             'candidates': {cid: asdict(initial_budget(pair[cid], adapter, context_limit=definition.contextLimit,
@@ -159,7 +160,7 @@ def prepare(*, definition, output):
     plan = {'schemaVersion': VERSION, 'kind': 'baseline', 'definition': definition.model_dump(),
         'experimentPath': str(experiment_path), 'experimentHash': file_hash(experiment_path),
         'datasetRoot': str(dataset_root), 'datasetHash': tree_hash(dataset_root), 'sources': measurement_sources(),
-        'configurations': configurations, 'index': index, 'split': split, 'requests': requests,
+        'configurations': configurations, 'index': index, 'split': split, 'sizeProfile': profile, 'requests': requests,
         'episodes': episodes, 'manifest': manifest, 'estimates': {},
         'budget': {'contextLimit': definition.contextLimit, 'outputReservation': definition.outputReservation,
                    'tokenizer': 'utf8-byte-upper-bound', 'provenance': 'estimated', 'serializationAllowance': 256}}
@@ -239,7 +240,7 @@ def freeze(*, prepared):
             scored = [o['passed'] for o in observations if o['configuration'] == cid and type(o['passed']) is bool]
             quality[cid] = {'passRate': mean(scored) if scored else None,
                             'evaluated': len(scored), 'passed': sum(scored)}
-            for size in ('small', 'large'):
+            for size in (('small', 'medium', 'large') if plan['sizeProfile'] == 'long64' else ('small', 'large')):
                 sample = [o for o in observations if o['configuration'] == cid and o['sizeBin'] == size]
                 success = [o for o in sample if o['status'] == 'success']
                 tokens = [o['tokens']['value'] for o in sample if o['tokens']['value'] is not None]

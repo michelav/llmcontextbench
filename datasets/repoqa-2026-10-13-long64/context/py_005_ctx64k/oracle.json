@@ -1,0 +1,15 @@
+{
+  "baseId": "py_005",
+  "endByte": 8356,
+  "endLine": 245,
+  "instanceId": "py_005_ctx64k",
+  "language": "python",
+  "needleName": "read_from_memlab",
+  "normalizedLanguage": "python",
+  "path": "torch_geometric/profile/profile.py",
+  "repo": "pyg-team/pytorch_geometric",
+  "sequence": 5,
+  "startByte": 7700,
+  "startLine": 230,
+  "targetFunction": "def read_from_memlab(line_profiler: Any) -> List[float]:  # pragma: no cover\n    from pytorch_memlab.line_profiler.line_records import LineRecords\n\n    # See: https://pytorch.org/docs/stable/cuda.html#torch.cuda.memory_stats\n\n    track_stats = [  # Different statistic can be collected as needed.\n        'allocated_bytes.all.peak',\n        'reserved_bytes.all.peak',\n        'active_bytes.all.peak',\n    ]\n\n    records = LineRecords(line_profiler._raw_line_records,\n                          line_profiler._code_infos)\n    stats = records.display(None, track_stats)._line_records\n    return [byte_to_megabyte(x) for x in stats.values.max(axis=0).tolist()]"
+}

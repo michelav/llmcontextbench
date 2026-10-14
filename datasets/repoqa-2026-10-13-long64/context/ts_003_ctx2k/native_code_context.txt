@@ -1,0 +1,252 @@
+
+const extensions = /* #__PURE__ */ new Set(binaryExtensions);
+
+/**
+ * A function that checks if a file path is a binary file based on its
+ * extension.
+ * @param name The file path to check.
+ * @returns A boolean indicating whether the file path is a binary file.
+ */
+
+function isBinaryPath(name: string) {
+  return extensions.has(extname(name).slice(1).toLowerCase());
+}
+
+/**
+ * An interface that represents a file in a GitHub repository. It has
+ * properties for the file name, path, SHA, size, URLs, type, and links.
+ */
+export interface GithubFile {
+  name: string;
+  path: string;
+  sha: string;
+  size: number;
+  url: string;
+  html_url: string;
+  git_url: string;
+  download_url: string;
+  type: string;
+  _links: {
+    self: string;
+    git: string;
+    html: string;
+  };
+}
+
+/**
+ * An interface that represents the response from fetching the content of
+ * a file. It has properties for the file contents and metadata.
+ */
+interface GetContentResponse {
+  contents: string;
+  metadata: { source: string; repository: string; branch: string };
+}
+
+/**
+ * An interface describing the submodules of a Git repository.
+ */
+interface SubmoduleInfo {
+  name: string;
+  path: string;
+  url: string;
+  ref: string;
+}
+
+/**
+ * An interface that represents the parameters for the GithubRepoLoader
+ * class. It extends the AsyncCallerParams interface and adds additional
+ * properties specific to the GitHub repository loader.
+ */
+export interface GithubRepoLoaderParams extends AsyncCallerParams {
+  /**
+   * The base URL of the GitHub instance.
+   * To be used when you are not targeting github.com, e.g. a GitHub Enterprise instance.
+   */
+  baseUrl?: string;
+  /**
+   * The API endpoint URL of the GitHub instance.
+   * To be used when you are not targeting github.com, e.g. a GitHub Enterprise instance.
+   */
+  apiUrl?: string;
+  branch?: string;
+  recursive?: boolean;
+  /**
+   * Set to true to recursively process submodules. Is only effective, when recursive=true.
+   */
+  processSubmodules?: boolean;
+  unknown?: UnknownHandling;
+  accessToken?: string;
+  ignoreFiles?: (string | RegExp)[];
+  ignorePaths?: string[];
+  verbose?: boolean;
+  /**
+   * The maximum number of concurrent calls that can be made. Defaults to 2.
+   */
+  maxConcurrency?: number;
+  /**
+   * The maximum number of retries that can be made for a single call,
+   * with an exponential backoff between each attempt. Defaults to 2.
+   */
+  maxRetries?: number;
+}
+
+/**
+ * A class that extends the BaseDocumentLoader and implements the
+ * GithubRepoLoaderParams interface. It represents a document loader for
+ * loading files from a GitHub repository.
+ */
+export class GithubRepoLoader
+  extends BaseDocumentLoader
+  implements GithubRepoLoaderParams
+{
+  public baseUrl: string;
+
+  public apiUrl: string;
+
+  private readonly owner: string;
+
+  private readonly repo: string;
+
+  private readonly initialPath: string;
+
+  private headers: Record<string, string> = {};
+
+  public branch: string;
+
+  public recursive: boolean;
+
+  public processSubmodules: boolean;
+
+  public unknown: UnknownHandling;
+
+  public accessToken?: string;
+
+  public ignoreFiles: (string | RegExp)[];
+
+  public ignore?: Ignore;
+
+  public verbose?: boolean;
+
+  public maxConcurrency?: number;
+
+  public maxRetries?: number;
+
+  protected caller: AsyncCaller;
+
+  public ignorePaths?: string[];
+
+  private submoduleInfos: SubmoduleInfo[];
+
+  constructor(
+    githubUrl: string,
+    {
+      accessToken = getEnvironmentVariable("GITHUB_ACCESS_TOKEN"),
+      baseUrl = "https://github.com",
+      apiUrl = "https://api.github.com",
+      branch = "main",
+      recursive = true,
+      processSubmodules = false,
+      unknown = UnknownHandling.Warn,
+      ignoreFiles = [],
+      ignorePaths,
+      verbose = false,
+      maxConcurrency = 2,
+      maxRetries = 2,
+      ...rest
+    }: GithubRepoLoaderParams = {}
+  ) {
+    super();
+    this.baseUrl = baseUrl;
+    this.apiUrl = apiUrl;
+    const { owner, repo, path } = this.extractOwnerAndRepoAndPath(githubUrl);
+    this.owner = owner;
+    this.repo = repo;
+    this.initialPath = path;
+    this.branch = branch;
+    this.recursive = recursive;
+    // processing submodules without processing contents of other directories makes no sense
+    if (processSubmodules && !recursive) {
+      throw new Error(
+        `Input property "recursive" must be true if "processSubmodules" is true.`
+      );
+    }
+    this.processSubmodules = processSubmodules;
+    this.unknown = unknown;
+    this.accessToken = accessToken;
+    this.ignoreFiles = ignoreFiles;
+    this.verbose = verbose;
+    this.maxConcurrency = maxConcurrency;
+    this.maxRetries = maxRetries;
+    this.headers = {
+      "User-Agent": "langchain",
+    };
+    this.caller = new AsyncCaller({
+      maxConcurrency,
+      maxRetries,
+      ...rest,
+    });
+    this.ignorePaths = ignorePaths;
+    if (ignorePaths) {
+      this.ignore = ignore.default().add(ignorePaths);
+    }
+    if (this.accessToken) {
+      this.headers = {
+        ...this.headers,
+        Authorization: `Bearer ${this.accessToken}`,
+      };
+    }
+  }
+
+  /**
+   * Extracts the owner, repository, and path from a GitHub URL.
+   * @param url The GitHub URL to extract information from.
+   * @returns An object containing the owner, repository, and path extracted from the GitHub URL.
+   */
+  private extractOwnerAndRepoAndPath(url: string): {
+    owner: string;
+    repo: string;
+    path: string;
+  } {
+    const match = url.match(
+      new RegExp(`${this.baseUrl}/([^/]+)/([^/]+)(/tree/[^/]+/(.+))?`, "i")
+    );
+
+    if (!match) {
+      throw new Error("Invalid GitHub URL format.");
+    }
+
+    return { owner: match[1], repo: match[2], path: match[4] || "" };
+  }
+
+  /**
+   * Fetches the files from the GitHub repository and creates Document
+   * instances for each file. It also handles error handling based on the
+   * unknown handling option.
+   * @returns A promise that resolves to an array of Document instances.
+   */
+  public async load(): Promise<Document[]> {
+    this.log(
+      `Loading documents from ${this.baseUrl}/${this.owner}/${this.repo}/${this.initialPath}...`
+    );
+    // process repository without submodules
+    const documents: Document[] = (await this.processRepo()).map(
+      (fileResponse) =>
+        new Document({
+          pageContent: fileResponse.contents,
+          metadata: fileResponse.metadata,
+        })
+    );
+    if (this.processSubmodules) {
+      // process submodules
+      await this.getSubmoduleInfo();
+      for (const submoduleInfo of this.submoduleInfos) {
+        documents.push(...(await this.loadSubmodule(submoduleInfo)));
+      }
+    }
+    return documents;
+  }
+
+  /**
+   * Asynchronously streams documents from the entire GitHub repository.
+   * It is suitable for situations where processing large repositories in a memory-efficient manner is required.
+...

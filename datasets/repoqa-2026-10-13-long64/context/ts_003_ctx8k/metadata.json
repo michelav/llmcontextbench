@@ -1,0 +1,21 @@
+{
+  "base_id": "ts_003",
+  "code_context_ntokens": 8050,
+  "description": "1. **Purpose**: The function determines if a given file path corresponds to a binary file by examining the file extension.\n2. **Input**: A string representing the file path.\n3. **Output**: A boolean value; `true` if the file is binary, otherwise `false`.\n4. **Procedure**: The function extracts the extension from the file path, converts it to lowercase, and checks if this extension is included in a predefined set of binary file extensions.",
+  "end_byte": 827,
+  "end_line": 24,
+  "instance_id": "ts_003_ctx8k",
+  "language": "typescript",
+  "needle_name": "isBinaryPath",
+  "needle_token_end": 409,
+  "needle_token_start": 377,
+  "normalized_language": "typescript",
+  "path": "langchain/src/document_loaders/web/github.ts",
+  "position_ratio": 0.05,
+  "repo": "langchain-ai/langchainjs",
+  "repoqa_description": "Function Description:1. **Purpose**: The function determines if a given file path corresponds to a binary file by examining the file extension.\n2. **Input**: A string representing the file path.\n3. **Output**: A boolean value; `true` if the file is binary, otherwise `false`.\n4. **Procedure**: The function extracts the extension from the file path, converts it to lowercase, and checks if this extension is included in a predefined set of binary file extensions.",
+  "requested_context_tokens": 8192,
+  "sequence": 3,
+  "start_byte": 725,
+  "start_line": 21
+}

@@ -1,0 +1,282 @@
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:            MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_valueOutOfRange"));
+            Object[] msgArgs = {SSType.DATETIME};
+            throw new SQLServerException(form.format(msgArgs), SQLState.DATA_EXCEPTION_DATETIME_FIELD_OVERFLOW,
+                    DriverError.NOT_SET, null);
+        }
+
+        // And put it all on the wire...
+
+        // Number of days since the SQL Server Base Date (January 1, 1900)
+        writeInt(daysSinceSQLBaseDate);
+
+        // Milliseconds since midnight (at a resolution of three hundredths of a second)
+        writeInt((3 * millisSinceMidnight + 5) / 10);
+    }
+
+    void writeRPCTime(String sName, GregorianCalendar localCalendar, int subSecondNanos, int scale,
+            boolean bOut) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.TIMEN);
+        writeByte((byte) scale);
+
+        if (null == localCalendar) {
+            writeByte((byte) 0);
+            return;
+        }
+
+        writeByte((byte) TDS.timeValueLength(scale));
+        writeScaledTemporal(localCalendar, subSecondNanos, scale, SSType.TIME);
+    }
+
+    void writeRPCDate(String sName, GregorianCalendar localCalendar, boolean bOut) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.DATEN);
+        if (null == localCalendar) {
+            writeByte((byte) 0);
+            return;
+        }
+
+        writeByte((byte) TDS.DAYS_INTO_CE_LENGTH);
+        writeScaledTemporal(localCalendar, 0, // subsecond nanos (none for a date value)
+                0, // scale (dates are not scaled)
+                SSType.DATE);
+    }
+
+    
+void writeEncryptedRPCTime(String sName, GregorianCalendar localCalendar, int subSecondNanos, int scale,
+            boolean bOut, SQLServerStatement statement) throws SQLServerException {
+        if (con.getSendTimeAsDatetime()) {
+            throw new SQLServerException(SQLServerException.getErrString("R_sendTimeAsDateTimeForAE"), null);
+        }
+        writeRPCNameValType(sName, bOut, TDSType.BIGVARBINARY);
+
+        if (null == localCalendar)
+            writeEncryptedRPCByteArray(null);
+        else
+            writeEncryptedRPCByteArray(writeEncryptedScaledTemporal(localCalendar, subSecondNanos, scale, SSType.TIME,
+                    (short) 0, statement));
+
+        writeByte(TDSType.TIMEN.byteValue());
+        writeByte((byte) scale);
+        writeCryptoMetaData();
+    }
+
+    void writeEncryptedRPCDate(String sName, GregorianCalendar localCalendar, boolean bOut,
+            SQLServerStatement statement) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.BIGVARBINARY);
+
+        if (null == localCalendar)
+            writeEncryptedRPCByteArray(null);
+        else
+            writeEncryptedRPCByteArray(writeEncryptedScaledTemporal(localCalendar, 0, // subsecond nanos (none for a
+                                                                                      // date value)
+                    0, // scale (dates are not scaled)
+                    SSType.DATE, (short) 0, statement));
+
+        writeByte(TDSType.DATEN.byteValue());
+        writeCryptoMetaData();
+    }
+
+    void writeEncryptedRPCDateTime(String sName, GregorianCalendar cal, int subSecondNanos, boolean bOut,
+            JDBCType jdbcType, SQLServerStatement statement) throws SQLServerException {
+        assert (subSecondNanos >= 0) && (subSecondNanos < Nanos.PER_SECOND) : "Invalid subNanoSeconds value: "
+                + subSecondNanos;
+        assert (cal != null) || (subSecondNanos == 0) : "Invalid subNanoSeconds value when calendar is null: "
+                + subSecondNanos;
+
+        writeRPCNameValType(sName, bOut, TDSType.BIGVARBINARY);
+
+        if (null == cal)
+            writeEncryptedRPCByteArray(null);
+        else
+            writeEncryptedRPCByteArray(getEncryptedDateTimeAsBytes(cal, subSecondNanos, jdbcType, statement));
+
+        if (JDBCType.SMALLDATETIME == jdbcType) {
+            writeByte(TDSType.DATETIMEN.byteValue());
+            writeByte((byte) 4);
+        } else {
+            writeByte(TDSType.DATETIMEN.byteValue());
+            writeByte((byte) 8);
+        }
+        writeCryptoMetaData();
+    }
+
+    // getEncryptedDateTimeAsBytes is called if jdbcType/ssType is SMALLDATETIME or DATETIME
+    byte[] getEncryptedDateTimeAsBytes(GregorianCalendar cal, int subSecondNanos, JDBCType jdbcType,
+            SQLServerStatement statement) throws SQLServerException {
+        int daysSinceSQLBaseDate = DDC.daysSinceBaseDate(cal.get(Calendar.YEAR), cal.get(Calendar.DAY_OF_YEAR),
+                TDS.BASE_YEAR_1900);
+
+        // Next, figure out the number of milliseconds since midnight of the current day.
+        int millisSinceMidnight = (subSecondNanos + Nanos.PER_MILLISECOND / 2) / Nanos.PER_MILLISECOND + // Millis into
+                                                                                                         // the current
+                                                                                                         // second
+                1000 * cal.get(Calendar.SECOND) + // Seconds into the current minute
+                60 * 1000 * cal.get(Calendar.MINUTE) + // Minutes into the current hour
+                60 * 60 * 1000 * cal.get(Calendar.HOUR_OF_DAY); // Hours into the current day
+
+        // The last millisecond of the current day is always rounded to the first millisecond
+        // of the next day because DATETIME is only accurate to 1/300th of a second.
+        if (millisSinceMidnight >= 1000 * 60 * 60 * 24 - 1) {
+            ++daysSinceSQLBaseDate;
+            millisSinceMidnight = 0;
+        }
+
+        if (JDBCType.SMALLDATETIME == jdbcType) {
+
+            int secondsSinceMidnight = (millisSinceMidnight / 1000);
+            int minutesSinceMidnight = (secondsSinceMidnight / 60);
+
+            // Values that are 29.998 seconds or less are rounded down to the nearest minute
+            minutesSinceMidnight = ((secondsSinceMidnight % 60) > 29.998) ? minutesSinceMidnight + 1
+                                                                          : minutesSinceMidnight;
+
+            // minutesSinceMidnight for (23:59:30)
+            int maxMinutesSinceMidnightSmallDateTime = 1440;
+            // Verification for smalldatetime to be within valid range of (1900.01.01) to (2079.06.06)
+            // smalldatetime for unencrypted does not allow insertion of 2079.06.06 23:59:59 and it is rounded up
+            // to 2079.06.07 00:00:00, therefore, we are checking minutesSinceMidnight for that condition. If it's not
+            // within valid range, then
+            // throw an exception now so that statement execution is safely canceled.
+            // 157 is the calculated day of year from 06-06 , 1440 is minutesince midnight for (23:59:30)
+            if ((daysSinceSQLBaseDate < DDC.daysSinceBaseDate(1900, 1, TDS.BASE_YEAR_1900)
+                    || daysSinceSQLBaseDate > DDC.daysSinceBaseDate(2079, 157, TDS.BASE_YEAR_1900))
+                    || (daysSinceSQLBaseDate == DDC.daysSinceBaseDate(2079, 157, TDS.BASE_YEAR_1900)
+                            && minutesSinceMidnight >= maxMinutesSinceMidnightSmallDateTime)) {
+                MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_valueOutOfRange"));
+                Object[] msgArgs = {SSType.SMALLDATETIME};
+                throw new SQLServerException(form.format(msgArgs), SQLState.DATA_EXCEPTION_DATETIME_FIELD_OVERFLOW,
+                        DriverError.NOT_SET, null);
+            }
+
+            ByteBuffer days = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
+            days.putShort((short) daysSinceSQLBaseDate);
+            ByteBuffer seconds = ByteBuffer.allocate(2).order(ByteOrder.LITTLE_ENDIAN);
+            seconds.putShort((short) minutesSinceMidnight);
+
+            byte[] value = new byte[4];
+            System.arraycopy(days.array(), 0, value, 0, 2);
+            System.arraycopy(seconds.array(), 0, value, 2, 2);
+            return SQLServerSecurityUtility.encryptWithKey(value, cryptoMeta, con, statement);
+        } else if (JDBCType.DATETIME == jdbcType) {
+            // Last-ditch verification that the value is in the valid range for the
+            // DATETIMEN TDS data type (1/1/1753 to 12/31/9999). If it's not, then
+            // throw an exception now so that statement execution is safely canceled.
+            // Attempting to put an invalid value on the wire would result in a TDS
+            // exception, which would close the connection.
+            // These are based on SQL Server algorithms
+            // And put it all on the wire...
+            if (daysSinceSQLBaseDate < DDC.daysSinceBaseDate(1753, 1, TDS.BASE_YEAR_1900)
+                    || daysSinceSQLBaseDate >= DDC.daysSinceBaseDate(10000, 1, TDS.BASE_YEAR_1900)) {
+                MessageFormat form = new MessageFormat(SQLServerException.getErrString("R_valueOutOfRange"));
+                Object[] msgArgs = {SSType.DATETIME};
+                throw new SQLServerException(form.format(msgArgs), SQLState.DATA_EXCEPTION_DATETIME_FIELD_OVERFLOW,
+                        DriverError.NOT_SET, null);
+            }
+
+            // Number of days since the SQL Server Base Date (January 1, 1900)
+            ByteBuffer days = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
+            days.putInt(daysSinceSQLBaseDate);
+            ByteBuffer seconds = ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN);
+            seconds.putInt((3 * millisSinceMidnight + 5) / 10);
+
+            byte[] value = new byte[8];
+            System.arraycopy(days.array(), 0, value, 0, 4);
+            System.arraycopy(seconds.array(), 0, value, 4, 4);
+            return SQLServerSecurityUtility.encryptWithKey(value, cryptoMeta, con, statement);
+        }
+
+        assert false : "Unexpected JDBCType type " + jdbcType;
+        return null;
+    }
+
+    void writeEncryptedRPCDateTime2(String sName, GregorianCalendar localCalendar, int subSecondNanos, int scale,
+            boolean bOut, SQLServerStatement statement) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.BIGVARBINARY);
+
+        if (null == localCalendar)
+            writeEncryptedRPCByteArray(null);
+        else
+            writeEncryptedRPCByteArray(writeEncryptedScaledTemporal(localCalendar, subSecondNanos, scale,
+                    SSType.DATETIME2, (short) 0, statement));
+
+        writeByte(TDSType.DATETIME2N.byteValue());
+        writeByte((byte) (scale));
+        writeCryptoMetaData();
+    }
+
+    void writeEncryptedRPCDateTimeOffset(String sName, GregorianCalendar utcCalendar, int minutesOffset,
+            int subSecondNanos, int scale, boolean bOut, SQLServerStatement statement) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.BIGVARBINARY);
+
+        if (null == utcCalendar)
+            writeEncryptedRPCByteArray(null);
+        else {
+            assert 0 == utcCalendar.get(Calendar.ZONE_OFFSET);
+            writeEncryptedRPCByteArray(writeEncryptedScaledTemporal(utcCalendar, subSecondNanos, scale,
+                    SSType.DATETIMEOFFSET, (short) minutesOffset, statement));
+        }
+
+        writeByte(TDSType.DATETIMEOFFSETN.byteValue());
+        writeByte((byte) (scale));
+        writeCryptoMetaData();
+
+    }
+
+    void writeRPCDateTime2(String sName, GregorianCalendar localCalendar, int subSecondNanos, int scale,
+            boolean bOut) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.DATETIME2N);
+        writeByte((byte) scale);
+
+        if (null == localCalendar) {
+            writeByte((byte) 0);
+            return;
+        }
+
+        writeByte((byte) TDS.datetime2ValueLength(scale));
+        writeScaledTemporal(localCalendar, subSecondNanos, scale, SSType.DATETIME2);
+    }
+
+    void writeRPCDateTimeOffset(String sName, GregorianCalendar utcCalendar, int minutesOffset, int subSecondNanos,
+            int scale, boolean bOut) throws SQLServerException {
+        writeRPCNameValType(sName, bOut, TDSType.DATETIMEOFFSETN);
+        writeByte((byte) scale);
+
+        if (null == utcCalendar) {
+            writeByte((byte) 0);
+            return;
+        }
+
+        assert 0 == utcCalendar.get(Calendar.ZONE_OFFSET);
+
+        writeByte((byte) TDS.datetimeoffsetValueLength(scale));
+        writeScaledTemporal(utcCalendar, subSecondNanos, scale, SSType.DATETIMEOFFSET);
+
+        writeShort((short) minutesOffset);
+    }
+
+    /**
+     * Returns subSecondNanos rounded to the maximum precision supported. The maximum fractional scale is
+     * MAX_FRACTIONAL_SECONDS_SCALE(7). Eg1: if you pass 456,790,123 the function would return 456,790,100 Eg2: if you
+     * pass 456,790,150 the function would return 456,790,200 Eg3: if you pass 999,999,951 the function would return
+     * 1,000,000,000 This is done to ensure that we have consistent rounding behaviour in setters and getters. Bug
+     * #507919
+     */
+    private int getRoundedSubSecondNanos(int subSecondNanos) {
+        return ((subSecondNanos + (Nanos.PER_MAX_SCALE_INTERVAL / 2)) / Nanos.PER_MAX_SCALE_INTERVAL)
+                * Nanos.PER_MAX_SCALE_INTERVAL;
+    }
+
+    /**
+     * Writes to the TDS channel a temporal value as an instance instance of one of the scaled temporal SQL types: DATE,
+     * TIME, DATETIME2, or DATETIMEOFFSET.
+     *
+...
+
+Function Description:1. **Purpose**: The function is designed to securely transmit a time value in an encrypted form as part of a remote procedure call (RPC) to a SQL Server, ensuring the confidentiality of the data.
+2. **Input**: The function takes a calendar object representing the time to be encrypted, nanoseconds to add precision, a scale to define the precision of the time value, a boolean indicating if the parameter is an output, and a statement object for SQL operations.
+3. **Output**: There is no direct return value; however, the function writes encrypted time data to a network stream or buffer for SQL Server communication.
+4. **Procedure**: 
+   - Initially, the function checks if the configuration allows sending time as datetime, throwing an exception if not permitted.
+   - It sets the parameter type for the RPC.
+   - If the calendar object is null, it writes a null value; otherwise, it encrypts the time data (including nanoseconds and scale adjustments) and writes this encrypted data.
+   - Finally, it writes metadata related to the encryption and the time type to the stream or buffer.
+Based on the function description and code context, please retrieve and repeat the exact described function from the code context in a code block wrapped by ```:

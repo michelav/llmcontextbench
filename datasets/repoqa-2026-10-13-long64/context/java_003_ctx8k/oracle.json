@@ -1,0 +1,15 @@
+{
+  "baseId": "java_003",
+  "endByte": 16407,
+  "endLine": 409,
+  "instanceId": "java_003_ctx8k",
+  "language": "java",
+  "needleName": "checkAndAppendClientConnId",
+  "normalizedLanguage": "java",
+  "path": "src/main/java/com/microsoft/sqlserver/jdbc/SQLServerException.java",
+  "repo": "microsoft/mssql-jdbc",
+  "sequence": 3,
+  "startByte": 15632,
+  "startLine": 394,
+  "targetFunction": "static String checkAndAppendClientConnId(String errMsg, SQLServerConnection conn) {\n        if (null != conn && conn.isConnected()) {\n            UUID clientConnId = conn.getClientConIdInternal();\n            if (null != clientConnId) {\n                StringBuilder sb = (errMsg != null) ? new StringBuilder(errMsg) : new StringBuilder();\n                // This syntax of adding connection id is matched in a retry logic. If anything changes here, make\n                // necessary changes to enableSSL() function's exception handling mechanism.\n                sb.append(LOG_CLIENT_CONNECTION_ID_PREFIX);\n                sb.append(clientConnId.toString());\n                return sb.toString();\n            }\n        }\n        return (errMsg != null) ? errMsg : \"\";\n\n    }"
+}

@@ -1,0 +1,1385 @@
+# Repository: pyg-team/pytorch_geometric
+
+        negative_slope (float, optional): LeakyReLU angle of the negative
+            slope. (default: :obj:`0.2`)
+        dropout (float, optional): Dropout probability of the normalized
+            attention coefficients which exposes each node to a stochastically
+            sampled neighborhood during training. (default: :obj:`0`)
+        add_self_loops (bool, optional): If set to :obj:`False`, will not add
+            self-loops to the input graph. (default: :obj:`True`)
+        bias (bool, optional): If set to :obj:`False`, the layer will not learn
+            an additive bias. (default: :obj:`True`)
+        attention_type (str, optional): Type of attention to use
+            (:obj:`'MX'`, :obj:`'SD'`). (default: :obj:`'MX'`)
+        neg_sample_ratio (float, optional): The ratio of the number of sampled
+            negative edges to the number of positive edges.
+            (default: :obj:`0.5`)
+        edge_sample_ratio (float, optional): The ratio of samples to use for
+            training among the number of training edges. (default: :obj:`1.0`)
+        is_undirected (bool, optional): Whether the input graph is undirected.
+            If not given, will be automatically computed with the input graph
+            when negative sampling is performed. (default: :obj:`False`)
+        **kwargs (optional): Additional arguments of
+            :class:`torch_geometric.nn.conv.MessagePassing`.
+
+    Shapes:
+        - **input:**
+          node features :math:`(|\mathcal{V}|, F_{in})`,
+          edge indices :math:`(2, |\mathcal{E}|)`,
+          negative edge indices :math:`(2, |\mathcal{E}^{(-)}|)` *(optional)*
+        - **output:** node features :math:`(|\mathcal{V}|, H * F_{out})`
+    """
+    att_x: OptTensor
+    att_y: OptTensor
+
+    def __init__(self, in_channels: int, out_channels: int, heads: int = 1,
+                 concat: bool = True, negative_slope: float = 0.2,
+                 dropout: float = 0.0, add_self_loops: bool = True,
+                 bias: bool = True, attention_type: str = 'MX',
+                 neg_sample_ratio: float = 0.5, edge_sample_ratio: float = 1.0,
+                 is_undirected: bool = False, **kwargs):
+        kwargs.setdefault('aggr', 'add')
+        super().__init__(node_dim=0, **kwargs)
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.heads = heads
+        self.concat = concat
+        self.negative_slope = negative_slope
+        self.dropout = dropout
+        self.add_self_loops = add_self_loops
+        self.attention_type = attention_type
+        self.neg_sample_ratio = neg_sample_ratio
+        self.edge_sample_ratio = edge_sample_ratio
+        self.is_undirected = is_undirected
+
+        assert attention_type in ['MX', 'SD']
+        assert 0.0 < neg_sample_ratio and 0.0 < edge_sample_ratio <= 1.0
+
+        self.lin = Linear(in_channels, heads * out_channels, bias=False,
+                          weight_initializer='glorot')
+
+        if self.attention_type == 'MX':
+            self.att_l = Parameter(torch.empty(1, heads, out_channels))
+            self.att_r = Parameter(torch.empty(1, heads, out_channels))
+        else:  # self.attention_type == 'SD'
+            self.register_parameter('att_l', None)
+            self.register_parameter('att_r', None)
+
+        self.att_x = self.att_y = None  # x/y for self-supervision
+
+        if bias and concat:
+            self.bias = Parameter(torch.empty(heads * out_channels))
+        elif bias and not concat:
+            self.bias = Parameter(torch.empty(out_channels))
+        else:
+            self.register_parameter('bias', None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        super().reset_parameters()
+        self.lin.reset_parameters()
+        glorot(self.att_l)
+        glorot(self.att_r)
+        zeros(self.bias)
+
+    def forward(
+        self,
+        x: Tensor,
+        edge_index: Adj,
+        neg_edge_index: OptTensor = None,
+        batch: OptTensor = None,
+    ) -> Tensor:
+        r"""Runs the forward pass of the module.
+
+        Args:
+            x (torch.Tensor): The input node features.
+            edge_index (torch.Tensor or SparseTensor): The edge indices.
+            neg_edge_index (torch.Tensor, optional): The negative edges to
+                train against. If not given, uses negative sampling to
+                calculate negative edges. (default: :obj:`None`)
+            batch (torch.Tensor, optional): The batch vector
+                :math:`\mathbf{b} \in {\{ 0, \ldots, B-1\}}^N`, which assigns
+                each element to a specific example.
+                Used when sampling negatives on-the-fly in mini-batch
+                scenarios. (default: :obj:`None`)
+        """
+        N, H, C = x.size(0), self.heads, self.out_channels
+
+        if self.add_self_loops:
+            if isinstance(edge_index, SparseTensor):
+                edge_index = torch_sparse.fill_diag(edge_index, 1.)
+            else:
+                edge_index, _ = remove_self_loops(edge_index)
+                edge_index, _ = add_self_loops(edge_index, num_nodes=N)
+
+        x = self.lin(x).view(-1, H, C)
+
+        # propagate_type: (x: Tensor)
+        out = self.propagate(edge_index, x=x)
+
+        if self.training:
+            if isinstance(edge_index, SparseTensor):
+                col, row, _ = edge_index.coo()
+                edge_index = torch.stack([row, col], dim=0)
+            pos_edge_index = self.positive_sampling(edge_index)
+
+            pos_att = self.get_attention(
+                edge_index_i=pos_edge_index[1],
+                x_i=x[pos_edge_index[1]],
+                x_j=x[pos_edge_index[0]],
+                num_nodes=x.size(0),
+                return_logits=True,
+            )
+
+            if neg_edge_index is None:
+                neg_edge_index = self.negative_sampling(edge_index, N, batch)
+
+            neg_att = self.get_attention(
+                edge_index_i=neg_edge_index[1],
+                x_i=x[neg_edge_index[1]],
+                x_j=x[neg_edge_index[0]],
+                num_nodes=x.size(0),
+                return_logits=True,
+            )
+
+            self.att_x = torch.cat([pos_att, neg_att], dim=0)
+            self.att_y = self.att_x.new_zeros(self.att_x.size(0))
+            self.att_y[:pos_edge_index.size(1)] = 1.
+
+        if self.concat is True:
+            out = out.view(-1, self.heads * self.out_channels)
+        else:
+            out = out.mean(dim=1)
+
+        if self.bias is not None:
+            out = out + self.bias
+
+        return out
+
+    def message(self, edge_index_i: Tensor, x_i: Tensor, x_j: Tensor,
+                size_i: Optional[int]) -> Tensor:
+        alpha = self.get_attention(edge_index_i, x_i, x_j, num_nodes=size_i)
+        alpha = F.dropout(alpha, p=self.dropout, training=self.training)
+        return x_j * alpha.view(-1, self.heads, 1)
+
+    def negative_sampling(self, edge_index: Tensor, num_nodes: int,
+                          batch: OptTensor = None) -> Tensor:
+
+        num_neg_samples = int(self.neg_sample_ratio * self.edge_sample_ratio *
+                              edge_index.size(1))
+
+        if not self.is_undirected and not is_undirected(
+                edge_index, num_nodes=num_nodes):
+            edge_index = to_undirected(edge_index, num_nodes=num_nodes)
+
+        if batch is None:
+            neg_edge_index = negative_sampling(edge_index, num_nodes,
+                                               num_neg_samples=num_neg_samples)
+        else:
+            neg_edge_index = batched_negative_sampling(
+                edge_index, batch, num_neg_samples=num_neg_samples)
+
+        return neg_edge_index
+
+    
+def positive_sampling(self, edge_index: Tensor) -> Tensor:
+        pos_edge_index, _ = dropout_edge(edge_index,
+                                         p=1. - self.edge_sample_ratio,
+                                         training=self.training)
+        return pos_edge_index
+
+    def get_attention(self, edge_index_i: Tensor, x_i: Tensor, x_j: Tensor,
+                      num_nodes: Optional[int],
+                      return_logits: bool = False) -> Tensor:
+
+        if self.attention_type == 'MX':
+            logits = (x_i * x_j).sum(dim=-1)
+            if return_logits:
+                return logits
+
+            alpha = (x_j * self.att_l).sum(-1) + (x_i * self.att_r).sum(-1)
+            alpha = alpha * logits.sigmoid()
+
+        else:  # self.attention_type == 'SD'
+            alpha = (x_i * x_j).sum(dim=-1) / math.sqrt(self.out_channels)
+            if return_logits:
+                return alpha
+
+        alpha = F.leaky_relu(alpha, self.negative_slope)
+        alpha = softmax(alpha, edge_index_i, num_nodes=num_nodes)
+        return alpha
+
+    def get_attention_loss(self) -> Tensor:
+        r"""Computes the self-supervised graph attention loss."""
+        if not self.training:
+            return torch.tensor([0], device=self.lin.weight.device)
+
+        return F.binary_cross_entropy_with_logits(
+            self.att_x.mean(dim=-1),
+            self.att_y,
+        )
+
+    def __repr__(self) -> str:
+        return (f'{self.__class__.__name__}({self.in_channels}, '
+                f'{self.out_channels}, heads={self.heads}, '
+                f'type={self.attention_type})')
+
+# Path: torch_geometric/nn/conv/tag_conv.py
+import torch
+from torch import Tensor
+
+from torch_geometric.nn.conv import MessagePassing
+from torch_geometric.nn.conv.gcn_conv import gcn_norm
+from torch_geometric.nn.dense.linear import Linear
+from torch_geometric.nn.inits import zeros
+from torch_geometric.typing import Adj, OptTensor, SparseTensor
+from torch_geometric.utils import spmm
+
+
+class TAGConv(MessagePassing):
+    r"""The topology adaptive graph convolutional networks operator from the
+    `"Topology Adaptive Graph Convolutional Networks"
+    <https://arxiv.org/abs/1710.10370>`_ paper.
+
+    .. math::
+        \mathbf{X}^{\prime} = \sum_{k=0}^K \left( \mathbf{D}^{-1/2} \mathbf{A}
+        \mathbf{D}^{-1/2} \right)^k \mathbf{X} \mathbf{W}_{k},
+
+    where :math:`\mathbf{A}` denotes the adjacency matrix and
+    :math:`D_{ii} = \sum_{j=0} A_{ij}` its diagonal degree matrix.
+    The adjacency matrix can include other values than :obj:`1` representing
+    edge weights via the optional :obj:`edge_weight` tensor.
+
+    Args:
+        in_channels (int): Size of each input sample, or :obj:`-1` to derive
+            the size from the first input(s) to the forward method.
+        out_channels (int): Size of each output sample.
+        K (int, optional): Number of hops :math:`K`. (default: :obj:`3`)
+        bias (bool, optional): If set to :obj:`False`, the layer will not learn
+            an additive bias. (default: :obj:`True`)
+        normalize (bool, optional): Whether to apply symmetric normalization.
+            (default: :obj:`True`)
+        **kwargs (optional): Additional arguments of
+            :class:`torch_geometric.nn.conv.MessagePassing`.
+
+    Shapes:
+        - **input:**
+          node_features :math:`(|\mathcal{V}|, F_{in})`,
+          edge_index :math:`(2, |\mathcal{E}|)`,
+          edge_weights :math:`(|\mathcal{E}|)` *(optional)*
+        - **output:** node features :math:`(|\mathcal{V}|, F_{out})`
+    """
+    def __init__(self, in_channels: int, out_channels: int, K: int = 3,
+                 bias: bool = True, normalize: bool = True, **kwargs):
+        kwargs.setdefault('aggr', 'add')
+        super().__init__(**kwargs)
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.K = K
+        self.normalize = normalize
+
+        self.lins = torch.nn.ModuleList([
+            Linear(in_channels, out_channels, bias=False) for _ in range(K + 1)
+        ])
+
+        if bias:
+            self.bias = torch.nn.Parameter(torch.empty(out_channels))
+        else:
+            self.register_parameter('bias', None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        super().reset_parameters()
+        for lin in self.lins:
+            lin.reset_parameters()
+        zeros(self.bias)
+
+    def forward(self, x: Tensor, edge_index: Adj,
+                edge_weight: OptTensor = None) -> Tensor:
+
+        if self.normalize:
+            if isinstance(edge_index, Tensor):
+                edge_index, edge_weight = gcn_norm(  # yapf: disable
+                    edge_index, edge_weight, x.size(self.node_dim),
+                    improved=False, add_self_loops=False, flow=self.flow,
+                    dtype=x.dtype)
+
+            elif isinstance(edge_index, SparseTensor):
+                edge_index = gcn_norm(  # yapf: disable
+                    edge_index, edge_weight, x.size(self.node_dim),
+                    add_self_loops=False, flow=self.flow, dtype=x.dtype)
+
+        out = self.lins[0](x)
+        for lin in self.lins[1:]:
+            # propagate_type: (x: Tensor, edge_weight: OptTensor)
+            x = self.propagate(edge_index, x=x, edge_weight=edge_weight)
+            out = out + lin.forward(x)
+
+        if self.bias is not None:
+            out = out + self.bias
+
+        return out
+
+    def message(self, x_j: Tensor, edge_weight: OptTensor) -> Tensor:
+        return x_j if edge_weight is None else edge_weight.view(-1, 1) * x_j
+
+    def message_and_aggregate(self, adj_t: Adj, x: Tensor) -> Tensor:
+        return spmm(adj_t, x, reduce=self.aggr)
+
+    def __repr__(self) -> str:
+        return (f'{self.__class__.__name__}({self.in_channels}, '
+                f'{self.out_channels}, K={self.K})')
+
+# Path: torch_geometric/nn/conv/transformer_conv.py
+import math
+import typing
+from typing import Optional, Tuple, Union
+
+import torch
+import torch.nn.functional as F
+from torch import Tensor
+
+from torch_geometric.nn.conv import MessagePassing
+from torch_geometric.nn.dense.linear import Linear
+from torch_geometric.typing import (
+    Adj,
+    NoneType,
+    OptTensor,
+    PairTensor,
+    SparseTensor,
+)
+from torch_geometric.utils import softmax
+
+if typing.TYPE_CHECKING:
+    from typing import overload
+else:
+    from torch.jit import _overload_method as overload
+
+
+class TransformerConv(MessagePassing):
+    r"""The graph transformer operator from the `"Masked Label Prediction:
+    Unified Message Passing Model for Semi-Supervised Classification"
+    <https://arxiv.org/abs/2009.03509>`_ paper.
+
+    .. math::
+        \mathbf{x}^{\prime}_i = \mathbf{W}_1 \mathbf{x}_i +
+        \sum_{j \in \mathcal{N}(i)} \alpha_{i,j} \mathbf{W}_2 \mathbf{x}_{j},
+
+    where the attention coefficients :math:`\alpha_{i,j}` are computed via
+    multi-head dot product attention:
+
+    .. math::
+        \alpha_{i,j} = \textrm{softmax} \left(
+        \frac{(\mathbf{W}_3\mathbf{x}_i)^{\top} (\mathbf{W}_4\mathbf{x}_j)}
+        {\sqrt{d}} \right)
+
+    Args:
+        in_channels (int or tuple): Size of each input sample, or :obj:`-1` to
+            derive the size from the first input(s) to the forward method.
+            A tuple corresponds to the sizes of source and target
+            dimensionalities.
+        out_channels (int): Size of each output sample.
+        heads (int, optional): Number of multi-head-attentions.
+            (default: :obj:`1`)
+        concat (bool, optional): If set to :obj:`False`, the multi-head
+            attentions are averaged instead of concatenated.
+            (default: :obj:`True`)
+        beta (bool, optional): If set, will combine aggregation and
+            skip information via
+
+            .. math::
+                \mathbf{x}^{\prime}_i = \beta_i \mathbf{W}_1 \mathbf{x}_i +
+                (1 - \beta_i) \underbrace{\left(\sum_{j \in \mathcal{N}(i)}
+                \alpha_{i,j} \mathbf{W}_2 \vec{x}_j \right)}_{=\mathbf{m}_i}
+
+            with :math:`\beta_i = \textrm{sigmoid}(\mathbf{w}_5^{\top}
+            [ \mathbf{W}_1 \mathbf{x}_i, \mathbf{m}_i, \mathbf{W}_1
+            \mathbf{x}_i - \mathbf{m}_i ])` (default: :obj:`False`)
+        dropout (float, optional): Dropout probability of the normalized
+            attention coefficients which exposes each node to a stochastically
+            sampled neighborhood during training. (default: :obj:`0`)
+        edge_dim (int, optional): Edge feature dimensionality (in case
+            there are any). Edge features are added to the keys after
+            linear transformation, that is, prior to computing the
+            attention dot product. They are also added to final values
+            after the same linear transformation. The model is:
+
+            .. math::
+                \mathbf{x}^{\prime}_i = \mathbf{W}_1 \mathbf{x}_i +
+                \sum_{j \in \mathcal{N}(i)} \alpha_{i,j} \left(
+                \mathbf{W}_2 \mathbf{x}_{j} + \mathbf{W}_6 \mathbf{e}_{ij}
+                \right),
+
+            where the attention coefficients :math:`\alpha_{i,j}` are now
+            computed via:
+
+            .. math::
+                \alpha_{i,j} = \textrm{softmax} \left(
+                \frac{(\mathbf{W}_3\mathbf{x}_i)^{\top}
+                (\mathbf{W}_4\mathbf{x}_j + \mathbf{W}_6 \mathbf{e}_{ij})}
+                {\sqrt{d}} \right)
+
+            (default :obj:`None`)
+        bias (bool, optional): If set to :obj:`False`, the layer will not learn
+            an additive bias. (default: :obj:`True`)
+        root_weight (bool, optional): If set to :obj:`False`, the layer will
+            not add the transformed root node features to the output and the
+            option  :attr:`beta` is set to :obj:`False`. (default: :obj:`True`)
+        **kwargs (optional): Additional arguments of
+            :class:`torch_geometric.nn.conv.MessagePassing`.
+    """
+    _alpha: OptTensor
+
+    def __init__(
+        self,
+        in_channels: Union[int, Tuple[int, int]],
+        out_channels: int,
+        heads: int = 1,
+        concat: bool = True,
+        beta: bool = False,
+        dropout: float = 0.,
+        edge_dim: Optional[int] = None,
+        bias: bool = True,
+        root_weight: bool = True,
+        **kwargs,
+    ):
+        kwargs.setdefault('aggr', 'add')
+        super().__init__(node_dim=0, **kwargs)
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.heads = heads
+        self.beta = beta and root_weight
+        self.root_weight = root_weight
+        self.concat = concat
+        self.dropout = dropout
+        self.edge_dim = edge_dim
+        self._alpha = None
+
+        if isinstance(in_channels, int):
+            in_channels = (in_channels, in_channels)
+
+        self.lin_key = Linear(in_channels[0], heads * out_channels)
+        self.lin_query = Linear(in_channels[1], heads * out_channels)
+        self.lin_value = Linear(in_channels[0], heads * out_channels)
+        if edge_dim is not None:
+            self.lin_edge = Linear(edge_dim, heads * out_channels, bias=False)
+        else:
+            self.lin_edge = self.register_parameter('lin_edge', None)
+
+        if concat:
+            self.lin_skip = Linear(in_channels[1], heads * out_channels,
+                                   bias=bias)
+            if self.beta:
+                self.lin_beta = Linear(3 * heads * out_channels, 1, bias=False)
+            else:
+                self.lin_beta = self.register_parameter('lin_beta', None)
+        else:
+            self.lin_skip = Linear(in_channels[1], out_channels, bias=bias)
+            if self.beta:
+                self.lin_beta = Linear(3 * out_channels, 1, bias=False)
+            else:
+                self.lin_beta = self.register_parameter('lin_beta', None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        super().reset_parameters()
+        self.lin_key.reset_parameters()
+        self.lin_query.reset_parameters()
+        self.lin_value.reset_parameters()
+        if self.edge_dim:
+            self.lin_edge.reset_parameters()
+        self.lin_skip.reset_parameters()
+        if self.beta:
+            self.lin_beta.reset_parameters()
+
+    @overload
+    def forward(
+        self,
+        x: Union[Tensor, PairTensor],
+        edge_index: Adj,
+        edge_attr: OptTensor = None,
+        return_attention_weights: NoneType = None,
+    ) -> Tensor:
+        pass
+
+    @overload
+    def forward(  # noqa: F811
+        self,
+        x: Union[Tensor, PairTensor],
+        edge_index: Tensor,
+        edge_attr: OptTensor = None,
+        return_attention_weights: bool = None,
+    ) -> Tuple[Tensor, Tuple[Tensor, Tensor]]:
+        pass
+
+    @overload
+    def forward(  # noqa: F811
+        self,
+        x: Union[Tensor, PairTensor],
+        edge_index: SparseTensor,
+        edge_attr: OptTensor = None,
+        return_attention_weights: bool = None,
+    ) -> Tuple[Tensor, SparseTensor]:
+        pass
+
+    def forward(  # noqa: F811
+        self,
+        x: Union[Tensor, PairTensor],
+        edge_index: Adj,
+        edge_attr: OptTensor = None,
+        return_attention_weights: Optional[bool] = None,
+    ) -> Union[
+            Tensor,
+            Tuple[Tensor, Tuple[Tensor, Tensor]],
+            Tuple[Tensor, SparseTensor],
+    ]:
+        r"""Runs the forward pass of the module.
+
+        Args:
+            x (torch.Tensor or (torch.Tensor, torch.Tensor)): The input node
+                features.
+            edge_index (torch.Tensor or SparseTensor): The edge indices.
+            edge_attr (torch.Tensor, optional): The edge features.
+                (default: :obj:`None`)
+            return_attention_weights (bool, optional): If set to :obj:`True`,
+                will additionally return the tuple
+                :obj:`(edge_index, attention_weights)`, holding the computed
+                attention weights for each edge. (default: :obj:`None`)
+        """
+        H, C = self.heads, self.out_channels
+
+        if isinstance(x, Tensor):
+            x = (x, x)
+
+        query = self.lin_query(x[1]).view(-1, H, C)
+        key = self.lin_key(x[0]).view(-1, H, C)
+        value = self.lin_value(x[0]).view(-1, H, C)
+
+        # propagate_type: (query: Tensor, key:Tensor, value: Tensor,
+        #                  edge_attr: OptTensor)
+        out = self.propagate(edge_index, query=query, key=key, value=value,
+                             edge_attr=edge_attr)
+
+        alpha = self._alpha
+        self._alpha = None
+
+        if self.concat:
+            out = out.view(-1, self.heads * self.out_channels)
+        else:
+            out = out.mean(dim=1)
+
+        if self.root_weight:
+            x_r = self.lin_skip(x[1])
+            if self.lin_beta is not None:
+                beta = self.lin_beta(torch.cat([out, x_r, out - x_r], dim=-1))
+                beta = beta.sigmoid()
+                out = beta * x_r + (1 - beta) * out
+            else:
+                out = out + x_r
+
+        if isinstance(return_attention_weights, bool):
+            assert alpha is not None
+            if isinstance(edge_index, Tensor):
+                return out, (edge_index, alpha)
+            elif isinstance(edge_index, SparseTensor):
+                return out, edge_index.set_value(alpha, layout='coo')
+        else:
+            return out
+
+    def message(self, query_i: Tensor, key_j: Tensor, value_j: Tensor,
+                edge_attr: OptTensor, index: Tensor, ptr: OptTensor,
+                size_i: Optional[int]) -> Tensor:
+
+        if self.lin_edge is not None:
+            assert edge_attr is not None
+            edge_attr = self.lin_edge(edge_attr).view(-1, self.heads,
+                                                      self.out_channels)
+            key_j = key_j + edge_attr
+
+        alpha = (query_i * key_j).sum(dim=-1) / math.sqrt(self.out_channels)
+        alpha = softmax(alpha, index, ptr, size_i)
+        self._alpha = alpha
+        alpha = F.dropout(alpha, p=self.dropout, training=self.training)
+
+        out = value_j
+        if edge_attr is not None:
+            out = out + edge_attr
+
+        out = out * alpha.view(-1, self.heads, 1)
+        return out
+
+    def __repr__(self) -> str:
+        return (f'{self.__class__.__name__}({self.in_channels}, '
+                f'{self.out_channels}, heads={self.heads})')
+
+# Path: torch_geometric/nn/conv/utils/cheatsheet.py
+import importlib
+import inspect
+import re
+from typing import Optional
+
+
+def paper_title(cls: str) -> Optional[str]:
+    cls = importlib.import_module('torch_geometric.nn.conv').__dict__[cls]
+    match = re.search('`\".+?\"', inspect.getdoc(cls), flags=re.DOTALL)
+    return None if match is None else match.group().replace('\n', ' ')[2:-1]
+
+
+def paper_link(cls: str) -> Optional[str]:
+    cls = importlib.import_module('torch_geometric.nn.conv').__dict__[cls]
+    match = re.search('<.+?>', inspect.getdoc(cls), flags=re.DOTALL)
+    return None if match is None else match.group().replace('\n', ' ')[1:-1]
+
+
+def supports_sparse_tensor(cls: str) -> bool:
+    cls = importlib.import_module('torch_geometric.nn.conv').__dict__[cls]
+    signature = inspect.signature(cls.forward)
+    return 'SparseTensor' in str(signature)
+
+
+def supports_edge_weights(cls: str) -> bool:
+    cls = importlib.import_module('torch_geometric.nn.conv').__dict__[cls]
+    signature = inspect.signature(cls.forward)
+    return 'edge_weight' in str(signature)
+
+
+def supports_edge_features(cls: str) -> bool:
+    cls = importlib.import_module('torch_geometric.nn.conv').__dict__[cls]
+    signature = inspect.signature(cls.forward)
+    return 'edge_attr' in str(signature)
+
+
+def supports_bipartite_graphs(cls: str) -> bool:
+    cls = importlib.import_module('torch_geometric.nn.conv').__dict__[cls]
+    signature = inspect.signature(cls.forward)
+    return 'Union[torch.Tensor, Tuple[torch.Tensor' in str(signature)
+
+
+def supports_static_graphs(cls: str) -> bool:
+    cls = importlib.import_module('torch_geometric.nn.conv').__dict__[cls]
+    return 'node_dim=' not in inspect.getsource(cls.__init__)
+
+
+def supports_lazy_initialization(cls: str) -> bool:
+    cls = importlib.import_module('torch_geometric.nn.conv').__dict__[cls]
+    doc = re.sub(' +', ' ', inspect.getdoc(cls).replace('\n', ' '))
+    match = re.search('or :obj:`-1` to derive the size from the first', doc)
+    return match is not None
+
+
+def processes_heterogeneous_graphs(cls: str) -> bool:
+    if 'hetero' in cls.lower():
+        return True
+    cls = importlib.import_module('torch_geometric.nn.conv').__dict__[cls]
+    signature = inspect.signature(cls.forward)
+    return 'edge_index_dict' in str(signature) or 'edge_type' in str(signature)
+
+
+def processes_hypergraphs(cls: str) -> bool:
+    cls = importlib.import_module('torch_geometric.nn.conv').__dict__[cls]
+    signature = inspect.signature(cls.forward)
+    return 'hyperedge_index' in str(signature)
+
+
+def processes_point_clouds(cls: str) -> bool:
+    cls = importlib.import_module('torch_geometric.nn.conv').__dict__[cls]
+    signature = inspect.signature(cls.forward)
+    return (('edge_index' not in str(signature)
+             and 'csc' not in str(signature)) or 'pos' in str(signature))
+
+# Path: torch_geometric/nn/conv/utils/__init__.py
+r"""GNN utility package."""
+
+from .cheatsheet import paper_title, paper_link
+from .cheatsheet import supports_sparse_tensor
+from .cheatsheet import supports_edge_weights
+from .cheatsheet import supports_edge_features
+from .cheatsheet import supports_bipartite_graphs
+from .cheatsheet import supports_static_graphs
+from .cheatsheet import supports_lazy_initialization
+from .cheatsheet import processes_heterogeneous_graphs
+from .cheatsheet import processes_hypergraphs
+from .cheatsheet import processes_point_clouds
+
+__all__ = [
+    'paper_title',
+    'paper_link',
+    'supports_sparse_tensor',
+    'supports_edge_weights',
+    'supports_edge_features',
+    'supports_bipartite_graphs',
+    'supports_static_graphs',
+    'supports_lazy_initialization',
+    'processes_heterogeneous_graphs',
+    'processes_hypergraphs',
+    'processes_point_clouds',
+]
+
+# Path: torch_geometric/nn/conv/wl_conv.py
+from typing import Optional
+
+import torch
+from torch import Tensor
+
+from torch_geometric.typing import Adj
+from torch_geometric.utils import (
+    degree,
+    is_sparse,
+    scatter,
+    sort_edge_index,
+    to_edge_index,
+)
+
+
+class WLConv(torch.nn.Module):
+    r"""The Weisfeiler Lehman (WL) operator from the `"A Reduction of a Graph
+    to a Canonical Form and an Algebra Arising During this Reduction"
+    <https://www.iti.zcu.cz/wl2018/pdf/wl_paper_translation.pdf>`_ paper.
+
+    :class:`WLConv` iteratively refines node colorings according to:
+
+    .. math::
+        \mathbf{x}^{\prime}_i = \textrm{hash} \left( \mathbf{x}_i, \{
+        \mathbf{x}_j \colon j \in \mathcal{N}(i) \} \right)
+
+    Shapes:
+        - **input:**
+          node coloring :math:`(|\mathcal{V}|, F_{in})` *(one-hot encodings)*
+          or :math:`(|\mathcal{V}|)` *(integer-based)*,
+          edge indices :math:`(2, |\mathcal{E}|)`
+        - **output:** node coloring :math:`(|\mathcal{V}|)` *(integer-based)*
+    """
+    def __init__(self):
+        super().__init__()
+        self.hashmap = {}
+
+    def reset_parameters(self):
+        r"""Resets all learnable parameters of the module."""
+        self.hashmap = {}
+
+    @torch.no_grad()
+    def forward(self, x: Tensor, edge_index: Adj) -> Tensor:
+        r"""Runs the forward pass of the module."""
+        if x.dim() > 1:
+            assert (x.sum(dim=-1) == 1).sum() == x.size(0)
+            x = x.argmax(dim=-1)  # one-hot -> integer.
+        assert x.dtype == torch.long
+
+        if is_sparse(edge_index):
+            col_and_row, _ = to_edge_index(edge_index)
+            col = col_and_row[0]
+            row = col_and_row[1]
+        else:
+            edge_index = sort_edge_index(edge_index, num_nodes=x.size(0),
+                                         sort_by_row=False)
+            row, col = edge_index[0], edge_index[1]
+
+        # `col` is sorted, so we can use it to `split` neighbors to groups:
+        deg = degree(col, x.size(0), dtype=torch.long).tolist()
+
+        out = []
+        for node, neighbors in zip(x.tolist(), x[row].split(deg)):
+            idx = hash(tuple([node] + neighbors.sort()[0].tolist()))
+            if idx not in self.hashmap:
+                self.hashmap[idx] = len(self.hashmap)
+            out.append(self.hashmap[idx])
+
+        return torch.tensor(out, device=x.device)
+
+    def histogram(self, x: Tensor, batch: Optional[Tensor] = None,
+                  norm: bool = False) -> Tensor:
+        r"""Given a node coloring :obj:`x`, computes the color histograms of
+        the respective graphs (separated by :obj:`batch`).
+        """
+        if batch is None:
+            batch = torch.zeros(x.size(0), dtype=torch.long, device=x.device)
+
+        num_colors = len(self.hashmap)
+        batch_size = int(batch.max()) + 1
+
+        index = batch * num_colors + x
+        out = scatter(torch.ones_like(index), index, dim=0,
+                      dim_size=num_colors * batch_size, reduce='sum')
+        out = out.view(batch_size, num_colors)
+
+        if norm:
+            out = out.to(torch.float)
+            out /= out.norm(dim=-1, keepdim=True)
+
+        return out
+
+# Path: torch_geometric/nn/conv/wl_conv_continuous.py
+from typing import Union
+
+from torch import Tensor
+
+from torch_geometric.nn.conv import MessagePassing
+from torch_geometric.typing import (
+    Adj,
+    OptPairTensor,
+    OptTensor,
+    Size,
+    SparseTensor,
+)
+from torch_geometric.utils import scatter, spmm
+
+
+class WLConvContinuous(MessagePassing):
+    r"""The Weisfeiler Lehman operator from the `"Wasserstein
+    Weisfeiler-Lehman Graph Kernels" <https://arxiv.org/abs/1906.01277>`_
+    paper.
+
+    Refinement is done though a degree-scaled mean aggregation and works on
+    nodes with continuous attributes:
+
+    .. math::
+        \mathbf{x}^{\prime}_i = \frac{1}{2}\big(\mathbf{x}_i +
+        \frac{1}{\textrm{deg}(i)}
+        \sum_{j \in \mathcal{N}(i)} e_{j,i} \cdot \mathbf{x}_j \big)
+
+    where :math:`e_{j,i}` denotes the edge weight from source node :obj:`j` to
+    target node :obj:`i` (default: :obj:`1`)
+
+    Args:
+        **kwargs (optional): Additional arguments of
+            :class:`torch_geometric.nn.conv.MessagePassing`.
+
+    Shapes:
+        - **input:**
+          node features :math:`(|\mathcal{V}|, F)` or
+          :math:`((|\mathcal{V_s}|, F), (|\mathcal{V_t}|, F))` if bipartite,
+          edge indices :math:`(2, |\mathcal{E}|)`,
+          edge weights :math:`(|\mathcal{E}|)` *(optional)*
+        - **output:** node features :math:`(|\mathcal{V}|, F)` or
+          :math:`(|\mathcal{V}_t|, F)` if bipartite
+    """
+    def __init__(self, **kwargs):
+        super().__init__(aggr='add', **kwargs)
+
+    def forward(
+        self,
+        x: Union[Tensor, OptPairTensor],
+        edge_index: Adj,
+        edge_weight: OptTensor = None,
+        size: Size = None,
+    ) -> Tensor:
+
+        if isinstance(x, Tensor):
+            x = (x, x)
+
+        # propagate_type: (x: OptPairTensor, edge_weight: OptTensor)
+        out = self.propagate(edge_index, x=x, edge_weight=edge_weight,
+                             size=size)
+
+        if isinstance(edge_index, SparseTensor):
+            assert edge_weight is None
+            dst_index, _, edge_weight = edge_index.coo()
+        else:
+            dst_index = edge_index[1]
+
+        if edge_weight is None:
+            edge_weight = x[0].new_ones(dst_index.numel())
+
+        deg = scatter(edge_weight, dst_index, 0, out.size(0), reduce='sum')
+        deg_inv = 1. / deg
+        deg_inv.masked_fill_(deg_inv == float('inf'), 0)
+        out = deg_inv.view(-1, 1) * out
+
+        x_dst = x[1]
+        if x_dst is not None:
+            out = 0.5 * (x_dst + out)
+
+        return out
+
+    def message(self, x_j: Tensor, edge_weight: OptTensor) -> Tensor:
+        return x_j if edge_weight is None else edge_weight.view(-1, 1) * x_j
+
+    def message_and_aggregate(self, adj_t: Adj, x: OptPairTensor) -> Tensor:
+        return spmm(adj_t, x[0], reduce=self.aggr)
+
+# Path: torch_geometric/nn/conv/x_conv.py
+from math import ceil
+from typing import Optional
+
+import torch
+from torch import Tensor
+from torch.nn import ELU
+from torch.nn import BatchNorm1d as BN
+from torch.nn import Conv1d
+from torch.nn import Linear as L
+from torch.nn import Sequential as S
+
+from torch_geometric.nn import Reshape
+from torch_geometric.nn.inits import reset
+
+try:
+    from torch_cluster import knn_graph
+except ImportError:
+    knn_graph = None
+
+
+class XConv(torch.nn.Module):
+    r"""The convolutional operator on :math:`\mathcal{X}`-transformed points
+    from the `"PointCNN: Convolution On X-Transformed Points"
+    <https://arxiv.org/abs/1801.07791>`_ paper.
+
+    .. math::
+        \mathbf{x}^{\prime}_i = \mathrm{Conv}\left(\mathbf{K},
+        \gamma_{\mathbf{\Theta}}(\mathbf{P}_i - \mathbf{p}_i) \times
+        \left( h_\mathbf{\Theta}(\mathbf{P}_i - \mathbf{p}_i) \, \Vert \,
+        \mathbf{x}_i \right) \right),
+
+    where :math:`\mathbf{K}` and :math:`\mathbf{P}_i` denote the trainable
+    filter and neighboring point positions of :math:`\mathbf{x}_i`,
+    respectively.
+    :math:`\gamma_{\mathbf{\Theta}}` and :math:`h_{\mathbf{\Theta}}` describe
+    neural networks, *i.e.* MLPs, where :math:`h_{\mathbf{\Theta}}`
+    individually lifts each point into a higher-dimensional space, and
+    :math:`\gamma_{\mathbf{\Theta}}` computes the :math:`\mathcal{X}`-
+    transformation matrix based on *all* points in a neighborhood.
+
+    Args:
+        in_channels (int): Size of each input sample.
+        out_channels (int): Size of each output sample.
+        dim (int): Point cloud dimensionality.
+        kernel_size (int): Size of the convolving kernel, *i.e.* number of
+            neighbors including self-loops.
+        hidden_channels (int, optional): Output size of
+            :math:`h_{\mathbf{\Theta}}`, *i.e.* dimensionality of lifted
+            points. If set to :obj:`None`, will be automatically set to
+            :obj:`in_channels / 4`. (default: :obj:`None`)
+        dilation (int, optional): The factor by which the neighborhood is
+            extended, from which :obj:`kernel_size` neighbors are then
+            uniformly sampled. Can be interpreted as the dilation rate of
+            classical convolutional operators. (default: :obj:`1`)
+        bias (bool, optional): If set to :obj:`False`, the layer will not learn
+            an additive bias. (default: :obj:`True`)
+        num_workers (int): Number of workers to use for k-NN computation.
+            Has no effect in case :obj:`batch` is not :obj:`None`, or the input
+            lies on the GPU. (default: :obj:`1`)
+
+    Shapes:
+        - **input:**
+          node features :math:`(|\mathcal{V}|, F_{in})`,
+          positions :math:`(|\mathcal{V}|, D)`,
+          batch vector :math:`(|\mathcal{V}|)` *(optional)*
+        - **output:**
+          node features :math:`(|\mathcal{V}|, F_{out})`
+    """
+    def __init__(self, in_channels: int, out_channels: int, dim: int,
+                 kernel_size: int, hidden_channels: Optional[int] = None,
+                 dilation: int = 1, bias: bool = True, num_workers: int = 1):
+        super().__init__()
+
+        if knn_graph is None:
+            raise ImportError('`XConv` requires `torch-cluster`.')
+
+        self.in_channels = in_channels
+        if hidden_channels is None:
+            hidden_channels = in_channels // 4
+        assert hidden_channels > 0
+        self.hidden_channels = hidden_channels
+        self.out_channels = out_channels
+        self.dim = dim
+        self.kernel_size = kernel_size
+        self.dilation = dilation
+        self.num_workers = num_workers
+
+        C_in, C_delta, C_out = in_channels, hidden_channels, out_channels
+        D, K = dim, kernel_size
+
+        self.mlp1 = S(
+            L(dim, C_delta),
+            ELU(),
+            BN(C_delta),
+            L(C_delta, C_delta),
+            ELU(),
+            BN(C_delta),
+            Reshape(-1, K, C_delta),
+        )
+
+        self.mlp2 = S(
+            L(D * K, K**2),
+            ELU(),
+            BN(K**2),
+            Reshape(-1, K, K),
+            Conv1d(K, K**2, K, groups=K),
+            ELU(),
+            BN(K**2),
+            Reshape(-1, K, K),
+            Conv1d(K, K**2, K, groups=K),
+            BN(K**2),
+            Reshape(-1, K, K),
+        )
+
+        C_in = C_in + C_delta
+        depth_multiplier = int(ceil(C_out / C_in))
+        self.conv = S(
+            Conv1d(C_in, C_in * depth_multiplier, K, groups=C_in),
+            Reshape(-1, C_in * depth_multiplier),
+            L(C_in * depth_multiplier, C_out, bias=bias),
+        )
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        r"""Resets all learnable parameters of the module."""
+        reset(self.mlp1)
+        reset(self.mlp2)
+        reset(self.conv)
+
+    def forward(self, x: Tensor, pos: Tensor, batch: Optional[Tensor] = None):
+        r"""Runs the forward pass of the module."""
+        pos = pos.unsqueeze(-1) if pos.dim() == 1 else pos
+        (N, D), K = pos.size(), self.kernel_size
+
+        edge_index = knn_graph(pos, K * self.dilation, batch, loop=True,
+                               flow='target_to_source',
+                               num_workers=self.num_workers)
+
+        if self.dilation > 1:
+            edge_index = edge_index[:, ::self.dilation]
+
+        row, col = edge_index[0], edge_index[1]
+
+        pos = pos[col] - pos[row]
+
+        x_star = self.mlp1(pos)
+        if x is not None:
+            x = x.unsqueeze(-1) if x.dim() == 1 else x
+            x = x[col].view(N, K, self.in_channels)
+            x_star = torch.cat([x_star, x], dim=-1)
+        x_star = x_star.transpose(1, 2).contiguous()
+
+        transform_matrix = self.mlp2(pos.view(N, K * D))
+
+        x_transformed = torch.matmul(x_star, transform_matrix)
+
+        out = self.conv(x_transformed)
+
+        return out
+
+    def __repr__(self) -> str:
+        return (f'{self.__class__.__name__}({self.in_channels}, '
+                f'{self.out_channels})')
+
+# Path: torch_geometric/nn/conv/__init__.py
+from .message_passing import MessagePassing
+from .simple_conv import SimpleConv
+from .gcn_conv import GCNConv
+from .cheb_conv import ChebConv
+from .sage_conv import SAGEConv
+from .cugraph.sage_conv import CuGraphSAGEConv
+from .graph_conv import GraphConv
+from .gravnet_conv import GravNetConv
+from .gated_graph_conv import GatedGraphConv
+from .res_gated_graph_conv import ResGatedGraphConv
+from .gat_conv import GATConv
+from .cugraph.gat_conv import CuGraphGATConv
+from .fused_gat_conv import FusedGATConv
+from .gatv2_conv import GATv2Conv
+from .transformer_conv import TransformerConv
+from .agnn_conv import AGNNConv
+from .tag_conv import TAGConv
+from .gin_conv import GINConv, GINEConv
+from .arma_conv import ARMAConv
+from .sg_conv import SGConv
+from .appnp import APPNP
+from .mf_conv import MFConv
+from .rgcn_conv import RGCNConv, FastRGCNConv
+from .cugraph.rgcn_conv import CuGraphRGCNConv
+from .rgat_conv import RGATConv
+from .signed_conv import SignedConv
+from .dna_conv import DNAConv
+from .point_conv import PointNetConv
+from .gmm_conv import GMMConv
+from .spline_conv import SplineConv
+from .nn_conv import NNConv
+from .cg_conv import CGConv
+from .edge_conv import EdgeConv, DynamicEdgeConv
+from .x_conv import XConv
+from .ppf_conv import PPFConv
+from .feast_conv import FeaStConv
+from .point_transformer_conv import PointTransformerConv
+from .hypergraph_conv import HypergraphConv
+from .le_conv import LEConv
+from .pna_conv import PNAConv
+from .cluster_gcn_conv import ClusterGCNConv
+from .gen_conv import GENConv
+from .gcn2_conv import GCN2Conv
+from .pan_conv import PANConv
+from .wl_conv import WLConv
+from .wl_conv_continuous import WLConvContinuous
+from .film_conv import FiLMConv
+from .supergat_conv import SuperGATConv
+from .fa_conv import FAConv
+from .eg_conv import EGConv
+from .pdn_conv import PDNConv
+from .general_conv import GeneralConv
+from .hgt_conv import HGTConv
+from .heat_conv import HEATConv
+from .hetero_conv import HeteroConv
+from .han_conv import HANConv
+from .lg_conv import LGConv
+from .ssg_conv import SSGConv
+from .point_gnn_conv import PointGNNConv
+from .gps_conv import GPSConv
+from .antisymmetric_conv import AntiSymmetricConv
+from .dir_gnn_conv import DirGNNConv
+from .mixhop_conv import MixHopConv
+
+import torch_geometric.nn.conv.utils  # noqa
+
+__all__ = [
+    'MessagePassing',
+    'SimpleConv',
+    'GCNConv',
+    'ChebConv',
+    'SAGEConv',
+    'CuGraphSAGEConv',
+    'GraphConv',
+    'GravNetConv',
+    'GatedGraphConv',
+    'ResGatedGraphConv',
+    'GATConv',
+    'CuGraphGATConv',
+    'FusedGATConv',
+    'GATv2Conv',
+    'TransformerConv',
+    'AGNNConv',
+    'TAGConv',
+    'GINConv',
+    'GINEConv',
+    'ARMAConv',
+    'SGConv',
+    'SSGConv',
+    'APPNP',
+    'MFConv',
+    'RGCNConv',
+    'FastRGCNConv',
+    'CuGraphRGCNConv',
+    'RGATConv',
+    'SignedConv',
+    'DNAConv',
+    'PointNetConv',
+    'GMMConv',
+    'SplineConv',
+    'NNConv',
+    'CGConv',
+    'EdgeConv',
+    'DynamicEdgeConv',
+    'XConv',
+    'PPFConv',
+    'FeaStConv',
+    'PointTransformerConv',
+    'HypergraphConv',
+    'LEConv',
+    'PNAConv',
+    'ClusterGCNConv',
+    'GENConv',
+    'GCN2Conv',
+    'PANConv',
+    'WLConv',
+    'WLConvContinuous',
+    'FiLMConv',
+    'SuperGATConv',
+    'FAConv',
+    'EGConv',
+    'PDNConv',
+    'GeneralConv',
+    'HGTConv',
+    'HEATConv',
+    'HeteroConv',
+    'HANConv',
+    'LGConv',
+    'PointGNNConv',
+    'GPSConv',
+    'AntiSymmetricConv',
+    'DirGNNConv',
+    'MixHopConv',
+]
+
+classes = __all__
+
+ECConv = NNConv
+PointConv = PointNetConv
+
+# Path: torch_geometric/explain/algorithm/attention_explainer.py
+import logging
+from typing import List, Optional, Union
+
+import torch
+from torch import Tensor
+
+from torch_geometric.explain import Explanation
+from torch_geometric.explain.algorithm import ExplainerAlgorithm
+from torch_geometric.explain.config import ExplanationType, ModelTaskLevel
+from torch_geometric.nn.conv.message_passing import MessagePassing
+
+
+class AttentionExplainer(ExplainerAlgorithm):
+    r"""An explainer that uses the attention coefficients produced by an
+    attention-based GNN (*e.g.*,
+    :class:`~torch_geometric.nn.conv.GATConv`,
+    :class:`~torch_geometric.nn.conv.GATv2Conv`, or
+    :class:`~torch_geometric.nn.conv.TransformerConv`) as edge explanation.
+    Attention scores across layers and heads will be aggregated according to
+    the :obj:`reduce` argument.
+
+    Args:
+        reduce (str, optional): The method to reduce the attention scores
+            across layers and heads. (default: :obj:`"max"`)
+    """
+    def __init__(self, reduce: str = 'max'):
+        super().__init__()
+        self.reduce = reduce
+
+    def forward(
+        self,
+        model: torch.nn.Module,
+        x: Tensor,
+        edge_index: Tensor,
+        *,
+        target: Tensor,
+        index: Optional[Union[int, Tensor]] = None,
+        **kwargs,
+    ) -> Explanation:
+        if isinstance(x, dict) or isinstance(edge_index, dict):
+            raise ValueError(f"Heterogeneous graphs not yet supported in "
+                             f"'{self.__class__.__name__}'")
+
+        hard_edge_mask = None
+        if self.model_config.task_level == ModelTaskLevel.node:
+            # We need to compute the hard edge mask to properly clean up edge
+            # attributions not involved during message passing:
+            _, hard_edge_mask = self._get_hard_masks(model, index, edge_index,
+                                                     num_nodes=x.size(0))
+
+        alphas: List[Tensor] = []
+
+        def hook(module, msg_kwargs, out):
+            if 'alpha' in msg_kwargs[0]:
+                alphas.append(msg_kwargs[0]['alpha'].detach())
+            elif getattr(module, '_alpha', None) is not None:
+                alphas.append(module._alpha.detach())
+
+        hook_handles = []
+        for module in model.modules():  # Register message forward hooks:
+            if (isinstance(module, MessagePassing)
+                    and module.explain is not False):
+                hook_handles.append(module.register_message_forward_hook(hook))
+
+        model(x, edge_index, **kwargs)
+
+        for handle in hook_handles:  # Remove hooks:
+            handle.remove()
+
+        if len(alphas) == 0:
+            raise ValueError("Could not collect any attention coefficients. "
+                             "Please ensure that your model is using "
+                             "attention-based GNN layers.")
+
+        for i, alpha in enumerate(alphas):
+            alpha = alpha[:edge_index.size(1)]  # Respect potential self-loops.
+            if alpha.dim() == 2:
+                alpha = getattr(torch, self.reduce)(alpha, dim=-1)
+                if isinstance(alpha, tuple):  # Respect `torch.max`:
+                    alpha = alpha[0]
+            elif alpha.dim() > 2:
+                raise ValueError(f"Can not reduce attention coefficients of "
+                                 f"shape {list(alpha.size())}")
+            alphas[i] = alpha
+
+        if len(alphas) > 1:
+            alpha = torch.stack(alphas, dim=-1)
+            alpha = getattr(torch, self.reduce)(alpha, dim=-1)
+            if isinstance(alpha, tuple):  # Respect `torch.max`:
+                alpha = alpha[0]
+        else:
+            alpha = alphas[0]
+
+        alpha = self._post_process_mask(alpha, hard_edge_mask,
+                                        apply_sigmoid=False)
+
+        return Explanation(edge_mask=alpha)
+
+    def supports(self) -> bool:
+        explanation_type = self.explainer_config.explanation_type
+        if explanation_type != ExplanationType.model:
+            logging.error(f"'{self.__class__.__name__}' only supports "
+                          f"model explanations "
+                          f"got (`explanation_type={explanation_type.value}`)")
+            return False
+
+        node_mask_type = self.explainer_config.node_mask_type
+        if node_mask_type is not None:
+            logging.error(f"'{self.__class__.__name__}' does not support "
+                          f"explaining input node features "
+                          f"got (`node_mask_type={node_mask_type.value}`)")
+            return False
+
+        return True
+
+# Path: torch_geometric/explain/algorithm/base.py
+from abc import abstractmethod
+from typing import Dict, Optional, Tuple, Union
+
+import torch
+import torch.nn.functional as F
+from torch import Tensor
+
+from torch_geometric.explain import Explanation, HeteroExplanation
+from torch_geometric.explain.config import (
+    ExplainerConfig,
+    ModelConfig,
+    ModelReturnType,
+)
+from torch_geometric.nn import MessagePassing
+from torch_geometric.typing import EdgeType, NodeType
+from torch_geometric.utils import k_hop_subgraph
+
+
+class ExplainerAlgorithm(torch.nn.Module):
+    r"""An abstract base class for implementing explainer algorithms."""
+    @abstractmethod
+    def forward(
+        self,
+        model: torch.nn.Module,
+        x: Union[Tensor, Dict[NodeType, Tensor]],
+        edge_index: Union[Tensor, Dict[EdgeType, Tensor]],
+        *,
+        target: Tensor,
+        index: Optional[Union[int, Tensor]] = None,
+        **kwargs,
+    ) -> Union[Explanation, HeteroExplanation]:
+        r"""Computes the explanation.
+
+        Args:
+            model (torch.nn.Module): The model to explain.
+            x (Union[torch.Tensor, Dict[NodeType, torch.Tensor]]): The input
+                node features of a homogeneous or heterogeneous graph.
+            edge_index (Union[torch.Tensor, Dict[NodeType, torch.Tensor]]): The
+                input edge indices of a homogeneous or heterogeneous graph.
+            target (torch.Tensor): The target of the model.
+            index (Union[int, Tensor], optional): The index of the model
+                output to explain. Can be a single index or a tensor of
+                indices. (default: :obj:`None`)
+            **kwargs (optional): Additional keyword arguments passed to
+                :obj:`model`.
+        """
+
+    @abstractmethod
+    def supports(self) -> bool:
+        r"""Checks if the explainer supports the user-defined settings provided
+        in :obj:`self.explainer_config`, :obj:`self.model_config`.
+        """
+        pass
+
+    ###########################################################################
+...
