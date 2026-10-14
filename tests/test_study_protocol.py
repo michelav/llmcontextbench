@@ -163,6 +163,97 @@ def test_reliability_exclusion_cooldown_and_recovery(frozen, tmp_path):
     assert controller.decide(4)['configuration'] == first
 
 
+def _reliability_controller(frozen, tmp_path, **options):
+    definition = make_study(tmp_path, frozen, policies={'r': {'type':'reliability',
+        'failureClasses':['step-limit'], 'window':3, 'minimumObservations':2,
+        'failureRateThreshold':0.5, 'cooldownRequests':2, 'probeInterval':100, **options}}, comparisons=[])
+    path = Path(study.prepare(definition=definition, output=tmp_path/f'study-rel-{len(options)}')['prepared'])
+    plan = sealed_read(path)
+    return Controller(plan, plan['episodes'][0])
+
+
+def _observe(controller, cid, sequence, *, failures=(), tokens=10, partial=None, size='small'):
+    controller.observe({'configuration':cid, 'sizeBin':size, 'status':'error' if failures else 'success',
+        'durationMs':10, 'tokens':{'value':tokens,'knownPartial':partial},
+        'failures':list(failures), 'sequenceIndex':sequence})
+
+
+@pytest.mark.parametrize('reset', [False, True])
+def test_reliability_recovery_probe_closes_circuit_only_with_reset(frozen, tmp_path, reset):
+    controller = _reliability_controller(frozen, tmp_path, **({'resetOnRecovery': True} if reset else {}))
+    first = controller.decide(0)['configuration']
+    for sequence in (1, 2):
+        _observe(controller, first, sequence, failures=['step-limit'])
+    assert controller.decide(2)['configuration'] != first
+    probe = controller.decide(4)
+    assert (probe['configuration'], probe['reason']) == (first, 'recovery_probe')
+    _observe(controller, first, 5)
+    controller.decide(5)
+    # v1 behaviour re-excludes immediately because old failures stay in the window.
+    assert (first in controller.excluded_until) is (not reset)
+    if reset:
+        _observe(controller, first, 6, failures=['step-limit'])
+        controller.decide(6)
+        assert first in controller.excluded_until
+
+
+def _budget_controller(frozen, tmp_path, name, **options):
+    definition = make_study(tmp_path, frozen, policies={'budget':{'type':'budget','probeInterval':100, **options},
+                                      'inline':{'type':'fixed','configuration':'inline-code-full'},
+                                      'mcp':{'type':'fixed','configuration':'local-mcp-repoqa-ops'}},
+                            latencyLimitMs=None, tokenBudget=700, comparisons=[])
+    plan = sealed_read(Path(study.prepare(definition=definition, output=tmp_path/name)['prepared']))
+    return plan, Controller(plan, plan['episodes'][0])
+
+
+def test_budget_bounded_unknown_usage_keeps_serving(frozen, tmp_path):
+    plan, controller = _budget_controller(frozen, tmp_path, 'budget-bounded', unknownUsage='bounded')
+    cid = controller.decide(0)['configuration']
+    assert cid is not None
+    _observe(controller, cid, 1, tokens=None, partial=5)
+    assert controller.decide(1)['configuration'] is not None
+    ledger = controller.ledger()
+    bound = plan['tokenQuantiles'][cid]['small']['p95']
+    assert ledger['knownTokens'] == 5 and ledger['unknownConsumption'] is True
+    assert ledger['estimatedTokens'] == max(0, bound-5)
+    assert ledger['estimatedTokensProvenance'] == 'estimated'
+
+
+def test_budget_expected_forecast_does_not_read_future_requests(frozen, tmp_path):
+    plan, controller = _budget_controller(frozen, tmp_path, 'budget-expected', forecast='expected')
+    workload = controller.episode['workload']
+    controller.episode = {**controller.episode, 'workload': workload[:1] + ['unknown-future']*(len(workload)-1)}
+    assert controller.decide(0)['configuration'] is not None
+    assert abs(sum(plan['calibrationSizeMix'].values()) - 1) < 1e-9
+
+
+@pytest.mark.parametrize('scope', ['global', 'bin'])
+def test_router_incumbent_scope(frozen, tmp_path, scope):
+    definition = make_study(tmp_path, frozen, policies={'router': {'type':'router','adaptive':False,
+        'probeInterval':100, 'incumbentScope':scope}}, comparisons=[])
+    plan = sealed_read(Path(study.prepare(definition=definition, output=tmp_path/f'scope-{scope}')['prepared']))
+    inline, mcp = plan['configurations']
+    for cid, size, tokens in ((inline,'small',1), (mcp,'small',100), (inline,'large',100), (mcp,'large',1)):
+        plan['estimates'][cid][size].update(latencyMs=10, tokens=tokens)
+    controller = Controller(plan, plan['episodes'][0])
+    preferred = {'small': inline, 'large': mcp}
+    matches = []
+    for index, instance in enumerate(plan['episodes'][0]['workload'][:8]):
+        size = plan['requests'][instance]['sizeBin']
+        matches.append(controller.decide(index)['configuration'] == preferred[size])
+    assert all(matches) is (scope == 'bin')
+
+
+def test_episode_ids_cover_study_settings(frozen, tmp_path):
+    ids = []
+    for limit in (1000, 1000, 2000):
+        path = study.prepare(definition=make_study(tmp_path, frozen, latencyLimitMs=limit),
+                             output=tmp_path/f'ids-{len(ids)}')['prepared']
+        ids.append([e['id'] for e in sealed_read(Path(path))['episodes']])
+    assert ids[0] == ids[1]
+    assert not set(ids[0]) & set(ids[2])
+
+
 def test_failure_classification_keeps_operation_distinct():
     from ctxbench.adaptive.study_runner import classify_failures
     from ctxbench.benchmark.models import TrialTrace

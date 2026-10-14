@@ -228,3 +228,23 @@ Paired bootstrap intervals iterate requests and target clusters in sorted order,
 so `analyze` output is deterministic for a given seed. Analyses written before
 this fix depended on Python hash randomisation; their mean differences are
 unchanged but their intervals can differ slightly when regenerated.
+
+## Policy options added for the v2 suite
+
+Each option defaults to the v1 behaviour, so v1 definitions and sealed plans
+replay unchanged (`tests/test_study_v1_regression.py`). New definitions should
+set them explicitly.
+
+| Policy | Option | Values (default first) | Effect |
+|---|---|---|---|
+| `router`, `reliability` | `incumbentScope` | `global`, `bin` | `bin` keeps the incumbent, cooldown and material-improvement test per size bin, so routing small and large requests differently is not blocked by cooldown. |
+| `reliability` | `resetOnRecovery` | `false`, `true` | `true` closes the circuit after a clean recovery probe: failure rates are judged only from that probe onward. With `false`, old failures stay in the window and the configuration is re-excluded immediately. |
+| `budget` | `unknownUsage` | `stop`, `bounded` | `bounded` keeps serving after a request with unknown usage. It charges the known partial count plus an estimated remainder up to the calibration p95 for that configuration and bin; the ledger reports `estimatedTokens` (provenance `estimated`) and `estimatedOvershoot` separately from `knownTokens`. |
+| `budget` | `forecast` | `lookahead`, `expected` | `expected` forecasts remaining demand as remaining request count × calibration-mix expected tokens, without reading future request sizes. `lookahead` uses the actual remaining workload (a batch-workload assumption). |
+
+Prepared plans also record calibration token quantiles (`tokenQuantiles`) and the
+calibration size-bin mix (`calibrationSizeMix`). Episode IDs now hash the policy
+configuration, scenario, workload and study settings (baseline digest,
+configurations, latency limit, token budget, quality floor), so IDs no longer
+collide between studies that reuse policy names and seeds. Previously prepared
+studies keep their sealed IDs.

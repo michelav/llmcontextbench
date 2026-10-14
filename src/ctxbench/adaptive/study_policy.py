@@ -9,11 +9,14 @@ class Controller:
         self.order = plan['configurations']
         self.observed = defaultdict(list)
         self.current = None
-        self.last_switch = 0
+        self.current_by = {}
+        self.last_switch_by = {}
         self.probes = 0
         self.consumed = 0
+        self.estimated = 0
         self.unknown = False
         self.excluded_until = {}
+        self.window_start = {}
         self.stopped = False
 
     def _estimate(self, cid, size, metric):
@@ -54,6 +57,15 @@ class Controller:
         return probe, True
 
     def _forecast(self, cid, start):
+        if self.policy.get('forecast', 'lookahead') == 'expected':
+            # Request count is known; future request features are not read.
+            per_request = 0.0
+            for size, share in self.plan['calibrationSizeMix'].items():
+                value = self._estimate(cid, size, 'tokens')
+                if value is None:
+                    return None
+                per_request += share*value
+            return (len(self.episode['workload'])-start)*per_request
         values = []
         for instance in self.episode['workload'][start:]:
             candidate = self.plan['requests'][instance]['candidates'][cid]
@@ -75,8 +87,8 @@ class Controller:
         return rate is not None and rate >= floor
 
     def _budget(self, index, eligible):
-        remaining = self.plan['definition']['tokenBudget'] - self.consumed
-        if self.unknown or self.stopped:
+        remaining = self.plan['definition']['tokenBudget'] - self.consumed - self.estimated
+        if (self.unknown and self.policy.get('unknownUsage', 'stop') == 'stop') or self.stopped:
             return None, 'unknown_consumption' if self.unknown else 'budget_infeasible', False
         eligible = [cid for cid in eligible if self._quality_eligible(cid)]
         feasible = [(cid, self._forecast(cid, index)) for cid in eligible]
@@ -101,7 +113,7 @@ class Controller:
                 new = self._estimate(probe, size, 'tokens')
                 old = self._estimate(chosen, size, 'tokens')
                 demand = self._forecast(chosen, index)
-                if new is not None and old is not None and demand is not None and self.consumed+demand-old+new <= self.plan['definition']['tokenBudget']:
+                if new is not None and old is not None and demand is not None and self.consumed+self.estimated+demand-old+new <= self.plan['definition']['tokenBudget']:
                     self.probes += 1
                     return probe, 'scheduled_probe', True
         return chosen, reason, False
@@ -114,7 +126,7 @@ class Controller:
         candidates = []
         recovery = []
         for cid in eligible:
-            history = self.observed[(cid, 'all')][-window:]
+            history = self.observed[(cid, 'all')][self.window_start.get(cid, 0):][-window:]
             if cid in self.excluded_until:
                 if index+1 >= self.excluded_until[cid]:
                     recovery.append(cid)
@@ -130,23 +142,25 @@ class Controller:
         if not candidates:
             return None, 'all_candidates_ineligible', False
         size = self.plan['requests'][self.episode['workload'][index]]['sizeBin']
-        best = self._rank(candidates, size)
         return self._router_decision(index, candidates, size)
 
     def _router_decision(self, index, eligible, size):
+        # Global scope reproduces v1; bin scope keeps hysteresis within one size bin.
+        scope = size if self.policy.get('incumbentScope', 'global') == 'bin' else None
+        current = self.current_by.get(scope)
         best = self._rank(eligible, size)
         chosen = best
-        if self.current in eligible and best != self.current:
-            cooldown = index+1-self.last_switch <= self.policy.get('cooldownRequests', 5)
+        if current in eligible and best != current:
+            cooldown = index+1-self.last_switch_by.get(scope, 0) <= self.policy.get('cooldownRequests', 5)
             criterion = 'tokens' if self._estimate(best, size, 'durationMs') is not None and self._estimate(best, size, 'durationMs') <= self.plan['definition'].get('latencyLimitMs',float('inf')) else 'durationMs'
-            old = self._estimate(self.current, size, criterion)
+            old = self._estimate(current, size, criterion)
             new = self._estimate(best, size, criterion)
             material = new is not None and (old is None or new <= old*(1-self.policy.get('materialImprovement', .10)))
             if cooldown or not material:
-                chosen = self.current
-        if chosen != self.current:
-            self.current = chosen
-            self.last_switch = index+1
+                chosen = current
+        if chosen != current:
+            self.current_by[scope] = chosen
+            self.last_switch_by[scope] = index+1
         actual, probe = self._probe(index, chosen, eligible)
         return actual, 'scheduled_probe' if probe else 'router', probe
 
@@ -180,17 +194,29 @@ class Controller:
         self.observed[(cid,'all')].append(row)
         if token['value'] is None:
             self.unknown = True
-            self.consumed += token.get('knownPartial') or 0
+            partial = token.get('knownPartial') or 0
+            self.consumed += partial
+            if self.policy.get('unknownUsage') == 'bounded':
+                bound = self.plan['tokenQuantiles'][cid][size]['p95']
+                self.estimated += max(0, (bound or 0)-partial)
         else:
             self.consumed += token['value']
         if self.policy['type'] == 'reliability' and cid in self.excluded_until:
             monitored = set(self.policy['failureClasses'])
             if not monitored.intersection(observation['failures']):
                 self.excluded_until.pop(cid)
+                if self.policy.get('resetOnRecovery'):
+                    # Close the circuit: judge the configuration only from the clean probe onward.
+                    self.window_start[cid] = len(self.observed[(cid, 'all')])-1
             else:
                 self.excluded_until[cid] = observation['sequenceIndex']+self.policy['cooldownRequests']
 
     def ledger(self):
         budget = self.plan['definition'].get('tokenBudget')
-        return {'knownTokens': self.consumed, 'unknownConsumption': self.unknown,
-                'budget': budget, 'overshoot': max(0, self.consumed-budget) if budget is not None else None}
+        ledger = {'knownTokens': self.consumed, 'unknownConsumption': self.unknown,
+                  'budget': budget, 'overshoot': max(0, self.consumed-budget) if budget is not None else None}
+        if self.policy.get('unknownUsage') == 'bounded':
+            ledger['estimatedTokens'] = self.estimated
+            ledger['estimatedTokensProvenance'] = 'estimated'
+            ledger['estimatedOvershoot'] = max(0, self.consumed+self.estimated-budget)
+        return ledger

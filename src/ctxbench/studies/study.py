@@ -72,6 +72,11 @@ def prepare(*, definition, output):
                              *(d.lastRequest+1 for d in delays)})
         phases[scenario] = [{'firstRequest': start, 'lastRequest': end-1}
                             for start, end in zip(boundaries, boundaries[1:])]
+    # Episode identity covers every input that changes behaviour, so IDs never
+    # collide across studies that reuse policy names and seeds.
+    study_identity = {'baselineDigest': file_hash(baseline_path), 'configurations': selected,
+                      'latencyLimitMs': definition.latencyLimitMs, 'tokenBudget': definition.tokenBudget,
+                      'minimumCalibrationPassRate': definition.minimumCalibrationPassRate}
     episodes = []
     for seed in definition.seeds:
         workload = [r['instanceId'] for r in ordered_workload(index, parent['split']['heldOut'], seed)]
@@ -79,7 +84,9 @@ def prepare(*, definition, output):
             for scenario, delays in definition.scenarios.items():
                 for policy, config in definition.policies.items():
                     identity = {'policyName': policy, 'scenarioName': scenario, 'seed': seed, 'repeat': repeat}
-                    episodes.append({**identity, 'id': digest(identity)[:24], 'workload': workload,
+                    behaviour = {**identity, 'policy': config.model_dump(), 'workload': workload,
+                                 'scenario': [d.model_dump() for d in delays], 'study': study_identity}
+                    episodes.append({**identity, 'id': digest(behaviour)[:24], 'workload': workload,
                                      'policy': config.model_dump(), 'scenario': [d.model_dump() for d in delays]})
     estimates = {cid: frozen['estimates'][cid] for cid in selected}
     quality = {cid: frozen['quality'][cid] for cid in selected}
@@ -123,6 +130,8 @@ def prepare(*, definition, output):
         'datasetRoot': parent['datasetRoot'], 'datasetHash': parent['datasetHash'],
         'sources': parent['sources'], 'split': parent['split'], 'index': index,
         'configurations': selected, 'requests': requests, 'estimates': estimates, 'quality': quality,
+        'tokenQuantiles': _token_quantiles(frozen, selected),
+        'calibrationSizeMix': _calibration_size_mix(parent),
         'episodes': episodes, 'manifest': manifest, 'budget': parent['budget'], 'phases': phases,
         'resolved': {'protocolVersion': 3, 'estimator': 'all-observations-v1',
                      'tieOrder': selected, 'failureMonitoring': 'execution-only',
@@ -281,6 +290,34 @@ def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42, allow_source_
 def baseline_rows(path):
     from .baseline import rows
     return rows(path)
+
+
+def _token_quantiles(frozen, configurations):
+    """Calibration token p95/max per configuration and bin (nearest rank; successes with known usage)."""
+    values = defaultdict(list)
+    for row in frozen.get('observations', []):
+        token = row['tokens']['value'] if isinstance(row.get('tokens'), dict) else row.get('tokens')
+        if row.get('status') == 'success' and token is not None:
+            values[(row['configuration'], row['sizeBin'])].append(token)
+    result = {}
+    for cid in configurations:
+        result[cid] = {}
+        for (config, size), sample in values.items():
+            if config == cid:
+                sample = sorted(sample)
+                result[cid][size] = {'p95': sample[max(0, -(-95*len(sample)//100)-1)], 'max': sample[-1],
+                                     'observations': len(sample), 'provenance': 'derived'}
+    return result
+
+
+def _calibration_size_mix(parent):
+    counts = defaultdict(int)
+    calibration = set(parent['split']['calibration'])
+    for request in parent['requests'].values():
+        if request['target'] in calibration:
+            counts[request['sizeBin']] += 1
+    total = sum(counts.values())
+    return {size: count/total for size, count in sorted(counts.items())} if total else {}
 
 
 def _timeline_plots(root, plan, by_arm):

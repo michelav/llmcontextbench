@@ -85,3 +85,14 @@ dataset and frozen-artifact hashes still checked; drifted sources reported as
 regenerated deterministically with 1000 replicates, seed 42. Means unchanged;
 intervals shifted slightly (budget vs mcp-lean now [-916, -16] ms).
 Validation: `pytest tests/test_study_protocol.py` 12 passed; `pytest -k cli` 68 passed.
+
+## 2026-10-15 — SEAMS v2, S1: correctness fixes
+
+Opt-in options (defaults reproduce v1): `incumbentScope` (router/reliability),
+`resetOnRecovery` (reliability), `unknownUsage` and `forecast` (budget). Prepare now
+records `tokenQuantiles` and `calibrationSizeMix`, and episode IDs cover all
+behaviour-changing inputs. Only non-fingerprinted files changed
+(`adaptive/study_policy.py`, `studies/{models,study}.py`), so the v1 baseline still
+verifies strictly. Validation: `tests/test_study_protocol.py` 19 passed; new
+`tests/test_study_v1_regression.py` replays every recorded v1 decision identically
+(3 studies, 42 episodes).

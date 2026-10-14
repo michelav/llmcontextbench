@@ -44,11 +44,14 @@ class RouterPolicy(Definition):
     cooldownRequests: Annotated[StrictInt, Field(ge=0)] = 5
     updateWindow: PositiveInt = 5
     materialImprovement: Annotated[float, Field(ge=0, lt=1)] = 0.10
+    incumbentScope: Literal['global', 'bin'] = 'global'
 
 
 class BudgetPolicy(Definition):
     type: Literal['budget']
     probeInterval: PositiveInt = 10
+    unknownUsage: Literal['stop', 'bounded'] = 'stop'
+    forecast: Literal['lookahead', 'expected'] = 'lookahead'
 
 
 class ReliabilityPolicy(Definition):
@@ -59,6 +62,8 @@ class ReliabilityPolicy(Definition):
     failureRateThreshold: Annotated[float, Field(gt=0, le=1)]
     cooldownRequests: PositiveInt
     probeInterval: PositiveInt = 10
+    resetOnRecovery: bool = False
+    incumbentScope: Literal['global', 'bin'] = 'global'
 
     @model_validator(mode='after')
     def validate_failure_window(self):
