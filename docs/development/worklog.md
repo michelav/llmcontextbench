@@ -109,3 +109,16 @@ adaptive router still estimated inline at 7.0–9.0 s (actual about 2.8 s) after
 fresh inline observation in 30 requests, because round-robin probes rotated across
 both MCP arms. Validation: `pytest -k "adaptive or study"` 157 passed; v1 decisions
 still replay identically.
+
+## 2026-10-15 — SEAMS v2, S3b: cascade policy
+
+Added `type: cascade` (primary + one fallback on observed trigger failures, optional
+`primaryMaxSteps` and repository `memory`). `adaptive/study_runner.py` now runs
+attempts through one helper; non-cascade packets keep their exact v1 layout. Cascade
+packets record per-attempt trials, results and observations, and every attempt is
+projected as a canonical trial. Analysis gained `fallbacks`, `tokensLowerBound` and
+`wastedTokensLowerBound`. This changes a fingerprinted file: the v1 baseline now
+needs `--allow-source-drift` for `status`/`analyze`, and v2 collection needs the
+v2 baseline (S6a). New `tests/test_study_cascade.py`: 9 tests (trigger-only fallback,
+canonical projection, step override, source memory, resume between attempts,
+explicit retry during fallback, replay, validation, analysis).

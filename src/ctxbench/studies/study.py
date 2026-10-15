@@ -53,6 +53,9 @@ def prepare(*, definition, output):
         raise ValueError('unknown configuration subset')
     if any(p.type == 'fixed' and p.configuration not in selected for p in definition.policies.values()):
         raise ValueError('fixed policy references an unselected configuration')
+    if any(p.type == 'cascade' and any(cid not in selected for cid in (p.primary, *p.fallbacks))
+           for p in definition.policies.values()):
+        raise ValueError('cascade policy references an unselected configuration')
     for delays in definition.scenarios.values():
         for delay in delays:
             if delay.configuration not in selected:
@@ -225,6 +228,11 @@ def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42, allow_source_
                 'status': result['status'] if result else 'unserved',
                 'latencyMs': packet['observation']['durationMs'] if packet['observation'] else None,
                 'tokens': packet['observation']['tokens']['value'] if packet['observation'] else None,
+                'tokenLowerBound': (packet['observation']['tokens']['value']
+                                    if packet['observation']['tokens']['value'] is not None
+                                    else packet['observation']['tokens']['knownPartial'] or 0)
+                                   if packet['observation'] else None,
+                'attempts': packet.get('attempts', [None] if packet['observation'] else []),
                 'passed': outcome.get('passed') if isinstance(outcome,dict) else None,
                 'probe': packet['selection']['probe'], 'failures': packet['observation']['failures'] if packet['observation'] else []}
         durations = [r['latencyMs'] for r in request_rows.values() if r['latencyMs'] is not None]
@@ -239,6 +247,12 @@ def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42, allow_source_
             'meanLatencyMs':mean(durations) if durations else None,
             'deadlineMisses':sum(x>limit for x in durations) if limit is not None else None,
             'knownTokens':sum(tokens) if tokens else None, 'tokenCoverage':len(tokens),
+            # Unknown totals contribute their known partial usage: a derived lower bound over all executions.
+            'tokensLowerBound':sum(r['tokenLowerBound'] for r in request_rows.values() if r['tokenLowerBound'] is not None),
+            'fallbacks':sum(len(r['attempts']) > 1 for r in request_rows.values()),
+            'wastedTokensLowerBound':sum(sum(a['observation']['tokens']['value'] if a['observation']['tokens']['value'] is not None
+                                             else a['observation']['tokens']['knownPartial'] or 0
+                                             for a in r['attempts'][:-1]) for r in request_rows.values()),
             'passRate':mean(quality) if quality else None, 'evaluationCoverage':len(quality),
             'probes':sum(r['probe'] for r in request_rows.values()),
             'budgetOvershoot':max(0,sum(tokens)-plan['definition']['tokenBudget']) if tokens and plan['definition'].get('tokenBudget') else None})

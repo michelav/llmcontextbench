@@ -73,9 +73,12 @@ def _project(root, packets, checkpoint):
     for packet in packets:
         decisions.append(packet['decision'])
         timings.append(packet['timing'])
-        if packet['trial'] is not None:
-            trial = TrialSpec.model_validate(packet['trial'])
-            result = TrialResult.model_validate(packet['result'])
+        # Cascade packets project every attempt; other packets carry one execution.
+        executions = ([(a['trial'], a['result']) for a in packet['attempts']] if 'attempts' in packet
+                      else [(packet['trial'], packet['result'])] if packet['trial'] is not None else [])
+        for trial_payload, result_payload in executions:
+            trial = TrialSpec.model_validate(trial_payload)
+            result = TrialResult.model_validate(result_payload)
             trials.append(trial.to_persisted_artifact())
             trace_ref = f'traces/executions/{result.trialId}.json'
             project_json(root / trace_ref, {'experimentId': result.experimentId, 'trialId': result.trialId,

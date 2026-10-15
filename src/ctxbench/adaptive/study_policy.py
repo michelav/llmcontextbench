@@ -18,6 +18,9 @@ class Controller:
         self.excluded_until = {}
         self.window_start = {}
         self.avoided = {}
+        self.attempted = defaultdict(list)
+        self.flagged_sources = set()
+        self.source_of = {item['instanceId']: item.get('repo') for item in plan.get('index', [])}
         self.index = 0
         self.stopped = False
 
@@ -228,6 +231,34 @@ class Controller:
         actual, probe = self._probe(index, chosen, eligible)
         return actual, 'scheduled_probe' if probe else 'router', probe
 
+    def _cascade(self, instance, eligible):
+        fallbacks = [cid for cid in self.policy['fallbacks'] if cid in eligible]
+        if (self.policy.get('memory') == 'source' and fallbacks
+                and self.source_of.get(instance) in self.flagged_sources):
+            return fallbacks[0], 'source_memory', False
+        if self.policy['primary'] in eligible:
+            return self.policy['primary'], 'primary', False
+        if fallbacks:
+            return fallbacks[0], 'primary_ineligible', False
+        return None, 'no_eligible_candidate', False
+
+    def decide_fallback(self, index, observation):
+        """Within-request fallback after an observed trigger failure; never reads evaluation."""
+        if self.policy['type'] != 'cascade' or observation is None or observation['status'] == 'success':
+            return None
+        triggers = set(self.policy.get('triggerFailureClasses', ['step-limit', 'tool-use']))
+        if not triggers.intersection(observation['failures']):
+            return None
+        instance = self.episode['workload'][index]
+        if observation['configuration'] == self.policy['primary']:
+            self.flagged_sources.add(self.source_of.get(instance))
+        eligible = self._eligible(instance)
+        used = self.attempted[index]
+        for cid in self.policy['fallbacks']:
+            if cid in eligible and cid not in used:
+                return {'configuration': cid, 'reason': 'fallback', 'probe': False}
+        return None
+
     def decide(self, index):
         self.index = index
         instance = self.episode['workload'][index]
@@ -243,6 +274,8 @@ class Controller:
             chosen, reason, probe = self._budget(index, eligible)
         elif kind == 'reliability':
             chosen, reason, probe = self._reliability(index, eligible)
+        elif kind == 'cascade':
+            chosen, reason, probe = self._cascade(instance, eligible)
         else:
             chosen, reason, probe = self._router_decision(index, eligible, size)
         return {'configuration': chosen, 'reason': reason, 'probe': probe}
@@ -256,6 +289,7 @@ class Controller:
         row = {'status': observation['status'], 'durationMs': observation['durationMs'],
                'tokens': token['value'], 'failures': observation['failures'],
                'sizeBin': size, 'sequenceIndex': observation['sequenceIndex']}
+        self.attempted[observation['sequenceIndex']-1].append(cid)
         self.observed[(cid,size)].append(row)
         self.observed[(cid,'all')].append(row)
         if token['value'] is None:

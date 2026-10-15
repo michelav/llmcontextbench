@@ -87,7 +87,28 @@ class ReliabilityPolicy(Definition):
         return self
 
 
-Policy = Annotated[FixedPolicy | RouterPolicy | BudgetPolicy | ReliabilityPolicy,
+FailureClass = Literal['operation', 'transport', 'provider', 'tool-use', 'step-limit', 'unknown']
+
+
+class CascadePolicy(Definition):
+    """Primary configuration with a bounded within-request fallback on observed failures."""
+    type: Literal['cascade']
+    primary: str
+    fallbacks: list[str] = Field(min_length=1, max_length=1)
+    triggerFailureClasses: list[FailureClass] = Field(default_factory=lambda: ['step-limit', 'tool-use'], min_length=1)
+    primaryMaxSteps: PositiveInt | None = None
+    memory: Literal['none', 'source'] = 'none'
+
+    @model_validator(mode='after')
+    def validate_chain(self):
+        if self.primary in self.fallbacks or len(set(self.fallbacks)) != len(self.fallbacks):
+            raise ValueError('cascade fallbacks must be distinct from the primary and each other')
+        if len(set(self.triggerFailureClasses)) != len(self.triggerFailureClasses):
+            raise ValueError('repeated cascade trigger failure class')
+        return self
+
+
+Policy = Annotated[FixedPolicy | RouterPolicy | BudgetPolicy | ReliabilityPolicy | CascadePolicy,
                    Field(discriminator='type')]
 
 

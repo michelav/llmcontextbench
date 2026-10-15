@@ -82,7 +82,10 @@ def run(plan, episode, root, *, resume=False, retry_uncertain=False, execution=N
                 raise ValueError('unfinished request precedes completed history')
             if packet.get('uncertainRetries'):
                 controller.unknown = True
-            controller.observe(packet['observation'])
+            if 'attempts' in packet:
+                _replay_attempts(controller, index, packet['attempts'], finished=True)
+            else:
+                controller.observe(packet['observation'])
             if packet['ledger'] != controller.ledger():
                 raise ValueError('saved ledger differs from replay')
         _project(root, packets, checkpoint)
@@ -90,9 +93,64 @@ def run(plan, episode, root, *, resume=False, retry_uncertain=False, execution=N
             from ctxbench.ai.engine import Engine
             engine = Engine()
             execution = execute_runspec
+        def make_trial(cid, params=None):
+            original = plan['requests'][instance_of[0]]['trials'][cid]
+            update = {'trialId': digest([identity['planDigest'], episode['id'], instance_of[0], cid]),
+                      'outputRoot': str(root.resolve())}
+            if params:
+                update['params'] = {**original.get('params', {}), **params}
+            return TrialSpec.model_validate(original).model_copy(update=update, deep=True)
+
+        def execute_attempt(trial, cid, index, instance, uncertain):
+            """One measured execution; injected delays are inside the measured duration."""
+            delayed_runtimes = []
+            delay_requested, delay_actual, thrown = 0, 0, None
+            started = datetime.now(timezone.utc).isoformat()
+            outer = monotonic()
+            try:
+                treatments = [d for d in episode['scenario'] if d['configuration'] == cid and
+                              d['firstRequest'] <= index+1 <= d['lastRequest']]
+                delay_requested = sum(d['delayMs'] for d in treatments if d['scope'] == 'request')
+                delay_start = monotonic()
+                if delay_requested:
+                    sleeper(delay_requested / 1000)
+                delay_actual = (monotonic()-delay_start)*1000
+                tool_delay = sum(d['delayMs'] for d in treatments if d['scope'] == 'tool-call')
+                kwargs = {}
+                if tool_delay:
+                    def decorate(runtime):
+                        delayed = MeasuredToolDelay(runtime, tool_delay, sleeper=sleeper, monotonic=monotonic)
+                        delayed_runtimes.append(delayed)
+                        return delayed
+                    kwargs['local_mcp_runtime_decorator'] = decorate
+                result = execution(trial, engine, **kwargs)
+            except Exception as exc:
+                thrown = exc
+                result = error_result(trial, exc, started, datetime.now(timezone.utc).isoformat(),
+                                      (monotonic()-outer)*1000)
+            duration = max(0, (monotonic()-outer)*1000)
+            if result.trialId != trial.trialId or result.configurationId != cid:
+                raise ValueError('execution result identity mismatch')
+            metrics = result.trace.aiTrace.get('metrics', {})
+            total, provenance, partial = account_tokens(result.provider, result.usage.get('totalTokens'),
+                model_calls=metrics.get('modelCalls'), raw_response=result.trace.rawResponse,
+                partial_total=metrics.get('totalTokens'), missing_total_estimate=metrics.get('totalTokensEstimated'))
+            if uncertain:
+                partial = (partial or 0) + (total or 0)
+                total, provenance = None, 'unavailable'
+            observation = {'configuration': cid, 'sizeBin': plan['requests'][instance]['sizeBin'],
+                'status': result.status, 'durationMs': duration,
+                'tokens': {'value': total, 'provenance': provenance, 'knownPartial': partial},
+                'failures': classify_failures(result, thrown), 'sequenceIndex': index+1}
+            return {'result': result, 'observation': observation, 'durationMs': duration,
+                    'delayRequestedMs': delay_requested, 'delayActualMs': delay_actual,
+                    'delayedRuntimes': delayed_runtimes}
+
+        instance_of = [None]
         try:
             for index in range(len(packets), len(episode['workload'])):
                 instance = episode['workload'][index]
+                instance_of[0] = instance
                 selection = controller.decide(index)
                 retrying = pending is not None and index+1 == pending['sequenceIndex']
                 if retrying and selection != pending['selection']:
@@ -103,10 +161,14 @@ def run(plan, episode, root, *, resume=False, retry_uncertain=False, execution=N
                 cid = selection['configuration']
                 trial = None
                 if cid:
-                    original = plan['requests'][instance]['trials'][cid]
-                    trial = TrialSpec.model_validate(original).model_copy(update={
-                        'trialId': digest([identity['planDigest'], episode['id'], instance, cid]),
-                        'outputRoot': str(root.resolve())}, deep=True)
+                    trial = make_trial(cid)
+                if controller.policy['type'] == 'cascade':
+                    packet = _cascade_request(controller, index, instance, selection, pending if retrying else None,
+                                              uncertain, root, make_trial, execute_attempt, checkpoint)
+                    packets.append(packet)
+                    _project(root, packets, checkpoint)
+                    pending = None
+                    continue
                 packet = {'schemaVersion': 3, 'sequenceIndex': index+1, 'instanceId': instance,
                           'selection': selection, 'state': 'started', 'executionStarted': False,
                           'uncertainRetries': 1 if uncertain else 0,
@@ -123,44 +185,11 @@ def run(plan, episode, root, *, resume=False, retry_uncertain=False, execution=N
                     packet['executionStarted'] = True
                     sealed_write(packet_path, packet)
                     checkpoint('execution_started', index+1)
-                    started = datetime.now(timezone.utc).isoformat()
-                    outer = monotonic()
-                    try:
-                        treatments = [d for d in episode['scenario'] if d['configuration'] == cid and
-                                      d['firstRequest'] <= index+1 <= d['lastRequest']]
-                        delay_requested = sum(d['delayMs'] for d in treatments if d['scope'] == 'request')
-                        delay_start = monotonic()
-                        if delay_requested:
-                            sleeper(delay_requested / 1000)
-                        delay_actual = (monotonic()-delay_start)*1000
-                        tool_delay = sum(d['delayMs'] for d in treatments if d['scope'] == 'tool-call')
-                        kwargs = {}
-                        if tool_delay:
-                            def decorate(runtime):
-                                delayed = MeasuredToolDelay(runtime, tool_delay, sleeper=sleeper, monotonic=monotonic)
-                                delayed_runtimes.append(delayed)
-                                return delayed
-                            kwargs['local_mcp_runtime_decorator'] = decorate
-                        result = execution(trial, engine, **kwargs)
-                    except Exception as exc:
-                        thrown = exc
-                        result = error_result(trial, exc, started, datetime.now(timezone.utc).isoformat(),
-                                              (monotonic()-outer)*1000)
-                    duration = max(0, (monotonic()-outer)*1000)
-                    if result.trialId != trial.trialId or result.configurationId != cid:
-                        raise ValueError('execution result identity mismatch')
+                    outcome = execute_attempt(trial, cid, index, instance, uncertain)
                     checkpoint('execution_finished', index+1)
-                    metrics = result.trace.aiTrace.get('metrics', {})
-                    total, provenance, partial = account_tokens(result.provider, result.usage.get('totalTokens'),
-                        model_calls=metrics.get('modelCalls'), raw_response=result.trace.rawResponse,
-                        partial_total=metrics.get('totalTokens'), missing_total_estimate=metrics.get('totalTokensEstimated'))
-                    if uncertain:
-                        partial = (partial or 0) + (total or 0)
-                        total, provenance = None, 'unavailable'
-                    observation = {'configuration': cid, 'sizeBin': plan['requests'][instance]['sizeBin'],
-                        'status': result.status, 'durationMs': duration,
-                        'tokens': {'value': total, 'provenance': provenance, 'knownPartial': partial},
-                        'failures': classify_failures(result, thrown), 'sequenceIndex': index+1}
+                    result, observation, duration = outcome['result'], outcome['observation'], outcome['durationMs']
+                    delay_requested, delay_actual = outcome['delayRequestedMs'], outcome['delayActualMs']
+                    delayed_runtimes = outcome['delayedRuntimes']
                 else:
                     observation = None
                 controller.observe(observation)
@@ -188,6 +217,108 @@ def run(plan, episode, root, *, resume=False, retry_uncertain=False, execution=N
         finally:
             if engine:
                 engine.close()
+
+
+def _replay_attempts(controller, index, attempts, *, finished=False):
+    """Re-observe saved attempts, mirroring every fallback query the live loop made."""
+    for position, attempt in enumerate(attempts):
+        if position:
+            fallback = controller.decide_fallback(index, attempts[position-1]['observation'])
+            if fallback is None or fallback['configuration'] != attempt['configuration']:
+                raise ValueError('saved fallback differs from policy replay')
+        controller.observe(attempt['observation'])
+    if finished and attempts and len(attempts) <= len(controller.policy['fallbacks']):
+        if controller.decide_fallback(index, attempts[-1]['observation']) is not None:
+            raise ValueError('saved request stopped before a fallback the policy now requires')
+
+
+def _combined_tokens(observations):
+    """Sum per-attempt usage; any unknown attempt makes the total unknown with a known lower bound."""
+    tokens = [o['tokens'] for o in observations]
+    if all(t['value'] is not None for t in tokens):
+        provenances = {t['provenance'] for t in tokens}
+        return {'value': sum(t['value'] for t in tokens),
+                'provenance': provenances.pop() if len(provenances) == 1 else 'derived', 'knownPartial': None}
+    return {'value': None, 'provenance': 'unavailable',
+            'knownPartial': sum(t['value'] if t['value'] is not None else (t['knownPartial'] or 0) for t in tokens)}
+
+
+def _cascade_request(controller, index, instance, selection, pending, uncertain, root, make_trial,
+                     execute_attempt, checkpoint):
+    """Primary attempt plus at most the declared fallbacks, charged to the same request."""
+    plan, policy = controller.plan, controller.policy
+    packet_path = root / f'recovery/request-{index+1:04d}.json'
+    saved = pending.get('attempts', []) if pending else []
+    completed = [a for a in saved if a['state'] == 'completed']
+    # Only the attempt interrupted after it started may have charged unknown usage.
+    retry_position = len(completed) if len(saved) > len(completed) else None
+    _replay_attempts(controller, index, completed)
+    packet = {'schemaVersion': 3, 'sequenceIndex': index+1, 'instanceId': instance, 'selection': selection,
+              'state': 'started', 'executionStarted': False, 'uncertainRetries': 1 if uncertain else 0,
+              'startedAt': pending['startedAt'] if pending else datetime.now(timezone.utc).isoformat(),
+              'attempts': completed}
+    sealed_write(packet_path, packet)
+    checkpoint('selection_saved', index+1)
+    while len(completed) <= len(policy['fallbacks']):
+        if not completed:
+            cid, reason = selection['configuration'], selection['reason']
+        else:
+            fallback = controller.decide_fallback(index, completed[-1]['observation'])
+            if fallback is None:
+                break
+            cid, reason = fallback['configuration'], fallback['reason']
+        if cid is None:
+            break
+        params = ({'max_steps': policy['primaryMaxSteps']}
+                  if policy.get('primaryMaxSteps') and cid == policy['primary'] else None)
+        trial = make_trial(cid, params)
+        attempt = {'configuration': cid, 'reason': reason, 'state': 'started',
+                   'trial': trial.model_dump(mode='json')}
+        packet.update(attempts=completed+[attempt], executionStarted=True)
+        sealed_write(packet_path, packet)
+        checkpoint('attempt_started', index+1)
+        outcome = execute_attempt(trial, cid, index, instance, uncertain and len(completed) == retry_position)
+        runtimes = outcome['delayedRuntimes']
+        attempt.update(state='completed', result=outcome['result'].model_dump(mode='json'),
+                       observation=outcome['observation'], durationMs=outcome['durationMs'],
+                       delayRequestedMs=outcome['delayRequestedMs'], delayActualMs=outcome['delayActualMs'],
+                       toolDelayRequestedMs=sum(r.calls*r.delay_ms for r in runtimes),
+                       toolDelayActualMs=sum(r.actual_ms for r in runtimes),
+                       toolCallsDelayed=sum(r.calls for r in runtimes))
+        controller.observe(outcome['observation'])
+        completed.append(attempt)
+        packet.update(attempts=completed, executionStarted=False)
+        sealed_write(packet_path, packet)
+        checkpoint('attempt_saved', index+1)
+    observations = [a['observation'] for a in completed]
+    final = completed[-1] if completed else None
+    combined = None
+    if final:
+        combined = {**final['observation'], 'durationMs': sum(a['durationMs'] for a in completed),
+                    'tokens': _combined_tokens(observations)}
+    summary = [{'configuration': a['configuration'], 'reason': a['reason'], 'status': a['observation']['status'],
+                'durationMs': a['durationMs'], 'tokens': a['observation']['tokens'],
+                'failures': a['observation']['failures']} for a in completed]
+    decision = {'schemaVersion': 4, 'requestId': instance, 'sequenceIndex': index+1, **selection,
+                'status': final['observation']['status'] if final else 'unserved',
+                'tokens': combined['tokens'] if combined else None,
+                'durationMs': combined['durationMs'] if combined else None,
+                'delayRequestedMs': sum(a['delayRequestedMs'] for a in completed),
+                'delayActualMs': sum(a['delayActualMs'] for a in completed),
+                'toolDelayRequestedMs': sum(a['toolDelayRequestedMs'] for a in completed),
+                'toolDelayActualMs': sum(a['toolDelayActualMs'] for a in completed),
+                'toolCallsDelayed': sum(a['toolCallsDelayed'] for a in completed),
+                'attempts': summary, 'finalConfiguration': final['configuration'] if final else None,
+                'fallbackReason': completed[0]['observation']['failures'] if len(completed) > 1 else None,
+                'ledger': controller.ledger()}
+    packet.update(state='completed', trial=final['trial'] if final else None,
+                  result=final['result'] if final else None, observation=combined, decision=decision,
+                  ledger=controller.ledger(), completedAt=datetime.now(timezone.utc).isoformat(),
+                  timing={'schemaVersion': 3, 'sequenceIndex': index+1,
+                          'durationMs': combined['durationMs'] if combined else None})
+    sealed_write(packet_path, packet)
+    checkpoint('outcome_saved', index+1)
+    return packet
 
 
 def classify_failures(result, thrown=None):

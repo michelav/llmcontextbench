@@ -39,6 +39,75 @@
       "title": "BudgetPolicy",
       "type": "object"
     },
+    "CascadePolicy": {
+      "additionalProperties": false,
+      "description": "Primary configuration with a bounded within-request fallback on observed failures.",
+      "properties": {
+        "type": {
+          "const": "cascade",
+          "title": "Type",
+          "type": "string"
+        },
+        "primary": {
+          "title": "Primary",
+          "type": "string"
+        },
+        "fallbacks": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 1,
+          "minItems": 1,
+          "title": "Fallbacks",
+          "type": "array"
+        },
+        "triggerFailureClasses": {
+          "items": {
+            "enum": [
+              "operation",
+              "transport",
+              "provider",
+              "tool-use",
+              "step-limit",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Triggerfailureclasses",
+          "type": "array"
+        },
+        "primaryMaxSteps": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Primarymaxsteps"
+        },
+        "memory": {
+          "default": "none",
+          "enum": [
+            "none",
+            "source"
+          ],
+          "title": "Memory",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "primary",
+        "fallbacks"
+      ],
+      "title": "CascadePolicy",
+      "type": "object"
+    },
     "Delay": {
       "additionalProperties": false,
       "properties": {
@@ -350,6 +419,7 @@
         "discriminator": {
           "mapping": {
             "budget": "#/$defs/BudgetPolicy",
+            "cascade": "#/$defs/CascadePolicy",
             "fixed": "#/$defs/FixedPolicy",
             "reliability": "#/$defs/ReliabilityPolicy",
             "router": "#/$defs/RouterPolicy"
@@ -368,6 +438,9 @@
           },
           {
             "$ref": "#/$defs/ReliabilityPolicy"
+          },
+          {
+            "$ref": "#/$defs/CascadePolicy"
           }
         ]
       },

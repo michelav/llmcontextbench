@@ -254,3 +254,32 @@ configuration, scenario, workload and study settings (baseline digest,
 configurations, latency limit, token budget, quality floor), so IDs no longer
 collide between studies that reuse policy names and seeds. Previously prepared
 studies keep their sealed IDs.
+
+### Cascade policy (within-request fallback)
+
+```json
+"cascade-mcp": {"type": "cascade", "primary": "local-mcp-lean",
+                "fallbacks": ["local-mcp-default"],
+                "triggerFailureClasses": ["step-limit", "tool-use"]}
+```
+
+Each request first runs `primary`. If that attempt fails with one of
+`triggerFailureClasses` (classified from the execution only, never from
+evaluation), the single declared fallback runs for the same request. Optional
+`primaryMaxSteps` lowers the primary attempt's `max_steps` (an early-abort
+variant); optional `memory: "source"` sends later requests for a repository
+whose primary attempt failed straight to the fallback (an ablation; it keys on the
+repository, never the target function).
+
+Every attempt is a canonical trial: both appear in `trials.jsonl`,
+`responses.jsonl` and traces, and `llmctxbench eval` scores both. The request
+outcome is the final attempt. Its latency is the sum of attempt durations, and its
+tokens are the sum of attempt usage; if any attempt's usage is unknown, the total
+is `unavailable` with the known lower bound in `knownPartial`. Decision records use
+`schemaVersion` 4 and add `attempts`, `finalConfiguration` and `fallbackReason`.
+Resume never repeats a completed attempt; an attempt interrupted after it started
+requires `--retry-uncertain`, and its usage is then unknown.
+
+`study analyze` reports `fallbacks`, `tokensLowerBound` (unknown totals counted at
+their known partial usage) and `wastedTokensLowerBound` (failed attempts before a
+fallback), next to `knownTokens`, which covers fully known requests only.
