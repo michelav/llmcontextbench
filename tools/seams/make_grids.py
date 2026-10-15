@@ -44,8 +44,8 @@ def variant(base, change):
     return {k: v for k, v in {**base, **change}.items() if v is not None}
 
 
-def mcp_delay(first, last, delay=SA_DELAY_MS):
-    return {'kind': 'delay', 'configuration': MCP, 'scope': 'tool-call', 'delayMs': delay,
+def mcp_delay(first, last, delay=None):
+    return {'kind': 'delay', 'configuration': MCP, 'scope': 'tool-call', 'delayMs': delay or SA_DELAY_MS,
             'firstRequest': first, 'lastRequest': last}
 
 
@@ -158,12 +158,34 @@ OUTPUTS = {
 }
 
 
+def apply_selection(path):
+    """Use a select_parameters.py record for the live definitions (the replay grids stay unchanged)."""
+    global V2, SA_LIMIT_MS, SA_DELAY_MS
+    decision = json.loads(Path(path).read_text())['decision']
+    V2 = variant(V2, V2_CANDIDATES[decision['policy']])
+    SA_LIMIT_MS, SA_DELAY_MS = decision['latencyLimitMs'], decision['delayMs']
+
+
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='Generate SEAMS v2 replay grids and study definitions.')
+    parser.add_argument('--selection', help='Selection record from tools/seams/select_parameters.py')
+    args = parser.parse_args()
+    if args.selection:
+        grids = {name: build() for name, build in OUTPUTS.items() if name.startswith('replay/')}
+        apply_selection(args.selection)
+    else:
+        grids = {}
     for name, build in OUTPUTS.items():
+        if name in grids:
+            payload = grids[name]
+        else:
+            payload = build()
         path = OUT / name
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(build(), indent=2) + '\n')
+        path.write_text(json.dumps(payload, indent=2) + '\n')
         print(path.relative_to(ROOT))
+    return
 
 
 if __name__ == '__main__':
