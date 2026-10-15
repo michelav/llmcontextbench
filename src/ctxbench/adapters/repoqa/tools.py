@@ -48,10 +48,28 @@ READ_FILE_SCHEMA = {
     "additionalProperties": False,
 }
 
+FIND_SYMBOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "workspace_id": {"type": "string"},
+        "query": {"type": "string"},
+        "k": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
+    },
+    "required": ["workspace_id", "query"],
+    "additionalProperties": False,
+}
+
+FIND_SYMBOL_DESCRIPTION = (
+    "Search a RepoQA workspace for the code symbols that best match a description of what the code does. "
+    "Pass the description (or key words from it) as query. Returns the top k symbols (default 5, at most 20), "
+    "best first, each with symbol_id, name, path and complete code."
+)
+
 REPOQA_OPERATIONS = ("list_files", "list_symbols", "get_symbol", "read_file")
 
 REPOQA_LEAN_OPERATIONS = tuple(name + "_lean" for name in REPOQA_OPERATIONS)
-REPOQA_ALL_OPERATIONS = REPOQA_OPERATIONS + REPOQA_LEAN_OPERATIONS
+REPOQA_TASK_OPERATIONS = ("find_symbol",)
+REPOQA_ALL_OPERATIONS = REPOQA_OPERATIONS + REPOQA_LEAN_OPERATIONS + REPOQA_TASK_OPERATIONS
 
 
 def normalize_allowed_operations(allowed_operations: list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
@@ -105,12 +123,13 @@ def list_repoqa_tool_specs(*, include_lean: bool = False) -> list[ToolSpec]:
     )
     if not include_lean:
         return defaults
+    task = [ToolSpec(name="find_symbol", description=FIND_SYMBOL_DESCRIPTION, input_schema=FIND_SYMBOL_SCHEMA)]
     lean_symbols_schema = deepcopy(LIST_SYMBOLS_SCHEMA)
     for field in ("path", "kind"):
         lean_symbols_schema["properties"][field] = {"anyOf": [{"type": "string"}, {"type": "null"}], "default": None}
     return defaults + [ToolSpec(name=spec.name + "_lean", description=description,
                                 input_schema=lean_symbols_schema if spec.name == "list_symbols" else spec.input_schema)
-                       for spec, description in zip(defaults, descriptions)]
+                       for spec, description in zip(defaults, descriptions)] + task
 
 
 class RepoQAToolService:
@@ -131,6 +150,7 @@ class RepoQAToolService:
             "list_symbols": self._call_list_symbols,
             "get_symbol": self._call_get_symbol,
             "read_file": self._call_read_file,
+            "find_symbol": self._call_find_symbol,
         }
         for name in REPOQA_LEAN_OPERATIONS:
             self._handlers[name] = self._lean_handler(name)
@@ -198,6 +218,15 @@ class RepoQAToolService:
             _require_string(arguments, "workspace_id"),
             _require_string(arguments, "symbol_id"),
         )
+
+    def _call_find_symbol(self, arguments: dict[str, Any]) -> list[dict[str, Any]]:
+        k = arguments.get("k", 5)
+        if k is None:
+            k = 5
+        if isinstance(k, bool) or not isinstance(k, int):
+            raise ValueError("RepoQA find_symbol requires 'k' to be an integer when provided.")
+        return self._provider.find_symbol(_require_string(arguments, "workspace_id"),
+                                          _require_string(arguments, "query"), k)
 
     def _call_read_file(self, arguments: dict[str, Any]) -> dict[str, Any]:
         return self._provider.read_file(

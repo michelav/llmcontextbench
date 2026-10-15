@@ -52,3 +52,17 @@ def test_lean_protocol_schema_and_content_parity(name, extra):
     finally:
         runtime.close()
         service.close()
+
+
+def test_find_symbol_ranks_callables_and_validates_arguments():
+    provider = RepoQAProvider(contexts_dir=ROOT)
+    found = provider.find_symbol(WORKSPACE, 'Greet a person by name', 5)
+    assert [s['name'] for s in found] == ['Greeter.greet', 'helper']
+    assert found[0] == {'symbol_id': found[0]['symbol_id'], 'name': 'Greeter.greet', 'path': 'src/example.py',
+                        'code': provider.get_symbol(WORKSPACE, found[0]['symbol_id'])['code']}
+    assert [s['name'] for s in provider.find_symbol(WORKSPACE, 'strip value', 1)] == ['helper']
+    service = RepoQAToolService(contexts_dir=ROOT, allowed_operations=['find_symbol'])
+    assert [t.name for t in service.list_tools()] == ['find_symbol']
+    assert service.call_tool('find_symbol', {'workspace_id': WORKSPACE, 'query': 'the of'}).is_error
+    assert service.call_tool('find_symbol', {'workspace_id': WORKSPACE, 'query': 'greet', 'k': 'two'}).is_error
+    assert not service.call_tool('find_symbol', {'workspace_id': WORKSPACE, 'query': 'greet', 'k': None}).is_error

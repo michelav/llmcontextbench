@@ -7,7 +7,7 @@ from fastmcp import FastMCP
 
 from ctxbench.ai.models.base import ToolResult, ToolSpec
 from ctxbench.ai.mcp_result import mcp_operation_result
-from ctxbench.adapters.repoqa.tools import RepoQAToolService
+from ctxbench.adapters.repoqa.tools import FIND_SYMBOL_DESCRIPTION, RepoQAToolService
 
 
 class RepoQAMCPServer:
@@ -64,6 +64,11 @@ class RepoQAMCPServer:
             @self.app.tool(name="get_symbol", description="Return one RepoQA symbol, including generated visible code.")
             async def get_symbol(workspace_id: str, symbol_id: str) -> object:
                 return mcp_operation_result(self.call_tool("get_symbol", {"workspace_id": workspace_id, "symbol_id": symbol_id}))
+
+        if "find_symbol" in selected:
+            @self.app.tool(name="find_symbol", description=FIND_SYMBOL_DESCRIPTION)
+            async def find_symbol(workspace_id: str, query: str, k: int | None = 5) -> object:
+                return mcp_operation_result(self.call_tool("find_symbol", {"workspace_id": workspace_id, "query": query, "k": k}))
 
         if "read_file" in selected:
             @self.app.tool(name="read_file", description="Read one generated visible file from a RepoQA workspace.")

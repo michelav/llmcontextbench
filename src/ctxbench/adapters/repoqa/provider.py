@@ -3,7 +3,9 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import math
 import re
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -145,6 +147,39 @@ class RepoQAProvider:
         if not isinstance(code, str) or not code.strip():
             raise ValueError(f"Visible code is unavailable for symbol_id={symbol_id}")
         return {"code": code}
+
+    def find_symbol(self, workspace_id: str, query: str, k: int = 5) -> list[dict[str, Any]]:
+        """Rank callable symbols (functions and methods) by BM25 relevance of name, documentation and code."""
+        terms = Counter(_search_tokens(query))
+        if not terms:
+            raise ValueError("RepoQA find_symbol requires a query with searchable words.")
+        k = max(1, min(int(k), 20))
+        candidates = []
+        for item in self._workspace_payload(workspace_id)["files"]:
+            stack = list(item.get("symbols", []))
+            while stack:
+                symbol = stack.pop()
+                stack.extend(child for child in symbol.get("children", []) if isinstance(child, dict))
+                code = symbol.get("code")
+                if isinstance(code, str) and code.strip() and _symbol_kind_matches(symbol.get("kind"), "function"):
+                    text = " ".join(str(symbol.get(key) or "") for key in ("qualified_name", "documentation", "code"))
+                    candidates.append((symbol, item["path"], Counter(_search_tokens(text))))
+        if not candidates:
+            return []
+        average = sum(sum(counts.values()) for *_, counts in candidates) / len(candidates)
+        frequency = Counter(term for *_, counts in candidates for term in counts)
+
+        def score(counts):
+            length, total = sum(counts.values()), 0.0
+            for term in terms:
+                if term in counts:
+                    idf = math.log(1 + (len(candidates) - frequency[term] + 0.5) / (frequency[term] + 0.5))
+                    total += idf * counts[term] * 2.2 / (counts[term] + 1.2 * (0.25 + 0.75 * length / average))
+            return total
+
+        ranked = sorted(candidates, key=lambda row: -score(row[2]))[:k]
+        return [{"symbol_id": symbol["symbol_id"], "name": symbol.get("qualified_name") or symbol.get("name"),
+                 "path": path, "code": symbol["code"]} for symbol, path, _ in ranked]
 
     def read_file_lean(self, workspace_id: str, path: str) -> dict[str, str]:
         return {"content": self.read_file(workspace_id, path)["content"]}
@@ -349,6 +384,18 @@ def _path_matches(file_path: Any, requested_path: str) -> bool:
     if not prefix:
         return True
     return file_path == prefix or file_path.startswith(f"{prefix}/")
+
+
+_SEARCH_STOPWORDS = frozenset(
+    "the a an of to and or is in for it with that this as be by on are if from its which function given "
+    "returns return value values input output purpose procedure designed specific specified provided each".split()
+)
+
+
+def _search_tokens(text: str) -> list[str]:
+    """Split identifiers (camelCase, snake_case) and prose into lowercase search terms."""
+    parts = re.findall(r"[A-Za-z][a-z]*|[A-Z]+(?![a-z])|\d+", text or "")
+    return [part.lower() for part in parts if len(part) > 1 and part.lower() not in _SEARCH_STOPWORDS]
 
 
 def _find_symbol(symbol: dict[str, Any], symbol_id: str) -> dict[str, Any] | None:
