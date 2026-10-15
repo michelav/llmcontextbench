@@ -244,3 +244,31 @@ Exploratory replay of two further scenarios on v2 calibration (pair inline + MCP
 
 **Token cap: replay-only negative case.**
 - A static per-size rule matches the `pace` policy, which uses feedback from the token ledger, because cost is predictable from request size (C2 fails).
+
+## 2026-10-15 — SEAMS v2: why tool configurations are slower (interaction patterns)
+
+`tools/seams/interaction_patterns.py` (output `baselines/repoqa-long64-v2/interaction-patterns.json`) reads the calibration execution traces.
+
+**Where the time goes.**
+- Tool-configuration latency is almost entirely model time: tools take about 10 ms per request and the harness about 30 ms.
+- Tool configurations make about 3.9 sequential model calls per request; inline makes 1.
+
+**Cost per model call** (least-squares fit, about 2,370 calls per run):
+
+| Run | Fixed cost per call | Per 1k input tokens | Per 100 output tokens | R² |
+|---|---|---|---|---|
+| v1 | 1.28 s | about 0.01 s | 0.68 s | 0.55 |
+| v2 | 1.52 s | about 0.01 s | 0.81 s | 0.45 |
+
+- Inline pays the fixed cost once; tool configurations pay it about 4 times.
+- So a provider-wide slowdown in the fixed cost affects tool configurations about 4 × more than inline.
+
+**Interaction pattern.**
+- The dominant sequence is `list_files > list_symbols > get_symbol` → answer: 62–83 % of requests, depending on configuration.
+- `list_files` returns the same information for a repository every time, yet costs a full round trip.
+- Parallel tool calls are allowed but are used in only 4–17 of 144 requests, because each step depends on the previous one.
+- Lean's median is similar to default's. Its tail comes from exploration loops: repeated `list_symbols` in 5–8 calls takes 13–16 s, and the same loops cause its step-limit failures.
+
+**MCP vs functions.** No per-call difference in v1 (1.32, 1.56 and 1.75 s for both). The v2 gap comes from the slow periods.
+
+**Scope.** The surface code (`adapters/repoqa/{tools,mcp_server,provider}.py`) is fingerprinted. A redesigned surface therefore needs a new baseline. It is deferred until after the pre-registered collection, in a separate worktree.
