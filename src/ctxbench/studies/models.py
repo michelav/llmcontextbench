@@ -1,7 +1,7 @@
 """Authored definitions. Scientific thresholds have no implicit defaults."""
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, StrictInt, Tag, model_validator
 
 PositiveInt = Annotated[StrictInt, Field(gt=0)]
 
@@ -67,6 +67,7 @@ class BudgetPolicy(Definition):
     probeInterval: PositiveInt = 10
     unknownUsage: Literal['stop', 'bounded'] = 'stop'
     forecast: Literal['lookahead', 'expected'] = 'lookahead'
+    mode: Literal['incumbent', 'pace'] = 'incumbent'
 
 
 class ReliabilityPolicy(Definition):
@@ -108,11 +109,39 @@ class CascadePolicy(Definition):
         return self
 
 
-Policy = Annotated[FixedPolicy | RouterPolicy | BudgetPolicy | ReliabilityPolicy | CascadePolicy,
-                   Field(discriminator='type')]
+class RequestRange(Definition):
+    firstRequest: PositiveInt
+    lastRequest: PositiveInt
+
+    @model_validator(mode='after')
+    def validate_range(self):
+        if self.lastRequest < self.firstRequest:
+            raise ValueError('lastRequest precedes firstRequest')
+        return self
+
+
+class SchedulePhase(RequestRange):
+    configurationBySize: dict[str, str] = Field(min_length=1)
+
+
+class SchedulePolicy(Definition):
+    """Phase oracle: knows the disturbance schedule by design; an upper bound, not deployable."""
+    type: Literal['schedule']
+    default: dict[str, str] = Field(min_length=1)
+    phases: list[SchedulePhase] = Field(default_factory=list)
+
+
+class RandomPolicy(Definition):
+    type: Literal['random-eligible']
+    seed: StrictInt
+
+
+Policy = Annotated[FixedPolicy | RouterPolicy | BudgetPolicy | ReliabilityPolicy | CascadePolicy
+                   | SchedulePolicy | RandomPolicy, Field(discriminator='type')]
 
 
 class Delay(Definition):
+    kind: Literal['delay'] = 'delay'
     configuration: str
     scope: Literal['request', 'tool-call']
     delayMs: PositiveInt
@@ -126,6 +155,28 @@ class Delay(Definition):
         return self
 
 
+class Fault(RequestRange):
+    """Each local-MCP tool call fails with this probability (seeded per request position and call)."""
+    kind: Literal['fault']
+    configuration: str
+    toolErrorRate: Annotated[float, Field(gt=0, le=1)]
+    seed: StrictInt
+
+
+class TokenQuota(RequestRange):
+    """Harness-simulated provider quota over the trailing 60 s of wall time, for every configuration."""
+    kind: Literal['token-quota']
+    tokensPerMinute: PositiveInt
+
+
+def _effect_kind(value):
+    return value.get('kind', 'delay') if isinstance(value, dict) else getattr(value, 'kind', 'delay')
+
+
+Effect = Annotated[Union[Annotated[Delay, Tag('delay')], Annotated[Fault, Tag('fault')],
+                         Annotated[TokenQuota, Tag('token-quota')]], Discriminator(_effect_kind)]
+
+
 class Study(Definition):
     schemaVersion: Literal[1] = 1
     baseline: str
@@ -133,7 +184,7 @@ class Study(Definition):
     seeds: list[StrictInt] = Field(min_length=1)
     repeats: PositiveInt
     policies: dict[str, Policy] = Field(min_length=1)
-    scenarios: dict[str, list[Delay]] = Field(min_length=1)
+    scenarios: dict[str, list[Effect]] = Field(min_length=1)
     comparisons: list[tuple[str, str]] = Field(default_factory=list)
     latencyLimitMs: Annotated[float, Field(gt=0)] | None = None
     tokenBudget: PositiveInt | None = None

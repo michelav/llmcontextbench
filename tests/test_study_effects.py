@@ -1,0 +1,131 @@
+"""Phase-oracle, random and pacing policies; fault and token-quota effects."""
+from pathlib import Path
+
+import pytest
+
+from ctxbench.adaptive.recovery import sealed_read
+from ctxbench.adaptive.study_policy import Controller
+from ctxbench.adaptive.study_runner import run
+from ctxbench.ai.models.base import ToolResult
+from ctxbench.studies import study
+from tests.test_study_protocol import frozen, make_study, mock_execute  # noqa: F401  (fixture reuse)
+
+INLINE, MCP = 'inline-code-full', 'local-mcp-repoqa-ops'
+
+
+def prepared(tmp_path, frozen, name, **overrides):
+    return sealed_read(Path(study.prepare(definition=make_study(tmp_path, frozen, comparisons=[], **overrides),
+                                          output=tmp_path/name)['prepared']))
+
+
+def test_schedule_policy_follows_phases(frozen, tmp_path):
+    plan = prepared(tmp_path, frozen, 'schedule', policies={'oracle': {'type': 'schedule',
+        'default': {'small': INLINE, 'large': MCP},
+        'phases': [{'firstRequest': 3, 'lastRequest': 4, 'configurationBySize': {'small': MCP, 'large': INLINE}}]}})
+    controller = Controller(plan, plan['episodes'][0])
+    for index, instance in enumerate(plan['episodes'][0]['workload'][:6]):
+        size = plan['requests'][instance]['sizeBin']
+        in_phase = 3 <= index+1 <= 4
+        expected = {'small': MCP, 'large': INLINE} if in_phase else {'small': INLINE, 'large': MCP}
+        assert controller.decide(index) == {'configuration': expected[size], 'reason': 'schedule', 'probe': False}
+
+
+def test_schedule_rejects_phase_beyond_workload(frozen, tmp_path):
+    definition = make_study(tmp_path, frozen, comparisons=[], policies={'oracle': {'type': 'schedule',
+        'default': {'small': INLINE}, 'phases': [{'firstRequest': 1, 'lastRequest': 999,
+                                                  'configurationBySize': {'small': MCP}}]}})
+    with pytest.raises(ValueError, match='schedule phase exceeds workload'):
+        study.prepare(definition=definition, output=tmp_path/'bad-schedule')
+
+
+def test_random_policy_is_seeded_and_eligible(frozen, tmp_path):
+    plan = prepared(tmp_path, frozen, 'random', policies={'random': {'type': 'random-eligible', 'seed': 7}})
+    def sequence():
+        controller = Controller(plan, plan['episodes'][0])
+        return [controller.decide(i)['configuration'] for i in range(20)]
+    first, again = sequence(), sequence()
+    assert first == again and set(first) == {INLINE, MCP}
+
+
+def test_pace_serves_every_request_within_budget(frozen, tmp_path):
+    plan = prepared(tmp_path, frozen, 'pace', latencyLimitMs=None, tokenBudget=700, policies={
+        'pace': {'type': 'budget', 'mode': 'pace', 'forecast': 'expected', 'probeInterval': 1000},
+        'inline': {'type': 'fixed', 'configuration': INLINE}, 'mcp': {'type': 'fixed', 'configuration': MCP}})
+    for size in ('small', 'large'):
+        plan['estimates'][INLINE][size].update(latencyMs=10, tokens=20)
+        plan['estimates'][MCP][size].update(latencyMs=100, tokens=5)
+    def execution(trial, engine, **kwargs):
+        result = mock_execute(trial, engine)
+        return result.model_copy(update={'usage': {'totalTokens': 20 if trial.configurationId == INLINE else 5}})
+    episode = plan['episodes'][0]
+    packets = run(plan, episode, tmp_path/'pace-run', execution=execution)
+    chosen = [p['selection']['configuration'] for p in packets]
+    assert None not in chosen and {INLINE, MCP} == set(chosen)
+    assert chosen[0] == INLINE and chosen[-1] == MCP
+    assert packets[-1]['ledger']['knownTokens'] <= 700
+
+
+class FakeRuntime:
+    def list_tools(self):
+        return []
+
+    def call_tool(self, name, arguments):
+        return ToolResult(name=name, content='ok', is_error=False, metadata={})
+
+    def close(self):
+        pass
+
+
+def calling_execution(calls=10):
+    def execution(trial, engine, **kwargs):
+        decorate = kwargs.get('local_mcp_runtime_decorator')
+        if decorate:
+            runtime = decorate(FakeRuntime())
+            for _ in range(calls):
+                runtime.call_tool('read_file', {})
+        return mock_execute(trial, engine)
+    return execution
+
+
+def test_fault_injection_is_seeded_and_recorded(frozen, tmp_path):
+    fault = {'kind': 'fault', 'configuration': MCP, 'toolErrorRate': 0.5, 'seed': 3,
+             'firstRequest': 1, 'lastRequest': 4}
+    plan = prepared(tmp_path, frozen, 'fault', scenarios={'faulty': [fault]},
+                    policies={'mcp': {'type': 'fixed', 'configuration': MCP}}, latencyLimitMs=None)
+    counts = []
+    for name in ('one', 'two'):
+        packets = run(plan, plan['episodes'][0], tmp_path/f'fault-{name}', execution=calling_execution())
+        counts.append([p['decision']['faultsInjected'] for p in packets])
+    assert counts[0] == counts[1]
+    assert all(0 < n < 10 for n in counts[0][:4]) and set(counts[0][4:]) == {0}
+
+
+def test_fault_requires_local_mcp(frozen, tmp_path):
+    fault = {'kind': 'fault', 'configuration': INLINE, 'toolErrorRate': 0.5, 'seed': 3,
+             'firstRequest': 1, 'lastRequest': 4}
+    with pytest.raises(ValueError, match='fault injection requires local_mcp'):
+        prepared(tmp_path, frozen, 'bad-fault', scenarios={'faulty': [fault]})
+
+
+def test_token_quota_waits_inside_measured_time(frozen, tmp_path):
+    quota = {'kind': 'token-quota', 'tokensPerMinute': 1500, 'firstRequest': 1, 'lastRequest': 3}
+    plan = prepared(tmp_path, frozen, 'quota', scenarios={'quota': [quota]},
+                    policies={'inline': {'type': 'fixed', 'configuration': INLINE}}, latencyLimitMs=None)
+    clock = [0.0]
+    def sleeper(seconds):
+        clock[0] += seconds
+    def execution(trial, engine, **kwargs):
+        result = mock_execute(trial, engine)
+        return result.model_copy(update={'usage': {'totalTokens': 1000}})
+    packets = run(plan, plan['episodes'][0], tmp_path/'quota-run', execution=execution,
+                  monotonic=lambda: clock[0], sleeper=sleeper)
+    waits = [round(p['decision']['quotaWaitMs']) for p in packets[:4]]
+    assert waits == [0, 0, 60000, 0]
+    assert round(packets[2]['decision']['durationMs']) == 60000
+    assert all(p['decision']['controllerMs'] >= 0 for p in packets)
+
+
+def test_legacy_scenario_entries_still_validate(frozen, tmp_path):
+    delay = {'configuration': MCP, 'scope': 'tool-call', 'delayMs': 5, 'firstRequest': 1, 'lastRequest': 2}
+    plan = prepared(tmp_path, frozen, 'legacy-delay', scenarios={'delayed': [delay]})
+    assert plan['episodes'][0]['scenario'][0]['kind'] == 'delay'

@@ -31,6 +31,15 @@
           ],
           "title": "Forecast",
           "type": "string"
+        },
+        "mode": {
+          "default": "incumbent",
+          "enum": [
+            "incumbent",
+            "pace"
+          ],
+          "title": "Mode",
+          "type": "string"
         }
       },
       "required": [
@@ -111,6 +120,12 @@
     "Delay": {
       "additionalProperties": false,
       "properties": {
+        "kind": {
+          "const": "delay",
+          "default": "delay",
+          "title": "Kind",
+          "type": "string"
+        },
         "configuration": {
           "title": "Configuration",
           "type": "string"
@@ -149,6 +164,51 @@
       "title": "Delay",
       "type": "object"
     },
+    "Fault": {
+      "additionalProperties": false,
+      "description": "Each local-MCP tool call fails with this probability (seeded per request position and call).",
+      "properties": {
+        "firstRequest": {
+          "exclusiveMinimum": 0,
+          "title": "Firstrequest",
+          "type": "integer"
+        },
+        "lastRequest": {
+          "exclusiveMinimum": 0,
+          "title": "Lastrequest",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "fault",
+          "title": "Kind",
+          "type": "string"
+        },
+        "configuration": {
+          "title": "Configuration",
+          "type": "string"
+        },
+        "toolErrorRate": {
+          "exclusiveMinimum": 0,
+          "maximum": 1,
+          "title": "Toolerrorrate",
+          "type": "number"
+        },
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "firstRequest",
+        "lastRequest",
+        "kind",
+        "configuration",
+        "toolErrorRate",
+        "seed"
+      ],
+      "title": "Fault",
+      "type": "object"
+    },
     "FixedPolicy": {
       "additionalProperties": false,
       "properties": {
@@ -167,6 +227,26 @@
         "configuration"
       ],
       "title": "FixedPolicy",
+      "type": "object"
+    },
+    "RandomPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "random-eligible",
+          "title": "Type",
+          "type": "string"
+        },
+        "seed": {
+          "title": "Seed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "type",
+        "seed"
+      ],
+      "title": "RandomPolicy",
       "type": "object"
     },
     "ReliabilityPolicy": {
@@ -372,6 +452,102 @@
       ],
       "title": "RouterPolicy",
       "type": "object"
+    },
+    "SchedulePhase": {
+      "additionalProperties": false,
+      "properties": {
+        "firstRequest": {
+          "exclusiveMinimum": 0,
+          "title": "Firstrequest",
+          "type": "integer"
+        },
+        "lastRequest": {
+          "exclusiveMinimum": 0,
+          "title": "Lastrequest",
+          "type": "integer"
+        },
+        "configurationBySize": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "minProperties": 1,
+          "title": "Configurationbysize",
+          "type": "object"
+        }
+      },
+      "required": [
+        "firstRequest",
+        "lastRequest",
+        "configurationBySize"
+      ],
+      "title": "SchedulePhase",
+      "type": "object"
+    },
+    "SchedulePolicy": {
+      "additionalProperties": false,
+      "description": "Phase oracle: knows the disturbance schedule by design; an upper bound, not deployable.",
+      "properties": {
+        "type": {
+          "const": "schedule",
+          "title": "Type",
+          "type": "string"
+        },
+        "default": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "minProperties": 1,
+          "title": "Default"
+        },
+        "phases": {
+          "items": {
+            "$ref": "#/$defs/SchedulePhase"
+          },
+          "title": "Phases",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "default"
+      ],
+      "title": "SchedulePolicy",
+      "type": "object"
+    },
+    "TokenQuota": {
+      "additionalProperties": false,
+      "description": "Harness-simulated provider quota over the trailing 60 s of wall time, for every configuration.",
+      "properties": {
+        "firstRequest": {
+          "exclusiveMinimum": 0,
+          "title": "Firstrequest",
+          "type": "integer"
+        },
+        "lastRequest": {
+          "exclusiveMinimum": 0,
+          "title": "Lastrequest",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "token-quota",
+          "title": "Kind",
+          "type": "string"
+        },
+        "tokensPerMinute": {
+          "exclusiveMinimum": 0,
+          "title": "Tokensperminute",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "firstRequest",
+        "lastRequest",
+        "kind",
+        "tokensPerMinute"
+      ],
+      "title": "TokenQuota",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -421,8 +597,10 @@
             "budget": "#/$defs/BudgetPolicy",
             "cascade": "#/$defs/CascadePolicy",
             "fixed": "#/$defs/FixedPolicy",
+            "random-eligible": "#/$defs/RandomPolicy",
             "reliability": "#/$defs/ReliabilityPolicy",
-            "router": "#/$defs/RouterPolicy"
+            "router": "#/$defs/RouterPolicy",
+            "schedule": "#/$defs/SchedulePolicy"
           },
           "propertyName": "type"
         },
@@ -441,6 +619,12 @@
           },
           {
             "$ref": "#/$defs/CascadePolicy"
+          },
+          {
+            "$ref": "#/$defs/SchedulePolicy"
+          },
+          {
+            "$ref": "#/$defs/RandomPolicy"
           }
         ]
       },
@@ -451,7 +635,17 @@
     "scenarios": {
       "additionalProperties": {
         "items": {
-          "$ref": "#/$defs/Delay"
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Delay"
+            },
+            {
+              "$ref": "#/$defs/Fault"
+            },
+            {
+              "$ref": "#/$defs/TokenQuota"
+            }
+          ]
         },
         "type": "array"
       },

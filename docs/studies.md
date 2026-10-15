@@ -283,3 +283,32 @@ requires `--retry-uncertain`, and its usage is then unknown.
 `study analyze` reports `fallbacks`, `tokensLowerBound` (unknown totals counted at
 their known partial usage) and `wastedTokensLowerBound` (failed attempts before a
 fallback), next to `knownTokens`, which covers fully known requests only.
+
+### Reference policies, budget pacing and scenario effects
+
+| Policy | Definition | Purpose |
+|---|---|---|
+| `schedule` | `{"type": "schedule", "default": {"small": cid, ...}, "phases": [{"firstRequest": 31, "lastRequest": 60, "configurationBySize": {...}}]}` | Phase oracle. It is given the disturbance schedule by design, so it is an upper bound for comparison, never a deployable policy. |
+| `random-eligible` | `{"type": "random-eligible", "seed": 7}` | Seeded uniform choice among eligible configurations; a sanity baseline. |
+| `budget` with `mode: "pace"` | `{"type": "budget", "mode": "pace", "forecast": "expected", "unknownUsage": "bounded"}` | For each request, picks the fastest qualified configuration whose estimated cost still leaves enough budget to serve every remaining request with the cheapest qualified configuration. |
+
+Scenario entries are effects. Entries without `kind` are delays, as before.
+
+```json
+{"kind": "fault", "configuration": "local-mcp-default", "toolErrorRate": 0.3, "seed": 11,
+ "firstRequest": 31, "lastRequest": 60}
+{"kind": "token-quota", "tokensPerMinute": 250000, "firstRequest": 49, "lastRequest": 72}
+```
+
+- `fault` (local MCP only): each tool call in the range returns a tool error result
+  (`is_error`, so the model sees a failing service) with the given probability.
+  Draws are seeded by `seed`, request position and call number, so they are
+  identical across arms at the same position.
+- `token-quota` (all configurations): a harness-simulated provider quota. Before
+  each request in the range, the runner waits until tokens completed in the
+  trailing 60 s fall below the quota. Unknown usage counts at its known partial
+  value. The wait is inside the measured request duration. Quota history is kept
+  in process memory and restarts empty after a resume.
+
+Decision records (`schemaVersion` 4) add `quotaWaitMs`, `faultsInjected` and
+`controllerMs` (policy decide/observe time, measured with `perf_counter`).

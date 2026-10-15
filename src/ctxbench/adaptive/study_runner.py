@@ -3,11 +3,13 @@
 Unknown interrupted attempts require a fresh collection; V3 does not automatically
 retry potentially charged calls. Legacy retry behavior remains in runner.py.
 """
+import random
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter, sleep
 
 from ctxbench.adapters.repoqa.study import digest
+from ctxbench.ai.models.base import ToolResult
 from ctxbench.ai.models.usage import account_tokens
 from ctxbench.benchmark.models import TrialSpec
 from ctxbench.benchmark.executor import execute_runspec
@@ -43,6 +45,43 @@ class MeasuredToolDelay(DelayedRuntime):
         self.actual_ms += max(0, (self.monotonic()-started)*1000)
         self.calls += 1
         return self.runtime.call_tool(name, arguments)
+
+
+class InjectedFaultRuntime:
+    """Fails each tool call with a fixed probability, seeded by request position and call number."""
+    MESSAGE = 'Injected fault: the context service is temporarily unavailable.'
+
+    def __init__(self, runtime, rate, key):
+        self.runtime, self.rate, self.key = runtime, rate, key
+        self.calls = 0
+        self.injected = 0
+
+    def list_tools(self):
+        return self.runtime.list_tools()
+
+    def call_tool(self, name, arguments):
+        self.calls += 1
+        if random.Random(f'{self.key}:{self.calls}').random() < self.rate:
+            self.injected += 1
+            return ToolResult(name=name, content=self.MESSAGE, is_error=True,
+                              metadata={'runtime': 'mcp', 'injectedFault': True})
+        return self.runtime.call_tool(name, arguments)
+
+    def close(self):
+        self.runtime.close()
+
+
+def quota_wait_seconds(log, now, tokens_per_minute):
+    """Seconds until trailing-60 s usage falls below the quota (log holds completion time and tokens)."""
+    window = sorted((t, k) for t, k in log if now - t < 60)
+    total = sum(k for _, k in window)
+    if total < tokens_per_minute:
+        return 0.0
+    for t, k in window:
+        total -= k
+        if total < tokens_per_minute:
+            return max(0.0, t + 60 - now)
+    return 0.0
 
 
 def run(plan, episode, root, *, resume=False, retry_uncertain=False, execution=None, checkpoint=lambda *_: None,
@@ -102,26 +141,39 @@ def run(plan, episode, root, *, resume=False, retry_uncertain=False, execution=N
             return TrialSpec.model_validate(original).model_copy(update=update, deep=True)
 
         def execute_attempt(trial, cid, index, instance, uncertain):
-            """One measured execution; injected delays are inside the measured duration."""
-            delayed_runtimes = []
-            delay_requested, delay_actual, thrown = 0, 0, None
+            """One measured execution; injected delays, faults and quota waits are inside the measured duration."""
+            delayed_runtimes, faulty_runtimes = [], []
+            delay_requested, delay_actual, quota_wait, thrown = 0, 0, 0.0, None
+            active = [d for d in episode['scenario'] if d['firstRequest'] <= index+1 <= d['lastRequest']]
+            treatments = [d for d in active if d.get('kind', 'delay') == 'delay' and d['configuration'] == cid]
+            faults = [d for d in active if d.get('kind') == 'fault' and d['configuration'] == cid]
+            quotas = [d['tokensPerMinute'] for d in active if d.get('kind') == 'token-quota']
             started = datetime.now(timezone.utc).isoformat()
             outer = monotonic()
             try:
-                treatments = [d for d in episode['scenario'] if d['configuration'] == cid and
-                              d['firstRequest'] <= index+1 <= d['lastRequest']]
+                if quotas:
+                    wait = quota_wait_seconds(quota_log, monotonic(), min(quotas))
+                    if wait:
+                        wait_start = monotonic()
+                        sleeper(wait)
+                        quota_wait = (monotonic()-wait_start)*1000
                 delay_requested = sum(d['delayMs'] for d in treatments if d['scope'] == 'request')
                 delay_start = monotonic()
                 if delay_requested:
                     sleeper(delay_requested / 1000)
                 delay_actual = (monotonic()-delay_start)*1000
                 tool_delay = sum(d['delayMs'] for d in treatments if d['scope'] == 'tool-call')
+                fault_rate = max((d['toolErrorRate'] for d in faults), default=0)
                 kwargs = {}
-                if tool_delay:
+                if tool_delay or fault_rate:
                     def decorate(runtime):
-                        delayed = MeasuredToolDelay(runtime, tool_delay, sleeper=sleeper, monotonic=monotonic)
-                        delayed_runtimes.append(delayed)
-                        return delayed
+                        if fault_rate:
+                            runtime = InjectedFaultRuntime(runtime, fault_rate, f"{faults[0]['seed']}:{index+1}")
+                            faulty_runtimes.append(runtime)
+                        if tool_delay:
+                            runtime = MeasuredToolDelay(runtime, tool_delay, sleeper=sleeper, monotonic=monotonic)
+                            delayed_runtimes.append(runtime)
+                        return runtime
                     kwargs['local_mcp_runtime_decorator'] = decorate
                 result = execution(trial, engine, **kwargs)
             except Exception as exc:
@@ -142,16 +194,22 @@ def run(plan, episode, root, *, resume=False, retry_uncertain=False, execution=N
                 'status': result.status, 'durationMs': duration,
                 'tokens': {'value': total, 'provenance': provenance, 'knownPartial': partial},
                 'failures': classify_failures(result, thrown), 'sequenceIndex': index+1}
+            quota_log.append((monotonic(), total if total is not None else (partial or 0)))
             return {'result': result, 'observation': observation, 'durationMs': duration,
                     'delayRequestedMs': delay_requested, 'delayActualMs': delay_actual,
-                    'delayedRuntimes': delayed_runtimes}
+                    'delayedRuntimes': delayed_runtimes, 'quotaWaitMs': quota_wait,
+                    'faultsInjected': sum(r.injected for r in faulty_runtimes)}
 
+        # Quota history lives in this process only; it restarts empty after a resume.
+        quota_log = []
         instance_of = [None]
         try:
             for index in range(len(packets), len(episode['workload'])):
                 instance = episode['workload'][index]
                 instance_of[0] = instance
+                controller_started = perf_counter()
                 selection = controller.decide(index)
+                controller_ms = (perf_counter()-controller_started)*1000
                 retrying = pending is not None and index+1 == pending['sequenceIndex']
                 if retrying and selection != pending['selection']:
                     raise ValueError('pending selection differs from policy replay')
@@ -164,7 +222,7 @@ def run(plan, episode, root, *, resume=False, retry_uncertain=False, execution=N
                     trial = make_trial(cid)
                 if controller.policy['type'] == 'cascade':
                     packet = _cascade_request(controller, index, instance, selection, pending if retrying else None,
-                                              uncertain, root, make_trial, execute_attempt, checkpoint)
+                                              uncertain, root, make_trial, execute_attempt, checkpoint, controller_ms)
                     packets.append(packet)
                     _project(root, packets, checkpoint)
                     pending = None
@@ -177,7 +235,7 @@ def run(plan, episode, root, *, resume=False, retry_uncertain=False, execution=N
                 sealed_write(packet_path, packet)
                 checkpoint('selection_saved', index+1)
                 result, duration, thrown = None, None, None
-                delay_requested, delay_actual = 0, 0
+                delay_requested, delay_actual, quota_wait, faults_injected = 0, 0, 0.0, 0
                 delayed_runtimes = []
                 if uncertain and controller.policy['type'] == 'budget':
                     trial = None
@@ -190,10 +248,13 @@ def run(plan, episode, root, *, resume=False, retry_uncertain=False, execution=N
                     result, observation, duration = outcome['result'], outcome['observation'], outcome['durationMs']
                     delay_requested, delay_actual = outcome['delayRequestedMs'], outcome['delayActualMs']
                     delayed_runtimes = outcome['delayedRuntimes']
+                    quota_wait, faults_injected = outcome['quotaWaitMs'], outcome['faultsInjected']
                 else:
                     observation = None
+                controller_started = perf_counter()
                 controller.observe(observation)
-                decision = {'schemaVersion': 3, 'requestId': instance, 'sequenceIndex': index+1,
+                controller_ms += (perf_counter()-controller_started)*1000
+                decision = {'schemaVersion': 4, 'requestId': instance, 'sequenceIndex': index+1,
                             **selection, 'status': result.status if result else 'unserved',
                             'tokens': observation['tokens'] if observation else None,
                             'durationMs': duration, 'delayRequestedMs': delay_requested,
@@ -201,7 +262,8 @@ def run(plan, episode, root, *, resume=False, retry_uncertain=False, execution=N
                             'toolDelayRequestedMs': sum(r.calls*r.delay_ms for r in delayed_runtimes),
                             'toolDelayActualMs': sum(r.actual_ms for r in delayed_runtimes),
                             'toolCallsDelayed': sum(r.calls for r in delayed_runtimes),
-                            'ledger': controller.ledger()}
+                            'quotaWaitMs': quota_wait, 'faultsInjected': faults_injected,
+                            'controllerMs': controller_ms, 'ledger': controller.ledger()}
                 packet.update(state='completed', trial=trial.model_dump(mode='json') if trial else None,
                               result=result.model_dump(mode='json') if result else None,
                               observation=observation, decision=decision, ledger=controller.ledger(),
@@ -244,7 +306,7 @@ def _combined_tokens(observations):
 
 
 def _cascade_request(controller, index, instance, selection, pending, uncertain, root, make_trial,
-                     execute_attempt, checkpoint):
+                     execute_attempt, checkpoint, controller_ms=0.0):
     """Primary attempt plus at most the declared fallbacks, charged to the same request."""
     plan, policy = controller.plan, controller.policy
     packet_path = root / f'recovery/request-{index+1:04d}.json'
@@ -263,7 +325,9 @@ def _cascade_request(controller, index, instance, selection, pending, uncertain,
         if not completed:
             cid, reason = selection['configuration'], selection['reason']
         else:
+            controller_started = perf_counter()
             fallback = controller.decide_fallback(index, completed[-1]['observation'])
+            controller_ms += (perf_counter()-controller_started)*1000
             if fallback is None:
                 break
             cid, reason = fallback['configuration'], fallback['reason']
@@ -284,8 +348,11 @@ def _cascade_request(controller, index, instance, selection, pending, uncertain,
                        delayRequestedMs=outcome['delayRequestedMs'], delayActualMs=outcome['delayActualMs'],
                        toolDelayRequestedMs=sum(r.calls*r.delay_ms for r in runtimes),
                        toolDelayActualMs=sum(r.actual_ms for r in runtimes),
-                       toolCallsDelayed=sum(r.calls for r in runtimes))
+                       toolCallsDelayed=sum(r.calls for r in runtimes),
+                       quotaWaitMs=outcome['quotaWaitMs'], faultsInjected=outcome['faultsInjected'])
+        controller_started = perf_counter()
         controller.observe(outcome['observation'])
+        controller_ms += (perf_counter()-controller_started)*1000
         completed.append(attempt)
         packet.update(attempts=completed, executionStarted=False)
         sealed_write(packet_path, packet)
@@ -308,6 +375,9 @@ def _cascade_request(controller, index, instance, selection, pending, uncertain,
                 'toolDelayRequestedMs': sum(a['toolDelayRequestedMs'] for a in completed),
                 'toolDelayActualMs': sum(a['toolDelayActualMs'] for a in completed),
                 'toolCallsDelayed': sum(a['toolCallsDelayed'] for a in completed),
+                'quotaWaitMs': sum(a['quotaWaitMs'] for a in completed),
+                'faultsInjected': sum(a['faultsInjected'] for a in completed),
+                'controllerMs': controller_ms,
                 'attempts': summary, 'finalConfiguration': final['configuration'] if final else None,
                 'fallbackReason': completed[0]['observation']['failures'] if len(completed) > 1 else None,
                 'ledger': controller.ledger()}

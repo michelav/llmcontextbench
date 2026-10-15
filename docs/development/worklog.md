@@ -122,3 +122,11 @@ needs `--allow-source-drift` for `status`/`analyze`, and v2 collection needs the
 v2 baseline (S6a). New `tests/test_study_cascade.py`: 9 tests (trigger-only fallback,
 canonical projection, step override, source memory, resume between attempts,
 explicit retry during fallback, replay, validation, analysis).
+
+## 2026-10-15 — SEAMS v2, S3: reference policies and effects
+
+Added `schedule` (phase oracle), `random-eligible` and budget `mode: pace` policies,
+plus `fault` and `token-quota` scenario effects. Scenario entries without `kind`
+remain delays. Decision records now use `schemaVersion` 4 with `quotaWaitMs`,
+`faultsInjected` and `controllerMs`. This is the last planned change to the
+fingerprinted runner before the S6a code freeze. New `tests/test_study_effects.py`: 8 tests.

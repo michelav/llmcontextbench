@@ -1,4 +1,5 @@
 """Deterministic V3 policy state; decisions depend only on frozen estimates and prior execution."""
+import random
 from collections import defaultdict
 
 
@@ -23,6 +24,8 @@ class Controller:
         self.source_of = {item['instanceId']: item.get('repo') for item in plan.get('index', [])}
         self.index = 0
         self.stopped = False
+        if self.policy['type'] == 'random-eligible':
+            self.rng = random.Random(f"{self.policy['seed']}:{episode['seed']}:{episode['repeat']}")
 
     def _calibration(self, cid, size, metric):
         return self.plan['estimates'][cid][size]['latencyMs' if metric == 'durationMs' else 'tokens']
@@ -148,6 +151,8 @@ class Controller:
         if (self.unknown and self.policy.get('unknownUsage', 'stop') == 'stop') or self.stopped:
             return None, 'unknown_consumption' if self.unknown else 'budget_infeasible', False
         eligible = [cid for cid in eligible if self._quality_eligible(cid)]
+        if self.policy.get('mode', 'incumbent') == 'pace':
+            return self._pace(index, eligible, remaining)
         feasible = [(cid, self._forecast(cid, index)) for cid in eligible]
         feasible = [(cid, demand) for cid, demand in feasible if demand is not None and demand <= remaining]
         if not feasible:
@@ -174,6 +179,33 @@ class Controller:
                     self.probes += 1
                     return probe, 'scheduled_probe', True
         return chosen, reason, False
+
+    def _pace(self, index, eligible, remaining):
+        """Fastest qualified configuration whose cost still leaves the cheapest plan for the rest."""
+        size = self.plan['requests'][self.episode['workload'][index]]['sizeBin']
+        rest = [self._forecast(cid, index+1) for cid in self.order if self._quality_eligible(cid)]
+        rest = min((value for value in rest if value is not None), default=None)
+        if rest is None:
+            self.stopped = True
+            return None, 'budget_infeasible', False
+        ranked = sorted(eligible, key=lambda cid: (self._estimate(cid, size, 'durationMs') is None,
+                                                   self._estimate(cid, size, 'durationMs') or 0, self.order.index(cid)))
+        for cid in ranked:
+            cost = self._estimate(cid, size, 'tokens')
+            if cost is not None and cost + rest <= remaining:
+                return cid, 'paced', False
+        self.stopped = True
+        return None, 'budget_infeasible', False
+
+    def _schedule(self, index, size, eligible):
+        mapping = self.policy['default']
+        for phase in self.policy['phases']:
+            if phase['firstRequest'] <= index+1 <= phase['lastRequest']:
+                mapping = phase['configurationBySize']
+        chosen = mapping.get(size)
+        if chosen in eligible:
+            return chosen, 'schedule', False
+        return (eligible[0], 'schedule_fallback', False) if eligible else (None, 'no_eligible_candidate', False)
 
     def _reliability(self, index, eligible):
         monitored = set(self.policy['failureClasses'])
@@ -276,6 +308,10 @@ class Controller:
             chosen, reason, probe = self._reliability(index, eligible)
         elif kind == 'cascade':
             chosen, reason, probe = self._cascade(instance, eligible)
+        elif kind == 'schedule':
+            chosen, reason, probe = self._schedule(index, size, eligible)
+        elif kind == 'random-eligible':
+            chosen, reason, probe = self.rng.choice(eligible), 'random', False
         else:
             chosen, reason, probe = self._router_decision(index, eligible, size)
         return {'configuration': chosen, 'reason': reason, 'probe': probe}

@@ -58,10 +58,20 @@ def prepare(*, definition, output):
         raise ValueError('cascade policy references an unselected configuration')
     for delays in definition.scenarios.values():
         for delay in delays:
+            if delay.kind == 'token-quota':
+                continue
             if delay.configuration not in selected:
-                raise ValueError('delay references an unselected configuration')
-            if delay.scope == 'tool-call' and parent['manifest']['configurations'][delay.configuration]['strategy'] != 'local_mcp':
+                raise ValueError(f'{delay.kind} references an unselected configuration')
+            strategy = parent['manifest']['configurations'][delay.configuration]['strategy']
+            if delay.kind == 'delay' and delay.scope == 'tool-call' and strategy != 'local_mcp':
                 raise ValueError('tool-call delay requires local_mcp')
+            if delay.kind == 'fault' and strategy != 'local_mcp':
+                raise ValueError('fault injection requires local_mcp')
+    for policy in definition.policies.values():
+        if policy.type == 'schedule':
+            mappings = [policy.default, *(phase.configurationBySize for phase in policy.phases)]
+            if any(cid not in selected for mapping in mappings for cid in mapping.values()):
+                raise ValueError('schedule policy references an unselected configuration')
     index = parent['index']
     lengths = {len(ordered_workload(index, parent['split']['heldOut'], seed)) for seed in definition.seeds}
     if len(lengths) != 1:
@@ -69,6 +79,9 @@ def prepare(*, definition, output):
     length = lengths.pop()
     if any(delay.lastRequest > length for delays in definition.scenarios.values() for delay in delays):
         raise ValueError('delay range exceeds workload')
+    if any(phase.lastRequest > length for policy in definition.policies.values() if policy.type == 'schedule'
+           for phase in policy.phases):
+        raise ValueError('schedule phase exceeds workload')
     phases = {}
     for scenario, delays in definition.scenarios.items():
         boundaries = sorted({1, length+1, *(d.firstRequest for d in delays),
