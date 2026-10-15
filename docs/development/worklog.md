@@ -296,3 +296,13 @@ Exploratory replay of two further scenarios on v2 calibration (pair inline + MCP
 - S-E′ is the only live study (seeds 301–305); S-D is reported from P1 and the v1 counterfactual.
 - P3′ (v3 re-pilot, 192 requests): GO on all gates. v2 delay-phase misses 5 against frozen's 14; recovery lag 2; 452k tokens against 774k. P3 on v2 (lean fallback) had 11 against 14 and recovery lag 9.
 - `tools/seams/run_study.sh` added for detached, resumable collection (session jobs stop at 2 h).
+
+## 2026-10-15 — S-E′ live collection
+
+- `tools/seams/run_study.sh studies/seams3-inline-degradation`, detached, 15:29–22:52 UTC: 60 episodes, 5,760 requests, all evaluated, 67.3M answer tokens. No resumes, retries, provider errors or discarded episodes.
+- H2c′ supported: in the delay phase, v2 had 8.6 misses per episode against frozen's 27.2 (per request −0.62 [−0.69, −0.55]), and its episode tokens were 1,065k against 1,490k.
+- No stationary cost: v2 2.2 misses at 1,450k tokens, frozen 2.2 at 1,490k.
+- Fixed direct had fewer misses than v2 over the degraded episode (9.8 against 12.4) at 415k tokens, but more in stationary (6.0 against 2.2).
+- v1 matched v2 in the delay phase but stayed on direct without a disturbance (6.8 stationary misses).
+- Live means matched replay for frozen, v2 and the oracle (28.6 / 12.4 / 4.6 against 28.4 / 12.6 / 3.6).
+- Record and table in the pre-registration ("S-E′ collection record"); summary script `tools/seams/se3_summary.py`.

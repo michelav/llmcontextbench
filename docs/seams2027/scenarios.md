@@ -59,7 +59,7 @@ surface was designed to remove those calls (worklog, 2026-10-15).
 - **Scenarios:** `stationary` (no delay: measures the cost of adapting when nothing changes) and `inline-degraded`.
 - **Measures:** H2c′ — v2 has fewer misses than frozen in the delay phase and uses fewer tokens. Secondary: reaction and recovery lag (RQ3), probes and switches, v2 against v1 (RQ4), pass rate. Fixed direct is reported next to the primary contrast: over a whole episode it has few misses at a fifth of the tokens, so the claim is "feedback beats a router without feedback", not "adaptation beats every fixed choice".
 - **Evidence so far:** replay — frozen 28.4 misses per episode, v2 12.6, oracle 3.6; pilot P3′ (live, 48 requests) — delay-phase misses v2 5 against frozen 14, recovery lag 2, tokens 452k against 774k.
-- **Status:** pilot passed; full collection (60 episodes, seeds 301–305, 5,760 requests) awaits approval.
+- **Status:** collected 2026-10-15 (60 episodes, seeds 301–305, 5,760 requests). H2c′ supported: delay-phase misses v2 8.6 against frozen 27.2 per episode, tokens 1,065k against 1,490k; results in the pre-registration ("S-E′ collection record").
 - **Files:** `examples/studies/study.seams3-inline-degradation.json`, `examples/studies/pilot.v3-inline-degradation.json`, `studies/replay-v3calib/inline-degradation.json`.
 
 ### P3 — the same scenario with MCP lean as the fallback (pilot, "before")

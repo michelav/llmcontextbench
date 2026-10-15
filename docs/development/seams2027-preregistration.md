@@ -309,6 +309,33 @@ Misses per phase (requests 1–16 / 17–32 / 33–48) and episode tokens: inlin
 frozen 1/14/0, 774k; v1 3/6/1, 470k; v2 0/5/0, 452k. All arms passed every request. After the
 delay, v2 routes by size bin, mixing inline and direct (both meet 7 s then).
 
+### S-E′ collection record (2026-10-15)
+
+- **Collection.** Started 15:29:21 UTC, finished 22:52:45 UTC, code `240a2ee`. 60 of 60 episodes, 5,760 of 5,760 requests, all evaluated. No crashes, resumes, uncertain retries, provider errors or discarded episodes. 67.3M answer tokens (lower bound, `reported`).
+- **Task failures (kept):** step-limit failures on fixed direct (about 0.5 % of its requests) and in the oracle; every router arm passed every request.
+- **Hashes:** `prepared.json` sha256 `af80916e…`, `analysis.json` `d0ce63ca…` (`studies/seams3-inline-degradation/`).
+- **H2c′ (primary): supported.** Delay phase (requests 31–60), v2 against frozen, per request, paired, with a 16-target-cluster bootstrap (seed 42, 1,000 replicates; computed with the analysis bootstrap in `tools/seams/se3_summary.py`):
+  - misses −0.62 [−0.69, −0.55];
+  - tokens −6.8k [−9.9k, −4.0k].
+- **Means per episode over 5 seeds.** Misses are given per phase (1–30 / 31–60 / 61–96) and for the whole episode, with tokens in thousands:
+
+  | Arm | Stationary misses | Stationary tokens | Degraded misses | Degraded total | Degraded tokens |
+  |---|---|---|---|---|---|
+  | inline | 0.8 / 0.4 / 0.0 | 1,613 | 0.0 / 30.0 / 0.2 | 30.2 | 1,613 |
+  | direct | 1.6 / 2.6 / 1.8 | 411 | 2.8 / 2.6 / 4.4 | 9.8 | 415 |
+  | frozen | 0.8 / 1.0 / 0.4 | 1,490 | 0.0 / 27.2 / 1.4 | 28.6 | 1,490 |
+  | v1 | 2.0 / 1.8 / 3.0 | 742 | 1.4 / 7.2 / 2.0 | 10.6 | 699 |
+  | v2 | 0.6 / 0.8 / 0.8 | 1,450 | 0.6 / 8.6 / 3.2 | 12.4 | 1,065 |
+  | oracle | 0.6 / 4.6 / 0.6 | 1,241 | 1.2 / 2.8 / 0.6 | 4.6 | 1,234 |
+
+  Totals in the stationary scenario: inline 1.2, direct 6.0, frozen 2.2, v1 6.8, v2 2.2, oracle 5.8. The oracle's schedule is fixed, so in the stationary scenario it uses direct on requests 31–60 and is not an upper bound there.
+- **Secondary.**
+  - **Lags:** v2 reaction lag 0–2 (median 1); recovery lag 0, 1, 6, 7, 12 across seeds.
+  - **v2 against v1, delay phase:** misses +0.03 [−0.03, 0.09], tokens +0.8k [+0.2k, +1.3k]. v1 sends 70 % of requests to direct even without a disturbance, which costs 6.8 misses against v2's 2.2.
+  - **v2 against fixed direct, delay phase:** misses +0.21 [+0.15, +0.26].
+  - **v2 against the oracle, delay phase:** misses +0.18 [+0.11, +0.26].
+- **Replay against live.** Replay predicted frozen 28.4, v2 12.6 and oracle 3.6 misses per degraded episode; live values are 28.6, 12.4 and 4.6.
+
 ## Stopping rules and reporting
 
 - **Collection order (v3):** S-E′ only, after P3′ passes. Collection is seed-major, with arm order shuffled within each seed, and episode wall-clock times are recorded.
