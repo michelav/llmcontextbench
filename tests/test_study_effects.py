@@ -65,6 +65,24 @@ def test_pace_serves_every_request_within_budget(frozen, tmp_path):
     assert packets[-1]['ledger']['knownTokens'] <= 700
 
 
+def test_pace_serves_cheapest_once_the_reserve_is_reached(frozen, tmp_path):
+    plan = prepared(tmp_path, frozen, 'pace-reserve', latencyLimitMs=None, tokenBudget=2000, policies={
+        'pace': {'type': 'budget', 'mode': 'pace', 'forecast': 'expected', 'probeInterval': 1000},
+        'inline': {'type': 'fixed', 'configuration': INLINE}, 'mcp': {'type': 'fixed', 'configuration': MCP}})
+    for size in ('small', 'large'):
+        plan['estimates'][INLINE][size].update(latencyMs=10, tokens=40)
+        plan['estimates'][MCP][size].update(latencyMs=100, tokens=10 if size == 'small' else 30)
+    controller = Controller(plan, plan['episodes'][0])
+    workload = plan['episodes'][0]['workload']
+    large = next(i for i, instance in enumerate(workload) if plan['requests'][instance]['sizeBin'] == 'large')
+    # No slack beyond the cheapest plan for the rest: a large request exceeds the mean reserve.
+    controller.consumed = 2000 - min(controller._forecast(c, large+1) for c in (INLINE, MCP))
+    decision = controller.decide(large)
+    assert decision['configuration'] == MCP and decision['reason'] in ('paced', 'paced_reserve')
+    controller.consumed = 2000 - 5
+    assert controller.decide(large)['configuration'] is None
+
+
 class FakeRuntime:
     def list_tools(self):
         return []

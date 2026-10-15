@@ -194,6 +194,12 @@ class Controller:
             cost = self._estimate(cid, size, 'tokens')
             if cost is not None and cost + rest <= remaining:
                 return cid, 'paced', False
+        # The reserve is an expectation; once spending reaches it, serve with the cheapest
+        # configuration for this request and stop only when even that no longer fits.
+        costs = [(self._estimate(cid, size, 'tokens'), self.order.index(cid), cid) for cid in eligible]
+        costs = [row for row in costs if row[0] is not None]
+        if costs and min(costs)[0] <= remaining:
+            return min(costs)[2], 'paced_reserve', False
         self.stopped = True
         return None, 'budget_infeasible', False
 

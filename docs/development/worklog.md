@@ -198,3 +198,35 @@ Tooling changes:
 - New `compare_baselines.py`.
 
 The pre-registration is now binding (see its deviation record and digests). The four definitions prepare cleanly against the v2 baseline, provider-free.
+
+## 2026-10-15 — SEAMS v2: within-run latency variation in the calibration runs
+
+`tools/seams/within_run.py` (output `baselines/repoqa-long64-v2/within-run.json`) shows where the v1→v2 drift came from.
+
+**v1 run.** It was flat for 75 minutes: MCP default median 5.9–7.2 s, with at most 4 % of requests above 10 s.
+
+**v2 run (88 minutes, all configurations interleaved).**
+- MCP default had slow periods of 15–30 minutes, each spanning roughly 100–250 requests:
+  - median 10.0–10.4 s, with 50–61 % of requests above 10 s;
+  - in between and at the end it recovered (6.3 s in the last window, about v1's level).
+- Function lean had one slow window (15–30 min: median 10.7 s, 58 % of requests above 10 s).
+- MCP lean and function default stayed stable.
+- Inline sped up (4.4 → 2.6 s) and reached 100 % cached input after the first 15 minutes.
+
+**Where the time goes.** The slowdown is in model-call time:
+- tools take about 10 ms per request, with no retries and no rate-limit waits;
+- output (about 54 tokens per call), input sizes and cache shares are similar across configurations;
+- yet MCP default took 39–47 ms per output token, against 30–35 ms for function default.
+
+The cause is not identified.
+
+**Implications.**
+- The frozen v2 baseline recorded MCP default during slow periods, so its knowledge is biased by when calibration ran. This is natural evidence for C1, C2 and C4.
+- The live S-A pair (MCP lean) was stable, so the injected delay remains necessary.
+- Natural slow periods during collection are a threat to validity. Shuffled arm order and wall-clock records (already pre-registered) mitigate it; report them.
+
+**Fix: `pace` budget policy.**
+- **Symptom.** `pace` stopped serving as soon as spending reached the expected reserve for the remaining requests. In replay, at an 800k cap it left 63 requests unserved and spent only 445k tokens.
+- **Cause.** A single large request costs more than the mean reserve, which made it look unaffordable.
+- **Fix.** `pace` now serves that request with the cheapest configuration (reason `paced_reserve`). It stops only when even the cheapest no longer fits.
+- **Scope.** The change is in `adaptive/study_policy.py`, which is not fingerprinted, and no pre-registered study uses `pace`.
