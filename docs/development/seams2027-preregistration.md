@@ -312,6 +312,10 @@ delay, v2 routes by size bin, mixing inline and direct (both meet 7 s then).
 ## Stopping rules and reporting
 
 - **Collection order (v3):** S-E′ only, after P3′ passes. Collection is seed-major, with arm order shuffled within each seed, and episode wall-clock times are recorded.
+- **Interruptions and provider errors (S-E′, written before collection):**
+  - a process crash or reboot is resumed with `--resume`; completed requests are replayed through the controller, which must reproduce the saved selections and ledgers;
+  - a request in flight at the crash is retried once with `--retry-uncertain`; its tokens are recorded as unavailable and the number of such retries is reported;
+  - a failed request that is not a task failure (any status other than success whose error is not a step limit, e.g. provider or network errors) stops the collection (`tools/seams/run_study.sh`, exit 3). After the cause is cleared, that episode is discarded in full and re-run from scratch with the same definition; discarded episodes and their causes are reported. Task failures (step limits, tool errors) are data and are kept.
 - **No mid-collection changes:** no parameter or code changes during collection. A defect that invalidates results stops the collection; it is then reported and a new seed set is used.
 - **Reporting:**
   - v1 results are reported as collected;
