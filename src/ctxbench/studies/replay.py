@@ -185,7 +185,7 @@ def replay(*, grid, prepared=None, baseline=None, output=None, replicates=None):
     if missing:
         raise ValueError(f'calibration pool lacks observations for {missing}')
     metric = spec.get('metric', 'deadlineMisses')
-    targets = spec.get('targets') or plan['split']['heldOut']
+    targets = spec.get('targets') or plan['definition'].get('targets') or plan['split']['heldOut']
     replicates = replicates or spec.get('replicates', 1)
     points = []
     for point in spec['points']:

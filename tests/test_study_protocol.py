@@ -425,3 +425,20 @@ def test_router_probe_options_are_validated(frozen):
         Study.model_validate({**base, 'policies':{'r':{'type':'router','adaptive':True,'probeMode':'targeted'}}})
     with pytest.raises(ValueError, match='minimumObservations'):
         Study.model_validate({**base, 'policies':{'r':{'type':'router','adaptive':True,'minimumObservations':6}}})
+
+
+def test_target_subset_builds_short_balanced_pilots(frozen, tmp_path):
+    held_out = sealed_read(frozen)['plan']['split']['heldOut']
+    full = sealed_read(Path(study.prepare(definition=make_study(tmp_path, frozen), output=tmp_path/'full')['prepared']))
+    subset = held_out[:4]
+    pilot = sealed_read(Path(study.prepare(definition=make_study(tmp_path, frozen, targets=subset),
+                                           output=tmp_path/'pilot')['prepared']))
+    workload = pilot['episodes'][0]['workload']
+    sizes = [pilot['requests'][instance]['variant'] for instance in workload]
+    assert len(workload) == len(full['episodes'][0]['workload']) * 4 // len(held_out)
+    assert {pilot['requests'][instance]['target'] for instance in workload} == set(subset)
+    assert len(set(sizes.count(size) for size in set(sizes))) == 1
+    assert not {e['id'] for e in pilot['episodes']} & {e['id'] for e in full['episodes']}
+    calibration = sealed_read(frozen)['plan']['split']['calibration'][0]
+    with pytest.raises(ValueError, match='held-out targets'):
+        study.prepare(definition=make_study(tmp_path, frozen, targets=[calibration]), output=tmp_path/'bad-targets')

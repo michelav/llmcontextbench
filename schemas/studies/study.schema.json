@@ -577,6 +577,22 @@
       "default": null,
       "title": "Configurations"
     },
+    "targets": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Targets"
+    },
     "seeds": {
       "items": {
         "type": "integer"

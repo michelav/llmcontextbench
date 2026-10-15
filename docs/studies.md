@@ -248,6 +248,11 @@ set them explicitly.
 | `router` | `switchOnObjectiveMiss` | `false`, `true` | `true` implements the documented rule that meeting the latency objective outranks token cost: an incumbent predicted to miss the limit is replaced (after cooldown) by an alternative predicted to meet it, even if that alternative uses more tokens. With `false`, such a switch must also save ≥ `materialImprovement` tokens. |
 | `budget` | `forecast` | `lookahead`, `expected` | `expected` forecasts remaining demand as remaining request count × calibration-mix expected tokens, without reading future request sizes. `lookahead` uses the actual remaining workload (a batch-workload assumption). |
 
+A study may set `targets` to a subset of the baseline's held-out targets (never
+calibration targets). The workload keeps balanced blocks of every context size, so
+four targets give a 24-request long64 episode. Use this for pilots with their own
+seeds; pilot episodes are never pooled with full collections.
+
 Prepared plans also record calibration token quantiles (`tokenQuantiles`), latency
 quantiles (`latencyQuantiles`) and the calibration size-bin mix (`calibrationSizeMix`). Episode IDs now hash the policy
 configuration, scenario, workload and study settings (baseline digest,

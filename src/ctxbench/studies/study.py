@@ -73,7 +73,11 @@ def prepare(*, definition, output):
             if any(cid not in selected for mapping in mappings for cid in mapping.values()):
                 raise ValueError('schedule policy references an unselected configuration')
     index = parent['index']
-    lengths = {len(ordered_workload(index, parent['split']['heldOut'], seed)) for seed in definition.seeds}
+    # Pilots may use a subset of held-out targets; calibration targets are never allowed.
+    targets = definition.targets or parent['split']['heldOut']
+    if any(target not in parent['split']['heldOut'] for target in targets):
+        raise ValueError('study targets must be held-out targets of the baseline')
+    lengths = {len(ordered_workload(index, targets, seed)) for seed in definition.seeds}
     if len(lengths) != 1:
         raise ValueError('unequal study workloads')
     length = lengths.pop()
@@ -90,12 +94,12 @@ def prepare(*, definition, output):
                             for start, end in zip(boundaries, boundaries[1:])]
     # Episode identity covers every input that changes behaviour, so IDs never
     # collide across studies that reuse policy names and seeds.
-    study_identity = {'baselineDigest': file_hash(baseline_path), 'configurations': selected,
+    study_identity = {'baselineDigest': file_hash(baseline_path), 'configurations': selected, 'targets': targets,
                       'latencyLimitMs': definition.latencyLimitMs, 'tokenBudget': definition.tokenBudget,
                       'minimumCalibrationPassRate': definition.minimumCalibrationPassRate}
     episodes = []
     for seed in definition.seeds:
-        workload = [r['instanceId'] for r in ordered_workload(index, parent['split']['heldOut'], seed)]
+        workload = [r['instanceId'] for r in ordered_workload(index, targets, seed)]
         for repeat in range(1, definition.repeats+1):
             for scenario, delays in definition.scenarios.items():
                 for policy, config in definition.policies.items():
@@ -115,7 +119,7 @@ def prepare(*, definition, output):
         fixed = {p.configuration for p in definition.policies.values() if p.type == 'fixed'}
         if fixed != set(selected):
             raise ValueError('budget study requires a fixed policy for every selected configuration')
-        held_instances = [r['instanceId'] for r in ordered_workload(index, parent['split']['heldOut'], definition.seeds[0])]
+        held_instances = [r['instanceId'] for r in ordered_workload(index, targets, definition.seeds[0])]
         sizes = [parent['requests'][instance]['sizeBin'] for instance in held_instances]
         forecast = {}
         for cid in selected:

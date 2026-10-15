@@ -181,6 +181,7 @@ class Study(Definition):
     schemaVersion: Literal[1] = 1
     baseline: str
     configurations: list[str] | None = None
+    targets: list[str] | None = Field(default=None, min_length=1)
     seeds: list[StrictInt] = Field(min_length=1)
     repeats: PositiveInt
     policies: dict[str, Policy] = Field(min_length=1)
@@ -196,6 +197,8 @@ class Study(Definition):
             raise ValueError('duplicate study seeds')
         if self.configurations is not None and (not self.configurations or len(set(self.configurations)) != len(self.configurations)):
             raise ValueError('duplicate or empty configuration subset')
+        if self.targets is not None and len(set(self.targets)) != len(self.targets):
+            raise ValueError('duplicate study target')
         if any(not name for name in (*self.policies, *self.scenarios)):
             raise ValueError('policy and scenario names must be nonempty')
         if any(p.type in ('router', 'reliability') for p in self.policies.values()) and self.latencyLimitMs is None:
