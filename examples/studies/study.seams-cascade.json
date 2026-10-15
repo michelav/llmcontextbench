@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "baseline": "../../baselines/repoqa-long64-v2/frozen.json",
+  "configurations": [
+    "inline-code-full",
+    "local-mcp-default",
+    "local-mcp-lean",
+    "local-function-default",
+    "local-function-lean"
+  ],
+  "seeds": [
+    301,
+    302,
+    303
+  ],
+  "repeats": 1,
+  "policies": {
+    "inline": {
+      "type": "fixed",
+      "configuration": "inline-code-full"
+    },
+    "mcp-default": {
+      "type": "fixed",
+      "configuration": "local-mcp-default"
+    },
+    "mcp-lean": {
+      "type": "fixed",
+      "configuration": "local-mcp-lean"
+    },
+    "function-default": {
+      "type": "fixed",
+      "configuration": "local-function-default"
+    },
+    "function-lean": {
+      "type": "fixed",
+      "configuration": "local-function-lean"
+    },
+    "cascade-mcp": {
+      "type": "cascade",
+      "primary": "local-mcp-lean",
+      "fallbacks": [
+        "local-mcp-default"
+      ]
+    },
+    "cascade-mcp-inline": {
+      "type": "cascade",
+      "primary": "local-mcp-lean",
+      "fallbacks": [
+        "inline-code-full"
+      ]
+    },
+    "cascade-fn": {
+      "type": "cascade",
+      "primary": "local-function-lean",
+      "fallbacks": [
+        "local-function-default"
+      ]
+    }
+  },
+  "scenarios": {
+    "stationary": []
+  },
+  "comparisons": [
+    [
+      "cascade-mcp",
+      "mcp-default"
+    ],
+    [
+      "cascade-mcp",
+      "mcp-lean"
+    ],
+    [
+      "cascade-mcp",
+      "inline"
+    ],
+    [
+      "cascade-mcp-inline",
+      "inline"
+    ],
+    [
+      "cascade-fn",
+      "function-default"
+    ],
+    [
+      "mcp-lean",
+      "function-lean"
+    ]
+  ]
+}

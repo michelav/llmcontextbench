@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "seeds": [
+    201,
+    202,
+    203
+  ],
+  "replicates": 10,
+  "configurations": [
+    "local-mcp-default",
+    "local-function-default"
+  ],
+  "base": {},
+  "policies": {
+    "mcp": {
+      "type": "fixed",
+      "configuration": "local-mcp-default"
+    },
+    "function": {
+      "type": "fixed",
+      "configuration": "local-function-default"
+    },
+    "frozen": {
+      "type": "router",
+      "adaptive": false,
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9
+    },
+    "v2": {
+      "type": "router",
+      "adaptive": true,
+      "estimator": "pooled-ratio",
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9,
+      "switchOnObjectiveMiss": true,
+      "cooldownRequests": 2,
+      "updateWindow": 4,
+      "minimumObservations": 2,
+      "probeInterval": 10,
+      "estimateTtlRequests": 12
+    },
+    "cascade": {
+      "type": "cascade",
+      "primary": "local-mcp-default",
+      "fallbacks": [
+        "local-function-default"
+      ],
+      "triggerFailureClasses": [
+        "step-limit",
+        "tool-use",
+        "transport"
+      ]
+    }
+  },
+  "points": [
+    {
+      "name": "fault30",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "fault",
+          "configuration": "local-mcp-default",
+          "toolErrorRate": 0.3,
+          "seed": 11,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "local-mcp-default",
+            "medium": "local-mcp-default",
+            "large": "local-mcp-default"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-function-default",
+                "medium": "local-function-default",
+                "large": "local-function-default"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "fault50",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "fault",
+          "configuration": "local-mcp-default",
+          "toolErrorRate": 0.5,
+          "seed": 11,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "local-mcp-default",
+            "medium": "local-mcp-default",
+            "large": "local-mcp-default"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-function-default",
+                "medium": "local-function-default",
+                "large": "local-function-default"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "fault70",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "fault",
+          "configuration": "local-mcp-default",
+          "toolErrorRate": 0.7,
+          "seed": 11,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "local-mcp-default",
+            "medium": "local-mcp-default",
+            "large": "local-mcp-default"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-function-default",
+                "medium": "local-function-default",
+                "large": "local-function-default"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

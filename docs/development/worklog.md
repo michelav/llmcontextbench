@@ -157,3 +157,16 @@ metrics: adaptive vs frozen in inline-delay has +12.5 points deadline-miss rate
 in 2 of 3 seeds; the third never returned. Plots were redrawn as labelled small
 multiples plus a cost/miss trade-off plot, rendered with librsvg and inspected. The
 palette is the dataviz reference instance; the validator was not run (no node).
+
+## 2026-10-15 — SEAMS v2, S6 (draft): scenario selection and pre-registration
+
+Added `tools/seams/make_grids.py`, which generates the replay grids
+(`examples/studies/replay/*.grid.json`), the live definitions
+(`study.seams-{cascade,degradation}.json`) and the pilots
+(`pilot.{cascade,degradation}.json`), all pointing at the future v2 baseline.
+Exploratory replay on v1 calibration (`studies/replay-v1calib/`, untracked) gives this
+opportunity map: S-A at 10–12 s limits with ≥ 2 s per-call delay shows opportunity, and
+v2 roughly halves v1's misses. An 8 s limit (C3), the S-B quota flip and S-C MCP faults
+vs functions (C1) are negative. Live collection therefore narrows to S-D cascade and
+S-A degradation (about 5.8k requests instead of 7.2k). Draft pre-registration:
+`docs/development/seams2027-preregistration.md`.
