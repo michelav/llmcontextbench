@@ -121,10 +121,17 @@ between versions, so compare distributions rather than target-paired outcomes.
 
 `experiment.repoqa-long64.json` and
 `examples/studies/baseline.repoqa-long64.json` define the five-configuration
-long64 baseline. The current study definitions select its three inline and
-local-MCP configurations. `examples/studies/study.long64-budget.json`,
-`study.long64-latency.json`, and `study.long64-reliability.json` use its frozen
-artifact. See `docs/studies.md` for preparation, evaluation, freezing,
+long64 baseline. The SEAMS v2 definitions (`study.seams-cascade.json`, which
+selects all five configurations, and `study.seams-degradation.json`, which
+selects inline and default local MCP) use the v2 frozen baseline. The v1
+definitions `study.long64-{budget,latency,reliability}.json` use the v1 baseline
+and select the inline and local-MCP configurations.
+
+Observed lean-surface behaviour: in v1 held-out runs, every lean MCP failure was a
+`max_steps=8` step-limit error on two targets (`rs_004`, `py_005`), at every context
+size, while lean used about half the tokens of the default surface. Calibration did
+not include those targets. The cascade policy exploits this with a bounded fallback
+to the default surface. See `docs/studies.md` for preparation, evaluation, freezing,
 degradation, and held-out execution commands. The four-size profile groups
 2k/4k as small and 8k/16k as large. The six-size profile groups 2k/4k as
 small, 8k/16k as medium, and 32k/64k as large. These groups determine

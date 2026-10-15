@@ -459,3 +459,25 @@ location, without changing protocol decisions, policy order or artifact schemas.
 The legacy wrapper remains supported. Completed studies require no rewriting;
 continuation of pre-migration studies requires their original source fingerprint.
 Prepare fresh studies after finalizing the migrated code and revision.
+
+## v2 protocol (policy version 3, SEAMS 2027)
+
+The v2 study protocol is defined in `docs/development/seams2027-plan.md` and
+`seams2027-preregistration.md`; options are documented in `docs/studies.md`.
+Contract changes relative to the slices above:
+- Router options (all opt-in, defaults reproduce v1): `estimator` (`pooled-ratio`),
+  `minimumObservations`, `estimateTtlRequests`, `probeMode` / `avoidedProbeInterval`,
+  `latencyQuantile`, `switchOnObjectiveMiss`, `incumbentScope`.
+- The `cascade` policy runs at most one fallback within a request, triggered by
+  execution failure classes only. Each attempt is a canonical trial, and the request
+  outcome is the final attempt with summed duration and tokens.
+- Reference policies `schedule` (phase oracle; an upper bound) and `random-eligible`.
+  The budget policy adds `mode: pace`, `unknownUsage: bounded` and `forecast: expected`.
+- Scenario effects: `delay` (unchanged), `fault` (seeded tool errors on local MCP),
+  `token-quota` (harness-simulated trailing-60 s quota).
+- Decision sidecar `schemaVersion` 4 adds `controllerMs`, `quotaWaitMs`,
+  `faultsInjected`, and for cascades `attempts`, `finalConfiguration`, `fallbackReason`.
+  `analysis.json` adds per-phase metrics, all-request pass rate, lags, arm aggregates
+  and paired intervals for every metric.
+- Provider-free `study replay` drives the same controller over calibration
+  observations. It informs parameter choice only.

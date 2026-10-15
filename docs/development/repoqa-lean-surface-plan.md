@@ -1,6 +1,10 @@
 # Lean RepoQA surface and strategy comparison
 
 Status: lean operations implemented. The V3 study protocol supersedes the adaptive-candidate restriction below; see `docs/studies.md`.
+Finding (2026-10): in v1 held-out runs lean failed only by step limit, on two targets,
+at about half the default surface's tokens. The SEAMS v2 cascade study tests a
+lean-first policy with a fallback to the default surface
+(`examples/studies/study.seams-cascade.json`).
 
 ## Summary
 
