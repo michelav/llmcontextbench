@@ -255,7 +255,68 @@ def pilot_inline_degradation():
             'comparisons': [['v2', 'frozen']]}
 
 
+# v3 catalogue (pre-registration, "v3 scenarios and selection rules"): the direct surface
+# is fast and cheap, so the incumbent depends on the limit.
+MCP_DIRECT = 'local-mcp-direct'
+ALL_DIRECT = dict.fromkeys(BINS, MCP_DIRECT)
+V3_GRIDS = {
+    'inline-degradation': {'configurations': [INLINE, MCP_DIRECT], 'limits': (6000, 7000, 8000)},
+    'direct-degradation': {'configurations': [INLINE, MCP_DIRECT, MCP_LEAN], 'limits': (8000, 10000, 12000)},
+    'quota': {'configurations': [INLINE, MCP_DIRECT], 'limits': (6000, 7000, 8000)},
+    'round-trip': {'configurations': [INLINE, MCP_DIRECT, MCP_LEAN], 'limits': (8000, 10000)},
+}
+V3_DURATIONS = (12, 24, 30, 36)
+
+
+def tool_delay(configuration, first, last, delay):
+    return {'kind': 'delay', 'configuration': configuration, 'scope': 'tool-call', 'delayMs': delay,
+            'firstRequest': first, 'lastRequest': last}
+
+
+def v3_disturbances(name, first, last):
+    """(label, effects, oracle schedules during the disturbance, default route) per magnitude."""
+    if name == 'inline-degradation':
+        for delay in (3000, 6000, 9000):
+            yield f'd{delay}', [inline_delay(first, last, delay)], {'oracle': ALL_DIRECT}, ALL_INLINE
+    elif name == 'direct-degradation':
+        for delay in (1000, 2000, 3000):
+            yield (f'd{delay}', [tool_delay(MCP_DIRECT, first, last, delay)],
+                   {'oracle': ALL_INLINE, 'oracle-lean': ALL_LEAN}, ALL_DIRECT)
+    elif name == 'quota':
+        for quota in (40000, 60000, 100000, 150000):
+            yield (f'q{quota//1000}k', [{'kind': 'token-quota', 'tokensPerMinute': quota,
+                                         'firstRequest': first, 'lastRequest': last}],
+                   {'oracle': ALL_DIRECT, 'oracle-split': {'small': INLINE, 'medium': MCP_DIRECT, 'large': MCP_DIRECT}},
+                   ALL_INLINE)
+    elif name == 'round-trip':
+        for delay in (1000, 2000, 3000):
+            yield (f'd{delay}', [tool_delay(MCP_DIRECT, first, last, delay), tool_delay(MCP_LEAN, first, last, delay)],
+                   {'oracle': ALL_INLINE}, ALL_DIRECT)
+
+
+def v3_grid(name):
+    spec = V3_GRIDS[name]
+    configurations = spec['configurations']
+    policies = {('inline' if c == INLINE else c.removeprefix('local-mcp-')): {'type': 'fixed', 'configuration': c}
+                for c in configurations}
+    policies.update({'frozen': FROZEN, 'v1': V1})
+    policies.update({name: variant(V2, change) for name, change in V2_CANDIDATES.items()})
+    policies.update({f'v2-{name}': variant(V2, change) for name, change in ABLATIONS.items()})
+    default = next(v3_disturbances(name, SA_FIRST, SA_LAST))[3]
+    points = [{'name': f'stationary-L{limit}', 'latencyLimitMs': limit, 'effects': [],
+               'policies': {'oracle': {'type': 'schedule', 'default': default}}} for limit in spec['limits']]
+    for limit in spec['limits']:
+        for duration in V3_DURATIONS:
+            first, last = SA_FIRST, SA_FIRST+duration-1
+            for label, effects, oracles, default in v3_disturbances(name, first, last):
+                points.append({'name': f'L{limit}-{label}-n{duration}', 'latencyLimitMs': limit, 'effects': effects,
+                               'policies': {key: oracle(first, last, during, default) for key, during in oracles.items()}})
+    return {'schemaVersion': 1, 'seeds': [201, 202, 203], 'replicates': 10, 'configurations': configurations,
+            'base': {}, 'policies': policies, 'points': points}
+
+
 OUTPUTS = {
+    **{f'replay/v3-{name}.grid.json': (lambda name=name: v3_grid(name)) for name in V3_GRIDS},
     'replay/degradation.grid.json': degradation_grid, 'replay/opposing.grid.json': opposing_grid,
     'replay/transport.grid.json': transport_grid,
     'replay/degradation-mcp-lean.grid.json': lambda: pair_grid('mcp-lean'),

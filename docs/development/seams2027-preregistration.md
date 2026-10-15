@@ -262,6 +262,25 @@ For S-B′, "milder" means the larger quota. The round-trip grid measures how ex
 per-call slowdown scales with the number of model calls (direct about 2.2, lean about 3.9;
 H-I3 in the interface idea doc) and is not collected live.
 
+### Outcome of the v3 selection (2026-10-15)
+
+Inputs: `baselines/repoqa-long64-v3/frozen.json` (sha256 `6d78a6e142745fa1…`); replay
+reports in `studies/replay-v3calib/` (`inline-degradation` `1ff173ecd213a7d4…`,
+`direct-degradation` `afb97e2f32f95bc6…`, `quota` `43d3a43b850099e3…`, `round-trip`
+`65f35448a467abd9…`); selection records `selection-{inline,direct,quota}.json`. Values are
+replay means per 96-request episode (`estimated`); tokens are lower bounds.
+
+| Scenario | Decision | Point | Frozen | Selected v2 | Oracle | Fixed direct | Fixed inline |
+|---|---|---|---|---|---|---|---|
+| S-E′ | selected | L7000, inline +9 s; `v2-t10-ttl10` | 28.4 misses, 1.49M | 12.6, 0.95M | 3.6, 1.18M | 10.4, 0.31M | 30.5, 1.58M |
+| S-F | **fails closed** (step 3) | L8000 | — | — | — | — | — |
+| S-B′ | selected | L7000, quota 60k TPM; `v2-rr10-ttl8` | 9.9, 1.46M | 9.0, 1.20M | 3.7, 1.17M | 10.7, 0.31M | 9.7, 1.55M |
+
+- **S-E′:** opportunity 24.8 misses per episode; the selected router recovers 64 % of it (capture). Fixed direct has fewer misses over the episode than any router, because direct sits just above the 7 s limit (12 % of its stationary requests miss) while inline misses every request of the disturbance; the paper reports fixed direct alongside the primary contrast.
+- **S-F:** at L8000 every candidate exceeds the stationary token constraint (frozen 0.37M; candidates 0.72–0.85M). The incumbent (direct) is about 5× cheaper than the only feasible alternative (inline), so each probe is expensive. Under the disturbance the routers do cut misses (L8000, 3 s per call: frozen 11.1, candidates 5.6–6.6, oracle 4.0), but the rule fails closed and S-F is reported as a replay-only case of exploration cost (C5).
+- **S-B′:** opportunity 6.2 misses per episode, but the selected router recovers 15 % of it (9.0 against frozen's 9.9). The rule does not set a minimum capture, so the point is selected; the predicted live effect is below what one pilot can resolve.
+- **Round-trip map (replay only):** at L8000, fixed direct misses 5.5, 7.7, 12.5 and 16.5 per episode at 0, 1, 2 and 3 s per call; fixed lean misses 24.3, 42.0, 48.8 and 47.3. At L10000 and 2 s per call, direct misses 3.6 and lean 30.8. Exposure grows with the number of calls, as H-I3 predicts. At that mild point the v2 routers miss more than frozen (6.1–6.8 against 4.2): adapting to a disturbance the incumbent can absorb costs more than it saves.
+
 ## Stopping rules and reporting
 
 - **Collection order:** S-D, then S-A, then S-E. Collection is seed-major, with arm order shuffled within each seed, and episode wall-clock times are recorded.

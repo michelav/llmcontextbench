@@ -46,10 +46,17 @@ def infeasible_limit(baseline, configuration, limits):
     return below[-1], p90
 
 
-def select(report, limits=LIMITS, delays=DELAYS):
+def severity(point):
+    """Disturbance magnitude for tie-breaks: a longer delay or a smaller quota is more severe."""
+    effect = point['effects'][0]
+    return effect['delayMs'] if effect['kind'] == 'delay' else -effect['tokensPerMinute']
+
+
+def select(report, limits=LIMITS, delays=DELAYS, quotas=()):
     points = {p['name']: p for p in report['points']}
-    eligible_points = [points[f'L{limit}-d{delay}-n{DURATION}'] for limit in limits for delay in delays]
-    chosen = max(eligible_points, key=lambda p: (p['opportunity'], -p['effects'][0]['delayMs']))
+    labels = [f'q{quota//1000}k' for quota in quotas] or [f'd{delay}' for delay in delays]
+    eligible_points = [points[f'L{limit}-{label}-n{DURATION}'] for limit in limits for label in labels]
+    chosen = max(eligible_points, key=lambda p: (p['opportunity'], -severity(p)))
     if chosen['opportunity'] <= 0:
         raise SystemExit(f"largest opportunity is {chosen['opportunity']:.2f} at {chosen['name']}; the rule fails closed")
     limit = chosen['latencyLimitMs']
@@ -65,7 +72,9 @@ def select(report, limits=LIMITS, delays=DELAYS):
         value = policies[name]['recoveryLag']
         return float('inf') if value is None else value
     policy = min(admissible, key=lambda c: (policies[c]['deadlineMisses'], lag(c)))
-    return {'point': chosen['name'], 'latencyLimitMs': limit, 'delayMs': chosen['effects'][0]['delayMs'],
+    effect = chosen['effects'][0]
+    return {'point': chosen['name'], 'latencyLimitMs': limit, 'delayMs': effect.get('delayMs'),
+            'tokensPerMinute': effect.get('tokensPerMinute'),
             'opportunity': chosen['opportunity'], 'policy': policy, 'admissible': admissible,
             'pointMisses': {c: policies[c]['deadlineMisses'] for c in CANDIDATES},
             'frozenMisses': policies['frozen']['deadlineMisses'], 'oracleMisses': policies['oracle']['deadlineMisses']}
@@ -77,6 +86,7 @@ def main():
     parser.add_argument('--output', required=True)
     parser.add_argument('--limits', default=','.join(map(str, LIMITS)), help='Comma-separated latency limits (ms)')
     parser.add_argument('--delays', default=','.join(map(str, DELAYS)), help='Comma-separated delays (ms)')
+    parser.add_argument('--quotas', help='Comma-separated token quotas (tokens per minute); replaces --delays')
     parser.add_argument('--rule', default=RULE, help='Rule label recorded with the decision')
     parser.add_argument('--feasible-config', help='Fix the limit from this configuration\'s calibration p90')
     parser.add_argument('--infeasible-config', help='Fix the limit below this configuration\'s calibration p90 (S-E)')
@@ -102,8 +112,9 @@ def main():
                            baselineSha256=hashlib.sha256(Path(args.baseline).read_bytes()).hexdigest())
         limits = (limit,)
     raw = Path(args.report).read_bytes()
-    decision = select(json.loads(raw), limits, delays)
-    record = {'rule': args.rule, 'limits': limits, 'delays': delays, 'feasibility': feasibility,
+    quotas = tuple(int(v) for v in args.quotas.split(',')) if args.quotas else ()
+    decision = select(json.loads(raw), limits, delays, quotas)
+    record = {'rule': args.rule, 'limits': limits, 'delays': () if quotas else delays, 'quotas': quotas, 'feasibility': feasibility,
               'report': args.report, 'reportSha256': hashlib.sha256(raw).hexdigest(), 'decision': decision}
     Path(args.output).write_text(json.dumps(record, indent=2) + '\n')
     print(json.dumps(decision, indent=2))
