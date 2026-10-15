@@ -1,0 +1,1488 @@
+{
+  "schemaVersion": 1,
+  "seeds": [
+    201,
+    202,
+    203
+  ],
+  "replicates": 10,
+  "configurations": [
+    "inline-code-full",
+    "local-mcp-lean"
+  ],
+  "base": {},
+  "policies": {
+    "inline": {
+      "type": "fixed",
+      "configuration": "inline-code-full"
+    },
+    "cheap": {
+      "type": "fixed",
+      "configuration": "local-mcp-lean"
+    },
+    "frozen": {
+      "type": "router",
+      "adaptive": false,
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9
+    },
+    "v1": {
+      "type": "router",
+      "adaptive": true
+    },
+    "v2-rr10-ttl12": {
+      "type": "router",
+      "adaptive": true,
+      "estimator": "pooled-ratio",
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9,
+      "switchOnObjectiveMiss": true,
+      "cooldownRequests": 2,
+      "updateWindow": 4,
+      "minimumObservations": 2,
+      "probeInterval": 10,
+      "estimateTtlRequests": 12
+    },
+    "v2-rr10-ttl8": {
+      "type": "router",
+      "adaptive": true,
+      "estimator": "pooled-ratio",
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9,
+      "switchOnObjectiveMiss": true,
+      "cooldownRequests": 2,
+      "updateWindow": 4,
+      "minimumObservations": 2,
+      "probeInterval": 10,
+      "estimateTtlRequests": 8
+    },
+    "v2-t8-ttl8": {
+      "type": "router",
+      "adaptive": true,
+      "estimator": "pooled-ratio",
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9,
+      "switchOnObjectiveMiss": true,
+      "cooldownRequests": 2,
+      "updateWindow": 4,
+      "minimumObservations": 2,
+      "probeInterval": 10,
+      "estimateTtlRequests": 8,
+      "probeMode": "targeted",
+      "avoidedProbeInterval": 8
+    },
+    "v2-t10-ttl10": {
+      "type": "router",
+      "adaptive": true,
+      "estimator": "pooled-ratio",
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9,
+      "switchOnObjectiveMiss": true,
+      "cooldownRequests": 2,
+      "updateWindow": 4,
+      "minimumObservations": 2,
+      "probeInterval": 10,
+      "estimateTtlRequests": 10,
+      "probeMode": "targeted",
+      "avoidedProbeInterval": 10
+    },
+    "v2-per-bin-mean": {
+      "type": "router",
+      "adaptive": true,
+      "estimator": "per-bin-mean",
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9,
+      "switchOnObjectiveMiss": true,
+      "cooldownRequests": 2,
+      "updateWindow": 4,
+      "minimumObservations": 2,
+      "probeInterval": 10,
+      "estimateTtlRequests": 12
+    },
+    "v2-no-ttl": {
+      "type": "router",
+      "adaptive": true,
+      "estimator": "pooled-ratio",
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9,
+      "switchOnObjectiveMiss": true,
+      "cooldownRequests": 2,
+      "updateWindow": 4,
+      "minimumObservations": 2,
+      "probeInterval": 10
+    },
+    "v2-mean-routing": {
+      "type": "router",
+      "adaptive": true,
+      "estimator": "pooled-ratio",
+      "incumbentScope": "bin",
+      "switchOnObjectiveMiss": true,
+      "cooldownRequests": 2,
+      "updateWindow": 4,
+      "minimumObservations": 2,
+      "probeInterval": 10,
+      "estimateTtlRequests": 12
+    },
+    "v2-global-scope": {
+      "type": "router",
+      "adaptive": true,
+      "estimator": "pooled-ratio",
+      "incumbentScope": "global",
+      "latencyQuantile": 0.9,
+      "switchOnObjectiveMiss": true,
+      "cooldownRequests": 2,
+      "updateWindow": 4,
+      "minimumObservations": 2,
+      "probeInterval": 10,
+      "estimateTtlRequests": 12
+    },
+    "v2-no-objective-first": {
+      "type": "router",
+      "adaptive": true,
+      "estimator": "pooled-ratio",
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9,
+      "switchOnObjectiveMiss": false,
+      "cooldownRequests": 2,
+      "updateWindow": 4,
+      "minimumObservations": 2,
+      "probeInterval": 10,
+      "estimateTtlRequests": 12
+    },
+    "v2-cooldown-5": {
+      "type": "router",
+      "adaptive": true,
+      "estimator": "pooled-ratio",
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9,
+      "switchOnObjectiveMiss": true,
+      "cooldownRequests": 5,
+      "updateWindow": 4,
+      "minimumObservations": 2,
+      "probeInterval": 10,
+      "estimateTtlRequests": 12
+    },
+    "v2-targeted-every-2": {
+      "type": "router",
+      "adaptive": true,
+      "estimator": "pooled-ratio",
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9,
+      "switchOnObjectiveMiss": true,
+      "cooldownRequests": 2,
+      "updateWindow": 4,
+      "minimumObservations": 2,
+      "probeInterval": 10,
+      "estimateTtlRequests": 12,
+      "probeMode": "targeted",
+      "avoidedProbeInterval": 2
+    }
+  },
+  "points": [
+    {
+      "name": "stationary-L9000",
+      "latencyLimitMs": 9000,
+      "effects": [],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          }
+        }
+      }
+    },
+    {
+      "name": "stationary-L10000",
+      "latencyLimitMs": 10000,
+      "effects": [],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          }
+        }
+      }
+    },
+    {
+      "name": "stationary-L11000",
+      "latencyLimitMs": 11000,
+      "effects": [],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          }
+        }
+      }
+    },
+    {
+      "name": "L9000-d3000-n12",
+      "latencyLimitMs": 9000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 3000,
+          "firstRequest": 31,
+          "lastRequest": 42
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 42,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L9000-d3000-n24",
+      "latencyLimitMs": 9000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 3000,
+          "firstRequest": 31,
+          "lastRequest": 54
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 54,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L9000-d3000-n30",
+      "latencyLimitMs": 9000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 3000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L9000-d3000-n36",
+      "latencyLimitMs": 9000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 3000,
+          "firstRequest": 31,
+          "lastRequest": 66
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 66,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L9000-d6000-n12",
+      "latencyLimitMs": 9000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 6000,
+          "firstRequest": 31,
+          "lastRequest": 42
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 42,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L9000-d6000-n24",
+      "latencyLimitMs": 9000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 6000,
+          "firstRequest": 31,
+          "lastRequest": 54
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 54,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L9000-d6000-n30",
+      "latencyLimitMs": 9000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 6000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L9000-d6000-n36",
+      "latencyLimitMs": 9000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 6000,
+          "firstRequest": 31,
+          "lastRequest": 66
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 66,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L9000-d9000-n12",
+      "latencyLimitMs": 9000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 42
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 42,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L9000-d9000-n24",
+      "latencyLimitMs": 9000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 54
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 54,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L9000-d9000-n30",
+      "latencyLimitMs": 9000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L9000-d9000-n36",
+      "latencyLimitMs": 9000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 66
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 66,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L10000-d3000-n12",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 3000,
+          "firstRequest": 31,
+          "lastRequest": 42
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 42,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L10000-d3000-n24",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 3000,
+          "firstRequest": 31,
+          "lastRequest": 54
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 54,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L10000-d3000-n30",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 3000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L10000-d3000-n36",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 3000,
+          "firstRequest": 31,
+          "lastRequest": 66
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 66,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L10000-d6000-n12",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 6000,
+          "firstRequest": 31,
+          "lastRequest": 42
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 42,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L10000-d6000-n24",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 6000,
+          "firstRequest": 31,
+          "lastRequest": 54
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 54,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L10000-d6000-n30",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 6000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L10000-d6000-n36",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 6000,
+          "firstRequest": 31,
+          "lastRequest": 66
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 66,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L10000-d9000-n12",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 42
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 42,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L10000-d9000-n24",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 54
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 54,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L10000-d9000-n30",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L10000-d9000-n36",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 66
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 66,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L11000-d3000-n12",
+      "latencyLimitMs": 11000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 3000,
+          "firstRequest": 31,
+          "lastRequest": 42
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 42,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L11000-d3000-n24",
+      "latencyLimitMs": 11000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 3000,
+          "firstRequest": 31,
+          "lastRequest": 54
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 54,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L11000-d3000-n30",
+      "latencyLimitMs": 11000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 3000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L11000-d3000-n36",
+      "latencyLimitMs": 11000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 3000,
+          "firstRequest": 31,
+          "lastRequest": 66
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 66,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L11000-d6000-n12",
+      "latencyLimitMs": 11000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 6000,
+          "firstRequest": 31,
+          "lastRequest": 42
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 42,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L11000-d6000-n24",
+      "latencyLimitMs": 11000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 6000,
+          "firstRequest": 31,
+          "lastRequest": 54
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 54,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L11000-d6000-n30",
+      "latencyLimitMs": 11000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 6000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L11000-d6000-n36",
+      "latencyLimitMs": 11000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 6000,
+          "firstRequest": 31,
+          "lastRequest": 66
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 66,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L11000-d9000-n12",
+      "latencyLimitMs": 11000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 42
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 42,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L11000-d9000-n24",
+      "latencyLimitMs": 11000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 54
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 54,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L11000-d9000-n30",
+      "latencyLimitMs": 11000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "L11000-d9000-n36",
+      "latencyLimitMs": 11000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 66
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 66,
+              "configurationBySize": {
+                "small": "local-mcp-lean",
+                "medium": "local-mcp-lean",
+                "large": "local-mcp-lean"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

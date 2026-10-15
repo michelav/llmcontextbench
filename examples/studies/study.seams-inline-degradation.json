@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "baseline": "../../baselines/repoqa-long64-v2/frozen.json",
+  "configurations": [
+    "inline-code-full",
+    "local-mcp-lean"
+  ],
+  "seeds": [
+    301,
+    302,
+    303
+  ],
+  "repeats": 1,
+  "latencyLimitMs": 10000,
+  "policies": {
+    "inline": {
+      "type": "fixed",
+      "configuration": "inline-code-full"
+    },
+    "cheap": {
+      "type": "fixed",
+      "configuration": "local-mcp-lean"
+    },
+    "frozen": {
+      "type": "router",
+      "adaptive": false,
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9
+    },
+    "v1": {
+      "type": "router",
+      "adaptive": true
+    },
+    "v2": {
+      "type": "router",
+      "adaptive": true,
+      "estimator": "pooled-ratio",
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9,
+      "switchOnObjectiveMiss": true,
+      "cooldownRequests": 2,
+      "updateWindow": 4,
+      "minimumObservations": 2,
+      "probeInterval": 10,
+      "estimateTtlRequests": 10,
+      "probeMode": "targeted",
+      "avoidedProbeInterval": 10
+    },
+    "oracle": {
+      "type": "schedule",
+      "default": {
+        "small": "inline-code-full",
+        "medium": "inline-code-full",
+        "large": "inline-code-full"
+      },
+      "phases": [
+        {
+          "firstRequest": 31,
+          "lastRequest": 60,
+          "configurationBySize": {
+            "small": "local-mcp-lean",
+            "medium": "local-mcp-lean",
+            "large": "local-mcp-lean"
+          }
+        }
+      ]
+    }
+  },
+  "scenarios": {
+    "stationary": [],
+    "inline-degraded": [
+      {
+        "kind": "delay",
+        "configuration": "inline-code-full",
+        "scope": "request",
+        "delayMs": 9000,
+        "firstRequest": 31,
+        "lastRequest": 60
+      }
+    ]
+  },
+  "comparisons": [
+    [
+      "v2",
+      "frozen"
+    ],
+    [
+      "v2",
+      "v1"
+    ],
+    [
+      "v2",
+      "cheap"
+    ],
+    [
+      "v2",
+      "inline"
+    ],
+    [
+      "v2",
+      "oracle"
+    ],
+    [
+      "v1",
+      "frozen"
+    ]
+  ]
+}

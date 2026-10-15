@@ -54,6 +54,13 @@ SA_PAIRS = {
 SA_SELECTED = {'mcp-lean': {'latencyLimitMs': 14000, 'delayMs': 3000, 'policy': 'v2-rr10-ttl8'}}
 
 
+# S-E: inline is the incumbent (lean infeasible at its calibration p90) and degrades by a
+# request-scope delay during requests 31-60; lean is the cheaper, slower fallback.
+SE_LIMITS, SE_DELAYS = (9000, 10000, 11000), (3000, 6000, 9000)
+SE_SELECTED = {'latencyLimitMs': 10000, 'delayMs': 9000, 'policy': 'v2-t10-ttl10'}
+ALL_INLINE, ALL_LEAN = dict.fromkeys(BINS, INLINE), dict.fromkeys(BINS, MCP_LEAN)
+
+
 def variant(base, change):
     return {k: v for k, v in {**base, **change}.items() if v is not None}
 
@@ -113,6 +120,29 @@ def pair_grid(pair):
                                'effects': [delay_effect(pair, first, last, delay)],
                                'policies': {'oracle': oracle(first, last, dict.fromkeys(BINS, INLINE), route(pair))}})
     return {'schemaVersion': 1, 'seeds': [201, 202, 203], 'replicates': 10, 'configurations': [INLINE, cheap],
+            'base': {}, 'policies': policies, 'points': points}
+
+
+def inline_delay(first, last, delay):
+    return {'kind': 'delay', 'configuration': INLINE, 'scope': 'request', 'delayMs': delay,
+            'firstRequest': first, 'lastRequest': last}
+
+
+def inline_degradation_grid():
+    policies = {'inline': {'type': 'fixed', 'configuration': INLINE}, 'cheap': {'type': 'fixed', 'configuration': MCP_LEAN},
+                'frozen': FROZEN, 'v1': V1}
+    policies.update({name: variant(V2, change) for name, change in V2_CANDIDATES.items()})
+    policies.update({f'v2-{name}': variant(V2, change) for name, change in ABLATIONS.items()})
+    points = [{'name': f'stationary-L{limit}', 'latencyLimitMs': limit, 'effects': [],
+               'policies': {'oracle': {'type': 'schedule', 'default': ALL_INLINE}}} for limit in SE_LIMITS]
+    for limit in SE_LIMITS:
+        for delay in SE_DELAYS:
+            for duration in (12, 24, 30, 36):
+                first, last = SA_FIRST, SA_FIRST+duration-1
+                points.append({'name': f'L{limit}-d{delay}-n{duration}', 'latencyLimitMs': limit,
+                               'effects': [inline_delay(first, last, delay)],
+                               'policies': {'oracle': oracle(first, last, ALL_LEAN, ALL_INLINE)}})
+    return {'schemaVersion': 1, 'seeds': [201, 202, 203], 'replicates': 10, 'configurations': [INLINE, MCP_LEAN],
             'base': {}, 'policies': policies, 'points': points}
 
 
@@ -201,21 +231,52 @@ def pilot_degradation(pair='mcp-lean'):
             'comparisons': [['v2', 'frozen']]}
 
 
+def study_inline_degradation():
+    chosen = SE_SELECTED
+    return {'schemaVersion': 1, 'baseline': BASELINE, 'configurations': [INLINE, MCP_LEAN],
+            'seeds': [301, 302, 303], 'repeats': 1, 'latencyLimitMs': chosen['latencyLimitMs'],
+            'policies': {'inline': {'type': 'fixed', 'configuration': INLINE},
+                         'cheap': {'type': 'fixed', 'configuration': MCP_LEAN},
+                         'frozen': FROZEN, 'v1': V1, 'v2': variant(V2, V2_CANDIDATES[chosen['policy']]),
+                         'oracle': oracle(SA_FIRST, SA_LAST, ALL_LEAN, ALL_INLINE)},
+            'scenarios': {'stationary': [], 'inline-degraded': [inline_delay(SA_FIRST, SA_LAST, chosen['delayMs'])]},
+            'comparisons': [['v2', 'frozen'], ['v2', 'v1'], ['v2', 'cheap'], ['v2', 'inline'], ['v2', 'oracle'],
+                            ['v1', 'frozen']]}
+
+
+def pilot_inline_degradation():
+    chosen = SE_SELECTED
+    return {'schemaVersion': 1, 'baseline': BASELINE, 'configurations': [INLINE, MCP_LEAN],
+            'targets': PILOT_DEGRADATION_TARGETS, 'seeds': [903], 'repeats': 1,
+            'latencyLimitMs': chosen['latencyLimitMs'],
+            'policies': {'inline': {'type': 'fixed', 'configuration': INLINE}, 'frozen': FROZEN, 'v1': V1,
+                         'v2': variant(V2, V2_CANDIDATES[chosen['policy']])},
+            'scenarios': {'inline-degraded': [inline_delay(17, 32, chosen['delayMs'])]},
+            'comparisons': [['v2', 'frozen']]}
+
+
 OUTPUTS = {
     'replay/degradation.grid.json': degradation_grid, 'replay/opposing.grid.json': opposing_grid,
     'replay/transport.grid.json': transport_grid,
     'replay/degradation-mcp-lean.grid.json': lambda: pair_grid('mcp-lean'),
     'replay/degradation-fn-lean.grid.json': lambda: pair_grid('fn-lean'),
+    'replay/inline-degradation.grid.json': inline_degradation_grid,
     'study.seams-cascade.json': study_cascade,
     'study.seams-degradation.json': lambda: study_degradation('mcp-lean'),
     'pilot.cascade.json': pilot_cascade,
     'pilot.degradation.json': lambda: pilot_degradation('mcp-lean'),
+    'study.seams-inline-degradation.json': study_inline_degradation,
+    'pilot.inline-degradation.json': pilot_inline_degradation,
 }
 
 
 def apply_selection(item):
-    """Use a select_parameters.py record (`pair=path`) for that pair's live definitions."""
+    """Use a select_parameters.py record (`pair=path`; `inline` for S-E) for the live definitions."""
     pair, path = item.split('=', 1)
+    if pair == 'inline':
+        decision = json.loads(Path(path).read_text())['decision']
+        SE_SELECTED.update({k: decision[k] for k in ('latencyLimitMs', 'delayMs', 'policy')})
+        return
     if pair not in SA_PAIRS:
         raise SystemExit(f'unknown S-A pair {pair!r}; expected one of {sorted(SA_PAIRS)}')
     decision = json.loads(Path(path).read_text())['decision']

@@ -10,7 +10,7 @@ changes after the first pilot episode runs, except to record pilot outcomes. Pla
 | RQ | Hypothesis | Evidence |
 |---|---|---|
 | RQ1. When does runtime adaptation of context provisioning pay off? | Adaptation pays off only when (C1) the best configuration changes over time, (C2) the change cannot be predicted from request features, (C3) a feasible fallback exists, (C4) the change lasts longer than detection lag, and (C5) probing is cheap. | Replay opportunity map across scenarios (below), including negative points. |
-| RQ2. When the conditions hold, does feedback reduce violations or cost? | **H2a (S-D):** a lean-first cascade reaches the default configuration's pass rate at lower token cost. **H2b (S-A):** the v2 router has fewer deadline misses than the frozen router when lean local MCP degrades, at a token cost below fixed inline. | Live paired episodes, seeds 301–303. |
+| RQ2. When the conditions hold, does feedback reduce violations or cost? | **H2a (S-D):** a lean-first cascade reaches the default configuration's pass rate at lower token cost. **H2b (S-A):** the v2 router has fewer deadline misses than the frozen router when lean local MCP degrades, at a token cost below fixed inline. **H2c (S-E):** when inline (the incumbent) degrades, the v2 router has fewer deadline misses than the frozen router and uses fewer tokens, by moving to MCP lean; any pass-rate cost is reported. | Live paired episodes, seeds 301–303. |
 | RQ3. How fast does it react, and what does it cost? | v2 reacts within 5 requests of onset and returns within 8 requests of recovery; controller overhead p95 < 5 ms. | Live `lags`, `controllerMsP95`, probe cost. |
 | RQ4. Which design choices matter? | Feasible fallbacks (scenario design) matter more than controller details; among controller details, estimate expiry and probe rate dominate recovery. | v1 vs v2 live; replay ablations. |
 
@@ -133,18 +133,64 @@ L12000/3000 ms). `select_parameters.py` now exits non-zero on a non-positive gap
 Regenerate with the command sequence in `docs/studies.md` ("SEAMS v2 suite").
 **No further parameter changes.**
 
+## Addition before any pilot: S-E inline degradation (2026-10-15)
+
+Added after the S-A selection and before any pilot episode ran, on calibration data only.
+Exploratory replay of two further ideas came first:
+- **Inline degradation:** positive at strong delays, so it is added below.
+- **Token cap with latency as the objective:** a static per-size rule (small and medium to inline, large to lean) matched the ledger-feedback `pace` policy: 5.2 misses at 0.70M tokens, against 4.1 misses plus 3.4 unserved at 0.99M, at a 1.0M cap. Token cost is predictable from request size, so C2 fails. It is reported as a replay-only negative case.
+
+**S-E definition** (`examples/studies/study.seams-inline-degradation.json`)
+- **Pair:** inline + MCP lean. Inline is the incumbent because lean misses the limit at its calibration p90.
+- **Arms:** fixed inline, fixed MCP lean (`cheap`), frozen, v1, v2, `schedule` oracle (inline outside the disturbance, lean during it).
+- **Scenarios:** `stationary`, and `inline-degraded` (a request-scope delay on inline for requests 31–60).
+- **Matrix:** 6 arms × 2 scenarios × 3 seeds = 36 episodes (3,456 requests).
+- **Primary contrast:** v2 vs frozen on `deadlineMiss` in `inline-degraded`.
+- **Secondary contrasts:** v2 vs frozen on `tokensLowerBound`; v2 vs fixed MCP lean and vs inline; v2 vs oracle; v1 vs frozen; `passed` for every contrast (quality cost of moving to lean).
+
+**S-E selection rule** (`select_parameters.py --infeasible-config local-mcp-lean --feasible-config inline-code-full`):
+1. **Limit:** the largest of {9000, 10000, 11000} ms below MCP lean's smallest per-bin calibration p90, provided inline's largest p90 is within it.
+2. **Delay:** among {3000, 6000, 9000} ms at `n30`, the largest frozen − oracle gap.
+3. **Policy:** among the same 4 candidates, with the same stationary constraints as S-A.
+
+**Selected** (record `studies/replay-v2calib/selection-inline.json`):
+
+| Item | Value |
+|---|---|
+| Calibration p90 | MCP lean 12141 / 10461 / 11401 ms; inline 4813 / 5113 / 6403 ms (small/medium/large) → limit 10000 ms |
+| Point | L10000-d9000-n30, opportunity 22.5 misses per episode |
+| Admissible | `v2-rr10-ttl8`, `v2-t8-ttl8`, `v2-t10-ttl10` (`v2-rr10-ttl12` fails: 2.7 stationary misses > frozen + 1) |
+| Policy | `v2-t10-ttl10` |
+| Point misses (estimated) | frozen 28.4, v1 21.3, v2 15.7, oracle 5.9, fixed lean 16.9, inline 30.0 |
+| Point tokens per episode (estimated) | frozen 1.47M, v2 1.19M, fixed lean 0.55M, inline 1.55M |
+| Stationary L10000 (estimated) | frozen and v2 1.5 misses / 1.50M; fixed lean 16.1 / 0.57M |
+
+**Caveats**
+- The 9 s delay is a 3–4 × slowdown of inline; it was injected, not observed.
+- Calibration understates lean's held-out failures (`rs_004`, `py_005`), so the pass-rate cost may be larger live.
+
+**Digests (sha256)**
+
+| File | sha256 |
+|---|---|
+| `studies/replay-v2calib/inline-degradation.json` | `5d9b559a4585775d88c9e35e3ae57bb3030fa8767ebbe6a00bd9dfba78001106` |
+| `studies/replay-v2calib/selection-inline.json` | `23e990ecf832b2daf36bebf7ecd0edf76ca419fca2d98cd87e7b2f177db3cf9d` |
+| `examples/studies/study.seams-inline-degradation.json` | `ca2c782fd8d9d735853c8e5c349af088a97a3f9c6f11bae66fb0c3e6c5acb40d` |
+| `examples/studies/pilot.inline-degradation.json` | `4d5b24cbb6814ebe4a05a4f519bde387d2ff5ba238319f8028550f5275242a52` |
+
 ## Pilots (seeds 901+, never pooled)
 
 | Pilot | Definition | Go criteria |
 |---|---|---|
 | P1 cascade | `pilot.cascade.json` (targets `rs_004`, `py_005`, `java_002`, `ts_001`) | `cascade-mcp` has 0 final failures; its tokens are ≤ 0.8 × `mcp-default`; fallbacks occur only on trigger classes; attempts are logged with provenance |
 | P2 degradation | `pilot.degradation.json` (8 targets, MCP lean 3000 ms per tool call on requests 17–32, limit 14000 ms) | v2 reacts ≤ 5 requests after onset and returns ≤ 8 after the end; v2 misses in the delay phase ≤ 50 % of frozen |
+| P3 inline degradation | `pilot.inline-degradation.json` (8 targets, inline + 9000 ms per request on requests 17–32, limit 10000 ms; seed 903) | v2 reacts ≤ 5 requests after onset and returns ≤ 8 after the end; v2 misses in the delay phase ≤ 75 % of frozen; v2 episode tokens ≤ frozen |
 
 A failed pilot allows one fix and one re-pilot; a second failure drops the scenario.
 
 ## Stopping rules and reporting
 
-- **Collection order:** S-D, then S-A. Collection is seed-major, with arm order shuffled within each seed, and episode wall-clock times are recorded.
+- **Collection order:** S-D, then S-A, then S-E. Collection is seed-major, with arm order shuffled within each seed, and episode wall-clock times are recorded.
 - **No mid-collection changes:** no parameter or code changes during collection. A defect that invalidates results stops the collection; it is then reported and a new seed set is used.
 - **Reporting:**
   - v1 results are reported as collected;
@@ -158,6 +204,7 @@ A failed pilot allows one fix and one re-pilot; a second failure drops the scena
 | Step | Requests | Answer tokens (estimate) |
 |---|---|---|
 | v2 baseline | 720 | about 7.5M |
-| Pilots P1 + P2 | 96 + 192 | about 3.5M |
+| Pilots P1 + P2 + P3 | 96 + 192 + 192 | about 6M |
 | S-D cascade | about 2,330 | about 28M |
-| S-A degradation | 3,456 | about 45M |
+| S-A degradation | 3,456 | about 30M |
+| S-E inline degradation | 3,456 | about 45M |

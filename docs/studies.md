@@ -402,20 +402,29 @@ measurement source after that needs a new baseline.
    python tools/seams/select_parameters.py studies/replay-v2calib/degradation-mcp-lean.json \
      --limits 12000,14000,16000 --delays 2000,3000 --feasible-config local-mcp-lean --baseline $B \
      --rule 'seams2027-preregistration S-A v2 (mcp-lean)' --output studies/replay-v2calib/selection-mcp-lean.json
-   python tools/seams/make_grids.py --selection mcp-lean=studies/replay-v2calib/selection-mcp-lean.json
+   llmctxbench study replay --baseline $B --grid examples/studies/replay/inline-degradation.grid.json \
+     --output studies/replay-v2calib/inline-degradation.json
+   python tools/seams/select_parameters.py studies/replay-v2calib/inline-degradation.json \
+     --limits 9000,10000,11000 --delays 3000,6000,9000 --infeasible-config local-mcp-lean \
+     --feasible-config inline-code-full --baseline $B --rule 'seams2027-preregistration S-E v1' \
+     --output studies/replay-v2calib/selection-inline.json
+   python tools/seams/make_grids.py --selection mcp-lean=studies/replay-v2calib/selection-mcp-lean.json \
+     --selection inline=studies/replay-v2calib/selection-inline.json
    python tools/seams/compare_baselines.py baselines/repoqa-long64/frozen.json $B
    ```
    `select_parameters.py` exits non-zero when the rule fails closed (no positive
    opportunity, or no candidate within the stationary constraints).
-3. Pilots (provider-backed, about 290 requests), each followed by eval and analyze:
+3. Pilots (provider-backed, about 480 requests), each followed by eval and analyze:
    ```bash
    llmctxbench study prepare --definition examples/studies/pilot.cascade.json --output studies/pilot-cascade
    llmctxbench study prepare --definition examples/studies/pilot.degradation.json --output studies/pilot-degradation
+   llmctxbench study prepare --definition examples/studies/pilot.inline-degradation.json --output studies/pilot-inline-degradation
    ```
    Run every episode in each prepared matrix with the episode loop above, then
    `llmctxbench eval` each `responses.jsonl` and `llmctxbench study analyze` each
    directory. Check the go criteria before continuing.
-4. Collection (provider-backed, about 5.8k requests): prepare
-   `study.seams-cascade.json` into `studies/seams-cascade` and
-   `study.seams-degradation.json` into `studies/seams-degradation`, run the episode
+4. Collection (provider-backed, about 9.2k requests): prepare
+   `study.seams-cascade.json` into `studies/seams-cascade`,
+   `study.seams-degradation.json` into `studies/seams-degradation` and
+   `study.seams-inline-degradation.json` into `studies/seams-inline-degradation`, run the episode
    loop (seed-major, arm order shuffled within each seed), then evaluate and analyze.

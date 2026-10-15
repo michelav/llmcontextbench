@@ -230,3 +230,17 @@ The cause is not identified.
 - **Cause.** A single large request costs more than the mean reserve, which made it look unaffordable.
 - **Fix.** `pace` now serves that request with the cheapest configuration (reason `paced_reserve`). It stops only when even the cheapest no longer fits.
 - **Scope.** The change is in `adaptive/study_policy.py`, which is not fingerprinted, and no pre-registered study uses `pace`.
+
+## 2026-10-15 — SEAMS v2: S-E inline degradation added before the pilots
+
+Exploratory replay of two further scenarios on v2 calibration (pair inline + MCP lean):
+
+**Inline degradation (S-E): added.**
+- Setup: at a 10 s limit, lean is infeasible at its p90, so every router keeps inline. Inline is then delayed per request.
+- At +9 s: frozen 28.4 misses / 1.47M tokens, v2 15.7 / 1.19M, oracle 5.9.
+- v2 beats frozen on both misses and tokens. Fixed lean (16.9 misses / 0.55M) is a strong competitor only while the disturbance lasts.
+- +3 s gives no opportunity.
+- The selection rule (`--infeasible-config`) picks L10000, +9000 ms and `v2-t10-ttl10`. The pre-registration records the addition, the digests and pilot P3.
+
+**Token cap: replay-only negative case.**
+- A static per-size rule matches the `pace` policy, which uses feedback from the token ledger, because cost is predictable from request size (C2 fails).
