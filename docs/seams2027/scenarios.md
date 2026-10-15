@@ -145,6 +145,30 @@ episodes. The validation table belongs in the threats to validity.
 | RQ4: which design choices matter? | v1 against v2 in S-E′; replay ablations; v1 lessons |
 | Secondary | cascade (P1, counterfactual); interface redesign (direct surface) |
 
+## Figures and tables
+
+Generated without provider calls from the v3 baseline, the replay reports, the pilots and
+the S-E′ study; run from the repository root:
+
+```bash
+python tools/seams/quota_attribution.py > /dev/null   # writes studies/replay-v3calib/quota-attribution.json
+python tools/seams/make_figures.py                   # docs/seams2027/figures/*.pdf
+python tools/seams/make_tables.py                    # docs/seams2027/tables/*.tex (booktabs)
+```
+
+| Output | Content |
+|---|---|
+| `figures/replay-opportunity.pdf` | replay map: opportunity (frozen − oracle) against what v2 recovers, for S-E′, S-B′, S-F, round-trip |
+| `figures/se-timeline.pdf` | S-E′ live: miss rate and share routed to direct per request position |
+| `figures/se-tradeoff.pdf` | S-E′ live: tokens against misses per arm, stationary and degraded, seed ranges |
+| `figures/pilots-p3.pdf` | P3 (lean fallback) against P3′ (direct fallback), misses per phase |
+| `figures/replay-round-trip.pdf` | replay: misses against per-call delay for each surface |
+| `figures/replay-quota-attribution.pdf` | replay S-B′: quota-phase misses by configuration and quota wait |
+| `tables/catalogue.tex` | v3 calibration catalogue |
+| `tables/se-results.tex`, `tables/se-contrasts.tex` | S-E′ live results and delay-phase intervals |
+| `tables/validation.tex` | replay against live |
+| `tables/ablation.tex` | replay ablation of v2 design choices at the S-E′ point |
+
 ## Limits
 
 One task (search needle function), one model (gpt-6-luna), 16 held-out targets reused

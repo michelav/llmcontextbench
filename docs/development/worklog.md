@@ -306,3 +306,10 @@ Exploratory replay of two further scenarios on v2 calibration (pair inline + MCP
 - v1 matched v2 in the delay phase but stayed on direct without a disturbance (6.8 stationary misses).
 - Live means matched replay for frozen, v2 and the oracle (28.6 / 12.4 / 4.6 against 28.4 / 12.6 / 3.6).
 - Record and table in the pre-registration ("S-E′ collection record"); summary script `tools/seams/se3_summary.py`.
+
+## 2026-10-15 — SEAMS figures and tables
+
+- `tools/seams/make_figures.py` (6 PDFs, deterministic) and `tools/seams/make_tables.py` (5 booktabs tables) write to `docs/seams2027/{figures,tables}`; `se3_summary.py` is now importable; `quota_attribution.py` also writes `quota-attribution.json`.
+- Seen while building them: fixed direct's misses vary widely across seeds (degraded 1–27, stationary 1–14); its p90 sits at the 7 s limit, so a slow provider period moves it a lot. v2 ranges 8–18 degraded, 0–4 stationary.
+- Replay against live for S-E′: frozen, v2 and inline within 0.3 misses; v1 15.8 predicted against 10.6 live.
+- The tables were not compiled (no LaTeX in this environment).

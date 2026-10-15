@@ -15,7 +15,7 @@ waits = []
 original = rp.quota_wait_seconds
 rp.quota_wait_seconds = lambda *a: waits.append(original(*a)) or waits[-1]
 LIMIT, FIRST, LAST = 7000, 31, 60
-out = {}
+out, summary = {}, {}
 for name in ('frozen', 'v2-rr10-ttl8', 'v2-t10-ttl10', 'oracle-split', 'direct', 'inline'):
     stats = collections.defaultdict(list)
     for seed in grid['seeds']:
@@ -41,3 +41,9 @@ for name in ('frozen', 'v2-rr10-ttl8', 'v2-t10-ttl10', 'oracle-split', 'direct',
         print(f"  {key[0]:5} {str(key[1]).replace('local-mcp-',''):16} {key[2]:6} n/ep={len(rows)/30:5.1f} "
               f"wait={st.mean(w for _,w,_ in rows):5.1f}s miss={sum(d>LIMIT for d,_,_ in rows)/30:4.1f}/ep "
               f"miss-with-wait={sum(d>LIMIT and w>0 for d,w,_ in rows)/30:4.1f}/ep probes={sum(p for *_,p in rows)/30:.1f}")
+        summary.setdefault(name, []).append({'phase': key[0], 'configuration': key[1], 'sizeBin': key[2],
+            'requestsPerEpisode': len(rows)/30, 'meanWaitS': st.mean(w for _,w,_ in rows),
+            'missesPerEpisode': sum(d>LIMIT for d,_,_ in rows)/30,
+            'missesWithWaitPerEpisode': sum(d>LIMIT and w>0 for d,w,_ in rows)/30})
+json.dump({'point': point['name'], 'provenance': 'estimated', 'episodesPerPolicy': 30, 'policies': summary},
+          open('studies/replay-v3calib/quota-attribution.json', 'w'), indent=1)
