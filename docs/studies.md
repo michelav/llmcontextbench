@@ -356,3 +356,21 @@ report is marked `provenance: estimated`.
 `study counterfactual` pairs two fixed arms of a completed study by seed and
 request, charging the fallback only where the primary failed. It reuses held-out
 executions and is marked `heldOutDebug: true`.
+
+## Analysis outputs (`analysis.json` schema 3, additive fields)
+
+Per episode, `summaries` add:
+- `passRateAllRequests`: passed / planned, so failed and unserved requests count as not passed (`passRate` remains the rate over evaluated requests);
+- `tokensLowerBound`, `fallbacks`, `wastedTokensLowerBound`;
+- `switches` (non-probe routing changes), `probeTokensLowerBound`, `probeDeadlineMisses`;
+- `controllerMsP50`/`controllerMsP95`;
+- `phaseSummaries`: misses, latency, tokens, failures and passes per scenario phase;
+- `lags`: for each disturbance of a configuration that was in use just before it, `reactionLag` (requests from onset to the first non-probe request routed elsewhere) and `recoveryLag` (requests from the end to the first non-probe return); `null` means it never happened.
+
+`arms` aggregates each policy and scenario over episodes (mean, minimum, maximum).
+Each comparison adds `metrics` with paired differences and target-cluster
+bootstrap intervals for `latencyMs`, `deadlineMiss`, `tokensLowerBound`, `failure`
+and `passed`; the original latency fields are unchanged. Plots are labelled SVGs:
+`latency-*.svg` (one panel per policy with the latency limit, disturbance bands and
+a strip of executed configurations) and `tradeoff-*.svg` (token lower bound per
+request against deadline-miss rate, or failure rate when no limit is set).

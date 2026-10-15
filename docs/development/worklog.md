@@ -145,3 +145,15 @@ At an 8 s limit, MCP's own tail violates the limit and frozen already prefers in
 so there is no opportunity (the C3 case). Untuned v2 is not consistently better than v1.
 Note: running slow CLI tests while editing files can trip the legacy adaptation
 CLI's "uncommitted files changed" guard; rerun those tests on a quiet tree.
+
+## 2026-10-15 — SEAMS v2, S5: analysis and figures
+
+Added all-request pass rate, switches, probe cost, controller overhead, per-phase
+summaries, reaction/recovery lags, arm aggregates, and paired cluster-bootstrap
+intervals for misses, tokens, failures and pass. Latency intervals are unchanged
+(v1 adaptive vs frozen, inline-delay: [689, 1235] ms). New v1 evidence from the paired
+metrics: adaptive vs frozen in inline-delay has +12.5 points deadline-miss rate
+[8.0, 17.7] and −2.1 points pass rate [−5.2, 0.0]. Recovery lag was 16.5 requests
+in 2 of 3 seeds; the third never returned. Plots were redrawn as labelled small
+multiples plus a cost/miss trade-off plot, rendered with librsvg and inspected. The
+palette is the dataviz reference instance; the validator was not run (no node).

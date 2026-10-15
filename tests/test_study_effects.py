@@ -129,3 +129,38 @@ def test_legacy_scenario_entries_still_validate(frozen, tmp_path):
     delay = {'configuration': MCP, 'scope': 'tool-call', 'delayMs': 5, 'firstRequest': 1, 'lastRequest': 2}
     plan = prepared(tmp_path, frozen, 'legacy-delay', scenarios={'delayed': [delay]})
     assert plan['episodes'][0]['scenario'][0]['kind'] == 'delay'
+
+
+def test_analysis_reports_all_request_quality_paired_metrics_and_arms(frozen, tmp_path):
+    import json
+    from ctxbench.adaptive.study_runner import load_packets
+    definition = make_study(tmp_path, frozen, latencyLimitMs=1000, comparisons=[['mcp', 'inline']], policies={
+        'inline': {'type': 'fixed', 'configuration': INLINE}, 'mcp': {'type': 'fixed', 'configuration': MCP}})
+    path = Path(study.prepare(definition=definition, output=tmp_path/'analysis-study')['prepared'])
+    plan = sealed_read(path)
+    for episode in plan['episodes']:
+        study.episode(prepared=path, policy=episode['policyName'], scenario='stationary', seed=201, repeat=1,
+                      execution=mock_execute)
+        root = path.parent/'episodes'/episode['id']
+        packets = load_packets(root)
+        # Every request passes except the first; evaluation rows are written as `llmctxbench eval` would.
+        rows = [{'trialId': p['result']['trialId'], 'outcome': {'passed': i > 0}} for i, p in enumerate(packets)]
+        (root/'evals.jsonl').write_text(''.join(json.dumps(r)+'\n' for r in rows))
+    report = study.analyze(path, bootstrap_replicates=20)
+    planned = len(plan['episodes'][0]['workload'])
+    for summary in report['summaries']:
+        assert summary['passRateAllRequests'] == (planned-1)/planned
+        assert summary['switches'] == 0 and len(summary['phaseSummaries']) == 1
+    comparison = report['comparisons'][0]
+    assert set(comparison['metrics']) == {'latencyMs', 'deadlineMiss', 'tokensLowerBound', 'failure', 'passed'}
+    assert comparison['metrics']['passed']['meanDifference'] == 0
+    assert {(a['policyName'], a['episodes']) for a in report['arms']} == {('inline', 1), ('mcp', 1)}
+    assert any(p.startswith('analysis/tradeoff-') for p in report['plots'])
+
+
+def test_lags_measure_reaction_and_recovery():
+    from ctxbench.studies.replay import _lags
+    route = ['A']*10 + ['A', 'A', 'B', 'B'] + ['B']*6 + ['B', 'A'] + ['A']*3
+    rows = [{'sequenceIndex': i+1, 'probe': False, 'configuration': c} for i, c in enumerate(route)]
+    effect = {'kind': 'delay', 'configuration': 'A', 'firstRequest': 11, 'lastRequest': 20}
+    assert _lags(rows, [effect]) == [{'configuration': 'A', 'reactionLag': 2, 'recoveryLag': 1}]
