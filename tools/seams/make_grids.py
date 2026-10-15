@@ -36,8 +36,22 @@ ABLATIONS = {
 }
 
 # S-A: MCP tool-call delay during requests 31-60 of 96; inline is the feasible fallback.
+# The original pair (inline + MCP default, limits 8-12 s) is kept as a replay grid: on v2
+# calibration MCP default drifted to p90 13-14 s and the pre-registered rule found no opportunity.
 SA_LIMIT_MS, SA_DELAY_MS, SA_FIRST, SA_LAST = 10000, 2000, 31, 60
 NORMAL_ROUTE = {'small': INLINE, 'medium': MCP, 'large': MCP}
+
+# Amended S-A (deviation recorded in the pre-registration): the cheap configuration is lean.
+# Function runtimes support only request-scope delay; about 3 tool calls per request in v2
+# calibration, so 6000/9000 ms per request matches 2000/3000 ms per tool call.
+SA_LIMITS = (12000, 14000, 16000)
+SA_PAIRS = {
+    'mcp-lean': {'cheap': MCP_LEAN, 'scope': 'tool-call', 'delays': (2000, 3000), 'scenario': 'mcp-lean-degraded'},
+    'fn-lean': {'cheap': FN_LEAN, 'scope': 'request', 'delays': (6000, 9000), 'scenario': 'function-lean-degraded'},
+}
+# Live parameters per pair, from select_parameters.py records on v2 calibration. fn-lean failed
+# the stationary cost constraint (rule fails closed) and is a replay-only negative case.
+SA_SELECTED = {'mcp-lean': {'latencyLimitMs': 14000, 'delayMs': 3000, 'policy': 'v2-rr10-ttl8'}}
 
 
 def variant(base, change):
@@ -47,6 +61,17 @@ def variant(base, change):
 def mcp_delay(first, last, delay=None):
     return {'kind': 'delay', 'configuration': MCP, 'scope': 'tool-call', 'delayMs': delay or SA_DELAY_MS,
             'firstRequest': first, 'lastRequest': last}
+
+
+def delay_effect(pair, first, last, delay):
+    spec = SA_PAIRS[pair]
+    return {'kind': 'delay', 'configuration': spec['cheap'], 'scope': spec['scope'], 'delayMs': delay,
+            'firstRequest': first, 'lastRequest': last}
+
+
+def route(pair):
+    cheap = SA_PAIRS[pair]['cheap']
+    return {'small': INLINE, 'medium': cheap, 'large': cheap}
 
 
 def oracle(first, last, during, default=NORMAL_ROUTE):
@@ -69,6 +94,25 @@ def degradation_grid():
                                'effects': [mcp_delay(first, last, delay)],
                                'policies': {'oracle': oracle(first, last, dict.fromkeys(BINS, INLINE))}})
     return {'schemaVersion': 1, 'seeds': [201, 202, 203], 'replicates': 10, 'configurations': [INLINE, MCP],
+            'base': {}, 'policies': policies, 'points': points}
+
+
+def pair_grid(pair):
+    cheap = SA_PAIRS[pair]['cheap']
+    policies = {'inline': {'type': 'fixed', 'configuration': INLINE}, 'cheap': {'type': 'fixed', 'configuration': cheap},
+                'frozen': FROZEN, 'v1': V1}
+    policies.update({name: variant(V2, change) for name, change in V2_CANDIDATES.items()})
+    policies.update({f'v2-{name}': variant(V2, change) for name, change in ABLATIONS.items()})
+    points = [{'name': f'stationary-L{limit}', 'latencyLimitMs': limit, 'effects': [],
+               'policies': {'oracle': {'type': 'schedule', 'default': route(pair)}}} for limit in SA_LIMITS]
+    for limit in SA_LIMITS:
+        for delay in SA_PAIRS[pair]['delays']:
+            for duration in (12, 24, 30, 36):
+                first, last = SA_FIRST, SA_FIRST+duration-1
+                points.append({'name': f'L{limit}-d{delay}-n{duration}', 'latencyLimitMs': limit,
+                               'effects': [delay_effect(pair, first, last, delay)],
+                               'policies': {'oracle': oracle(first, last, dict.fromkeys(BINS, INLINE), route(pair))}})
+    return {'schemaVersion': 1, 'seeds': [201, 202, 203], 'replicates': 10, 'configurations': [INLINE, cheap],
             'base': {}, 'policies': policies, 'points': points}
 
 
@@ -121,14 +165,17 @@ def study_cascade():
                             ['mcp-lean', 'function-lean']]}
 
 
-def study_degradation():
-    return {'schemaVersion': 1, 'baseline': BASELINE, 'configurations': [INLINE, MCP],
-            'seeds': [301, 302, 303], 'repeats': 1, 'latencyLimitMs': SA_LIMIT_MS,
+def study_degradation(pair='mcp-lean'):
+    spec, chosen = SA_PAIRS[pair], SA_SELECTED[pair]
+    v2 = variant(V2, V2_CANDIDATES[chosen['policy']])
+    return {'schemaVersion': 1, 'baseline': BASELINE, 'configurations': [INLINE, spec['cheap']],
+            'seeds': [301, 302, 303], 'repeats': 1, 'latencyLimitMs': chosen['latencyLimitMs'],
             'policies': {'inline': {'type': 'fixed', 'configuration': INLINE},
-                         'mcp': {'type': 'fixed', 'configuration': MCP},
-                         'frozen': FROZEN, 'v1': V1, 'v2': V2,
-                         'oracle': oracle(SA_FIRST, SA_LAST, dict.fromkeys(BINS, INLINE))},
-            'scenarios': {'stationary': [], 'mcp-degraded': [mcp_delay(SA_FIRST, SA_LAST)]},
+                         'cheap': {'type': 'fixed', 'configuration': spec['cheap']},
+                         'frozen': FROZEN, 'v1': V1, 'v2': v2,
+                         'oracle': oracle(SA_FIRST, SA_LAST, dict.fromkeys(BINS, INLINE), route(pair))},
+            'scenarios': {'stationary': [],
+                          spec['scenario']: [delay_effect(pair, SA_FIRST, SA_LAST, chosen['delayMs'])]},
             'comparisons': [['v2', 'frozen'], ['v2', 'v1'], ['v2', 'inline'], ['v2', 'oracle'], ['v1', 'frozen']]}
 
 
@@ -143,44 +190,48 @@ def pilot_cascade():
             'scenarios': {'stationary': []}, 'comparisons': [['cascade-mcp', 'mcp-default']]}
 
 
-def pilot_degradation():
-    return {'schemaVersion': 1, 'baseline': BASELINE, 'configurations': [INLINE, MCP],
-            'targets': PILOT_DEGRADATION_TARGETS, 'seeds': [902], 'repeats': 1, 'latencyLimitMs': SA_LIMIT_MS,
-            'policies': {'mcp': {'type': 'fixed', 'configuration': MCP}, 'frozen': FROZEN, 'v1': V1, 'v2': V2},
-            'scenarios': {'mcp-degraded': [mcp_delay(17, 32)]}, 'comparisons': [['v2', 'frozen']]}
+def pilot_degradation(pair='mcp-lean'):
+    spec, chosen = SA_PAIRS[pair], SA_SELECTED[pair]
+    return {'schemaVersion': 1, 'baseline': BASELINE, 'configurations': [INLINE, spec['cheap']],
+            'targets': PILOT_DEGRADATION_TARGETS, 'seeds': [902], 'repeats': 1,
+            'latencyLimitMs': chosen['latencyLimitMs'],
+            'policies': {'cheap': {'type': 'fixed', 'configuration': spec['cheap']}, 'frozen': FROZEN, 'v1': V1,
+                         'v2': variant(V2, V2_CANDIDATES[chosen['policy']])},
+            'scenarios': {spec['scenario']: [delay_effect(pair, 17, 32, chosen['delayMs'])]},
+            'comparisons': [['v2', 'frozen']]}
 
 
 OUTPUTS = {
     'replay/degradation.grid.json': degradation_grid, 'replay/opposing.grid.json': opposing_grid,
     'replay/transport.grid.json': transport_grid,
-    'study.seams-cascade.json': study_cascade, 'study.seams-degradation.json': study_degradation,
-    'pilot.cascade.json': pilot_cascade, 'pilot.degradation.json': pilot_degradation,
+    'replay/degradation-mcp-lean.grid.json': lambda: pair_grid('mcp-lean'),
+    'replay/degradation-fn-lean.grid.json': lambda: pair_grid('fn-lean'),
+    'study.seams-cascade.json': study_cascade,
+    'study.seams-degradation.json': lambda: study_degradation('mcp-lean'),
+    'pilot.cascade.json': pilot_cascade,
+    'pilot.degradation.json': lambda: pilot_degradation('mcp-lean'),
 }
 
 
-def apply_selection(path):
-    """Use a select_parameters.py record for the live definitions (the replay grids stay unchanged)."""
-    global V2, SA_LIMIT_MS, SA_DELAY_MS
+def apply_selection(item):
+    """Use a select_parameters.py record (`pair=path`) for that pair's live definitions."""
+    pair, path = item.split('=', 1)
+    if pair not in SA_PAIRS:
+        raise SystemExit(f'unknown S-A pair {pair!r}; expected one of {sorted(SA_PAIRS)}')
     decision = json.loads(Path(path).read_text())['decision']
-    V2 = variant(V2, V2_CANDIDATES[decision['policy']])
-    SA_LIMIT_MS, SA_DELAY_MS = decision['latencyLimitMs'], decision['delayMs']
+    SA_SELECTED[pair] = {k: decision[k] for k in ('latencyLimitMs', 'delayMs', 'policy')}
 
 
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Generate SEAMS v2 replay grids and study definitions.')
-    parser.add_argument('--selection', help='Selection record from tools/seams/select_parameters.py')
+    parser.add_argument('--selection', action='append', default=[], metavar='PAIR=RECORD',
+                        help='Selection record from tools/seams/select_parameters.py for an S-A pair (repeatable)')
     args = parser.parse_args()
-    if args.selection:
-        grids = {name: build() for name, build in OUTPUTS.items() if name.startswith('replay/')}
-        apply_selection(args.selection)
-    else:
-        grids = {}
+    for item in args.selection:
+        apply_selection(item)
     for name, build in OUTPUTS.items():
-        if name in grids:
-            payload = grids[name]
-        else:
-            payload = build()
+        payload = build()
         path = OUT / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload, indent=2) + '\n')

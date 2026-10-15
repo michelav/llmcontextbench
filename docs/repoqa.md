@@ -123,7 +123,7 @@ between versions, so compare distributions rather than target-paired outcomes.
 `examples/studies/baseline.repoqa-long64.json` define the five-configuration
 long64 baseline. The SEAMS v2 definitions (`study.seams-cascade.json`, which
 selects all five configurations, and `study.seams-degradation.json`, which
-selects inline and default local MCP) use the v2 frozen baseline. The v1
+selects inline and lean local MCP) use the v2 frozen baseline. The v1
 definitions `study.long64-{budget,latency,reliability}.json` use the v1 baseline
 and select the inline and local-MCP configurations.
 

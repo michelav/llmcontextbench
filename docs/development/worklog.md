@@ -170,3 +170,31 @@ v2 roughly halves v1's misses. An 8 s limit (C3), the S-B quota flip and S-C MCP
 vs functions (C1) are negative. Live collection therefore narrows to S-D cascade and
 S-A degradation (about 5.8k requests instead of 7.2k). Draft pre-registration:
 `docs/development/seams2027-preregistration.md`.
+
+## 2026-10-15 — SEAMS v2, S6a: v2 baseline and binding parameter selection
+
+**v2 baseline.**
+- Prepared from the unchanged baseline definition at tag `seams-v2-freeze`.
+- Executed with real provider calls: 720 requests, 30 episodes × 24.
+- Evaluated with the deterministic RepoQA scorer: 719 evaluated, 1 skipped (a failed `local-mcp-lean` response).
+- Frozen; `frozen.json` sha256 `dc9d1cf0…`.
+
+**Drift versus v1 calibration** (`tools/seams/compare_baselines.py` → `baselines/repoqa-long64-v2/drift-v1-v2.json`):
+- MCP default mean latency rose 32–43 %, with p90 going from 8–10 s to 13–14 s;
+- the other configurations rose 0–19 %;
+- tokens and pass rates are essentially unchanged.
+
+**The pre-registered S-A rule failed closed.**
+- At 10–12 s, MCP default is infeasible even without delay; opportunity is negative at every eligible point.
+- The S-A rule was amended before any pilot, using calibration data only:
+  - the pair is inline + MCP lean;
+  - the limit is fixed as the smallest grid limit covering lean's per-bin calibration p90.
+- **Selected:** L14000, 3000 ms per tool call on requests 31–60, policy `v2-rr10-ttl8` (the only candidate within the stationary token cap). Replay estimates misses per episode as frozen 15.4, v2 7.2, oracle 0.8, and tokens per episode as v2 0.85M against inline 1.56M.
+- **Inline + function lean** (request-scope delay of 6000/9000 ms) also fails closed: v2 spends about 1.5 × frozen tokens when nothing is disturbed. By your decision, it is a replay-only negative case (C5).
+
+Tooling changes:
+- `select_parameters.py` gained `--limits`, `--delays`, `--feasible-config`/`--baseline`, and fail-closed on a non-positive gap.
+- `make_grids.py` generates per-pair grids and takes `--selection PAIR=RECORD`.
+- New `compare_baselines.py`.
+
+The pre-registration is now binding (see its deviation record and digests). The four definitions prepare cleanly against the v2 baseline, provider-free.

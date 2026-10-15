@@ -389,13 +389,24 @@ measurement source after that needs a new baseline.
    for r in baselines/repoqa-long64-v2/episodes/*/responses.jsonl; do llmctxbench eval "$r"; done
    llmctxbench study baseline freeze --prepared baselines/repoqa-long64-v2/prepared.json
    ```
-2. Parameter selection (provider-free). Apply the pre-registered rule, set `V2` and
-   `SA_*` in `tools/seams/make_grids.py`, then regenerate:
+2. Parameter selection (provider-free). Replay each S-A grid on v2 calibration, apply
+   the pre-registered rule, and regenerate the definitions from the selection record.
+   The original pair (inline + MCP default) is replayed as a record of calibration drift;
+   the live pair is inline + MCP lean, with the limit fixed by lean's calibration p90:
    ```bash
-   llmctxbench study replay --baseline baselines/repoqa-long64-v2/frozen.json \
-     --grid examples/studies/replay/degradation.grid.json --output studies/replay-v2calib/degradation.json
-   python tools/seams/make_grids.py
+   B=baselines/repoqa-long64-v2/frozen.json
+   for g in degradation degradation-mcp-lean degradation-fn-lean opposing transport; do
+     llmctxbench study replay --baseline $B --grid examples/studies/replay/$g.grid.json \
+       --output studies/replay-v2calib/$g.json
+   done
+   python tools/seams/select_parameters.py studies/replay-v2calib/degradation-mcp-lean.json \
+     --limits 12000,14000,16000 --delays 2000,3000 --feasible-config local-mcp-lean --baseline $B \
+     --rule 'seams2027-preregistration S-A v2 (mcp-lean)' --output studies/replay-v2calib/selection-mcp-lean.json
+   python tools/seams/make_grids.py --selection mcp-lean=studies/replay-v2calib/selection-mcp-lean.json
+   python tools/seams/compare_baselines.py baselines/repoqa-long64/frozen.json $B
    ```
+   `select_parameters.py` exits non-zero when the rule fails closed (no positive
+   opportunity, or no candidate within the stationary constraints).
 3. Pilots (provider-backed, about 290 requests), each followed by eval and analyze:
    ```bash
    llmctxbench study prepare --definition examples/studies/pilot.cascade.json --output studies/pilot-cascade

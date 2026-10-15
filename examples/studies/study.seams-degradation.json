@@ -3,7 +3,7 @@
   "baseline": "../../baselines/repoqa-long64-v2/frozen.json",
   "configurations": [
     "inline-code-full",
-    "local-mcp-default"
+    "local-mcp-lean"
   ],
   "seeds": [
     301,
@@ -11,15 +11,15 @@
     303
   ],
   "repeats": 1,
-  "latencyLimitMs": 10000,
+  "latencyLimitMs": 14000,
   "policies": {
     "inline": {
       "type": "fixed",
       "configuration": "inline-code-full"
     },
-    "mcp": {
+    "cheap": {
       "type": "fixed",
-      "configuration": "local-mcp-default"
+      "configuration": "local-mcp-lean"
     },
     "frozen": {
       "type": "router",
@@ -42,14 +42,14 @@
       "updateWindow": 4,
       "minimumObservations": 2,
       "probeInterval": 10,
-      "estimateTtlRequests": 12
+      "estimateTtlRequests": 8
     },
     "oracle": {
       "type": "schedule",
       "default": {
         "small": "inline-code-full",
-        "medium": "local-mcp-default",
-        "large": "local-mcp-default"
+        "medium": "local-mcp-lean",
+        "large": "local-mcp-lean"
       },
       "phases": [
         {
@@ -66,12 +66,12 @@
   },
   "scenarios": {
     "stationary": [],
-    "mcp-degraded": [
+    "mcp-lean-degraded": [
       {
         "kind": "delay",
-        "configuration": "local-mcp-default",
+        "configuration": "local-mcp-lean",
         "scope": "tool-call",
-        "delayMs": 2000,
+        "delayMs": 3000,
         "firstRequest": 31,
         "lastRequest": 60
       }
