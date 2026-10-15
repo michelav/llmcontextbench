@@ -3,7 +3,8 @@
 Status: **binding** from 2026-10-15. The v2 baseline is frozen and the selection rules
 have been applied to it (see "Parameter selection on v2 calibration"). Nothing below
 changes after the first pilot episode runs, except to record pilot outcomes. Plan:
-`seams2027-plan.md`.
+`seams2027-plan.md`. Amended after the v2 pilots: see "Amendment after the v2 pilots"
+(v3 catalogue with a direct surface).
 
 ## Questions and hypotheses
 
@@ -188,6 +189,48 @@ Exploratory replay of two further ideas came first:
 
 A failed pilot allows one fix and one re-pilot; a second failure drops the scenario.
 
+### Pilot outcomes on v2 (2026-10-15)
+
+All 12 pilot episodes completed (480 requests, 5.3M answer tokens, 74 min), were evaluated
+and analyzed; no request was unserved. Gates were checked with `tools/seams/pilot_gates.py`.
+
+| Pilot | Gate | Value | Result |
+|---|---|---|---|
+| P1 | `cascade-mcp` final failures = 0 | 0 | GO |
+| P1 | tokens ≤ 0.8 × `mcp-default` | 300,705 / 203,744 = 1.48 (lower bound) | **NO-GO** |
+| P1 | fallbacks only on trigger classes | 8 of 8 fallbacks carry `step-limit` | GO |
+| P1 | attempts logged with provenance | yes | GO |
+| P2 | v2 reaction lag ≤ 5 | 0 | GO |
+| P2 | v2 recovery lag ≤ 8 | 5 | GO |
+| P2 | v2 delay-phase misses ≤ 50 % of frozen | 5 / 8 = 62 % | **NO-GO** |
+| P3 | v2 reaction lag ≤ 5 | 2 | GO |
+| P3 | v2 recovery lag ≤ 8 | 9 | **NO-GO** |
+| P3 | v2 delay-phase misses ≤ 75 % of frozen | 11 / 14 = 79 % | **NO-GO** |
+| P3 | v2 episode tokens ≤ frozen | 577,642 vs 764,026 | GO |
+
+Notes:
+- **Gate-script correction:** the first version of the fallback check required every failure class of a fallback to be a trigger class. One step-limit failure also carries the generic `operation` class. The cascade falls back when any trigger class is present (`decide_fallback`), so the check was corrected to match; the criterion itself is unchanged.
+- **P1:** half of the pilot targets were chosen because lean fails on them, so the token gate is harsh on this workload. On the two control targets the cascade used 0.74 × default; on `py_005` and `rs_004` it used 1.8× and 2.2×. Lean failed 6 of 6 on `rs_004` (v1: some passes). Function lean failed on the same targets, so the failures come from the lean surface, not the MCP transport.
+- **P2:** v2 had the fewest misses of any arm; the gate was missed by one request.
+- **P3:** v2 moved to MCP lean within 2 requests, but lean misses the 10 s limit most of the time at v2 provider latency (C3 fails: no fast fallback). It returned to inline late, so over the whole episode it missed 15 deadlines against frozen's 14.
+
+## Amendment after the v2 pilots: v3 catalogue with a direct surface (2026-10-15)
+
+This is the one fix allowed by the pilot rules, applied to the configuration catalogue.
+It was made after the negative pilots and before any confirmatory collection, and the paper
+reports it as such.
+
+- **Change:** a task-oriented operation `find_symbol(workspace_id, query, k)` ranks callable symbols by BM25 over name, documentation and code, and returns the top k with complete code. The configuration `local-mcp-direct` offers `find_symbol`, `list_symbols_lean` and `get_symbol_lean`. Commit `734b092`; design notes in `docs/development/ideas/repoqa-interface-redesign.md`.
+- **Why:** the v2 pilots and the interaction analysis showed that tool configurations are slow because of about 4 sequential model calls, and that no fast, cheap fallback existed (P3). The direct surface targets that cause.
+- **Evidence before adoption:**
+  - offline ranking check (no provider calls) using the task description as the query, over all 120 long64 instances, held-out ones included: target in the top 5 for 110 of 120. The only design choice made after this check was restricting the ranking to functions and methods;
+  - provider mini-check on the 4 calibration targets only (`experiment.repoqa-direct-check.json`, 96 requests): direct passed 48 of 48, median 4.0 s, p90 6.0 s, 2.19 model calls, 3.2k tokens per request; inline passed 48 of 48, 3.5 s, 5.0 s, 16.3k. Request durations in that run have 1 s resolution; provider-reported model time agrees (3.6 s against 3.4 s median).
+- **Consequences:**
+  - the v2 baseline no longer verifies (fingerprinted sources changed). A v3 baseline (`examples/studies/baseline.repoqa-long64-v3.json`, experiment `experiment.repoqa-long64-v3.json`; same split, seeds and repeats; six configurations) replaces it. Code freeze tag `seams-v3-freeze`;
+  - the v2 selections above are superseded. The same selection rules are applied to v3 calibration, and the v3 scenario set, parameters and pilot definitions are recorded here before any v3 pilot runs;
+  - v3 pilots use new seeds (904+) and the gates above. They are the re-pilots allowed by the rules: a scenario that fails its v3 pilot is dropped;
+  - S-D does not depend on the direct surface. Whether it is collected despite its P1 token gate is decided, and recorded here, before collection.
+
 ## Stopping rules and reporting
 
 - **Collection order:** S-D, then S-A, then S-E. Collection is seed-major, with arm order shuffled within each seed, and episode wall-clock times are recorded.
@@ -204,7 +247,9 @@ A failed pilot allows one fix and one re-pilot; a second failure drops the scena
 | Step | Requests | Answer tokens (estimate) |
 |---|---|---|
 | v2 baseline | 720 | about 7.5M |
-| Pilots P1 + P2 + P3 | 96 + 192 + 192 | about 6M |
+| Pilots P1 + P2 + P3 | 96 + 192 + 192 | about 6M (actual 5.3M) |
+| Direct mini-check | 96 | about 1M (actual 0.94M) |
+| v3 baseline | 864 | about 9M |
 | S-D cascade | about 2,330 | about 28M |
 | S-A degradation | 3,456 | about 30M |
 | S-E inline degradation | 3,456 | about 45M |

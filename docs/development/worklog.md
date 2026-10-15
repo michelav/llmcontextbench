@@ -272,3 +272,19 @@ Exploratory replay of two further scenarios on v2 calibration (pair inline + MCP
 **MCP vs functions.** No per-call difference in v1 (1.32, 1.56 and 1.75 s for both). The v2 gap comes from the slow periods.
 
 **Scope.** The surface code (`adapters/repoqa/{tools,mcp_server,provider}.py`) is fingerprinted. A redesigned surface therefore needs a new baseline. It is deferred until after the pre-registered collection, in a separate worktree.
+
+## 2026-10-15 — v2 pilots, direct surface, v3 baseline
+
+**v2 pilots P1–P3** (`tools/seams/run_pilots.sh`, gates `tools/seams/pilot_gates.py`): 480 requests, 5.3M answer tokens, 74 min. All three missed at least one pre-registered gate; details in the pre-registration ("Pilot outcomes on v2").
+- P1 cascade: 0 final failures, but 1.48 × default tokens. Lean failed 6 of 6 on `rs_004`.
+- P2 MCP-lean degradation: lags passed; delay-phase misses 5 against frozen's 8 (gate 4).
+- P3 inline degradation: MCP lean is too slow to be a fallback at a 10 s limit; recovery lag 9.
+
+**Direct surface.** The redesign parked earlier was brought forward as the one allowed fix, in a worktree (`exp/direct-surface`), then merged (`734b092`).
+- `find_symbol` ranks callable symbols by BM25 over name, documentation and code.
+- Offline (no provider calls): target in the top 5 for 110 of 120 instances.
+- Mini-check on the calibration targets (`experiment.repoqa-direct-check.json`, 96 requests, 0.94M tokens): direct 48/48 pass, median 4.0 s, p90 6.0 s, 2.19 calls, 3.2k tokens per request; inline 48/48, 3.5 s, 5.0 s, 16.3k.
+- Lesson: plain `execute` records request duration at 1 s resolution; use provider-reported model time for fine comparisons.
+- Lesson: a `pgrep -f` waiter whose own command line contains the pattern never exits; wait on the job itself instead.
+
+**v3 baseline.** Six configurations (v2 plus `local-mcp-direct`), same split and seeds; tag `seams-v3-freeze` (`5c09994`). 864 requests, started 10:48 UTC.
