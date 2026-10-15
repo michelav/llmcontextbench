@@ -288,3 +288,11 @@ Exploratory replay of two further scenarios on v2 calibration (pair inline + MCP
 - Lesson: a `pgrep -f` waiter whose own command line contains the pattern never exits; wait on the job itself instead.
 
 **v3 baseline.** Six configurations (v2 plus `local-mcp-direct`), same split and seeds; tag `seams-v3-freeze` (`5c09994`). 864 requests, started 10:48 UTC.
+
+## 2026-10-15 — v3 selection, decisions and P3′ re-pilot
+
+- v3 replay and selection (`studies/replay-v3calib/`, rules committed before the replays): S-E′ selected (L7000, inline +9 s, `v2-t10-ttl10`); S-F fails closed on probing cost; S-B′ selected with 15 % capture and made replay-only by decision; round-trip map replay-only. Details in the pre-registration.
+- S-B′ low capture traced with `tools/seams/quota_attribution.py`: bursty quota stalls, and waits caused by inline's consumption fall on direct requests (attribution).
+- S-E′ is the only live study (seeds 301–305); S-D is reported from P1 and the v1 counterfactual.
+- P3′ (v3 re-pilot, 192 requests): GO on all gates. v2 delay-phase misses 5 against frozen's 14; recovery lag 2; 452k tokens against 774k. P3 on v2 (lean fallback) had 11 against 14 and recovery lag 9.
+- `tools/seams/run_study.sh` added for detached, resumable collection (session jobs stop at 2 h).

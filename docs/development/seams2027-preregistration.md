@@ -294,6 +294,21 @@ replay means per 96-request episode (`estimated`); tokens are lower bounds.
 - **S-D: not collected.** The direct surface weakens its motivation and P1 missed its token gate. The cascade is reported as a secondary, exploratory result from P1 (live, v2) and the v1 held-out counterfactual.
 - **P3 (v2) is reported as the "before" case** for S-E′ (same scenario, lean as the fallback): pilot data, labelled as such, never pooled.
 
+### P3′ outcome (v3 re-pilot, 2026-10-15): GO
+
+4 episodes, 192 requests, seed 904, 13:51–14:11 UTC; all evaluated, none unserved.
+
+| Gate | Value | Result |
+|---|---|---|
+| v2 reaction lag ≤ 5 | 1 | GO |
+| v2 recovery lag ≤ 8 | 2 | GO |
+| v2 delay-phase misses ≤ 75 % of frozen | 5 / 14 = 36 % | GO |
+| v2 episode tokens ≤ frozen | 452,206 vs 773,512 | GO |
+
+Misses per phase (requests 1–16 / 17–32 / 33–48) and episode tokens: inline 0/16/0, 806k;
+frozen 1/14/0, 774k; v1 3/6/1, 470k; v2 0/5/0, 452k. All arms passed every request. After the
+delay, v2 routes by size bin, mixing inline and direct (both meet 7 s then).
+
 ## Stopping rules and reporting
 
 - **Collection order (v3):** S-E′ only, after P3′ passes. Collection is seed-major, with arm order shuffled within each seed, and episode wall-clock times are recorded.
