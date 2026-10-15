@@ -315,8 +315,40 @@ def v3_grid(name):
             'base': {}, 'policies': policies, 'points': points}
 
 
+# S-E' live (pre-registration, "Outcome of the v3 selection"): selection record
+# studies/replay-v3calib/selection-inline.json; seeds 301-305 by decision before the pilot.
+BASELINE_V3 = '../../baselines/repoqa-long64-v3/frozen.json'
+SE3_SELECTED = {'latencyLimitMs': 7000, 'delayMs': 9000, 'policy': 'v2-t10-ttl10'}
+
+
+def study_v3_inline_degradation():
+    chosen = SE3_SELECTED
+    return {'schemaVersion': 1, 'baseline': BASELINE_V3, 'configurations': [INLINE, MCP_DIRECT],
+            'seeds': [301, 302, 303, 304, 305], 'repeats': 1, 'latencyLimitMs': chosen['latencyLimitMs'],
+            'policies': {'inline': {'type': 'fixed', 'configuration': INLINE},
+                         'direct': {'type': 'fixed', 'configuration': MCP_DIRECT},
+                         'frozen': FROZEN, 'v1': V1, 'v2': variant(V2, V2_CANDIDATES[chosen['policy']]),
+                         'oracle': oracle(SA_FIRST, SA_LAST, ALL_DIRECT, ALL_INLINE)},
+            'scenarios': {'stationary': [], 'inline-degraded': [inline_delay(SA_FIRST, SA_LAST, chosen['delayMs'])]},
+            'comparisons': [['v2', 'frozen'], ['v2', 'v1'], ['v2', 'direct'], ['v2', 'inline'], ['v2', 'oracle'],
+                            ['v1', 'frozen']]}
+
+
+def pilot_v3_inline_degradation():
+    chosen = SE3_SELECTED
+    return {'schemaVersion': 1, 'baseline': BASELINE_V3, 'configurations': [INLINE, MCP_DIRECT],
+            'targets': PILOT_DEGRADATION_TARGETS, 'seeds': [904], 'repeats': 1,
+            'latencyLimitMs': chosen['latencyLimitMs'],
+            'policies': {'inline': {'type': 'fixed', 'configuration': INLINE}, 'frozen': FROZEN, 'v1': V1,
+                         'v2': variant(V2, V2_CANDIDATES[chosen['policy']])},
+            'scenarios': {'inline-degraded': [inline_delay(17, 32, chosen['delayMs'])]},
+            'comparisons': [['v2', 'frozen']]}
+
+
 OUTPUTS = {
     **{f'replay/v3-{name}.grid.json': (lambda name=name: v3_grid(name)) for name in V3_GRIDS},
+    'study.seams3-inline-degradation.json': study_v3_inline_degradation,
+    'pilot.v3-inline-degradation.json': pilot_v3_inline_degradation,
     'replay/degradation.grid.json': degradation_grid, 'replay/opposing.grid.json': opposing_grid,
     'replay/transport.grid.json': transport_grid,
     'replay/degradation-mcp-lean.grid.json': lambda: pair_grid('mcp-lean'),

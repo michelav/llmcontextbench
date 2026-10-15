@@ -66,17 +66,29 @@ def degradation(study, delay_ratio):
     return ok, s
 
 
+def inline_degradation(study):
+    """P3 gates (also the v3 S-E' re-pilot): delay phase on requests 17-32."""
+    ok, s = degradation(study, 0.75)
+    ok &= check('v2 episode tokens <= frozen', f"{s['v2']['tokensLowerBound']} vs {s['frozen']['tokensLowerBound']}",
+                s['v2']['tokensLowerBound'] <= s['frozen']['tokensLowerBound'])
+    return ok
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('--cascade', default='studies/pilot-cascade')
     parser.add_argument('--degradation', default='studies/pilot-degradation')
     parser.add_argument('--inline-degradation', default='studies/pilot-inline-degradation')
+    parser.add_argument('--v3', action='store_true', help="Check only the v3 S-E' re-pilot")
+    parser.add_argument('--v3-inline-degradation', default='studies/pilot-v3-inline-degradation')
     args = parser.parse_args()
+    if args.v3:
+        print("P3' inline degradation (v3, direct fallback)")
+        print(f"P3': {'GO' if inline_degradation(args.v3_inline_degradation) else 'NO-GO'}")
+        return
     print('P1 cascade'); p1 = cascade(args.cascade)
     print('P2 MCP-lean degradation'); p2, _ = degradation(args.degradation, 0.5)
-    print('P3 inline degradation'); p3, s = degradation(args.inline_degradation, 0.75)
-    p3 &= check('v2 episode tokens <= frozen', f"{s['v2']['tokensLowerBound']} vs {s['frozen']['tokensLowerBound']}",
-                s['v2']['tokensLowerBound'] <= s['frozen']['tokensLowerBound'])
+    print('P3 inline degradation'); p3 = inline_degradation(args.inline_degradation)
     for label, ok in (('P1', p1), ('P2', p2), ('P3', p3)):
         print(f"{label}: {'GO' if ok else 'NO-GO'}")
 

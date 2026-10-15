@@ -281,9 +281,22 @@ replay means per 96-request episode (`estimated`); tokens are lower bounds.
 - **S-B′:** opportunity 6.2 misses per episode, but the selected router recovers 15 % of it (9.0 against frozen's 9.9). The rule does not set a minimum capture, so the point is selected; the predicted live effect is below what one pilot can resolve.
 - **Round-trip map (replay only):** at L8000, fixed direct misses 5.5, 7.7, 12.5 and 16.5 per episode at 0, 1, 2 and 3 s per call; fixed lean misses 24.3, 42.0, 48.8 and 47.3. At L10000 and 2 s per call, direct misses 3.6 and lean 30.8. Exposure grows with the number of calls, as H-I3 predicts. At that mild point the v2 routers miss more than frozen (6.1–6.8 against 4.2): adapting to a disturbance the incumbent can absorb costs more than it saves.
 
+### Decisions for v3 collection (2026-10-15, before any v3 pilot)
+
+- **S-E′ is the only live study.** Definition `examples/studies/study.seams3-inline-degradation.json`: inline and MCP direct at L7000; inline +9 s per request on requests 31–60; arms `inline`, `direct`, `frozen`, `v1`, `v2` (`v2-t10-ttl10`), `oracle` (direct in every bin during the delay, inline otherwise); scenarios `stationary` and `inline-degraded`; **seeds 301–305** (raised from 3 to 5 before the pilot, since this is the only live study); 60 episodes, 5,760 requests.
+  - **H2c′:** when inline (the incumbent) degrades, the v2 router has fewer deadline misses than the frozen router and uses fewer tokens, by moving to MCP direct. Primary contrast: v2 against frozen on delay-phase misses. Secondary: tokens, v2 against v1, against fixed direct and against the oracle. Fixed direct is always reported next to the primary contrast.
+- **Re-pilot P3′:** `examples/studies/pilot.v3-inline-degradation.json` (8 pilot targets, seed 904, delay on requests 17–32, arms inline, frozen, v1, v2). Gates are the P3 gates: v2 reaction lag ≤ 5, recovery lag ≤ 8, delay-phase misses ≤ 75 % of frozen, episode tokens ≤ frozen (`tools/seams/pilot_gates.py --v3`). It is the last re-pilot for this scenario: if it fails, S-E′ is not collected live.
+- **S-B′ (token quota): replay only, by decision.** The rule selected it, but the predicted effect (0.9 misses per episode) cannot be resolved with 3–5 seeds. A replay trace (`estimated`) at the selected point shows why capture is low:
+  - the quota stalls are bursty: about a third of inline requests in the quota phase wait (5–16 s on average), so inline still looks acceptable most of the time and v2 keeps sending about 44 % of requests to it;
+  - waits caused by inline's consumption fall on direct requests too: in v2 episodes direct requests wait 2–4 s on average and about half of direct's misses in the phase coincide with a wait, while fixed direct never waits;
+  - so the monitor attributes a shared, self-inflicted disturbance to whichever configuration runs next. Reported as a monitoring limitation (separate queueing from service time), not fixed for SEAMS.
+- **S-F: replay only** (the rule failed closed). **Round-trip map: replay only.**
+- **S-D: not collected.** The direct surface weakens its motivation and P1 missed its token gate. The cascade is reported as a secondary, exploratory result from P1 (live, v2) and the v1 held-out counterfactual.
+- **P3 (v2) is reported as the "before" case** for S-E′ (same scenario, lean as the fallback): pilot data, labelled as such, never pooled.
+
 ## Stopping rules and reporting
 
-- **Collection order:** S-D, then S-A, then S-E. Collection is seed-major, with arm order shuffled within each seed, and episode wall-clock times are recorded.
+- **Collection order (v3):** S-E′ only, after P3′ passes. Collection is seed-major, with arm order shuffled within each seed, and episode wall-clock times are recorded.
 - **No mid-collection changes:** no parameter or code changes during collection. A defect that invalidates results stops the collection; it is then reported and a new seed set is used.
 - **Reporting:**
   - v1 results are reported as collected;
@@ -300,6 +313,8 @@ replay means per 96-request episode (`estimated`); tokens are lower bounds.
 | Pilots P1 + P2 + P3 | 96 + 192 + 192 | about 6M (actual 5.3M) |
 | Direct mini-check | 96 | about 1M (actual 0.94M) |
 | v3 baseline | 864 | about 9M |
+| P3′ pilot (v3) | 192 | about 2M |
+| S-E′ (5 seeds) | 5,760 | about 65M |
 | S-D cascade | about 2,330 | about 28M |
 | S-A degradation | 3,456 | about 30M |
 | S-E inline degradation | 3,456 | about 45M |
