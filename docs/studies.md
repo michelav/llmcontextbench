@@ -312,3 +312,42 @@ Scenario entries are effects. Entries without `kind` are delays, as before.
 
 Decision records (`schemaVersion` 4) add `quotaWaitMs`, `faultsInjected` and
 `controllerMs` (policy decide/observe time, measured with `perf_counter`).
+
+## Provider-free replay
+
+`study replay` drives the real study controller over outcomes resampled from
+frozen calibration observations, applying disturbances analytically. It is for
+debugging and parameter selection; claims require live episodes.
+
+```bash
+llmctxbench study replay --baseline baselines/repoqa-long64/frozen.json \
+  --grid examples/studies/replay/degradation.grid.json --output studies/replay/degradation.json
+llmctxbench study counterfactual --study-dir studies/repoqa-long64-budget \
+  --primary mcp-lean --fallback mcp-default
+```
+
+A grid (`schemaVersion` 1) declares `seeds`, `replicates`, optional `configurations`
+(subset of the baseline), `base` study settings (`latencyLimitMs`, `tokenBudget`),
+`policies` (same schema as study policies), and `points`. Each point has a `name`,
+optional `latencyLimitMs`/`tokenBudget`, `effects` (same schema as scenario effects)
+and optional per-point `policies` overrides, typically a `schedule` oracle that
+matches the point's disturbance. Workloads use the held-out request order for each
+seed, so only size bins are taken from held-out requests; outcomes come from the
+calibration pool.
+
+Disturbance model: a request delay adds `delayMs`; a tool-call delay adds `delayMs`
+× the sampled execution's recorded tool calls; a fault adds one step's duration and
+tokens per injected fault and fails with `step-limit` beyond 8 steps (an
+assumption, not a measurement); a token quota uses a simulated clock.
+
+Per point and policy, the report gives mean deadline misses, failures, pass rate,
+latency (mean, p95), token lower bound, fallbacks, probes, switches, and reaction
+and recovery lags. `opportunity` is the reference policy's metric minus the
+`schedule` oracle's; `capture` is the share of that gap a policy recovers. The
+reference is the non-adaptive router by default, so capture measures what runtime
+feedback adds; fixed arms are reported for the cost side of the trade-off. The
+report is marked `provenance: estimated`.
+
+`study counterfactual` pairs two fixed arms of a completed study by seed and
+request, charging the fallback only where the primary failed. It reuses held-out
+executions and is marked `heldOutDebug: true`.

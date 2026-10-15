@@ -130,3 +130,18 @@ plus `fault` and `token-quota` scenario effects. Scenario entries without `kind`
 remain delays. Decision records now use `schemaVersion` 4 with `quotaWaitMs`,
 `faultsInjected` and `controllerMs`. This is the last planned change to the
 fingerprinted runner before the S6a code freeze. New `tests/test_study_effects.py`: 8 tests.
+
+## 2026-10-15 — SEAMS v2, S4: replay and opportunity finder
+
+Added `study replay` (`src/ctxbench/studies/replay.py`) and `study counterfactual`.
+Replay drives the real `Controller` over calibration observations, joined to
+recorded tool calls and steps. Fidelity check: replaying the v1 latency scenario
+from v1 calibration gives deadline misses per episode of inline 32.5, frozen 35.1
+and adaptive 44.1, against live v1 values of 30, 34 and 46. The counterfactual
+lean→default cascade reproduces 0 failures and ≥8.77k tokens per request.
+Exploratory S-A sweep (v1 calibration, untuned v2): at 10–12 s limits with ≥2 s
+per tool-call delay, adaptation roughly halves frozen's misses at modest token cost.
+At an 8 s limit, MCP's own tail violates the limit and frozen already prefers inline,
+so there is no opportunity (the C3 case). Untuned v2 is not consistently better than v1.
+Note: running slow CLI tests while editing files can trip the legacy adaptation
+CLI's "uncommitted files changed" guard; rerun those tests on a quiet tree.

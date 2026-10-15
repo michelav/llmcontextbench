@@ -34,6 +34,18 @@ def register_study_commands(parser):
     analyze.add_argument('path')
     analyze.add_argument('--bootstrap-replicates', type=int, default=1000)
     analyze.add_argument('--bootstrap-seed', type=int, default=42)
+    replay = sub.add_parser('replay', help='Provider-free replay of policies over calibration observations')
+    source = replay.add_mutually_exclusive_group(required=True)
+    source.add_argument('--prepared', help='Prepared study supplying plan and workload features')
+    source.add_argument('--baseline', help='Frozen baseline (read-only; no source verification)')
+    replay.add_argument('--grid', required=True, help='Replay grid JSON (schemaVersion 1)')
+    replay.add_argument('--output', help='Write the replay report to this JSON file')
+    replay.add_argument('--replicates', type=int)
+    counterfactual = sub.add_parser('counterfactual',
+                                    help='Pair two fixed arms of a completed study as a primary/fallback cascade')
+    counterfactual.add_argument('--study-dir', required=True)
+    counterfactual.add_argument('--primary', required=True, help='Policy name of the primary fixed arm')
+    counterfactual.add_argument('--fallback', required=True, help='Policy name of the fallback fixed arm')
     for command in (status, analyze):
         command.add_argument('--allow-source-drift', action='store_true',
                              help='Read-only: tolerate changed measurement sources; reports list them as sourceDrift')
@@ -51,6 +63,9 @@ def study_command(args):
         options.pop(key, None)
     if baseline_operation is not None:
         target, operation = baseline, baseline_operation
+    elif operation in ('replay', 'counterfactual'):
+        from ctxbench.studies import replay as target
+        operation = 'replay' if operation == 'replay' else 'counterfactual_cascade'
     else:
         target = study
     if operation in ('execute', 'episode'):
