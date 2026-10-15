@@ -374,3 +374,37 @@ and `passed`; the original latency fields are unchanged. Plots are labelled SVGs
 `latency-*.svg` (one panel per policy with the latency limit, disturbance bands and
 a strip of executed configurations) and `tradeoff-*.svg` (token lower bound per
 request against deadline-miss rate, or failure rate when no limit is set).
+
+## SEAMS v2 suite: command sequence
+
+The pre-registration (`docs/development/seams2027-preregistration.md`) fixes the
+selection rules and gates. Code is frozen at tag `seams-v2-freeze`; a change to any
+measurement source after that needs a new baseline.
+
+1. v2 baseline (provider-backed, about 720 requests):
+   ```bash
+   llmctxbench study baseline prepare --definition examples/studies/baseline.repoqa-long64.json \
+     --output baselines/repoqa-long64-v2
+   llmctxbench study baseline execute --prepared baselines/repoqa-long64-v2/prepared.json
+   for r in baselines/repoqa-long64-v2/episodes/*/responses.jsonl; do llmctxbench eval "$r"; done
+   llmctxbench study baseline freeze --prepared baselines/repoqa-long64-v2/prepared.json
+   ```
+2. Parameter selection (provider-free). Apply the pre-registered rule, set `V2` and
+   `SA_*` in `tools/seams/make_grids.py`, then regenerate:
+   ```bash
+   llmctxbench study replay --baseline baselines/repoqa-long64-v2/frozen.json \
+     --grid examples/studies/replay/degradation.grid.json --output studies/replay-v2calib/degradation.json
+   python tools/seams/make_grids.py
+   ```
+3. Pilots (provider-backed, about 290 requests), each followed by eval and analyze:
+   ```bash
+   llmctxbench study prepare --definition examples/studies/pilot.cascade.json --output studies/pilot-cascade
+   llmctxbench study prepare --definition examples/studies/pilot.degradation.json --output studies/pilot-degradation
+   ```
+   Run every episode in each prepared matrix with the episode loop above, then
+   `llmctxbench eval` each `responses.jsonl` and `llmctxbench study analyze` each
+   directory. Check the go criteria before continuing.
+4. Collection (provider-backed, about 5.8k requests): prepare
+   `study.seams-cascade.json` into `studies/seams-cascade` and
+   `study.seams-degradation.json` into `studies/seams-degradation`, run the episode
+   loop (seed-major, arm order shuffled within each seed), then evaluate and analyze.
