@@ -231,6 +231,37 @@ reports it as such.
   - v3 pilots use new seeds (904+) and the gates above. They are the re-pilots allowed by the rules: a scenario that fails its v3 pilot is dropped;
   - S-D does not depend on the direct surface. Whether it is collected despite its P1 token gate is decided, and recorded here, before collection.
 
+## v3 scenarios and selection rules (written before any v3 replay, 2026-10-15)
+
+The v3 baseline (`baselines/repoqa-long64-v3`, 864 calibration requests, 864 passed)
+gives these per-bin calibration p90 latencies (ms; small / medium / large):
+
+| Configuration | small | medium | large |
+|---|---|---|---|
+| inline | 4,700 | 5,172 | 5,511 |
+| MCP direct | 7,386 | 7,008 | 7,226 |
+| MCP lean | 8,562 | 10,305 | 9,518 |
+
+**Common to every v3 scenario:**
+- replay on the v3 calibration pool only; seeds 201–203 × 10 replicates; 96-request episodes;
+- the disturbance covers requests 31–60 (the `n30` points; durations 12, 24 and 36 are reported only);
+- the same four candidate v2 routers (`v2-rr10-ttl12`, `v2-rr10-ttl8`, `v2-t8-ttl8`, `v2-t10-ttl10`) and ablations;
+- the reference is the frozen router; opportunity = frozen misses − the best schedule oracle's misses;
+- **step 1:** fix the latency limit from calibration p90 as stated per scenario;
+- **step 2:** among the `n30` points at that limit, choose the largest opportunity; ties go to the milder disturbance; a non-positive opportunity fails closed;
+- **step 3:** choose the candidate with the fewest misses at that point, subject to stationary misses ≤ frozen + 1 per episode and stationary tokens ≤ 1.15 × frozen; ties go to the lower recovery lag; no admissible candidate fails closed.
+
+| Scenario | What degrades | Catalogue | Grid | Limit rule (step 1) | Oracles during the disturbance |
+|---|---|---|---|---|---|
+| **S-E′** inline degradation | request delay on inline: 3, 6, 9 s | inline, direct | limits 6, 7, 8 s | largest limit below direct's smallest bin p90 and at or above inline's largest bin p90 (inline is the stationary incumbent) | direct in every bin |
+| **S-F** direct degradation | tool-call delay on direct: 1, 2, 3 s per call | inline, direct, lean | limits 8, 10, 12 s | smallest limit at or above direct's largest bin p90 (direct is feasible, so it is the cheap incumbent) | inline in every bin; lean in every bin |
+| **S-B′** token quota | tokens-per-minute quota on all configurations: 40k, 60k, 100k, 150k | inline, direct | limits 6, 7, 8 s | as S-E′ | direct in every bin; small to inline, medium and large to direct |
+| **Round-trip slowdown** (replay only) | tool-call delay on direct and lean together: 1, 2, 3 s per call | inline, direct, lean | limits 8, 10 s | not selected; reported as a map | inline in every bin |
+
+For S-B′, "milder" means the larger quota. The round-trip grid measures how exposure to a
+per-call slowdown scales with the number of model calls (direct about 2.2, lean about 3.9;
+H-I3 in the interface idea doc) and is not collected live.
+
 ## Stopping rules and reporting
 
 - **Collection order:** S-D, then S-A, then S-E. Collection is seed-major, with arm order shuffled within each seed, and episode wall-clock times are recorded.
