@@ -1,0 +1,115 @@
+{
+  "id": "repoqa-long64-six-configurations-v3",
+  "name": "RepoQA long64 six-configuration study baseline (v3, with direct surface)",
+  "output": "outputs",
+  "dataset": {
+    "id": "ctxbench/repoqa",
+    "version": "2026-10-13-long64.1",
+    "root": "datasets/repoqa-2026-10-13-long64"
+  },
+  "models": {
+    "answer": {
+      "provider": "openai",
+      "name": "gpt-6-luna"
+    }
+  },
+  "scope": {
+    "instances": [],
+    "tasks": [
+      "snf_retrieve_function"
+    ]
+  },
+  "factors": {
+    "model": [
+      "answer"
+    ],
+    "configuration": [
+      "inline-code-full",
+      "local-mcp-default",
+      "local-mcp-lean",
+      "local-function-default",
+      "local-function-lean",
+      "local-mcp-direct"
+    ]
+  },
+  "params": {
+    "common": {}
+  },
+  "evaluation": {
+    "enabled": true
+  },
+  "trace": {
+    "enabled": true,
+    "writeFiles": true,
+    "save_raw_response": true,
+    "save_tool_calls": true,
+    "save_usage": true,
+    "save_errors": true
+  },
+  "execution": {
+    "repeats": 1
+  },
+  "configurations": {
+    "inline-code-full": {
+      "strategy": "inline",
+      "representation": "code",
+      "surface": "full"
+    },
+    "local-mcp-default": {
+      "strategy": "local_mcp",
+      "representation": "json",
+      "surface": "repoqa-default"
+    },
+    "local-mcp-lean": {
+      "strategy": "local_mcp",
+      "representation": "json",
+      "surface": "repoqa-lean"
+    },
+    "local-function-default": {
+      "strategy": "local_function",
+      "representation": "json",
+      "surface": "repoqa-default"
+    },
+    "local-function-lean": {
+      "strategy": "local_function",
+      "representation": "json",
+      "surface": "repoqa-lean"
+    },
+    "local-mcp-direct": {
+      "strategy": "local_mcp",
+      "representation": "json",
+      "surface": "repoqa-direct"
+    }
+  },
+  "surfaces": {
+    "full": {
+      "type": "full_context"
+    },
+    "repoqa-default": {
+      "type": "operations",
+      "operations": [
+        "list_files",
+        "list_symbols",
+        "get_symbol",
+        "read_file"
+      ]
+    },
+    "repoqa-lean": {
+      "type": "operations",
+      "operations": [
+        "list_files_lean",
+        "list_symbols_lean",
+        "get_symbol_lean",
+        "read_file_lean"
+      ]
+    },
+    "repoqa-direct": {
+      "type": "operations",
+      "operations": [
+        "find_symbol",
+        "list_symbols_lean",
+        "get_symbol_lean"
+      ]
+    }
+  }
+}
