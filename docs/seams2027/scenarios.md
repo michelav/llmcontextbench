@@ -152,6 +152,8 @@ the S-E′ study; run from the repository root:
 
 ```bash
 python tools/seams/quota_attribution.py > /dev/null   # writes studies/replay-v3calib/quota-attribution.json
+llmctxbench study replay --baseline baselines/repoqa-long64-v3/frozen.json \
+  --grid examples/studies/replay/v3-limit-sweep.grid.json --output studies/replay-v3calib/limit-sweep.json
 python tools/seams/make_figures.py                   # docs/seams2027/figures/*.pdf
 python tools/seams/make_tables.py                    # docs/seams2027/tables/*.tex (booktabs)
 ```
@@ -163,6 +165,7 @@ python tools/seams/make_tables.py                    # docs/seams2027/tables/*.t
 | `figures/se-tradeoff.pdf` | S-E′ live: tokens against misses per arm, stationary and degraded, seed ranges |
 | `figures/pilots-p3.pdf` | P3 (lean fallback) against P3′ (direct fallback), misses per phase |
 | `figures/replay-round-trip.pdf` | replay: misses against per-call delay for each surface |
+| `figures/replay-limit-sweep.pdf` | replay: S-E′ arms across limits 5–10 s, without and with the delay and summed; live S-E′ means at 7 s (exploratory, after collection) |
 | `figures/replay-quota-attribution.pdf` | replay S-B′: quota-phase misses by configuration and quota wait |
 | `tables/catalogue.tex` | v3 calibration catalogue |
 | `tables/se-results.tex`, `tables/se-contrasts.tex` | S-E′ live results and delay-phase intervals |

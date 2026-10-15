@@ -189,6 +189,42 @@ def fig_quota(out, fmt):
     fig.savefig(out / f'replay-quota-attribution.{fmt}', bbox_inches='tight')
 
 
+def fig_limit_sweep(out, fmt):
+    """Replay: misses against the latency limit, without and with the S-E′ delay, and summed over both."""
+    pts = {p['name']: p['policies'] for p in points('limit-sweep')}
+    limits = sorted({int(n.split('L')[1].split('-')[0]) for n in pts})
+    _, rows, summ = se3.load(LIVE)
+    live = se3.arm_table(rows, summ)
+    arms = ['inline', 'direct', 'frozen', 'v1', 'v2', 'oracle']
+    fig, axes = plt.subplots(1, 3, figsize=WIDE, sharey=False)
+    for ax, title, scenarios in ((axes[0], 'no delay', ['stationary']),
+                                 (axes[1], 'inline +9 s on requests 31–60', ['inline-degraded']),
+                                 (axes[2], 'sum of both', ['stationary', 'inline-degraded'])):
+        for arm in arms:
+            if arm == 'oracle' and len(scenarios) > 1:
+                continue
+            ys = [sum(pts[f'stationary-L{l}' if s == 'stationary' else f'L{l}-d9000-n30'][arm]['deadlineMisses']
+                      for s in scenarios) for l in limits]
+            ax.plot([l/1000 for l in limits], ys, marker='o', ms=2.5, lw=1.1, color=COLORS[arm], label=arm,
+                    ls=':' if arm == 'oracle' else '-')
+            if arm != 'oracle':
+                ax.scatter(se3.LIMIT/1000, sum(live[(arm, s)]['misses'] for s in scenarios), marker='*', s=40,
+                           color=COLORS[arm], edgecolors='k', linewidths=.4, zorder=5)
+        ax.axvspan(4.7, 5.5, color='0.92', zorder=0)
+        ax.axvspan(7.0, 7.4, color='#d9f0d3', zorder=0)
+        ax.set_title(title)
+        ax.set_xlabel('latency limit (s)')
+        ax.set_ylim(bottom=0)
+    axes[0].set_ylabel('misses per episode')
+    axes[0].text(5.1, axes[0].get_ylim()[1]*.97, 'inline\np90', ha='center', va='top', fontsize=6)
+    axes[0].text(7.2, axes[0].get_ylim()[1]*.97, 'direct\np90', ha='center', va='top', fontsize=6)
+    axes[2].legend(frameon=False, fontsize=6)
+    fig.text(.5, -.05, 'Lines: replay (estimated), 30 episodes per point; stars: S-E′ live means at 7 s (5 seeds); '
+             'bands: calibration p90 range across size bins', ha='center', fontsize=7)
+    fig.tight_layout()
+    fig.savefig(out / f'replay-limit-sweep.{fmt}', bbox_inches='tight')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', default='docs/seams2027/figures')
@@ -196,7 +232,7 @@ def main():
     args = parser.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    for make in (fig_opportunity, fig_timeline, fig_tradeoff, fig_pilots, fig_round_trip, fig_quota):
+    for make in (fig_opportunity, fig_timeline, fig_tradeoff, fig_pilots, fig_round_trip, fig_quota, fig_limit_sweep):
         make(out, args.format)
         print('wrote', make.__name__)
 

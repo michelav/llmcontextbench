@@ -335,6 +335,7 @@ delay, v2 routes by size bin, mixing inline and direct (both meet 7 s then).
   - **v2 against fixed direct, delay phase:** misses +0.21 [+0.15, +0.26].
   - **v2 against the oracle, delay phase:** misses +0.18 [+0.11, +0.26].
 - **Replay against live.** Replay predicted frozen 28.4, v2 12.6 and oracle 3.6 misses per degraded episode; live values are 28.6, 12.4 and 4.6.
+- **Limit sweep (exploratory, added after collection; replay only, estimated).** The S-E′ arms and delay at limits 5–10 s in 0.5 s steps (`examples/studies/replay/v3-limit-sweep.grid.json`, seeds 201–203, 10 replicates). Summed over both scenarios, v2 has the fewest misses of the non-oracle arms from 5 to 7 s. At 7.5 s fixed direct ties it, and from 8 s fixed direct is better (direct's calibration p90 is 7.0–7.4 s). v2 has fewer misses than frozen with the delay at every limit. Live values at 7 s are close to replay except fixed direct without a delay (6.0 live against 11.4 replay).
 
 ## Stopping rules and reporting
 

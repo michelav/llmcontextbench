@@ -313,3 +313,9 @@ Exploratory replay of two further scenarios on v2 calibration (pair inline + MCP
 - Seen while building them: fixed direct's misses vary widely across seeds (degraded 1–27, stationary 1–14); its p90 sits at the 7 s limit, so a slow provider period moves it a lot. v2 ranges 8–18 degraded, 0–4 stationary.
 - Replay against live for S-E′: frozen, v2 and inline within 0.3 misses; v1 15.8 predicted against 10.6 live.
 - The tables were not compiled (no LaTeX in this environment).
+
+## 2026-10-15 — Limit sweep (replay, exploratory)
+
+- `limit_sweep_grid()` in `tools/seams/make_grids.py`; the replay at limits 5–10 s took 9 s; figure `docs/seams2027/figures/replay-limit-sweep.pdf`.
+- Summed over both scenarios, v2 is the best non-oracle arm from 5 to 7 s. Fixed direct ties it at 7.5 s and wins from 8 s, at about 310k tokens per episode against v2's 500k–950k.
+- So adaptation pays off when the cheap fallback is not reliably feasible on its own (limit below its p90) but is still far better than the degraded incumbent.

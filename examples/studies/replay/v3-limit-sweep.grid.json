@@ -1,0 +1,601 @@
+{
+  "schemaVersion": 1,
+  "seeds": [
+    201,
+    202,
+    203
+  ],
+  "replicates": 10,
+  "configurations": [
+    "inline-code-full",
+    "local-mcp-direct"
+  ],
+  "base": {},
+  "policies": {
+    "inline": {
+      "type": "fixed",
+      "configuration": "inline-code-full"
+    },
+    "direct": {
+      "type": "fixed",
+      "configuration": "local-mcp-direct"
+    },
+    "frozen": {
+      "type": "router",
+      "adaptive": false,
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9
+    },
+    "v1": {
+      "type": "router",
+      "adaptive": true
+    },
+    "v2": {
+      "type": "router",
+      "adaptive": true,
+      "estimator": "pooled-ratio",
+      "incumbentScope": "bin",
+      "latencyQuantile": 0.9,
+      "switchOnObjectiveMiss": true,
+      "cooldownRequests": 2,
+      "updateWindow": 4,
+      "minimumObservations": 2,
+      "probeInterval": 10,
+      "estimateTtlRequests": 10,
+      "probeMode": "targeted",
+      "avoidedProbeInterval": 10
+    }
+  },
+  "points": [
+    {
+      "name": "stationary-L5000",
+      "latencyLimitMs": 5000,
+      "effects": [],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          }
+        }
+      }
+    },
+    {
+      "name": "L5000-d9000-n30",
+      "latencyLimitMs": 5000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-direct",
+                "medium": "local-mcp-direct",
+                "large": "local-mcp-direct"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "stationary-L5500",
+      "latencyLimitMs": 5500,
+      "effects": [],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          }
+        }
+      }
+    },
+    {
+      "name": "L5500-d9000-n30",
+      "latencyLimitMs": 5500,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-direct",
+                "medium": "local-mcp-direct",
+                "large": "local-mcp-direct"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "stationary-L6000",
+      "latencyLimitMs": 6000,
+      "effects": [],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          }
+        }
+      }
+    },
+    {
+      "name": "L6000-d9000-n30",
+      "latencyLimitMs": 6000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-direct",
+                "medium": "local-mcp-direct",
+                "large": "local-mcp-direct"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "stationary-L6500",
+      "latencyLimitMs": 6500,
+      "effects": [],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          }
+        }
+      }
+    },
+    {
+      "name": "L6500-d9000-n30",
+      "latencyLimitMs": 6500,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-direct",
+                "medium": "local-mcp-direct",
+                "large": "local-mcp-direct"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "stationary-L7000",
+      "latencyLimitMs": 7000,
+      "effects": [],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          }
+        }
+      }
+    },
+    {
+      "name": "L7000-d9000-n30",
+      "latencyLimitMs": 7000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-direct",
+                "medium": "local-mcp-direct",
+                "large": "local-mcp-direct"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "stationary-L7500",
+      "latencyLimitMs": 7500,
+      "effects": [],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          }
+        }
+      }
+    },
+    {
+      "name": "L7500-d9000-n30",
+      "latencyLimitMs": 7500,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-direct",
+                "medium": "local-mcp-direct",
+                "large": "local-mcp-direct"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "stationary-L8000",
+      "latencyLimitMs": 8000,
+      "effects": [],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          }
+        }
+      }
+    },
+    {
+      "name": "L8000-d9000-n30",
+      "latencyLimitMs": 8000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-direct",
+                "medium": "local-mcp-direct",
+                "large": "local-mcp-direct"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "stationary-L8500",
+      "latencyLimitMs": 8500,
+      "effects": [],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          }
+        }
+      }
+    },
+    {
+      "name": "L8500-d9000-n30",
+      "latencyLimitMs": 8500,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-direct",
+                "medium": "local-mcp-direct",
+                "large": "local-mcp-direct"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "stationary-L9000",
+      "latencyLimitMs": 9000,
+      "effects": [],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          }
+        }
+      }
+    },
+    {
+      "name": "L9000-d9000-n30",
+      "latencyLimitMs": 9000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-direct",
+                "medium": "local-mcp-direct",
+                "large": "local-mcp-direct"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "stationary-L9500",
+      "latencyLimitMs": 9500,
+      "effects": [],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          }
+        }
+      }
+    },
+    {
+      "name": "L9500-d9000-n30",
+      "latencyLimitMs": 9500,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-direct",
+                "medium": "local-mcp-direct",
+                "large": "local-mcp-direct"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "stationary-L10000",
+      "latencyLimitMs": 10000,
+      "effects": [],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          }
+        }
+      }
+    },
+    {
+      "name": "L10000-d9000-n30",
+      "latencyLimitMs": 10000,
+      "effects": [
+        {
+          "kind": "delay",
+          "configuration": "inline-code-full",
+          "scope": "request",
+          "delayMs": 9000,
+          "firstRequest": 31,
+          "lastRequest": 60
+        }
+      ],
+      "policies": {
+        "oracle": {
+          "type": "schedule",
+          "default": {
+            "small": "inline-code-full",
+            "medium": "inline-code-full",
+            "large": "inline-code-full"
+          },
+          "phases": [
+            {
+              "firstRequest": 31,
+              "lastRequest": 60,
+              "configurationBySize": {
+                "small": "local-mcp-direct",
+                "medium": "local-mcp-direct",
+                "large": "local-mcp-direct"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

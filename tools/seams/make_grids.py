@@ -334,6 +334,27 @@ def study_v3_inline_degradation():
                             ['v1', 'frozen']]}
 
 
+# Limit sweep (exploratory, after S-E' collection): how narrow the window for adaptation is.
+# The S-E' disturbance and arms at limits 5-10 s; replay only, labelled estimated.
+SWEEP_LIMITS = tuple(range(5000, 10001, 500))
+
+
+def limit_sweep_grid():
+    chosen = SE3_SELECTED
+    effects = [inline_delay(SA_FIRST, SA_LAST, chosen['delayMs'])]
+    points = []
+    for limit in SWEEP_LIMITS:
+        points.append({'name': f'stationary-L{limit}', 'latencyLimitMs': limit, 'effects': [],
+                       'policies': {'oracle': {'type': 'schedule', 'default': ALL_INLINE}}})
+        points.append({'name': f'L{limit}-d{chosen["delayMs"]}-n30', 'latencyLimitMs': limit, 'effects': effects,
+                       'policies': {'oracle': oracle(SA_FIRST, SA_LAST, ALL_DIRECT, ALL_INLINE)}})
+    return {'schemaVersion': 1, 'seeds': [201, 202, 203], 'replicates': 10, 'configurations': [INLINE, MCP_DIRECT],
+            'base': {}, 'policies': {'inline': {'type': 'fixed', 'configuration': INLINE},
+                                     'direct': {'type': 'fixed', 'configuration': MCP_DIRECT},
+                                     'frozen': FROZEN, 'v1': V1, 'v2': variant(V2, V2_CANDIDATES[chosen['policy']])},
+            'points': points}
+
+
 def pilot_v3_inline_degradation():
     chosen = SE3_SELECTED
     return {'schemaVersion': 1, 'baseline': BASELINE_V3, 'configurations': [INLINE, MCP_DIRECT],
@@ -347,6 +368,7 @@ def pilot_v3_inline_degradation():
 
 OUTPUTS = {
     **{f'replay/v3-{name}.grid.json': (lambda name=name: v3_grid(name)) for name in V3_GRIDS},
+    'replay/v3-limit-sweep.grid.json': limit_sweep_grid,
     'study.seams3-inline-degradation.json': study_v3_inline_degradation,
     'pilot.v3-inline-degradation.json': pilot_v3_inline_degradation,
     'replay/degradation.grid.json': degradation_grid, 'replay/opposing.grid.json': opposing_grid,
