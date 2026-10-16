@@ -32,11 +32,12 @@ Levels:
 | Experiment (6 configurations, `gpt-6-luna`) | `experiment.repoqa-long64-v3.json` | sha256 `55162e80bbfcc9da…` |
 | Frozen v3 baseline (calibration) | data archive: `baselines/repoqa-long64-v3/frozen.json` | sha256 `6d78a6e142745fa1…` |
 | S-E′ live study | data archive: `studies/seams3-inline-degradation/` | `prepared.json` `af80916e12171d5b…`, `analysis.json` `d0ce63ca6f02ac80…` |
+| Frozen v2 baseline (calibration of the P1–P3 pilots) | data archive: `baselines/repoqa-long64-v2/frozen.json`; experiment `experiment.repoqa-long64.json` | sha256 `dc9d1cf06d2ea5ad…`; code at tag `seams-v2-freeze` |
 | Pilots P1–P3 (v2), P3′ (v3) | data archive: `studies/pilot-*` | seeds 901–904, never pooled |
 | Replay reports and selection records | data archive: `studies/replay-v3calib/`, `studies/replay-validation/` | hashes in the pre-registration |
 | Direct-surface provider check (pre-registration amendment, 2026-10-15) | experiment `experiment.repoqa-direct-check.json`; data archive: `runs/direct-check/` | sha256 `7964fa3fb1c78b6b…`; 96 requests on the 4 calibration targets |
 
-The data archive is built with `tools/seams/make_archive.sh` (about 84 MB, 15,772 files,
+The data archive is built with `tools/seams/make_archive.sh` (about 97 MB, 17,488 files,
 each listed with its sha256 in the accompanying `SHA256SUMS`). It is deterministic: the same
 inputs give the same archive.
 
@@ -113,6 +114,12 @@ llmctxbench study analyze studies/seams3-inline-degradation
 python tools/seams/pilot_gates.py --v3     # P3' gates
 python tools/seams/pilot_gates.py          # P1-P3 gates (v2)
 ```
+
+The P1–P3 pilots are bound to the v2 baseline, measured at tag `seams-v2-freeze`. The v3
+code adds the direct surface to three RepoQA adapter files, so verifying them with the paper
+revision needs `--allow-source-drift`. It reports those three files (`mcp_server.py`,
+`provider.py`, `tools.py`) and `_virtualenv.py`; every data hash is still checked. For an exact
+match, check out the tool at `seams-v2-freeze`.
 
 `status` and `analyze` verify the study against the frozen baseline: the dataset, the
 experiment, every pinned raw artifact, and a fingerprint of the measurement code

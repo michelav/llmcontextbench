@@ -11,6 +11,11 @@ Progress:
   - `tool-refactoring` was parked as `docs/development/ideas/lattes-filtered-tools.md` and then deleted.
   - `study status` verifies on `main`.
   - Nothing has been pushed to `main`.
+- **Slice 1 (2026-10-16):** done, with outcome (b).
+  - The prepared study and the frozen baselines record absolute paths of the experiment, the dataset and the baseline, so no layout works on another machine.
+  - Added the read-only `--path-map OLD=NEW` to `study status`, `analyze` and `replay --prepared` (`26196dc`), outside the fingerprint.
+  - In a `bwrap` sandbox with this checkout hidden, `status` and `analyze` passed from the article layout. `analysis.json` was identical except `sourceDrift`, and the figures, tables and S-E′ summary were byte-identical.
+  - The v2 pilots also needed `baselines/repoqa-long64-v2`, which is now in the data archive. They verify with `--allow-source-drift`, which reports the three adapter files v3 changed and `_virtualenv.py`.
 
 ## Goal
 
@@ -25,7 +30,7 @@ it, it stays here. Otherwise it belongs to the article.
 
 | Tool repository (this one) | Article repository (new) | Data archive (Zenodo DOI) |
 |---|---|---|
-| `src/ctxbench`, including the study, replay and adaptive engine | `docs/seams2027/` (ARTIFACT.md, scenarios, figures, tables) | `baselines/repoqa-long64-v3` |
+| `src/ctxbench`, including the study, replay and adaptive engine | `docs/seams2027/` (ARTIFACT.md, scenarios, figures, tables) | `baselines/repoqa-long64-v3`, `baselines/repoqa-long64-v2` (P1–P3 pilots) |
 | `tests/`, `schemas/` | `docs/development/seams2027-plan.md`, `seams2027-preregistration.md` | `studies/seams3-inline-degradation`, `studies/pilot-*`, `studies/pilot-episodes.tsv` |
 | `docs/studies.md`, `docs/repoqa.md`, `docs/architecture/` | `tools/seams/` | `studies/replay-v3calib`, `studies/replay-validation` |
 | `tools/repoqa/` (dataset build, RepoQA scorer) | SEAMS definitions (list below) | anonymized copy for review, on an anonymous host |
