@@ -6,6 +6,7 @@ debug pool is requested) and disturbances are applied analytically.
 """
 import json
 import random
+import re
 from collections import defaultdict
 from pathlib import Path
 from statistics import mean
@@ -16,7 +17,8 @@ from ctxbench.adapters.repoqa.study import digest, ordered_workload
 from ctxbench.adaptive.recovery import sealed_read, write
 from ctxbench.adaptive.study_policy import Controller
 from ctxbench.adaptive.study_runner import quota_wait_seconds
-from .models import Effect, Policy
+from .models import Effect, Policy, TokenRateBudget, WorkloadOrder, WorkloadShape
+from .ordering import ordered
 
 VERSION = 1
 POLICIES = TypeAdapter(dict[str, Policy])
@@ -35,7 +37,8 @@ def load_pool(plan):
             for line in responses.read_text().splitlines():
                 if line.strip():
                     row = json.loads(line)
-                    metrics[row['trialId']] = row.get('metricsSummary') or {}
+                    metrics[row['trialId']] = {**(row.get('metricsSummary') or {}),
+                                               'contextSize': context_size(row.get('instanceId'))}
     pool = defaultdict(list)
     for row in frozen['observations']:
         summary = metrics.get(row['trialId'], {})
@@ -44,8 +47,48 @@ def load_pool(plan):
             'status': row['status'], 'durationMs': row['durationMs'], 'failures': list(row['failures']),
             'tokens': tokens['value'] if tokens['value'] is not None else tokens.get('knownPartial') or 0,
             'tokensKnown': tokens['value'] is not None, 'passed': row.get('passed') is True,
-            'toolCalls': summary.get('toolCalls') or 0, 'steps': summary.get('steps') or 1})
+            'toolCalls': summary.get('toolCalls') or 0, 'steps': summary.get('steps') or 1,
+            'contextSize': summary.get('contextSize')})
     return dict(pool)
+
+
+def context_size(instance):
+    """Nominal context size of a RepoQA instance (`java_001_ctx64k` -> `64k`), or None."""
+    match = re.search(r'_ctx(\d+k)$', instance or '')
+    return match.group(1) if match else None
+
+
+def shaped_workload(plan, targets, shape, seed):
+    """Synthetic held-out workload: each position draws a request of a size sampled from its phase.
+
+    Requests may repeat. Only the request's size and eligibility matter in replay, because
+    outcomes are resampled from the calibration pool."""
+    rng = random.Random(f'workload:{seed}')
+    instances = sorted(iid for iid, request in plan['requests'].items() if request['target'] in set(targets))
+    by_key = defaultdict(list)
+    for iid in instances:
+        by_key[plan['requests'][iid]['sizeBin']].append(iid)
+        if context_size(iid):
+            by_key[context_size(iid)].append(iid)
+    workload, position = [], 0
+    for phase in shape['phases']:
+        keys = sorted(phase['sizeWeights'])
+        missing = [key for key in keys if not by_key.get(key)]
+        if missing:
+            raise ValueError(f'workload sizes without held-out requests: {missing}')
+        while position < phase['lastRequest']:
+            key = rng.choices(keys, weights=[phase['sizeWeights'][k] for k in keys])[0]
+            workload.append(rng.choice(by_key[key]))
+            position += 1
+    return workload
+
+
+def _draw(pool, cid, instance, size, rng):
+    """An observation of the same nominal size when the pool records sizes, else of the same bin."""
+    rows = pool[(cid, size)]
+    exact = context_size(instance)
+    same = [row for row in rows if exact and row.get('contextSize') == exact]
+    return rng.choice(same or rows)
 
 
 def _apply_effects(sample, cid, position, effects, rng):
@@ -83,7 +126,7 @@ def simulate(plan, episode, effects, pool, rng):
         while cid is not None:
             active = [q['tokensPerMinute'] for q in quotas if q['firstRequest'] <= index+1 <= q['lastRequest']]
             wait = quota_wait_seconds(quota_log, clock, min(active)) if active else 0.0
-            sample = rng.choice(pool[(cid, size)])
+            sample = _draw(pool, cid, instance, size, rng)
             outcome = _apply_effects(sample, cid, index+1, effects, rng)
             duration = outcome['durationMs'] + wait*1000
             clock += duration/1000
@@ -98,7 +141,7 @@ def simulate(plan, episode, effects, pool, rng):
             fallback = controller.decide_fallback(index, observation) if len(attempts) == 1 else None
             cid = fallback['configuration'] if fallback else None
         final = attempts[-1] if attempts else None
-        rows.append({'sequenceIndex': index+1, 'sizeBin': size, **selection,
+        rows.append({'sequenceIndex': index+1, 'sizeBin': size, 'contextSize': context_size(instance), **selection,
                      'finalConfiguration': final['configuration'] if final else None,
                      'status': final['status'] if final else 'unserved',
                      'passed': bool(final and final['passed']),
@@ -127,7 +170,38 @@ def _lags(rows, effects):
     return result
 
 
-def summarize(rows, limit, effects):
+def _phase_lags(rows, shape):
+    """Lags for workload disturbances: from onset to the first non-probe request away from the
+    configuration routed just before it, and from the end to the first return to it."""
+    routed = {r['sequenceIndex']: r['configuration'] for r in rows if not r['probe'] and r['configuration']}
+    result, start = [], 1
+    for phase in shape['phases']:
+        end = phase['lastRequest']
+        before = next((routed[i] for i in range(start-1, 0, -1) if i in routed), None)
+        if phase.get('disturbance') and before is not None:
+            result.extend(_lags(rows, [{'configuration': before, 'firstRequest': start, 'lastRequest': end}]))
+        start = end+1
+    return result
+
+
+def _budget_excess(rows, rate, shape=None):
+    """Requests at which the trailing-window mean of served tokens exceeds the per-request budget,
+    in total and per workload phase."""
+    if rate is None:
+        return None, None
+    served = [r for r in rows if r['status'] != 'unserved']
+    spent = [r['tokensLowerBound'] for r in served]
+    flags = {r['sequenceIndex']: sum(spent[max(0, i+1-rate['window']):i+1])/rate['window'] > rate['perRequest']
+             for i, r in enumerate(served)}
+    phases, start = [], 1
+    for phase in (shape or {}).get('phases', []):
+        phases.append(sum(flags.get(i, False) for i in range(start, phase['lastRequest']+1)))
+        start = phase['lastRequest']+1
+    return sum(flags.values()), phases or None
+
+
+def summarize(rows, limit, effects, rate=None, shape=None):
+    excess, phase_excess = _budget_excess(rows, rate, shape)
     durations = [r['durationMs'] for r in rows if r['durationMs'] is not None]
     routed = [r['configuration'] for r in rows if not r['probe'] and r['configuration']]
     ordered = sorted(durations)
@@ -139,10 +213,13 @@ def summarize(rows, limit, effects):
             'meanLatencyMs': mean(durations) if durations else None,
             'p95LatencyMs': ordered[max(0, -(-95*len(ordered)//100)-1)] if ordered else None,
             'tokensLowerBound': sum(r['tokensLowerBound'] for r in rows),
+            'probeTokens': sum(r['tokensLowerBound'] for r in rows if r['probe']),
+            'budgetExcess': excess,
+            'phaseExcess': phase_excess,
             'fallbacks': sum(r['attempts'] > 1 for r in rows),
             'probes': sum(bool(r['probe']) for r in rows),
             'switches': sum(a != b for a, b in zip(routed, routed[1:])),
-            'lags': _lags(rows, effects)}
+            'lags': _lags(rows, effects) + (_phase_lags(rows, shape) if shape else [])}
 
 
 def plan_from_baseline(path, configurations=None, definition=None):
@@ -193,6 +270,15 @@ def replay(*, grid, prepared=None, baseline=None, output=None, replicates=None, 
     for point in spec['points']:
         effects = [e.model_dump() for e in EFFECTS.validate_python(point.get('effects', []))]
         definition = {**plan['definition'], **{k: point[k] for k in ('latencyLimitMs', 'tokenBudget') if k in point}}
+        if 'tokenRateBudget' in point:
+            definition['tokenRateBudget'] = TokenRateBudget.model_validate(point['tokenRateBudget']).model_dump()
+        shape = point.get('workload', spec.get('workload'))
+        shape = WorkloadShape.model_validate(shape).model_dump() if shape else None
+        # `order` reproduces a live study's reordering exactly when `scenario` names the same scenario.
+        order = point.get('order')
+        order = WorkloadOrder.model_validate(order).model_dump() if order else None
+        if shape and order:
+            raise ValueError('a replay point takes either workload or order')
         point_plan = {**plan, 'definition': definition}
         # A point may override policies, e.g. a schedule oracle matching its own disturbance.
         overrides = {name: policy.model_dump()
@@ -200,7 +286,14 @@ def replay(*, grid, prepared=None, baseline=None, output=None, replicates=None, 
         point_policies = {**policies, **overrides}
         results = defaultdict(list)
         for seed in spec['seeds']:
-            workload = [r['instanceId'] for r in ordered_workload(plan['index'], targets, seed)]
+            rows = [{**r, 'sizeBin': plan['requests'][r['instanceId']]['sizeBin']}
+                    for r in ordered_workload(plan['index'], targets, seed)]
+            if shape:
+                workload = shaped_workload(plan, targets, shape, seed)
+            elif order:
+                workload = ordered(rows, order, seed, point.get('scenario', point['name']))
+            else:
+                workload = [r['instanceId'] for r in rows]
             for replicate in range(replicates):
                 for name, policy in point_policies.items():
                     episode = {'policyName': name, 'scenarioName': point['name'], 'seed': seed,
@@ -208,11 +301,14 @@ def replay(*, grid, prepared=None, baseline=None, output=None, replicates=None, 
                                'id': digest([point['name'], name, seed, replicate])[:24]}
                     # Identical draws across policies at the same seed and replicate.
                     rng = random.Random(f"{spec.get('seed', 0)}:{point['name']}:{seed}:{replicate}")
-                    rows = simulate(point_plan, episode, effects, pool, rng)
-                    results[name].append(summarize(rows, definition.get('latencyLimitMs'), effects))
+                    outcome = simulate(point_plan, episode, effects, pool, rng)
+                    results[name].append(summarize(outcome, definition.get('latencyLimitMs'), effects,
+                                                   definition.get('tokenRateBudget'), shape or order))
         aggregate = {name: _aggregate(values) for name, values in results.items()}
         points.append({'name': point['name'], 'latencyLimitMs': definition.get('latencyLimitMs'),
-                       'tokenBudget': definition.get('tokenBudget'), 'effects': effects,
+                       'tokenBudget': definition.get('tokenBudget'),
+                       'tokenRateBudget': definition.get('tokenRateBudget'), 'workload': shape, 'order': order,
+                       'effects': effects,
                        'policies': aggregate,
                        **_opportunity(aggregate, point_policies, metric, spec.get('reference'))})
     report = {'schemaVersion': VERSION, 'kind': 'replay', 'provenance': 'estimated',
@@ -225,9 +321,11 @@ def replay(*, grid, prepared=None, baseline=None, output=None, replicates=None, 
 
 
 def _aggregate(values):
-    keys = [k for k in values[0] if k != 'lags' and values[0][k] is not None]
+    keys = [k for k in values[0] if k not in ('lags', 'phaseExcess') and values[0][k] is not None]
     lags = [lag for v in values for lag in v['lags']]
     summary = {k: mean(v[k] for v in values) for k in keys}
+    if values[0].get('phaseExcess'):
+        summary['phaseExcess'] = [mean(v['phaseExcess'][i] for v in values) for i in range(len(values[0]['phaseExcess']))]
     summary['reactionLag'] = _mean_known(lag['reactionLag'] for lag in lags)
     summary['recoveryLag'] = _mean_known(lag['recoveryLag'] for lag in lags)
     summary['episodes'] = len(values)

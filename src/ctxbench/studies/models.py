@@ -136,8 +136,99 @@ class RandomPolicy(Definition):
     seed: StrictInt
 
 
+class BlindRouterPolicy(Definition):
+    """Router that never reads request features (size bin, size, target).
+
+    It keeps its incumbent while the incumbent's recent cost fits the objective (latency limit
+    and the trailing token-rate budget), and leaves when it no longer fits. It returns to a
+    faster configuration only through a probe whose own observation fits.
+    """
+    type: Literal['blind-router']
+    adaptive: bool
+    estimateWindow: PositiveInt = 2
+    probeTriggers: list[Literal['periodic', 'signal']] = Field(default_factory=list)
+    probeInterval: PositiveInt = 10
+    probeBackoff: bool = False
+    signalWindow: PositiveInt = 8
+    signalTokens: PositiveInt | None = None
+    budgetGuard: bool = False
+
+    @model_validator(mode='after')
+    def validate_probing(self):
+        if len(set(self.probeTriggers)) != len(self.probeTriggers):
+            raise ValueError('repeated probe trigger')
+        if ('signal' in self.probeTriggers) != (self.signalTokens is not None):
+            raise ValueError('the signal trigger requires signalTokens, and only it uses them')
+        if not self.adaptive and (self.probeTriggers or self.budgetGuard):
+            raise ValueError('a non-adaptive blind router does not probe')
+        return self
+
+
 Policy = Annotated[FixedPolicy | RouterPolicy | BudgetPolicy | ReliabilityPolicy | CascadePolicy
-                   | SchedulePolicy | RandomPolicy, Field(discriminator='type')]
+                   | SchedulePolicy | RandomPolicy | BlindRouterPolicy, Field(discriminator='type')]
+
+
+class TokenRateBudget(Definition):
+    """Mean tokens per request over the trailing `window` served requests must stay within `perRequest`."""
+    perRequest: PositiveInt
+    window: PositiveInt
+
+
+class WorkloadPhase(Definition):
+    """Requests up to `lastRequest` draw their size from `sizeWeights` (size bins or sizes such as `64k`)."""
+    lastRequest: PositiveInt
+    sizeWeights: dict[str, Annotated[float, Field(gt=0)]] = Field(min_length=1)
+    disturbance: bool = False
+
+
+class WorkloadShape(Definition):
+    """Replay-only synthetic workload: each position draws a held-out request of the phase's sizes."""
+    phases: list[WorkloadPhase] = Field(min_length=1)
+
+    @model_validator(mode='after')
+    def validate_phases(self):
+        ends = [phase.lastRequest for phase in self.phases]
+        if ends != sorted(set(ends)):
+            raise ValueError('workload phases must end at strictly increasing requests')
+        return self
+
+
+class OrderPhase(Definition):
+    """Positions up to `lastRequest` take, in seeded random order, unused requests of these sizes."""
+    lastRequest: PositiveInt
+    sizes: list[str] = Field(min_length=1)
+    disturbance: bool = False
+
+
+class WorkloadOrder(Definition):
+    """A reordering of the study's requests: every request appears exactly once.
+
+    `sizes` are size bins (`small`, `medium`, `large`) or nominal sizes (`2k` ... `64k`).
+    """
+    phases: list[OrderPhase] = Field(min_length=1)
+
+    @model_validator(mode='after')
+    def validate_phases(self):
+        ends = [phase.lastRequest for phase in self.phases]
+        if ends != sorted(set(ends)):
+            raise ValueError('workload phases must end at strictly increasing requests')
+        return self
+
+
+class PhaseOracle(Definition):
+    """Derived after collection: `disturbance` in workload disturbance phases, `normal` elsewhere."""
+    type: Literal['phase-oracle']
+    normal: str
+    disturbance: str
+
+
+class BudgetOracle(Definition):
+    """Derived after collection: per request, the sequence that knows every outcome in advance and
+    minimises budget excess, then deadline misses, then total latency (exact search over the window)."""
+    type: Literal['budget-oracle']
+
+
+DerivedArm = Annotated[SchedulePolicy | PhaseOracle | BudgetOracle, Field(discriminator='type')]
 
 
 class Delay(Definition):
@@ -189,6 +280,9 @@ class Study(Definition):
     comparisons: list[tuple[str, str]] = Field(default_factory=list)
     latencyLimitMs: Annotated[float, Field(gt=0)] | None = None
     tokenBudget: PositiveInt | None = None
+    tokenRateBudget: TokenRateBudget | None = None
+    workloads: dict[str, WorkloadOrder] = Field(default_factory=dict)
+    derivedArms: dict[str, DerivedArm] = Field(default_factory=dict)
     minimumCalibrationPassRate: Annotated[float, Field(ge=0, le=1)] | None = None
 
     @model_validator(mode='after')
@@ -203,10 +297,19 @@ class Study(Definition):
             raise ValueError('policy and scenario names must be nonempty')
         if any(p.type in ('router', 'reliability') for p in self.policies.values()) and self.latencyLimitMs is None:
             raise ValueError('routing requires latencyLimitMs')
+        if any(p.type == 'blind-router' for p in self.policies.values()) and self.latencyLimitMs is None and self.tokenRateBudget is None:
+            raise ValueError('a blind router requires latencyLimitMs or tokenRateBudget')
+        if any(name not in self.scenarios for name in self.workloads):
+            raise ValueError('workload orders must name defined scenarios')
         if any(p.type == 'budget' for p in self.policies.values()) != (self.tokenBudget is not None):
             raise ValueError('tokenBudget requires a budget policy and vice versa')
         if self.minimumCalibrationPassRate is not None and self.tokenBudget is None:
             raise ValueError('minimumCalibrationPassRate requires tokenBudget')
-        if any(a not in self.policies or b not in self.policies or a == b for a, b in self.comparisons):
+        if set(self.derivedArms) & set(self.policies):
+            raise ValueError('derived arm names must differ from policy names')
+        if any(a.type == 'budget-oracle' for a in self.derivedArms.values()) and self.tokenRateBudget is None:
+            raise ValueError('a budget oracle requires tokenRateBudget')
+        arms = {*self.policies, *self.derivedArms}
+        if any(a not in arms or b not in arms or a == b for a, b in self.comparisons):
             raise ValueError('comparison references missing or identical policy')
         return self

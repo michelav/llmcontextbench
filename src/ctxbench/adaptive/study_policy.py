@@ -24,6 +24,12 @@ class Controller:
         self.source_of = {item['instanceId']: item.get('repo') for item in plan.get('index', [])}
         self.index = 0
         self.stopped = False
+        # Blind router state: served-request spend, evidence start per configuration, probe pacing.
+        self.spend = []
+        self.since = {}
+        self.last_event = 0
+        self.interval = self.policy.get('probeInterval')
+        self.pending_probe = None
         if self.policy['type'] == 'random-eligible':
             self.rng = random.Random(f"{self.policy['seed']}:{episode['seed']}:{episode['repeat']}")
 
@@ -269,6 +275,106 @@ class Controller:
         actual, probe = self._probe(index, chosen, eligible)
         return actual, 'scheduled_probe' if probe else 'router', probe
 
+    def _pooled(self, cid, metric):
+        """Calibration value pooled over the calibration size mix: what a router that cannot see size knows."""
+        known = [(share, self._calibration(cid, size, metric))
+                 for size, share in (self.plan.get('calibrationSizeMix') or {}).items()]
+        known = [(share, value) for share, value in known if value is not None]
+        total = sum(share for share, _ in known)
+        return sum(share*value for share, value in known)/total if total else None
+
+    def _recent(self, cid, metric, window):
+        rows = self._fresh(self.observed[(cid, 'all')][self.since.get(cid, 0):])
+        values = [o[metric] for o in rows if o['status'] == 'success' and o[metric] is not None][-window:]
+        return sum(values)/len(values) if values else None
+
+    def _blind_estimate(self, cid, metric):
+        value = self._recent(cid, metric, self.policy['estimateWindow']) if self.policy['adaptive'] else None
+        return self._pooled(cid, metric) if value is None else value
+
+    def _projected_rate(self, tokens):
+        """Trailing-window mean if the next request costs `tokens`; non-adaptive routers ignore spend."""
+        rate = self.plan['definition'].get('tokenRateBudget')
+        if not self.policy['adaptive']:
+            return tokens
+        window = rate['window']
+        recent = self.spend[-(window-1):] if window > 1 else []
+        return (sum(recent)+tokens)/window
+
+    def _fits(self, latency, tokens):
+        limit = self.plan['definition'].get('latencyLimitMs')
+        rate = self.plan['definition'].get('tokenRateBudget')
+        return ((limit is None or (latency is not None and latency <= limit))
+                and (rate is None or (tokens is not None and self._projected_rate(tokens) <= rate['perRequest'])))
+
+    def _blind(self, index, eligible):
+        """Stay while the incumbent fits; otherwise fastest fitting, else cheapest within the deadline."""
+        limit = self.plan['definition'].get('latencyLimitMs')
+        latency = {cid: self._blind_estimate(cid, 'durationMs') for cid in eligible}
+        tokens = {cid: self._blind_estimate(cid, 'tokens') for cid in eligible}
+        order = lambda values: lambda cid: (values[cid] is None, values[cid] or 0, self.order.index(cid))
+        current = self.current if self.current in eligible else None
+        reason = 'incumbent'
+        if current is None or not self._fits(latency[current], tokens[current]):
+            fitting = [cid for cid in eligible if self._fits(latency[cid], tokens[cid])]
+            timely = [cid for cid in eligible if limit is None or (latency[cid] is not None and latency[cid] <= limit)]
+            if fitting:
+                chosen, reason = min(fitting, key=order(latency)), 'fastest_fitting'
+            elif timely:
+                chosen, reason = min(timely, key=order(tokens)), 'cheapest_timely'
+            else:
+                chosen, reason = min(eligible, key=order(latency)), 'fastest'
+            if chosen != current:
+                self.current, self.last_event, self.interval = chosen, index+1, self.policy.get('probeInterval')
+        probe = self._blind_probe(index, eligible, latency)
+        if probe is not None:
+            self.pending_probe = (probe, index+1)
+            self.probes += 1
+            return probe, 'probe', True
+        return self.current, reason, False
+
+    def _blind_probe(self, index, eligible, latency):
+        """A faster configuration to try, when a trigger fires and (optionally) the budget can absorb it."""
+        if not self.policy['adaptive'] or not self.policy['probeTriggers']:
+            return None
+        faster = [cid for cid in eligible if cid != self.current and latency[cid] is not None
+                  and latency[self.current] is not None and latency[cid] < latency[self.current]]
+        if not faster:
+            return None
+        elapsed = index+1-self.last_event
+        fired = False
+        if 'periodic' in self.policy['probeTriggers'] and elapsed >= self.interval:
+            fired = True
+        if 'signal' in self.policy['probeTriggers'] and elapsed >= self.policy['signalWindow']:
+            level = self._recent(self.current, 'tokens', self.policy['signalWindow'])
+            fired = fired or (level is not None and level <= self.policy['signalTokens'])
+        if not fired:
+            return None
+        candidate = min(faster, key=lambda cid: (latency[cid], self.order.index(cid)))
+        rate = self.plan['definition'].get('tokenRateBudget')
+        if self.policy['budgetGuard'] and rate is not None:
+            worst = max((q['p95'] for q in self.plan['tokenQuantiles'][candidate].values()), default=None)
+            if worst is None or self._projected_rate(worst) > rate['perRequest']:
+                return None
+        return candidate
+
+    def _blind_observe(self, cid, row):
+        self.spend.append(row['tokens'] or 0)
+        if self.pending_probe is None or self.pending_probe[1] != row['sequenceIndex']:
+            return
+        self.pending_probe = None
+        # A probe restarts that configuration's evidence: older observations predate the change it tests.
+        self.since[cid] = len(self.observed[(cid, 'all')])-1
+        self.last_event = row['sequenceIndex']
+        limit = self.plan['definition'].get('latencyLimitMs')
+        rate = self.plan['definition'].get('tokenRateBudget')
+        fits = (row['status'] == 'success' and (limit is None or row['durationMs'] <= limit)
+                and (rate is None or (row['tokens'] is not None and row['tokens'] <= rate['perRequest'])))
+        if fits:
+            self.current, self.interval = cid, self.policy.get('probeInterval')
+        elif self.policy['probeBackoff']:
+            self.interval *= 2
+
     def _cascade(self, instance, eligible):
         fallbacks = [cid for cid in self.policy['fallbacks'] if cid in eligible]
         if (self.policy.get('memory') == 'source' and fallbacks
@@ -318,6 +424,8 @@ class Controller:
             chosen, reason, probe = self._schedule(index, size, eligible)
         elif kind == 'random-eligible':
             chosen, reason, probe = self.rng.choice(eligible), 'random', False
+        elif kind == 'blind-router':
+            chosen, reason, probe = self._blind(index, eligible)
         else:
             chosen, reason, probe = self._router_decision(index, eligible, size)
         return {'configuration': chosen, 'reason': reason, 'probe': probe}
@@ -343,6 +451,8 @@ class Controller:
                 self.estimated += max(0, (bound or 0)-partial)
         else:
             self.consumed += token['value']
+        if self.policy['type'] == 'blind-router':
+            self._blind_observe(cid, row if token['value'] is not None else {**row, 'tokens': token.get('knownPartial')})
         if self.policy['type'] == 'reliability' and cid in self.excluded_until:
             monitored = set(self.policy['failureClasses'])
             if not monitored.intersection(observation['failures']):

@@ -371,6 +371,76 @@ reference is the non-adaptive router by default, so capture measures what runtim
 feedback adds; fixed arms are reported for the cost side of the trade-off. The
 report is marked `provenance: estimated`.
 
+### Workload bursts and the size-blind router
+
+Live studies reorder their requests per scenario with `workloads`; every request is used
+exactly once, so fixed arms see identical requests in every scenario:
+
+```json
+"workloads": {"burst": {"phases": [
+  {"lastRequest": 16, "sizes": ["small", "medium"]},
+  {"lastRequest": 32, "sizes": ["large"], "disturbance": true},
+  {"lastRequest": 48, "sizes": ["small", "medium"]}]}}
+```
+
+Each phase fills its positions, in seeded random order, with unused requests of the listed
+size bins or nominal sizes (`2k` ... `64k`); `prepare` fails if a phase runs out or requests are
+left over. Disturbance phases appear in `phases` with `disturbance: true` and get reaction and
+recovery lags in `analyze`. A replay point reproduces a live order exactly with
+`"order": {...}` and `"scenario": "<scenario name>"`.
+
+Replay can also sample a synthetic sequence with repeats: a grid or point may set `workload`
+to replace the held-out order with a sequence, for example small repositories, then a burst of large ones, then small again:
+
+```json
+"workload": {"phases": [
+  {"lastRequest": 30, "sizeWeights": {"2k": 0.45, "4k": 0.45, "64k": 0.1}},
+  {"lastRequest": 60, "sizeWeights": {"64k": 1}, "disturbance": true},
+  {"lastRequest": 96, "sizeWeights": {"2k": 0.45, "4k": 0.45, "64k": 0.1}}]}
+```
+
+Each position draws a held-out request of a size sampled from its phase's weights
+(keys are size bins or nominal sizes such as `64k`; requests may repeat). Outcomes
+are drawn from calibration observations of the same nominal size when the pool
+records it, otherwise of the same bin. Phases marked `disturbance` get reaction and
+recovery lags relative to the configuration routed just before them.
+
+A study or replay point may set `tokenRateBudget` (`perRequest`, `window`): the mean tokens
+over the trailing `window` served requests should stay within `perRequest`. Reports add
+`budgetExcess` (requests at which that mean exceeded the budget), per phase as well, and probe
+tokens.
+
+The `blind-router` policy never reads request features (size, bin, target). It keeps
+its incumbent while the incumbent's recent latency (mean of the last `estimateWindow`
+observations) meets `latencyLimitMs` and its recent tokens keep the projected window
+mean within the budget. Otherwise it moves to the fastest configuration that fits,
+else the cheapest that meets the limit. Before any observation it uses calibration
+pooled over the calibration size mix. It returns to a faster configuration only
+through a probe whose own observation fits; a probe restarts that configuration's
+evidence. Options:
+
+| Option | Meaning |
+|---|---|
+| `adaptive` | `false`: pooled calibration only, no spend tracking or probes (a static choice) |
+| `probeTriggers` | `periodic` (every `probeInterval` requests since the last switch or probe) and/or `signal` (the incumbent's mean tokens over `signalWindow` ≤ `signalTokens`) |
+| `probeBackoff` | double the periodic interval after a probe that did not fit |
+| `budgetGuard` | probe only if the candidate's calibration p95 tokens still keep the window within budget |
+
+Thresholds such as `signalTokens` must be set from calibration data.
+
+`derivedArms` in a study definition are computed by `analyze` from the fixed arms' rows for
+the same requests (`provenance: derived`; this assumes requests run one at a time and
+independently). They need a fixed policy for every configuration they use:
+
+| Type | Choice per request |
+|---|---|
+| `phase-oracle` | `disturbance` in disturbance phases, `normal` elsewhere |
+| `budget-oracle` | knows every outcome: fewest budget-excess requests, then misses, then latency (exact search over the window; needs `tokenRateBudget`) |
+| `schedule` | a size-aware rule, e.g. small and medium to inline, large to direct |
+
+Comparisons may name derived arms. In replay, size-aware references are written as
+`schedule` policies.
+
 `study counterfactual` pairs two fixed arms of a completed study by seed and
 request, charging the fallback only where the primary failed. It reuses held-out
 executions and is marked `heldOutDebug: true`.

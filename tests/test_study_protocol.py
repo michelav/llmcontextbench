@@ -474,3 +474,84 @@ def test_target_subset_builds_short_balanced_pilots(frozen, tmp_path):
     calibration = sealed_read(frozen)['plan']['split']['calibration'][0]
     with pytest.raises(ValueError, match='held-out targets'):
         study.prepare(definition=make_study(tmp_path, frozen, targets=[calibration]), output=tmp_path/'bad-targets')
+
+
+def _burst_study(tmp_path, frozen, **overrides):
+    base = Path(study.prepare(definition=make_study(tmp_path, frozen, comparisons=[]), output=tmp_path/f'probe-size-{len(list(tmp_path.glob("probe-size-*")))}')['prepared'])
+    plan = sealed_read(base)
+    bins = [plan['requests'][i]['sizeBin'] for i in plan['episodes'][0]['workload']]
+    small, large, total = bins.count('small'), bins.count('large'), len(bins)
+    order = {'phases': [{'lastRequest': small//2, 'sizes': ['small']},
+                        {'lastRequest': small//2+large, 'sizes': ['large'], 'disturbance': True},
+                        {'lastRequest': total, 'sizes': ['small']}]}
+    definition = dict(
+        policies={'inline': {'type': 'fixed', 'configuration': 'inline-code-full'},
+                  'mcp': {'type': 'fixed', 'configuration': 'local-mcp-repoqa-ops'},
+                  'blind': {'type': 'blind-router', 'adaptive': True, 'probeTriggers': ['periodic'], 'probeInterval': 5}},
+        scenarios={'stationary': [], 'burst': []}, workloads={'burst': order},
+        tokenRateBudget={'perRequest': 10, 'window': 4},
+        derivedArms={'oracle': {'type': 'phase-oracle', 'normal': 'inline-code-full', 'disturbance': 'local-mcp-repoqa-ops'},
+                     'budget-oracle': {'type': 'budget-oracle'},
+                     'size-aware': {'type': 'schedule', 'default': {'small': 'inline-code-full', 'large': 'local-mcp-repoqa-ops'}}},
+        comparisons=[['blind', 'oracle']])
+    definition.update(overrides)
+    return make_study(tmp_path, frozen, **definition), (small, large, total)
+
+
+def test_workload_order_reorders_the_same_requests_per_scenario(frozen, tmp_path):
+    definition, (small, large, total) = _burst_study(tmp_path, frozen)
+    plan = sealed_read(Path(study.prepare(definition=definition, output=tmp_path/'burst')['prepared']))
+    by = {(e['policyName'], e['scenarioName']): e for e in plan['episodes']}
+    stationary, burst = by[('inline', 'stationary')]['workload'], by[('inline', 'burst')]['workload']
+    assert sorted(stationary) == sorted(burst) and stationary != burst
+    assert by[('mcp', 'burst')]['workload'] == burst
+    bins = [plan['requests'][i]['sizeBin'] for i in burst]
+    assert bins[small//2:small//2+large] == ['large']*large and 'large' not in bins[:small//2]
+    assert [p.get('disturbance') for p in plan['phases']['burst']] == [False, True, False]
+    assert 'disturbance' not in plan['phases']['stationary'][0]
+
+
+def test_workload_order_must_use_every_request_once(frozen, tmp_path):
+    _, (small, large, total) = _burst_study(tmp_path, frozen)
+    definition, _ = _burst_study(tmp_path, frozen,
+        workloads={'burst': {'phases': [{'lastRequest': total, 'sizes': ['large']}]}})
+    with pytest.raises(ValueError, match='runs out'):
+        study.prepare(definition=definition, output=tmp_path/'bad-order')
+    definition, _ = _burst_study(tmp_path, frozen,
+        workloads={'burst': {'phases': [{'lastRequest': total-1, 'sizes': ['small', 'large']}]}})
+    with pytest.raises(ValueError, match='cover the whole workload'):
+        study.prepare(definition=definition, output=tmp_path/'short-order')
+    with pytest.raises(ValueError, match='defined scenarios'):
+        Study.model_validate({'baseline': 'b', 'seeds': [1], 'repeats': 1, 'scenarios': {'s': []},
+                              'policies': {'f': {'type': 'fixed', 'configuration': 'x'}},
+                              'workloads': {'missing': {'phases': [{'lastRequest': 1, 'sizes': ['small']}]}}})
+
+
+def test_derived_arms_need_fixed_arms_and_a_budget(frozen, tmp_path):
+    definition, _ = _burst_study(tmp_path, frozen, policies={
+        'inline': {'type': 'fixed', 'configuration': 'inline-code-full'},
+        'blind': {'type': 'blind-router', 'adaptive': True}})
+    with pytest.raises(ValueError, match='requires fixed policies'):
+        study.prepare(definition=definition, output=tmp_path/'no-fixed')
+    with pytest.raises(ValueError, match='requires tokenRateBudget'):
+        Study.model_validate({'baseline': 'b', 'seeds': [1], 'repeats': 1, 'scenarios': {'s': []},
+                              'policies': {'f': {'type': 'fixed', 'configuration': 'x'}},
+                              'derivedArms': {'o': {'type': 'budget-oracle'}}})
+
+
+def test_analysis_reports_excess_lags_and_derived_arms(frozen, tmp_path):
+    definition, (small, large, total) = _burst_study(tmp_path, frozen)
+    path = Path(study.prepare(definition=definition, output=tmp_path/'burst-run')['prepared'])
+    for policy in ('inline', 'mcp', 'blind'):
+        study.episode(prepared=path, policy=policy, scenario='burst', seed=201, repeat=1, execution=mock_execute)
+    report = study.analyze(path, bootstrap_replicates=50)
+    rows = {(r['policyName'], r['scenarioName']): r for r in report['summaries']}
+    for name in ('oracle', 'budget-oracle', 'size-aware'):
+        derived = rows[(name, 'burst')]
+        assert derived['derived'] is True and derived['provenance'] == 'derived' and derived['completed'] == total
+        assert rows[(name, 'stationary')]['completed'] == 0
+    assert rows[('inline', 'burst')]['budgetExcess'] is not None
+    assert [p['budgetExcess'] is not None for p in rows[('inline', 'burst')]['phaseSummaries']] == [True]*3
+    assert rows[('budget-oracle', 'burst')]['budgetExcess'] <= min(rows[(n, 'burst')]['budgetExcess'] for n in ('inline', 'mcp'))
+    burst_comparison = next(c for c in report['comparisons'] if c['scenario'] == 'burst')
+    assert burst_comparison['pairedRequests'] == total

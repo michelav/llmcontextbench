@@ -6,6 +6,7 @@ from ctxbench.adapters.repoqa.study import digest, ordered_workload
 from ctxbench.adaptive.recovery import sealed_read, sealed_write, episode_lock
 from .baseline import file_hash, prepared_path, verify, VERSION
 from .models import Study
+from .ordering import order_phases, ordered
 
 
 def parse_path_map(entries):
@@ -94,6 +95,17 @@ def prepare(*, definition, output):
             mappings = [policy.default, *(phase.configurationBySize for phase in policy.phases)]
             if any(cid not in selected for mapping in mappings for cid in mapping.values()):
                 raise ValueError('schedule policy references an unselected configuration')
+    fixed = {p.configuration for p in definition.policies.values() if p.type == 'fixed'}
+    for name, arm in definition.derivedArms.items():
+        if arm.type == 'budget-oracle':
+            needed = set(selected)
+        elif arm.type == 'phase-oracle':
+            needed = {arm.normal, arm.disturbance}
+        else:
+            needed = {cid for mapping in (arm.default, *(phase.configurationBySize for phase in arm.phases))
+                      for cid in mapping.values()}
+        if not needed <= fixed:
+            raise ValueError(f'derived arm {name} requires fixed policies for {sorted(needed - fixed)}')
     index = parent['index']
     # Pilots may use a subset of held-out targets; calibration targets are never allowed.
     targets = definition.targets or parent['split']['heldOut']
@@ -108,22 +120,34 @@ def prepare(*, definition, output):
     if any(phase.lastRequest > length for policy in definition.policies.values() if policy.type == 'schedule'
            for phase in policy.phases):
         raise ValueError('schedule phase exceeds workload')
+    orders = {name: order.model_dump() for name, order in definition.workloads.items()}
+    if any(order['phases'][-1]['lastRequest'] != length for order in orders.values()):
+        raise ValueError('workload order must cover the whole workload')
     phases = {}
     for scenario, delays in definition.scenarios.items():
+        ordered_phases = order_phases(orders[scenario]) if scenario in orders else []
         boundaries = sorted({1, length+1, *(d.firstRequest for d in delays),
-                             *(d.lastRequest+1 for d in delays)})
-        phases[scenario] = [{'firstRequest': start, 'lastRequest': end-1}
-                            for start, end in zip(boundaries, boundaries[1:])]
+                             *(d.lastRequest+1 for d in delays), *(p['firstRequest'] for p in ordered_phases)})
+        phases[scenario] = [{'firstRequest': start, 'lastRequest': end-1} for start, end in zip(boundaries, boundaries[1:])]
+        for phase in phases[scenario]:
+            if ordered_phases:
+                phase['disturbance'] = any(p['disturbance'] and p['firstRequest'] <= phase['firstRequest'] <= p['lastRequest']
+                                           for p in ordered_phases)
     # Episode identity covers every input that changes behaviour, so IDs never
     # collide across studies that reuse policy names and seeds.
     study_identity = {'baselineDigest': file_hash(baseline_path), 'configurations': selected, 'targets': targets,
                       'latencyLimitMs': definition.latencyLimitMs, 'tokenBudget': definition.tokenBudget,
                       'minimumCalibrationPassRate': definition.minimumCalibrationPassRate}
+    if definition.tokenRateBudget is not None:
+        study_identity['tokenRateBudget'] = definition.tokenRateBudget.model_dump()
     episodes = []
     for seed in definition.seeds:
-        workload = [r['instanceId'] for r in ordered_workload(index, targets, seed)]
+        rows = [{**r, 'sizeBin': parent['requests'][r['instanceId']]['sizeBin']}
+                for r in ordered_workload(index, targets, seed)]
         for repeat in range(1, definition.repeats+1):
             for scenario, delays in definition.scenarios.items():
+                workload = (ordered(rows, orders[scenario], seed, scenario) if scenario in orders
+                            else [r['instanceId'] for r in rows])
                 for policy, config in definition.policies.items():
                     identity = {'policyName': policy, 'scenarioName': scenario, 'seed': seed, 'repeat': repeat}
                     behaviour = {**identity, 'policy': config.model_dump(), 'workload': workload,
@@ -277,33 +301,22 @@ def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42, allow_source_
                 'sequenceIndex': packet['sequenceIndex'], 'configuration': packet['selection']['configuration'],
                 'finalConfiguration': packet['observation']['configuration'] if packet['observation'] else None,
                 'controllerMs': packet['decision'].get('controllerMs')}
-        durations = [r['latencyMs'] for r in request_rows.values() if r['latencyMs'] is not None]
-        tokens = [r['tokens'] for r in request_rows.values() if r['tokens'] is not None]
-        quality = [r['passed'] for r in request_rows.values() if type(r['passed']) is bool]
-        limit = plan['definition'].get('latencyLimitMs')
-        row = {k:e[k] for k in ('id','policyName','scenarioName','seed','repeat')}
-        row.update({'planned':len(e['workload']), 'completed':len(request_rows),
-            'success':sum(r['status']=='success' for r in request_rows.values()),
-            'failure':sum(r['status'] not in ('success','unserved') for r in request_rows.values()),
-            'unserved':sum(r['status']=='unserved' for r in request_rows.values()),
-            'meanLatencyMs':mean(durations) if durations else None,
-            'deadlineMisses':sum(x>limit for x in durations) if limit is not None else None,
-            'knownTokens':sum(tokens) if tokens else None, 'tokenCoverage':len(tokens),
-            # Unknown totals contribute their known partial usage: a derived lower bound over all executions.
-            'tokensLowerBound':sum(r['tokenLowerBound'] for r in request_rows.values() if r['tokenLowerBound'] is not None),
-            'fallbacks':sum(len(r['attempts']) > 1 for r in request_rows.values()),
-            'wastedTokensLowerBound':sum(sum(a['observation']['tokens']['value'] if a['observation']['tokens']['value'] is not None
-                                             else a['observation']['tokens']['knownPartial'] or 0
-                                             for a in r['attempts'][:-1]) for r in request_rows.values()),
-            'passRate':mean(quality) if quality else None, 'evaluationCoverage':len(quality),
-            'probes':sum(r['probe'] for r in request_rows.values()),
-            'budgetOvershoot':max(0,sum(tokens)-plan['definition']['tokenBudget']) if tokens and plan['definition'].get('tokenBudget') else None})
-        row.update(_episode_details(list(request_rows.values()), len(e['workload']), limit,
-                                    plan['phases'][e['scenarioName']], e['scenario']))
-        summaries.append(row)
+        summaries.append(_summary({k: e[k] for k in ('id', 'policyName', 'scenarioName', 'seed', 'repeat')},
+                                  request_rows, len(e['workload']), plan, e['scenario']))
         key = (e['policyName'],e['scenarioName'],e['seed'],e['repeat'])
         by_arm[key] = request_rows
         complete[key] = len(request_rows) == len(e['workload'])
+    for name, arm in plan['definition'].get('derivedArms', {}).items():
+        for e in plan['episodes']:
+            if e['policyName'] != _first_fixed(plan):
+                continue
+            key = (name, e['scenarioName'], e['seed'], e['repeat'])
+            rows = _derived_rows(plan, arm, e, by_arm)
+            summaries.append(_summary({'id': None, 'policyName': name, 'scenarioName': e['scenarioName'],
+                                       'seed': e['seed'], 'repeat': e['repeat'], 'derived': True,
+                                       'provenance': 'derived'}, rows, len(e['workload']), plan, e['scenario']))
+            by_arm[key] = rows
+            complete[key] = len(rows) == len(e['workload'])
     limit = plan['definition'].get('latencyLimitMs')
     paired_metrics = {
         'latencyMs': lambda r: r['latencyMs'],
@@ -420,11 +433,115 @@ def _quantile(values, probability):
     return ordered[max(0, -(-int(probability*100)*len(ordered)//100)-1)] if ordered else None
 
 
-def _episode_details(rows, planned, limit, phases, effects):
+def _summary(identity, request_rows, planned, plan, effects):
+    from statistics import mean
+    rows = list(request_rows.values())
+    durations = [r['latencyMs'] for r in rows if r['latencyMs'] is not None]
+    tokens = [r['tokens'] for r in rows if r['tokens'] is not None]
+    quality = [r['passed'] for r in rows if type(r['passed']) is bool]
+    limit = plan['definition'].get('latencyLimitMs')
+    row = dict(identity)
+    row.update({'planned':planned, 'completed':len(rows),
+        'success':sum(r['status']=='success' for r in rows),
+        'failure':sum(r['status'] not in ('success','unserved') for r in rows),
+        'unserved':sum(r['status']=='unserved' for r in rows),
+        'meanLatencyMs':mean(durations) if durations else None,
+        'deadlineMisses':sum(x>limit for x in durations) if limit is not None else None,
+        'knownTokens':sum(tokens) if tokens else None, 'tokenCoverage':len(tokens),
+        # Unknown totals contribute their known partial usage: a derived lower bound over all executions.
+        'tokensLowerBound':sum(r['tokenLowerBound'] for r in rows if r['tokenLowerBound'] is not None),
+        'fallbacks':sum(len(r['attempts']) > 1 for r in rows),
+        'wastedTokensLowerBound':sum(sum(a['observation']['tokens']['value'] if a['observation']['tokens']['value'] is not None
+                                         else a['observation']['tokens']['knownPartial'] or 0
+                                         for a in r['attempts'][:-1]) for r in rows),
+        'passRate':mean(quality) if quality else None, 'evaluationCoverage':len(quality),
+        'probes':sum(r['probe'] for r in rows),
+        'budgetOvershoot':max(0,sum(tokens)-plan['definition']['tokenBudget']) if tokens and plan['definition'].get('tokenBudget') else None})
+    row.update(_episode_details(rows, planned, limit, plan['phases'][identity['scenarioName']], effects,
+                                plan['definition'].get('tokenRateBudget')))
+    return row
+
+
+def _first_fixed(plan):
+    return next(name for name, policy in plan['definition']['policies'].items() if policy['type'] == 'fixed')
+
+
+def _derived_rows(plan, arm, episode, by_arm):
+    """Request rows of a derived arm, assembled from the fixed arms' rows for the same requests.
+
+    Valid only because requests run one at a time and independently of earlier ones; marked derived."""
+    fixed = {policy['configuration']: name for name, policy in plan['definition']['policies'].items()
+             if policy['type'] == 'fixed'}
+    key = (episode['scenarioName'], episode['seed'], episode['repeat'])
+    source = {cid: by_arm.get((name, *key), {}) for cid, name in fixed.items()}
+    workload = episode['workload']
+    if arm['type'] == 'budget-oracle':
+        # The whole sequence is optimised, so it needs every fixed arm's row for every request.
+        if any(source[cid].get(i, {}).get('latencyMs') is None for cid in source for i in workload):
+            return {}
+        choices = _budget_oracle(plan, workload, source)
+    else:
+        disturbed = {i for phase in plan['phases'][episode['scenarioName']] if phase.get('disturbance')
+                     for i in range(phase['firstRequest'], phase['lastRequest']+1)}
+        choices = []
+        for position, instance in enumerate(workload, 1):
+            if arm['type'] == 'phase-oracle':
+                choices.append(arm['disturbance'] if position in disturbed else arm['normal'])
+            else:
+                mapping = arm['default']
+                for phase in arm['phases']:
+                    if phase['firstRequest'] <= position <= phase['lastRequest']:
+                        mapping = phase['configurationBySize']
+                choices.append(mapping.get(plan['requests'][instance]['sizeBin']))
+    rows = {}
+    for position, (instance, cid) in enumerate(zip(workload, choices), 1):
+        row = source.get(cid, {}).get(instance)
+        if row is not None:
+            rows[instance] = {**row, 'sequenceIndex': position, 'probe': False, 'configuration': cid,
+                              'finalConfiguration': cid, 'controllerMs': None}
+    return rows
+
+
+def _budget_oracle(plan, workload, source):
+    """Exact search over the last window-1 choices: fewest excess requests, then misses, then latency."""
+    rate = plan['definition']['tokenRateBudget']
+    limit = plan['definition'].get('latencyLimitMs')
+    window, budget = rate['window'], rate['perRequest']
+    configurations = sorted(source)
+    if len(configurations)**(window-1) > 200000:
+        raise ValueError('budget oracle search space too large')
+    states = {(): ((0, 0, 0.0), [])}
+    for position, instance in enumerate(workload):
+        nxt = {}
+        for history, (score, path) in states.items():
+            for cid in configurations:
+                row = source[cid][instance]
+                spent = [source[c][workload[position-len(history)+i]]['tokenLowerBound'] or 0
+                         for i, c in enumerate(history)] + [row['tokenLowerBound'] or 0]
+                excess = sum(spent)/window > budget
+                miss = limit is not None and row['latencyMs'] > limit
+                value = (score[0]+excess, score[1]+miss, score[2]+row['latencyMs'])
+                state = (history + (cid,))[-(window-1):] if window > 1 else ()
+                if state not in nxt or value < nxt[state][0]:
+                    nxt[state] = (value, path+[cid])
+        states = nxt
+    return min(states.values())[1]
+
+
+def _excess_flags(rows, rate):
+    """Per request: does the trailing-window mean of served tokens exceed the per-request budget?"""
+    served = [r for r in rows if r['status'] != 'unserved']
+    spent = [r['tokenLowerBound'] or 0 for r in served]
+    return {r['sequenceIndex']: sum(spent[max(0, i+1-rate['window']):i+1])/rate['window'] > rate['perRequest']
+            for i, r in enumerate(served)}
+
+
+def _episode_details(rows, planned, limit, phases, effects, rate=None):
     """Derived per-episode metrics: all-request quality, switching, probe cost, overhead, phases, lags."""
     from statistics import mean
-    from .replay import _lags
+    from .replay import _lags, _phase_lags
     rows = sorted(rows, key=lambda r: r['sequenceIndex'])
+    excess = _excess_flags(rows, rate) if rate else {}
     routed = [r['configuration'] for r in rows if not r['probe'] and r['configuration']]
     probes = [r for r in rows if r['probe']]
     overhead = [r['controllerMs'] for r in rows if r['controllerMs'] is not None]
@@ -439,17 +556,21 @@ def _episode_details(rows, planned, limit, phases, effects):
             'meanLatencyMs': mean(latencies) if latencies else None,
             'tokensLowerBound': sum(r['tokenLowerBound'] or 0 for r in inside),
             'failures': sum(r['status'] not in ('success', 'unserved') for r in inside),
-            'passed': sum(r['passed'] is True for r in inside)})
+            'passed': sum(r['passed'] is True for r in inside),
+            'budgetExcess': sum(excess.get(r['sequenceIndex'], False) for r in inside) if rate else None})
     return {'passRateAllRequests': sum(r['passed'] is True for r in rows)/planned if planned else None,
             'switches': sum(a != b for a, b in zip(routed, routed[1:])),
             'probeTokensLowerBound': sum(r['tokenLowerBound'] or 0 for r in probes),
             'probeDeadlineMisses': sum(missed(r) for r in probes) if limit is not None else None,
             'controllerMsP50': _quantile(overhead, .5), 'controllerMsP95': _quantile(overhead, .95),
-            'phaseSummaries': phase_rows, 'lags': _lags(rows, effects)}
+            'budgetExcess': sum(excess.values()) if rate else None,
+            'phaseSummaries': phase_rows,
+            'lags': _lags(rows, effects) + (_phase_lags(rows, {'phases': phases})
+                                            if any(p.get('disturbance') for p in phases) else [])}
 
 
 ARM_FIELDS = ('completed', 'success', 'failure', 'unserved', 'meanLatencyMs', 'deadlineMisses', 'knownTokens',
-              'tokensLowerBound', 'passRate', 'passRateAllRequests', 'probes', 'fallbacks', 'switches',
+              'tokensLowerBound', 'passRate', 'passRateAllRequests', 'probes', 'fallbacks', 'switches', 'budgetExcess',
               'probeTokensLowerBound', 'controllerMsP95')
 
 
@@ -588,7 +709,7 @@ def _tradeoff_plots(root, plan, arms):
     """Per scenario: token lower bound per request against deadline-miss (or failure) rate, one point per policy."""
     plots = []
     limit = plan['definition'].get('latencyLimitMs')
-    order = list(plan['definition']['policies'])
+    order = [*plan['definition']['policies'], *plan['definition'].get('derivedArms', {})]
     colors = {name: SERIES[i % len(SERIES)] for i, name in enumerate(order)}
     for scenario in plan['definition']['scenarios']:
         points = []
