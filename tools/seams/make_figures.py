@@ -225,6 +225,69 @@ def fig_limit_sweep(out, fmt):
     fig.savefig(out / f'replay-limit-sweep.{fmt}', bbox_inches='tight')
 
 
+BIN_MARKERS = {'small': 'o', 'medium': 's', 'large': '^'}
+CONFIG_COLORS = {'inline-code-full': COLORS['inline'], 'local-mcp-direct': COLORS['direct']}
+
+
+def fig_deadline_origin(out, fmt):
+    """Calibration requests per configuration and size bin, with p90 and the candidate limits (how 7 s was chosen)."""
+    import random
+    observations = json.load(open('baselines/repoqa-long64-v3/frozen.json'))['payload']['observations']
+    rng = random.Random(0)
+    fig, ax = plt.subplots(figsize=NARROW)
+    groups = [(c, b) for c in CONFIG_COLORS for b in BIN_MARKERS]
+    for x, (config, size) in enumerate(groups):
+        ys = sorted(o['durationMs']/1000 for o in observations if o['configuration'] == config and o['sizeBin'] == size)
+        ax.scatter([x + rng.uniform(-.25, .25) for _ in ys], ys, s=5, alpha=.5, color=CONFIG_COLORS[config],
+                   marker=BIN_MARKERS[size], linewidths=0)
+        p90 = ys[max(0, -(-9*len(ys)//10)-1)]
+        ax.plot([x-.35, x+.35], [p90, p90], color='k', lw=1)
+        ax.text(x, p90 + .25, f'{p90:.1f}', ha='center', fontsize=6)
+    for limit in (6, 8):
+        ax.axhline(limit, color='0.6', lw=.6, ls=':')
+    ax.axhline(7, color='#d62728', lw=1)
+    ax.text(-.45, 7.2, 'limit 7 s (candidates 6, 8 s dotted)', color='#d62728', ha='left', fontsize=6)
+    ax.set_xticks(range(6), ['small', 'medium', 'large'] * 2)
+    ax.text(1, -.17, 'inline', transform=ax.get_xaxis_transform(), ha='center', fontsize=8)
+    ax.text(4, -.17, 'MCP direct', transform=ax.get_xaxis_transform(), ha='center', fontsize=8)
+    ax.set_ylabel('request latency (s)')
+    ax.set_ylim(0, 14)
+    ax.set_title('Calibration (4 targets, 48 requests per bar); bars: p90', fontsize=7)
+    fig.tight_layout()
+    fig.savefig(out / f'deadline-origin.{fmt}', bbox_inches='tight')
+
+
+def fig_requests(out, fmt, seed=301):
+    """Live S-E′, inline delayed, one seed: every request's latency, configuration, size bin, and misses."""
+    prep, rows, _ = se3.load(LIVE)
+    bins = {rid: r['sizeBin'] for rid, r in prep['requests'].items()}
+    arms = [('inline', 'fixed inline'), ('frozen', 'frozen router'), ('v2', 'adaptive v2'), ('direct', 'fixed direct')]
+    fig, axes = plt.subplots(len(arms), 1, figsize=(7.0, 6.4), sharex=True, sharey=True)
+    for ax, (arm, title) in zip(axes, arms):
+        episode = rows[(arm, 'inline-degraded', seed)]
+        for i, r in sorted(episode.items()):
+            y = r['durationMs']/1000
+            missed = y > se3.LIMIT/1000
+            ax.scatter(i, y, s=16, marker=BIN_MARKERS[bins[r['requestId']]], color=CONFIG_COLORS[r['configuration']],
+                       edgecolors='#d62728' if missed else 'none', linewidths=.9 if missed else 0, zorder=3)
+            if r['probe']:
+                ax.scatter(i, y, s=40, marker='o', facecolors='none', edgecolors='k', linewidths=.5, zorder=4)
+        ax.axhline(se3.LIMIT/1000, color='#d62728', lw=1)
+        ax.axvspan(30.5, 60.5, color='0.92', zorder=0)
+        counts = [sum(episode[i]['durationMs'] > se3.LIMIT for i in episode if lo <= i <= hi) for lo, hi in se3.PHASES]
+        ax.set_title(f'{title}: misses {counts[0]} / {counts[1]} / {counts[2]} (total {sum(counts)})', loc='left')
+        ax.set_ylabel('latency (s)')
+    axes[-1].set_xlabel(f'request position in the episode (seed {seed}; requests 31–60 shaded: inline +9 s)')
+    handles = [plt.Line2D([], [], ls='', marker='o', color=c, label=l) for c, l in
+               ((COLORS['inline'], 'ran inline'), (COLORS['direct'], 'ran MCP direct'))]
+    handles += [plt.Line2D([], [], ls='', marker=m, color='0.4', mfc='none', label=f'{b} context') for b, m in BIN_MARKERS.items()]
+    handles += [plt.Line2D([], [], ls='', marker='o', color='0.6', mec='#d62728', label='missed 7 s'),
+                plt.Line2D([], [], ls='', marker='o', mfc='none', mec='k', ms=8, label='probe')]
+    axes[0].legend(handles=handles, frameon=False, ncol=4, loc='upper left', bbox_to_anchor=(0, 1.55))
+    fig.tight_layout()
+    fig.savefig(out / f'se-requests.{fmt}', bbox_inches='tight')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', default='docs/seams2027/figures')
@@ -232,7 +295,8 @@ def main():
     args = parser.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    for make in (fig_opportunity, fig_timeline, fig_tradeoff, fig_pilots, fig_round_trip, fig_quota, fig_limit_sweep):
+    for make in (fig_opportunity, fig_timeline, fig_tradeoff, fig_pilots, fig_round_trip, fig_quota, fig_limit_sweep,
+                 fig_deadline_origin, fig_requests):
         make(out, args.format)
         print('wrote', make.__name__)
 
