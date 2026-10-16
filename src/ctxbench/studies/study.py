@@ -8,33 +8,55 @@ from .baseline import file_hash, prepared_path, verify, VERSION
 from .models import Study
 
 
-def _verify_inputs(plan, allow_source_drift=False):
+def parse_path_map(entries):
+    """`OLD=NEW` relocations of recorded absolute paths, longest prefix first."""
+    pairs = []
+    for entry in entries or ():
+        old, sep, new = str(entry).partition('=')
+        if not sep or not Path(old).is_absolute() or not new:
+            raise ValueError(f'path map entry must be OLD=NEW with an absolute OLD: {entry}')
+        pairs.append((old.rstrip('/'), str(Path(new).resolve())))
+    return sorted(pairs, key=lambda pair: -len(pair[0]))
+
+
+def local_path(recorded, path_map=()):
+    """Where a recorded absolute path lives now. Read-only: the sealed plan is never rewritten."""
+    text = str(recorded)
+    for old, new in path_map:
+        if text == old or text.startswith(old + '/'):
+            return Path(new + text[len(old):])
+    return Path(text)
+
+
+def _verify_inputs(plan, allow_source_drift=False, path_map=()):
     """Strict by default; read-only callers may tolerate measurement-source drift only."""
-    if not allow_source_drift:
+    if not allow_source_drift and not path_map:
         verify(plan)
         return []
     from ctxbench.adapters.repoqa.study import tree_hash
     from .baseline import measurement_sources
     if plan['schemaVersion'] != VERSION:
         raise ValueError('unsupported study manifest version')
-    if file_hash(plan['experimentPath']) != plan['experimentHash']:
+    if file_hash(local_path(plan['experimentPath'], path_map)) != plan['experimentHash']:
         raise ValueError('experiment fingerprint mismatch')
-    if tree_hash(Path(plan['datasetRoot'])) != plan['datasetHash']:
+    if tree_hash(local_path(plan['datasetRoot'], path_map)) != plan['datasetHash']:
         raise ValueError('dataset fingerprint mismatch')
     current, recorded = measurement_sources(), plan['sources']
     drift = sorted(name for name in set(current['files']) | set(recorded['files'])
                    if current['files'].get(name) != recorded['files'].get(name))
     drift += [key for key in ('runtime', 'definitionSchema') if current[key] != recorded[key]]
+    if drift and not allow_source_drift:
+        raise ValueError('measurement source fingerprint mismatch')
     return drift
 
 
-def verify_frozen(frozen, path, *, allow_source_drift=False):
+def verify_frozen(frozen, path, *, allow_source_drift=False, path_map=()):
     if frozen['schemaVersion'] != VERSION or frozen['kind'] != 'frozen-baseline':
         raise ValueError('unsupported frozen baseline')
     plan = frozen['plan']
     if frozen['preparedDigest'] != digest(plan):
         raise ValueError('baseline plan digest mismatch')
-    _verify_inputs(plan, allow_source_drift)
+    _verify_inputs(plan, allow_source_drift, path_map)
     for relative, expected in frozen['artifacts'].items():
         artifact = path.parent / relative
         if not artifact.is_file() or file_hash(artifact) != expected:
@@ -166,15 +188,15 @@ def prepare(*, definition, output):
     return {'prepared': str(output / 'prepared.json'), 'episodes': len(episodes), 'baselineDigest': plan['baselineDigest']}
 
 
-def verify_study(plan, *, allow_source_drift=False):
+def verify_study(plan, *, allow_source_drift=False, path_map=()):
     """Return drifted measurement sources; empty unless drift is explicitly allowed."""
     if plan['kind'] != 'study':
         raise ValueError('expected prepared study')
-    drift = _verify_inputs(plan, allow_source_drift)
-    path = Path(plan['baselinePath'])
+    drift = _verify_inputs(plan, allow_source_drift, path_map)
+    path = local_path(plan['baselinePath'], path_map)
     if file_hash(path) != plan['baselineDigest']:
         raise ValueError('frozen baseline digest mismatch')
-    verify_frozen(sealed_read(path), path, allow_source_drift=allow_source_drift)
+    verify_frozen(sealed_read(path), path, allow_source_drift=allow_source_drift, path_map=path_map)
     return drift
 
 
@@ -197,11 +219,11 @@ def episode(*, prepared, policy, scenario, seed, repeat, resume=False, retry_unc
     return {'episode': matches[0]['id'], 'completedRequests': len(packets)}
 
 
-def status(path, *, allow_source_drift=False):
+def status(path, *, allow_source_drift=False, path_map=None):
     from ctxbench.adaptive.study_runner import load_packets
     path = prepared_path(path)
     plan = sealed_read(path)
-    drift = verify_study(plan, allow_source_drift=allow_source_drift)
+    drift = verify_study(plan, allow_source_drift=allow_source_drift, path_map=parse_path_map(path_map))
     matrix = []
     for e in plan['episodes']:
         packets = load_packets(path.parent / 'episodes' / e['id'])
@@ -215,7 +237,7 @@ def status(path, *, allow_source_drift=False):
     return report
 
 
-def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42, allow_source_drift=False):
+def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42, allow_source_drift=False, path_map=None):
     """Paired descriptive analysis. Bootstrap units are targets within language."""
     import json
     import random
@@ -225,7 +247,7 @@ def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42, allow_source_
     from ctxbench.adaptive.recovery import write
     path = prepared_path(path)
     plan = sealed_read(path)
-    drift = verify_study(plan, allow_source_drift=allow_source_drift)
+    drift = verify_study(plan, allow_source_drift=allow_source_drift, path_map=parse_path_map(path_map))
     if type(bootstrap_replicates) is not int or bootstrap_replicates < 1:
         raise ValueError('bootstrap_replicates must be a positive integer')
     summaries, by_arm, complete = [], {}, {}

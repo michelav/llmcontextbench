@@ -124,9 +124,24 @@ fingerprint mismatch". In that case add `--allow-source-drift`: it skips only th
 fingerprint, still checks every data hash, and records the drifted files under
 `sourceDrift` in `analysis.json`.
 
+**Another location.** The prepared study and the frozen baseline record absolute paths from the
+original checkout (`/home/<author>/…/llmcontextbench`; `<repo>` in the anonymized copy). Map
+them to the extracted data and the checkout with `--path-map OLD=NEW`. It changes only where
+files are read; every hash is still checked:
+
+```bash
+R=$(jq -r .payload.baselinePath studies/seams3-inline-degradation/prepared.json | sed 's#/baselines/.*##')
+llmctxbench study analyze studies/seams3-inline-degradation --allow-source-drift \
+  --path-map $R/baselines=$PWD/baselines --path-map $R=$PWD
+```
+
 Checked on 2026-10-15 in a fresh checkout with the full archive and uv 0.11.32:
 `study analyze --allow-source-drift` reported `sourceDrift: [".../_virtualenv.py"]` and an
-`analysis.json` otherwise identical to the original.
+`analysis.json` otherwise identical to the original. That check could still reach the original
+checkout through the recorded paths. On 2026-10-16 it was repeated with the original checkout
+hidden (`bwrap`), the tool cloned at `seams2027-paper` and the data outside it: `status` and
+`analyze` passed with `--path-map`; `analysis.json` and the timeline plots were identical except
+for `sourceDrift`, and the figures, tables and S-E′ summary were byte-identical.
 
 ## D. Re-collect with the provider (costs tokens)
 

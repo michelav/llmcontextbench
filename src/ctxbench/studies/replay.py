@@ -165,7 +165,7 @@ def plan_from_baseline(path, configurations=None, definition=None):
             'calibrationSizeMix': _calibration_size_mix(parent)}
 
 
-def replay(*, grid, prepared=None, baseline=None, output=None, replicates=None):
+def replay(*, grid, prepared=None, baseline=None, output=None, replicates=None, path_map=None):
     """Run every grid point × policy × seed × replicate; report opportunity and capture per point."""
     spec = json.loads(Path(grid).read_text())
     if spec.get('schemaVersion') != VERSION:
@@ -177,7 +177,9 @@ def replay(*, grid, prepared=None, baseline=None, output=None, replicates=None):
     else:
         path = Path(prepared).resolve()
         plan = sealed_read(path if path.is_file() else path/'prepared.json')
-        plan = {**plan, 'definition': {**plan['definition'], **spec.get('base', {})}}
+        from .study import local_path, parse_path_map
+        plan = {**plan, 'definition': {**plan['definition'], **spec.get('base', {})},
+                'baselinePath': str(local_path(plan['baselinePath'], parse_path_map(path_map)))}
     policies = {name: policy.model_dump() for name, policy in POLICIES.validate_python(spec['policies']).items()}
     pool = load_pool(plan)
     missing = sorted({cid for cid in plan['configurations'] for size in plan['estimates'][cid]

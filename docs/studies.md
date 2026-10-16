@@ -224,6 +224,24 @@ artifact hashes are still checked, and the report lists the changed sources unde
 collection needs a compatible baseline. The v1 long64 baseline and studies were
 measured at the tag `seams-v1-studies`; check it out to reproduce them exactly.
 
+## Re-analysing studies in another location
+
+Prepared studies and frozen baselines record the absolute paths of the experiment,
+the dataset and the frozen baseline where they were prepared. Episode logs and
+frozen artifacts are found relative to their own directories. To verify a study
+copied to another machine or directory, map each recorded prefix to its new place:
+
+```bash
+llmctxbench study status studies/seams3-inline-degradation \
+  --path-map /old/checkout/baselines=$PWD/baselines --path-map /old/checkout=$PWD/tool
+```
+
+`--path-map OLD=NEW` is accepted by `status`, `analyze` and `replay --prepared`,
+can be repeated, and the longest matching `OLD` wins. It only changes where files
+are read: every hash is still checked, the sealed `prepared.json` is not rewritten,
+and source drift still needs `--allow-source-drift`. `prepare` and `episode` do not
+accept it.
+
 Paired bootstrap intervals iterate requests and target clusters in sorted order,
 so `analyze` output is deterministic for a given seed. Analyses written before
 this fix depended on Python hash randomisation; their mean differences are

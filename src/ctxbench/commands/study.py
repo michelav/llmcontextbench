@@ -49,6 +49,9 @@ def register_study_commands(parser):
     for command in (status, analyze):
         command.add_argument('--allow-source-drift', action='store_true',
                              help='Read-only: tolerate changed measurement sources; reports list them as sourceDrift')
+    for command in (status, analyze, replay):
+        command.add_argument('--path-map', action='append', metavar='OLD=NEW',
+                             help='Read-only: find recorded absolute paths under OLD at NEW (repeatable; longest OLD wins)')
     for command in sub.choices.values():
         if command.get_default('func') is None and command.prog.rsplit(' ', 1)[-1] != 'baseline':
             command.set_defaults(func=study_command)

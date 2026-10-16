@@ -110,6 +110,38 @@ def test_source_drift_allowed_only_for_read_only_commands(frozen, tmp_path, monk
         study.prepare(definition=definition, output=tmp_path/'study-drift-new')
 
 
+def test_path_map_relocates_recorded_paths_read_only(frozen, tmp_path, monkeypatch):
+    path = Path(study.prepare(definition=make_study(tmp_path, frozen), output=tmp_path/'study-moved')['prepared'])
+    sealed = path.read_bytes()
+    moved = tmp_path/'elsewhere'
+    moved.mkdir()
+    (tmp_path/'baseline').rename(moved/'baseline')
+    (tmp_path/'experiment.json').rename(moved/'experiment.json')
+    with pytest.raises(FileNotFoundError):
+        study.status(path)
+    path_map = [f'{tmp_path}={moved}']
+    assert 'sourceDrift' not in study.status(path, path_map=path_map)
+    assert 'sourceDrift' not in study.analyze(path, bootstrap_replicates=10, path_map=path_map)
+    assert path.read_bytes() == sealed
+    original = baseline.measurement_sources()
+    drifted = {**original, 'files': {**original['files'], 'src/ctxbench/adaptive/study_runner.py': 'changed'}}
+    monkeypatch.setattr(baseline, 'measurement_sources', lambda: drifted)
+    with pytest.raises(ValueError, match='measurement source fingerprint mismatch'):
+        study.status(path, path_map=path_map)
+    assert study.status(path, path_map=path_map, allow_source_drift=True)['sourceDrift'] == \
+        ['src/ctxbench/adaptive/study_runner.py']
+
+
+def test_path_map_entries_and_longest_prefix():
+    pairs = study.parse_path_map(['/old=/new', '/old/baselines=/data/baselines'])
+    assert study.local_path('/old/baselines/v3/frozen.json', pairs) == Path('/data/baselines/v3/frozen.json')
+    assert study.local_path('/old/experiment.json', pairs) == Path('/new/experiment.json')
+    assert study.local_path('/older/x', pairs) == Path('/older/x')
+    for bad in ('relative=/new', '/old', '/old='):
+        with pytest.raises(ValueError, match='OLD=NEW'):
+            study.parse_path_map([bad])
+
+
 def test_no_source_drift_key_without_drift(frozen, tmp_path):
     path = Path(study.prepare(definition=make_study(tmp_path, frozen), output=tmp_path/'study-clean')['prepared'])
     assert 'sourceDrift' not in study.status(path, allow_source_drift=True)
