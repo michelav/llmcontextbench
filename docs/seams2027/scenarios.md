@@ -166,7 +166,8 @@ python tools/seams/make_tables.py                    # docs/seams2027/tables/*.t
 | `figures/pilots-p3.pdf` | P3 (lean fallback) against P3′ (direct fallback), misses per phase |
 | `figures/replay-round-trip.pdf` | replay: misses against per-call delay for each surface |
 | `figures/deadline-origin.pdf` | calibration latency per configuration and size bin: box plots with whiskers at p10 and p90 (the rule uses p90), the 7 s limit and the 6 and 8 s candidates |
-| `figures/se-requests.pdf` | S-E′ live, seed 301, inline delayed: all requests of five arms in one plot; marker = arm, router misses coloured by size bin, fixed arms in grey |
+| `figures/se-requests.pdf` | S-E′ live, inline delayed, all 5 seeds: every request in grey, frozen, v1 and v2 misses in colour (n in the legend); inset: share of seeds missing per position (5-request moving mean) |
+| `figures/se-request-plane.pdf` | S-E′ live, inline delayed, all 5 seeds: tokens against latency per request; frozen, v1 and v2 requests during the delay in colour |
 | `figures/replay-limit-sweep.pdf` | replay: S-E′ arms across limits 5–10 s, without and with the delay and summed; live S-E′ means at 7 s (exploratory, after collection) |
 | `figures/replay-quota-attribution.pdf` | replay S-B′: quota-phase misses by configuration and quota wait |
 | `tables/catalogue.tex` | v3 calibration catalogue |
