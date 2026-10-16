@@ -319,3 +319,11 @@ Exploratory replay of two further scenarios on v2 calibration (pair inline + MCP
 - `limit_sweep_grid()` in `tools/seams/make_grids.py`; the replay at limits 5–10 s took 9 s; figure `docs/seams2027/figures/replay-limit-sweep.pdf`.
 - Summed over both scenarios, v2 is the best non-oracle arm from 5 to 7 s. Fixed direct ties it at 7.5 s and wins from 8 s, at about 310k tokens per episode against v2's 500k–950k.
 - So adaptation pays off when the cheap fallback is not reliably feasible on its own (limit below its p90) but is still far better than the degraded incumbent.
+
+## 2026-10-15 — SEAMS artifact
+
+- `docs/seams2027/ARTIFACT.md`: claims mapped to evidence, four reproduction levels, exact commands, hashes, costs, provenance and limitations.
+- `tools/seams/make_archive.sh`: a deterministic data archive (about 84 MB, 15,671 files with sha256), plus `--anonymize` for double-blind review, which replaces the absolute repository path.
+- Checked: both archives regenerate the committed figures and tables byte-for-byte, and the v3 selection records reproduce.
+- In a fresh checkout, `study analyze` failed the source fingerprint. The fingerprint includes `tools/repoqa/.venv`, where uv writes `_virtualenv.py` itself, and that file differs between uv 0.11.14 (the version at freeze) and 0.11.32.
+- `--allow-source-drift` reproduced `analysis.json` exactly, flagging only that file. This is documented and not fixed: `baseline.py` is itself fingerprinted.
