@@ -266,9 +266,10 @@ def fig_deadline_origin(out, fmt):
     fig.savefig(out / f'deadline-origin.{fmt}', bbox_inches='tight')
 
 
-ROUTER_MARKERS = {'frozen': 's', 'v1': '^', 'v2': 'o'}
+ROUTERS = ('frozen', 'v1', 'v2')
 ROUTER_NAMES = {'frozen': 'frozen router', 'v1': 'adaptive v1', 'v2': 'adaptive v2'}
 GREY = '0.82'
+INLINE = 'inline-code-full'
 
 
 def degraded_requests():
@@ -278,36 +279,59 @@ def degraded_requests():
             if scenario == 'inline-degraded' for i, r in sorted(episode.items())]
 
 
+def dots(ax, xs, ys, color, size=9, highlight=False, zorder=3):
+    """Borderless circles; a black border marks the requests the caption explains."""
+    ax.scatter(xs, ys, s=size, color=color, linewidths=.7 if highlight else 0, edgecolors='k' if highlight else 'none',
+               zorder=zorder + highlight)
+
+
+def callout(ax, text, xy, xytext):
+    ax.annotate(text, xy=xy, xytext=xytext, fontsize=6.5, ha='center', va='center', zorder=6,
+                bbox={'boxstyle': 'round,pad=.25', 'fc': 'white', 'ec': '0.4', 'lw': .5},
+                arrowprops={'arrowstyle': '-', 'color': '0.3', 'lw': .5})
+
+
 def fig_requests(out, fmt):
-    """Live S-E', inline delayed, all seeds: every request in grey, router misses in colour, per-position miss share inset."""
+    """Live S-E', inline delayed, all seeds: every request in grey, router misses in colour, two v2 groups outlined."""
     import random
     requests = degraded_requests()
     seeds = sorted({seed for _, seed, *_ in requests})
-    limit = se3.LIMIT/1000
     rng = random.Random(0)
+    jitter = lambda i: i + rng.uniform(-.35, .35)
     fig, ax = plt.subplots(figsize=(7.0, 3.6))
     ax.axvspan(30.5, 60.5, color='0.95', zorder=0)
     ax.text(45.5, 23.3, 'inline +9 s (requests 31-60)', ha='center', va='top', fontsize=6.5, color='0.35')
-    ax.scatter([i + rng.uniform(-.35, .35) for _, _, i, _, _ in requests], [r['durationMs']/1000 for *_, r in requests],
-               s=7, color=GREY, linewidths=0, zorder=1)
-    handles = [plt.Line2D([], [], ls='', marker='o', color=GREY, label=f'all requests, 6 arms (n={len(requests)})')]
-    for arm, marker in ROUTER_MARKERS.items():
-        missed = [(i, r['durationMs']/1000) for a, _, i, _, r in requests if a == arm and r['durationMs'] > se3.LIMIT]
-        ax.scatter([i + rng.uniform(-.35, .35) for i, _ in missed], [y for _, y in missed], s=14, marker=marker,
-                   color=COLORS[arm], edgecolors='k', linewidths=.25, alpha=.85, zorder=3)
-        handles.append(plt.Line2D([], [], ls='', marker=marker, color=COLORS[arm], mec='k', mew=.25,
+    dots(ax, [jitter(i) for _, _, i, _, _ in requests], [r['durationMs']/1000 for *_, r in requests], GREY, 6, zorder=1)
+    handles = [plt.Line2D([], [], ls='', marker='o', mew=0, color=GREY, label=f'all requests, 6 arms (n={len(requests)})')]
+    probes, late = [], []
+    for arm in ROUTERS:
+        missed = [(i, r) for a, _, i, _, r in requests if a == arm and r['durationMs'] > se3.LIMIT]
+        for i, r in missed:
+            if arm == 'v2' and 31 <= i <= 60 and r['probe']:
+                probes.append((jitter(i), r['durationMs']/1000))
+            elif arm == 'v2' and i > 60 and r['configuration'] != INLINE:
+                late.append((jitter(i), r['durationMs']/1000))
+            else:
+                dots(ax, jitter(i), r['durationMs']/1000, COLORS[arm])
+        handles.append(plt.Line2D([], [], ls='', marker='o', mew=0, color=COLORS[arm],
                                   label=f'{ROUTER_NAMES[arm]} misses (n={len(missed)})'))
-    ax.axhline(limit, color='k', lw=1, ls='--', zorder=4)
+    for group in (probes, late):
+        dots(ax, [x for x, _ in group], [y for _, y in group], COLORS['v2'], highlight=True)
+    callout(ax, f'v2 probes inline during the delay:\n{len(probes)} of its {sum(1 for a, _, i, _, r in requests if a == "v2" and 31 <= i <= 60 and r["durationMs"] > se3.LIMIT)} misses there',
+            (47, 15.5), (40, 20.5))
+    callout(ax, f'v2 stays on direct after the delay\n(back to inline 1-13 requests later): {len(late)} misses',
+            (75, 9.5), (80, 13.2))
+    ax.axhline(se3.LIMIT/1000, color='k', lw=1, ls='--', zorder=5)
     handles.append(plt.Line2D([], [], color='k', ls='--', label='latency limit 7 s'))
     ax.set_xlim(0, 97)
     ax.set_ylim(0, 24)
     ax.set_xlabel(f'request position in the episode ({len(seeds)} seeds, {min(seeds)}-{max(seeds)})')
     ax.set_ylabel('request latency (s)')
     ax.legend(handles=handles, loc='upper left', fontsize=6.5, framealpha=.95)
-    inset = ax.inset_axes([.665, .64, .325, .33])
+    inset = ax.inset_axes([.73, .71, .26, .26])
     inset.axvspan(30.5, 60.5, color='0.95')
     window = 5
-    for arm in ROUTER_MARKERS:
+    for arm in ROUTERS:
         miss = {i: 0 for i in range(1, 97)}
         for a, _, i, _, r in requests:
             if a == arm:
@@ -317,45 +341,55 @@ def fig_requests(out, fmt):
         inset.plot(range(1, 97), share, color=COLORS[arm], lw=1)
     inset.set_xlim(1, 96)
     inset.set_ylim(0, 1.05)
-    inset.set_title(f'share of seeds missing, {window}-request moving mean', fontsize=6)
+    inset.set_title(f'share of seeds missing ({window}-request mean)', fontsize=6)
     inset.tick_params(labelsize=5.5)
     inset.set_xticks([1, 31, 61, 96])
     fig.tight_layout()
     fig.savefig(out / f'se-requests.{fmt}', bbox_inches='tight')
 
 
-def fig_request_plane(out, fmt):
-    """Live S-E', inline delayed, all seeds: tokens against latency per request; router requests during the delay in colour."""
+VARIANTS = ('2k', '4k', '8k', '16k', '32k', '64k')
+
+
+def fig_request_sizes(out, fmt):
+    """Live S-E', inline delayed, all seeds: latency per context size; router requests during the delay side by side."""
+    import random
     requests = degraded_requests()
-    limit = se3.LIMIT/1000
+    rng = random.Random(0)
     fig, ax = plt.subplots(figsize=(7.0, 3.6))
-    ax.scatter([se3.tokens(r)/1000 for *_, r in requests], [r['durationMs']/1000 for *_, r in requests],
-               s=7, color=GREY, linewidths=0, zorder=1)
-    handles = [plt.Line2D([], [], ls='', marker='o', color=GREY, label=f'all requests, 6 arms (n={len(requests)})')]
-    for arm, marker in ROUTER_MARKERS.items():
-        delayed = [r for a, _, i, _, r in requests if a == arm and 31 <= i <= 60]
-        ax.scatter([se3.tokens(r)/1000 for r in delayed], [r['durationMs']/1000 for r in delayed], s=14, marker=marker,
-                   color=COLORS[arm], edgecolors='k', linewidths=.25, alpha=.8, zorder=3)
-        missed = sum(r['durationMs'] > se3.LIMIT for r in delayed)
-        handles.append(plt.Line2D([], [], ls='', marker=marker, color=COLORS[arm], mec='k', mew=.25,
+    for k in range(1, len(VARIANTS), 2):
+        ax.axvspan(k - .5, k + .5, color='0.97', zorder=0)
+    x = lambda request: VARIANTS.index(request['variant'])
+    dots(ax, [x(q) + rng.uniform(-.42, .42) for *_, q, _ in requests], [r['durationMs']/1000 for *_, r in requests],
+         GREY, 6, zorder=1)
+    handles = [plt.Line2D([], [], ls='', marker='o', mew=0, color=GREY, label=f'all requests, 6 arms (n={len(requests)})')]
+    reverted = []
+    for offset, arm in zip((-.27, 0, .27), ROUTERS):
+        delayed = [(q, r) for a, _, i, q, r in requests if a == arm and 31 <= i <= 60]
+        for q, r in delayed:
+            point = (x(q) + offset + rng.uniform(-.1, .1), r['durationMs']/1000)
+            if arm == 'v2' and r['configuration'] == INLINE and not r['probe'] and r['durationMs'] > se3.LIMIT:
+                reverted.append(point)
+            else:
+                dots(ax, *point, COLORS[arm])
+        missed = sum(r['durationMs'] > se3.LIMIT for _, r in delayed)
+        handles.append(plt.Line2D([], [], ls='', marker='o', mew=0, color=COLORS[arm],
                                   label=f'{ROUTER_NAMES[arm]}, requests 31-60 (n={len(delayed)}, {missed} missed)'))
-    ax.axhline(limit, color='k', lw=1, ls='--', zorder=4)
+    dots(ax, [p[0] for p in reverted], [p[1] for p in reverted], COLORS['v2'], highlight=True)
+    handles.append(plt.Line2D([], [], ls='', marker='o', color=COLORS['v2'], mec='k', mew=.7,
+                              label=f'v2 routed to inline (not a probe) and missed (n={len(reverted)})'))
+    ax.axhline(se3.LIMIT/1000, color='k', lw=1, ls='--', zorder=5)
     handles.append(plt.Line2D([], [], color='k', ls='--', label='latency limit 7 s'))
-    ax.set_xscale('log')
-    ax.set_xticks([2, 5, 10, 20, 50], ['2k', '5k', '10k', '20k', '50k'])
-    ax.set_xlabel('answer tokens per request (provider-reported, log scale)')
+    ax.set_xticks(range(len(VARIANTS)), VARIANTS)
+    ax.set_xlim(-.5, len(VARIANTS) - .5)
+    for center, name in ((.5, 'small'), (2.5, 'medium'), (4.5, 'large')):
+        ax.text(center, -.13, name, transform=ax.get_xaxis_transform(), ha='center', fontsize=7, color='0.35')
+    ax.set_xlabel('context size (size bin below); colour columns: frozen, v1, v2', labelpad=12)
     ax.set_ylabel('request latency (s)')
     ax.set_ylim(0, 21.5)
-    columns = {}
-    for *_, request, r in requests:
-        if r['configuration'] == 'inline-code-full':
-            columns.setdefault(request['variant'], []).append(se3.tokens(r)/1000)
-    for variant, xs in columns.items():
-        ax.text(sorted(xs)[len(xs)//2], 21, f'inline\n{variant}', ha='center', va='top', fontsize=6, color='0.35')
-    ax.text(3.2, 1.0, 'MCP direct, any context size', ha='center', fontsize=6, color='0.35')
-    ax.legend(handles=handles, loc='upper left', bbox_to_anchor=(0, -.17), ncol=2, frameon=False, fontsize=6.5)
+    ax.legend(handles=handles, loc='upper left', bbox_to_anchor=(0, -.2), ncol=2, frameon=False, fontsize=6.5)
     fig.tight_layout()
-    fig.savefig(out / f'se-request-plane.{fmt}', bbox_inches='tight')
+    fig.savefig(out / f'se-request-sizes.{fmt}', bbox_inches='tight')
 
 
 def main():
@@ -366,7 +400,7 @@ def main():
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     for make in (fig_opportunity, fig_timeline, fig_tradeoff, fig_pilots, fig_round_trip, fig_quota, fig_limit_sweep,
-                 fig_deadline_origin, fig_requests, fig_request_plane):
+                 fig_deadline_origin, fig_requests, fig_request_sizes):
         make(out, args.format)
         print('wrote', make.__name__)
 
