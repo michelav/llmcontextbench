@@ -225,65 +225,88 @@ def fig_limit_sweep(out, fmt):
     fig.savefig(out / f'replay-limit-sweep.{fmt}', bbox_inches='tight')
 
 
-BIN_MARKERS = {'small': 'o', 'medium': 's', 'large': '^'}
-CONFIG_COLORS = {'inline-code-full': COLORS['inline'], 'local-mcp-direct': COLORS['direct']}
+BIN_COLORS = {'small': '#0072B2', 'medium': '#E69F00', 'large': '#CC79A7'}  # Okabe-Ito, colour-blind safe
+CONFIG_LABELS = {'inline-code-full': 'inline', 'local-mcp-direct': 'MCP direct'}
+
+
+def nearest_rank(ys, q):
+    """Nearest-rank quantile of sorted values, as in the deadline rule."""
+    return ys[max(0, -(-int(q*100)*len(ys)//100)-1)]
 
 
 def fig_deadline_origin(out, fmt):
-    """Calibration requests per configuration and size bin, with p90 and the candidate limits (how 7 s was chosen)."""
+    """Calibration latency per configuration and size bin as box plots (whiskers p10-p90), with the candidate limits."""
     import random
     observations = json.load(open('baselines/repoqa-long64-v3/frozen.json'))['payload']['observations']
     rng = random.Random(0)
     fig, ax = plt.subplots(figsize=NARROW)
-    groups = [(c, b) for c in CONFIG_COLORS for b in BIN_MARKERS]
+    groups = [(c, b) for c in CONFIG_LABELS for b in BIN_COLORS]
+    stats = []
     for x, (config, size) in enumerate(groups):
         ys = sorted(o['durationMs']/1000 for o in observations if o['configuration'] == config and o['sizeBin'] == size)
-        ax.scatter([x + rng.uniform(-.25, .25) for _ in ys], ys, s=5, alpha=.5, color=CONFIG_COLORS[config],
-                   marker=BIN_MARKERS[size], linewidths=0)
-        p90 = ys[max(0, -(-9*len(ys)//10)-1)]
-        ax.plot([x-.35, x+.35], [p90, p90], color='k', lw=1)
-        ax.text(x, p90 + .25, f'{p90:.1f}', ha='center', fontsize=6)
+        p10, q1, med, q3, p90 = (nearest_rank(ys, q) for q in (.1, .25, .5, .75, .9))
+        stats.append({'med': med, 'q1': q1, 'q3': q3, 'whislo': p10, 'whishi': p90, 'fliers': []})
+        ax.scatter([x + rng.uniform(-.18, .18) for _ in ys], ys, s=4, color=BIN_COLORS[size], alpha=.45, linewidths=0, zorder=2)
+        ax.text(x + .27, p90 + .15, f'{p90:.1f}', va='bottom', ha='left', fontsize=6)
+    ax.bxp(stats, positions=range(len(groups)), widths=.5, showfliers=False, patch_artist=True, zorder=3,
+           boxprops={'facecolor': 'none', 'lw': .8}, medianprops={'color': 'k', 'lw': 1},
+           whiskerprops={'lw': .8}, capprops={'lw': 1.2})
     for limit in (6, 8):
         ax.axhline(limit, color='0.6', lw=.6, ls=':')
-    ax.axhline(7, color='#d62728', lw=1)
-    ax.text(-.45, 7.2, 'limit 7 s (candidates 6, 8 s dotted)', color='#d62728', ha='left', fontsize=6)
-    ax.set_xticks(range(6), ['small', 'medium', 'large'] * 2)
-    ax.text(1, -.17, 'inline', transform=ax.get_xaxis_transform(), ha='center', fontsize=8)
-    ax.text(4, -.17, 'MCP direct', transform=ax.get_xaxis_transform(), ha='center', fontsize=8)
+    ax.axhline(7, color='k', lw=1, ls='--')
+    ax.text(-.45, 7.15, 'limit 7 s (candidates 6, 8 s dotted)', ha='left', va='bottom', fontsize=6)
+    ax.axvline(2.5, color='0.8', lw=.5)
+    ax.set_xticks(range(6), list(BIN_COLORS) * 2)
+    for x, config in ((1, 'inline'), (4, 'MCP direct')):
+        ax.text(x, -.17, config, transform=ax.get_xaxis_transform(), ha='center', fontsize=8)
     ax.set_ylabel('request latency (s)')
     ax.set_ylim(0, 14)
-    ax.set_title('Calibration (4 targets, 48 requests per bar); bars: p90', fontsize=7)
+    ax.set_title('Calibration, 48 requests per box; whiskers p10-p90 (p90 labelled)', fontsize=7)
     fig.tight_layout()
     fig.savefig(out / f'deadline-origin.{fmt}', bbox_inches='tight')
 
 
+ROUTER_MARKERS = {'frozen': 's', 'v1': '^', 'v2': 'o'}
+FIXED_MARKERS = {'inline': '+', 'direct': 'x'}
+
+
 def fig_requests(out, fmt, seed=301):
-    """Live S-E′, inline delayed, one seed: every request's latency, configuration, size bin, and misses."""
+    """Live S-E', inline delayed, one seed: every request of each arm in one plot; router misses coloured by size bin."""
     prep, rows, _ = se3.load(LIVE)
     bins = {rid: r['sizeBin'] for rid, r in prep['requests'].items()}
-    arms = [('inline', 'fixed inline'), ('frozen', 'frozen router'), ('v2', 'adaptive v2'), ('direct', 'fixed direct')]
-    fig, axes = plt.subplots(len(arms), 1, figsize=(7.0, 6.4), sharex=True, sharey=True)
-    for ax, (arm, title) in zip(axes, arms):
+    limit = se3.LIMIT/1000
+    arms = list(FIXED_MARKERS) + list(ROUTER_MARKERS)
+    offsets = dict(zip(arms, (-.3, -.15, 0, .15, .3)))
+    fig, ax = plt.subplots(figsize=(7.0, 3.4))
+    ax.axvspan(30.5, 60.5, color='0.93', zorder=0)
+    for arm in arms:
         episode = rows[(arm, 'inline-degraded', seed)]
         for i, r in sorted(episode.items()):
-            y = r['durationMs']/1000
-            missed = y > se3.LIMIT/1000
-            ax.scatter(i, y, s=16, marker=BIN_MARKERS[bins[r['requestId']]], color=CONFIG_COLORS[r['configuration']],
-                       edgecolors='#d62728' if missed else 'none', linewidths=.9 if missed else 0, zorder=3)
-            if r['probe']:
-                ax.scatter(i, y, s=40, marker='o', facecolors='none', edgecolors='k', linewidths=.5, zorder=4)
-        ax.axhline(se3.LIMIT/1000, color='#d62728', lw=1)
-        ax.axvspan(30.5, 60.5, color='0.92', zorder=0)
-        counts = [sum(episode[i]['durationMs'] > se3.LIMIT for i in episode if lo <= i <= hi) for lo, hi in se3.PHASES]
-        ax.set_title(f'{title}: misses {counts[0]} / {counts[1]} / {counts[2]} (total {sum(counts)})', loc='left')
-        ax.set_ylabel('latency (s)')
-    axes[-1].set_xlabel(f'request position in the episode (seed {seed}; requests 31–60 shaded: inline +9 s)')
-    handles = [plt.Line2D([], [], ls='', marker='o', color=c, label=l) for c, l in
-               ((COLORS['inline'], 'ran inline'), (COLORS['direct'], 'ran MCP direct'))]
-    handles += [plt.Line2D([], [], ls='', marker=m, color='0.4', mfc='none', label=f'{b} context') for b, m in BIN_MARKERS.items()]
-    handles += [plt.Line2D([], [], ls='', marker='o', color='0.6', mec='#d62728', label='missed 7 s'),
-                plt.Line2D([], [], ls='', marker='o', mfc='none', mec='k', ms=8, label='probe')]
-    axes[0].legend(handles=handles, frameon=False, ncol=4, loc='upper left', bbox_to_anchor=(0, 1.55))
+            x, y = i + offsets[arm], r['durationMs']/1000
+            if arm in FIXED_MARKERS:
+                ax.scatter(x, y, s=10, marker=FIXED_MARKERS[arm], color='0.75', linewidths=.6, zorder=2)
+            elif y > limit:
+                ax.scatter(x, y, s=16, marker=ROUTER_MARKERS[arm], color=BIN_COLORS[bins[r['requestId']]],
+                           edgecolors='k', linewidths=.3, zorder=4)
+            else:
+                ax.scatter(x, y, s=12, marker=ROUTER_MARKERS[arm], facecolors='none', edgecolors='0.55',
+                           linewidths=.5, zorder=3)
+    ax.axhline(limit, color='k', lw=1, ls='--', zorder=5)
+    ax.set_xlim(0, 97)
+    ax.set_xlabel(f'request position in the episode (seed {seed})')
+    ax.set_ylabel('request latency (s)')
+    missed = {arm: [sum(rows[(arm, 'inline-degraded', seed)][i]['durationMs'] > se3.LIMIT
+                        for i in range(lo, hi + 1)) for lo, hi in se3.PHASES] for arm in arms}
+    names = {'inline': 'fixed inline', 'direct': 'fixed MCP direct', 'frozen': 'frozen router',
+             'v1': 'adaptive v1', 'v2': 'adaptive v2'}
+    label = lambda arm: f"{names[arm]} ({'/'.join(map(str, missed[arm]))})"
+    handles = [plt.Line2D([], [], ls='', marker=m, mfc='none', mec='0.4', label=label(a)) for a, m in ROUTER_MARKERS.items()]
+    handles += [plt.Line2D([], [], ls='', marker=m, color='0.6', label=label(a)) for a, m in FIXED_MARKERS.items()]
+    handles += [plt.matplotlib.patches.Patch(color=c, label=f'router miss, {b} context') for b, c in BIN_COLORS.items()]
+    handles += [plt.Line2D([], [], color='k', ls='--', label='latency limit 7 s'),
+                plt.matplotlib.patches.Patch(color='0.93', label='requests 31-60: inline +9 s')]
+    ax.legend(handles=handles, frameon=False, ncol=3, loc='upper left', bbox_to_anchor=(0, -.18), fontsize=6.5,
+              title='arm (misses in requests 1-30 / 31-60 / 61-96); hollow = met the limit', title_fontsize=6.5)
     fig.tight_layout()
     fig.savefig(out / f'se-requests.{fmt}', bbox_inches='tight')
 
