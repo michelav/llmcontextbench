@@ -320,7 +320,7 @@ def fig_requests(out, fmt):
         dots(ax, [x for x, _ in group], [y for _, y in group], COLORS['v2'], highlight=True)
     callout(ax, f'v2 probes inline during the delay:\n{len(probes)} of its {sum(1 for a, _, i, _, r in requests if a == "v2" and 31 <= i <= 60 and r["durationMs"] > se3.LIMIT)} misses there',
             (47, 15.5), (40, 20.5))
-    callout(ax, f'v2 stays on direct after the delay\n(back to inline 1-13 requests later): {len(late)} misses',
+    callout(ax, f'v2 stays on direct after the delay\n(back to inline 0-12 requests after it ends): {len(late)} misses',
             (75, 9.5), (80, 13.2))
     ax.axhline(se3.LIMIT/1000, color='k', lw=1, ls='--', zorder=5)
     handles.append(plt.Line2D([], [], color='k', ls='--', label='latency limit 7 s'))
