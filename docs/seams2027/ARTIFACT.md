@@ -34,8 +34,9 @@ Levels:
 | S-E′ live study | data archive: `studies/seams3-inline-degradation/` | `prepared.json` `af80916e12171d5b…`, `analysis.json` `d0ce63ca6f02ac80…` |
 | Pilots P1–P3 (v2), P3′ (v3) | data archive: `studies/pilot-*` | seeds 901–904, never pooled |
 | Replay reports and selection records | data archive: `studies/replay-v3calib/`, `studies/replay-validation/` | hashes in the pre-registration |
+| Direct-surface provider check (pre-registration amendment, 2026-10-15) | experiment `experiment.repoqa-direct-check.json`; data archive: `runs/direct-check/` | sha256 `7964fa3fb1c78b6b…`; 96 requests on the 4 calibration targets |
 
-The data archive is built with `tools/seams/make_archive.sh` (about 84 MB, 15,671 files,
+The data archive is built with `tools/seams/make_archive.sh` (about 84 MB, 15,772 files,
 each listed with its sha256 in the accompanying `SHA256SUMS`). It is deterministic: the same
 inputs give the same archive.
 
@@ -45,7 +46,8 @@ tools/seams/make_archive.sh dist --anonymize   # review copy: seams2027-data-ano
 ```
 
 **Double-blind review.** The raw logs contain the absolute path of the author's checkout.
-`--anonymize` replaces it with `<repo>` and fails if the home directory still appears. The
+`--anonymize` replaces it with `<repo>` and fails if the home directory still appears. The direct check was run from a
+second worktree, so its paths become `<repo>-direct`. The
 anonymized copy regenerates every figure and table byte-for-byte (level A). Because the frozen
 digests cover the original files, levels C and D need the full archive. Git history and
 repository metadata also identify the authors, so share the code for review through an

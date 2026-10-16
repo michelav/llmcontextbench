@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Build the SEAMS 2027 data archive (untracked study data) with a SHA256SUMS manifest.
 # Code, definitions, figures and tables are in git (tag the paper revision); this archive holds
-# what git does not: the frozen v3 baseline, pilots, replay reports and the S-E' study.
+# what git does not: the frozen v3 baseline, pilots, replay reports, the S-E' study and the
+# direct-surface provider check (runs/direct-check).
 #
 # Usage: tools/seams/make_archive.sh OUTPUT_DIR [--anonymize]
 # Produces OUTPUT_DIR/seams2027-data[-anon].tar.gz and the matching .SHA256SUMS.
@@ -26,6 +27,7 @@ paths=(
   studies/pilot-v3-inline-degradation
   studies/pilot-inline-degradation studies/pilot-degradation studies/pilot-cascade studies/pilot-episodes.tsv
   studies/replay-v3calib studies/replay-validation
+  runs/direct-check
 )
 if [ -n "${stage:-}" ]; then
   cp -a --parents "${paths[@]}" "$stage"

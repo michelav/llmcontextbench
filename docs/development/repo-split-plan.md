@@ -1,6 +1,16 @@
 # Plan: separate the tool from the SEAMS 2027 article
 
-Status: proposed (2026-10-16). SEAMS 2027 deadline: 2026-10-23.
+Status: in progress. SEAMS 2027 deadline: 2026-10-23.
+
+Progress:
+- **Slice 0 (2026-10-16):** done. The signed tag `seams2027-paper` is on `4f42ed7`, and the fingerprinted files are unchanged since `seams-v3-freeze`.
+- **Slice 0b (2026-10-16):** done.
+  - `main` was fast-forwarded to `4f42ed7`.
+  - The worktree `../llmcontextbench-direct` was removed after its `runs/direct-check` was copied here and checked against its hashes.
+  - All merged branches were deleted, locally and on `origin`.
+  - `tool-refactoring` was parked as `docs/development/ideas/lattes-filtered-tools.md` and then deleted.
+  - `study status` verifies on `main`.
+  - Nothing has been pushed to `main`.
 
 ## Goal
 
@@ -19,7 +29,7 @@ it, it stays here. Otherwise it belongs to the article.
 | `tests/`, `schemas/` | `docs/development/seams2027-plan.md`, `seams2027-preregistration.md` | `studies/seams3-inline-degradation`, `studies/pilot-*`, `studies/pilot-episodes.tsv` |
 | `docs/studies.md`, `docs/repoqa.md`, `docs/architecture/` | `tools/seams/` | `studies/replay-v3calib`, `studies/replay-validation` |
 | `tools/repoqa/` (dataset build, RepoQA scorer) | SEAMS definitions (list below) | anonymized copy for review, on an anonymous host |
-| one small example per study feature in `examples/studies/` | `experiment.repoqa-long64-v3.json` | |
+| one small example per study feature in `examples/studies/` | `experiment.repoqa-long64-v3.json`, `experiment.repoqa-direct-check.json` | `runs/direct-check` (direct-surface provider check) |
 | `specs/`, `.specify/`, skills | paper LaTeX source, advisor status page | |
 
 SEAMS definitions to move:
@@ -46,7 +56,7 @@ still use it as an example.
    - Prepared studies and raw logs contain absolute checkout paths.
    - Level C (`study status`, `analyze`) has only been checked with the data inside a tool checkout. Slice 1 tests it from the article layout.
 4. **Nothing is deleted from this repository before the article repository reproduces levels A to C.**
-5. **Files never committed anywhere:** `docs/LLMContextBench_evolution_working_brief.pdf`, `shared-context.md`, `runs/`.
+5. **Files never committed anywhere:** `docs/LLMContextBench_evolution_working_brief.pdf`, `shared-context.md`, `runs/` (except that `runs/direct-check` goes into the data archive).
 6. **Commits are GPG-signed.** No provider calls are needed for any slice.
 
 ## Implementation slices
@@ -119,7 +129,7 @@ still use it as an example.
     - the two `seams2027-*.md` development documents;
     - `tools/seams/`;
     - the SEAMS definitions;
-    - `experiment.repoqa-long64-v3.json`.
+    - `experiment.repoqa-long64-v3.json` and `experiment.repoqa-direct-check.json`.
   - **Adjust paths in the scripts:** `tools/seams/*.py` and `make_archive.sh` assume the tool root as the working directory. Give them one base-path variable, or run them from the article root with `PYTHONPATH=tool/src`.
   - **Rewrite `ARTIFACT.md`** for the new layout: clone with `--recurse-submodules`, fetch the data by DOI, then levels A to D.
   - **Add `paper/`** with the LaTeX source, and the advisor page as `docs/status.html`.
