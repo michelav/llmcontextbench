@@ -49,8 +49,9 @@ tools/seams/make_archive.sh dist --anonymize   # review copy: seams2027-data-ano
 **Double-blind review.** The raw logs contain the absolute path of the author's checkout.
 `--anonymize` replaces it with `<repo>` and fails if the home directory still appears. The direct check was run from a
 second worktree, so its paths become `<repo>-direct`. The
-anonymized copy regenerates every figure and table byte-for-byte (level A). Because the frozen
-digests cover the original files, levels C and D need the full archive. Git history and
+anonymized copy regenerates every figure and table byte-for-byte (level A). The frozen baselines are sealed with a digest of their original content,
+so replay and verification refuse the anonymized copy: levels B, C and D need the full archive
+(checked on 2026-10-16: `study replay` reports "corrupt recovery packet"). Git history and
 repository metadata also identify the authors, so share the code for review through an
 anonymized mirror.
 
