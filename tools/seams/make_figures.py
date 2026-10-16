@@ -7,6 +7,7 @@ Replay results are labelled `estimated`; live results come from `analysis.json` 
 import argparse, json, os
 os.environ.setdefault("SOURCE_DATE_EPOCH", "0")  # reproducible PDF metadata
 from pathlib import Path
+from itertools import accumulate
 from statistics import mean
 import matplotlib
 matplotlib.use('Agg')
@@ -392,6 +393,85 @@ def fig_request_sizes(out, fmt):
     fig.savefig(out / f'se-request-sizes.{fmt}', bbox_inches='tight')
 
 
+ARM_NAMES = {'inline': 'fixed inline', 'direct': 'fixed MCP direct', 'frozen': 'frozen router', 'v1': 'adaptive v1',
+             'v2': 'adaptive v2', 'oracle': 'phase oracle'}
+
+
+def end_labels(ax, ends, fmt, gap):
+    """Label line ends at the right edge, pushed apart so they do not overlap."""
+    placed = []
+    for arm, y in sorted(ends.items(), key=lambda item: item[1]):
+        ty = max(y, placed[-1] + gap) if placed else y
+        placed.append(ty)
+        ax.annotate(fmt(y), (96, y), xytext=(99, ty), textcoords='data', va='center', fontsize=6,
+                    color=COLORS[arm], annotation_clip=False)
+
+
+def fig_economy(out, fmt):
+    """Live S-E', inline delayed: cumulative tokens and misses per arm over the episode (mean of seeds; tokens band min-max)."""
+    _, rows, _ = se3.load(LIVE)
+    xs = range(1, 97)
+    fig, (top, bottom) = plt.subplots(2, 1, figsize=(7.0, 4.6), sharex=True, gridspec_kw={'height_ratios': [3, 2]})
+    token_ends, miss_ends = {}, {}
+    for arm in ('inline', 'frozen', 'v1', 'v2', 'oracle', 'direct'):
+        episodes = [e for (a, scenario, _), e in sorted(rows.items()) if a == arm and scenario == 'inline-degraded']
+        tokens = [list(accumulate(se3.tokens(e[i])/1e3 for i in xs)) for e in episodes]
+        misses = [list(accumulate(se3.miss(e[i]) for i in xs)) for e in episodes]
+        style = {'color': COLORS[arm], 'lw': 1.2, 'ls': ':' if arm == 'oracle' else '-', 'label': ARM_NAMES[arm]}
+        top.fill_between(xs, [min(c) for c in zip(*tokens)], [max(c) for c in zip(*tokens)], color=COLORS[arm],
+                         alpha=.12, lw=0)
+        top.plot(xs, [mean(c) for c in zip(*tokens)], **style)
+        bottom.plot(xs, [mean(c) for c in zip(*misses)], **style)
+        token_ends[arm], miss_ends[arm] = mean(t[-1] for t in tokens), mean(m[-1] for m in misses)
+    end_labels(top, token_ends, lambda y: f'{y:.0f}k', 60)
+    end_labels(bottom, miss_ends, lambda y: f'{y:.1f}', 2.0)
+    for ax in (top, bottom):
+        ax.axvspan(30.5, 60.5, color='0.95', zorder=0)
+    top.set_ylabel('cumulative answer\ntokens (thousands)')
+    bottom.set_ylabel('cumulative\ndeadline misses')
+    bottom.set_xlabel('request position in the episode (inline +9 s on requests 31-60 shaded; '
+                      'mean of 5 seeds, tokens band: min-max)')
+    bottom.set_xlim(1, 96)
+    top.legend(loc='upper left', ncol=2, frameon=False)
+    fig.tight_layout()
+    fig.savefig(out / f'se-economy.{fmt}', bbox_inches='tight')
+
+
+def fig_savings(out, fmt):
+    """Live S-E', inline delayed: tokens saved against fixed inline per arm, stacked by context size, with misses."""
+    prep, rows, _ = se3.load(LIVE)
+    variant = {rid: r['variant'] for rid, r in prep['requests'].items()}
+    arms = ('frozen', 'v1', 'v2', 'oracle', 'direct')
+    seeds = sorted({seed for _, scenario, seed in rows if scenario == 'inline-degraded'})
+    shades = dict(zip(VARIANTS, plt.cm.viridis_r([.1, .25, .4, .55, .72, .9])))
+    fig, axes = plt.subplots(1, 2, figsize=(7.0, 3.1), sharey=True)
+    for ax, (lo, hi, title) in zip(axes, ((31, 60, 'during the delay (requests 31-60)'),
+                                         (1, 96, 'whole episode (requests 1-96)'))):
+        for x, arm in enumerate(arms):
+            saved, misses = {v: 0.0 for v in VARIANTS}, 0
+            for seed in seeds:
+                base = {r['requestId']: se3.tokens(r) for r in rows[('inline', 'inline-degraded', seed)].values()}
+                for i, r in rows[(arm, 'inline-degraded', seed)].items():
+                    if lo <= i <= hi:
+                        saved[variant[r['requestId']]] += (base[r['requestId']] - se3.tokens(r))/len(seeds)/1e3
+                        misses += r['durationMs'] > se3.LIMIT
+            up = down = 0.0
+            for v in VARIANTS:
+                ax.bar(x, saved[v], bottom=up if saved[v] >= 0 else down, color=shades[v], width=.65, lw=0)
+                up, down = (up + saved[v], down) if saved[v] >= 0 else (up, down + saved[v])
+            ax.text(x, up + 10, f'{sum(saved.values()):.0f}k\n{misses/len(seeds):.1f} misses', ha='center',
+                    va='bottom', fontsize=6, linespacing=1.1)
+        ax.axhline(0, color='k', lw=.6)
+        ax.set_xticks(range(len(arms)), [ARM_NAMES[a].replace(' ', '\n', 1) for a in arms], fontsize=6.5)
+        ax.set_title(title, fontsize=7)
+    axes[0].set_ylim(top=1400)
+    axes[0].set_ylabel('tokens saved against fixed inline\n(thousands per episode, mean of 5 seeds)')
+    handles = [plt.matplotlib.patches.Patch(color=shades[v], label=f'context {v}') for v in VARIANTS]
+    fig.legend(handles=handles, loc='lower center', ncol=6, frameon=False, bbox_to_anchor=(.5, -.06), fontsize=6.5)
+    fig.tight_layout(rect=(0, .06, 1, 1))
+    fig.savefig(out / f'se-savings.{fmt}', bbox_inches='tight')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', default='docs/seams2027/figures')
@@ -400,7 +480,8 @@ def main():
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     for make in (fig_opportunity, fig_timeline, fig_tradeoff, fig_pilots, fig_round_trip, fig_quota, fig_limit_sweep,
-                 fig_deadline_origin, fig_requests, fig_request_sizes):
+                 fig_deadline_origin, fig_requests, fig_request_sizes,
+                 fig_economy, fig_savings):
         make(out, args.format)
         print('wrote', make.__name__)
 

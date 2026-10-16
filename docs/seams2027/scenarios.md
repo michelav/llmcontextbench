@@ -168,6 +168,8 @@ python tools/seams/make_tables.py                    # docs/seams2027/tables/*.t
 | `figures/deadline-origin.pdf` | calibration latency per configuration and size bin: box plots with whiskers at p10 and p90 (the rule uses p90), the 7 s limit and the 6 and 8 s candidates |
 | `figures/se-requests.pdf` | S-E′ live, inline delayed, all 5 seeds: every request in grey, frozen, v1 and v2 misses as colour; outlined: v2 probe misses during the delay and v2 misses on direct after it; inset: share of seeds missing per position |
 | `figures/se-request-sizes.pdf` | S-E′ live, inline delayed, all 5 seeds: latency per context size, frozen, v1 and v2 requests during the delay side by side; outlined: v2 non-probe inline misses (expired estimates) |
+| `figures/se-economy.pdf` | S-E′ live, inline delayed: cumulative answer tokens (band: min-max over seeds) and cumulative misses per arm over the episode |
+| `figures/se-savings.pdf` | S-E′ live, inline delayed: tokens saved against fixed inline (paired by seed and request), stacked by context size, with misses; delay phase and whole episode |
 | `figures/replay-limit-sweep.pdf` | replay: S-E′ arms across limits 5–10 s, without and with the delay and summed; live S-E′ means at 7 s (exploratory, after collection) |
 | `figures/replay-quota-attribution.pdf` | replay S-B′: quota-phase misses by configuration and quota wait |
 | `tables/catalogue.tex` | v3 calibration catalogue |
