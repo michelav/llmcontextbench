@@ -187,6 +187,17 @@ def test_non_adaptive_blind_router_is_static_and_does_not_probe():
         BlindRouterPolicy.model_validate({'type': 'blind-router', 'adaptive': True, 'probeTriggers': ['signal']})
 
 
+
+def test_no_probe_ablation_differs_from_periodic_only_in_probing():
+    periodic = drive(BURST, PERIODIC)
+    no_probe = drive(BURST, {'type': 'blind-router', 'adaptive': True, 'probeTriggers': []})
+    first_probe = next(i for i, d in enumerate(periodic) if d['probe'])
+    assert no_probe[:first_probe] == periodic[:first_probe]
+    assert not any(d['probe'] for d in no_probe)
+    # Without probes the inactive configuration's knowledge is never refreshed: no return after the burst.
+    left = next(i for i, d in enumerate(no_probe) if d['configuration'] == D)
+    assert 10 <= left <= 12 and all(d['configuration'] == D for d in no_probe[left:])
+
 def test_shaped_workload_follows_phases_and_is_deterministic():
     plan = {'requests': {f't{t}_ctx{s}': {'target': f't{t}', 'sizeBin': 'small' if s == '2k' else 'large'}
                          for t in range(3) for s in ('2k', '64k')}}

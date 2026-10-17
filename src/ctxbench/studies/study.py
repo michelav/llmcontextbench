@@ -290,6 +290,7 @@ def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42, allow_source_
             evaluation = evaluations.get(result['trialId']) if result else None
             outcome = evaluation.get('outcome') if evaluation else None
             request_rows[packet['instanceId']] = {'target':request['target'], 'language':request['language'],
+                'variant': request.get('variant'),
                 'status': result['status'] if result else 'unserved',
                 'latencyMs': packet['observation']['durationMs'] if packet['observation'] else None,
                 'tokens': packet['observation']['tokens']['value'] if packet['observation'] else None,
@@ -304,7 +305,7 @@ def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42, allow_source_
                 'finalConfiguration': packet['observation']['configuration'] if packet['observation'] else None,
                 'controllerMs': packet['decision'].get('controllerMs')}
         summaries.append(_summary({k: e[k] for k in ('id', 'policyName', 'scenarioName', 'seed', 'repeat')},
-                                  request_rows, len(e['workload']), plan, e['scenario']))
+                                  request_rows, len(e['workload']), plan, e['scenario'], e['policy']))
         key = (e['policyName'],e['scenarioName'],e['seed'],e['repeat'])
         by_arm[key] = request_rows
         complete[key] = len(request_rows) == len(e['workload'])
@@ -436,7 +437,7 @@ def _quantile(values, probability):
     return ordered[max(0, -(-int(probability*100)*len(ordered)//100)-1)] if ordered else None
 
 
-def _summary(identity, request_rows, planned, plan, effects):
+def _summary(identity, request_rows, planned, plan, effects, policy=None):
     from statistics import mean
     rows = list(request_rows.values())
     durations = [r['latencyMs'] for r in rows if r['latencyMs'] is not None]
@@ -461,7 +462,7 @@ def _summary(identity, request_rows, planned, plan, effects):
         'probes':sum(r['probe'] for r in rows),
         'budgetOvershoot':max(0,sum(tokens)-plan['definition']['tokenBudget']) if tokens and plan['definition'].get('tokenBudget') else None})
     row.update(_episode_details(rows, planned, limit, plan['phases'][identity['scenarioName']], effects,
-                                plan['definition'].get('tokenRateBudget')))
+                                plan['definition'].get('tokenRateBudget'), policy))
     return row
 
 
@@ -539,7 +540,112 @@ def _excess_flags(rows, rate):
             for i, r in enumerate(served)}
 
 
-def _episode_details(rows, planned, limit, phases, effects, rate=None):
+def _rate_details(rows, rate):
+    """Rolling-budget metrics beyond the canonical count (analysis protocol 4.1).
+
+    Canonical windows include the first window-1 requests, divided by the full window; the
+    full-window variants start at the window-th served request. Magnitudes use full windows."""
+    served = [r for r in rows if r['status'] != 'unserved']
+    spent = [r['tokenLowerBound'] or 0 for r in served]
+    window, budget = rate['window'], rate['perRequest']
+    means = [sum(spent[max(0, i+1-window):i+1])/window for i in range(len(spent))]
+    flags = [m > budget for m in means]
+    full = means[window-1:]
+    longest = current = 0
+    for flag in flags:
+        current = current+1 if flag else 0
+        longest = max(longest, current)
+    return {'fullWindowBudgetExcess': sum(m > budget for m in full),
+            'excessMagnitudeCumulative': sum(max(0, m-budget) for m in full),
+            'excessMagnitudeMax': max((max(0, m-budget) for m in full), default=0),
+            'longestViolationRun': longest}
+
+
+def _probe_accepted(row, limit, rate):
+    """The blind router's acceptance check for a probe's own request (`_blind_observe`)."""
+    return (row['status'] == 'success' and (limit is None or (row['latencyMs'] is not None and row['latencyMs'] <= limit))
+            and (rate is None or (row['tokens'] is not None and row['tokens'] <= rate['perRequest'])))
+
+
+def _probe_reason(row, limit, rate):
+    if row['status'] != 'success':
+        return 'failure'
+    if limit is not None and (row['latencyMs'] is None or row['latencyMs'] > limit):
+        return 'latency'
+    return 'tokens'
+
+
+def _burst_details(rows, phases, policy, limit, rate, sustain=4):
+    """Per disturbance phase: lags, censoring, probes and the schedule classification (analysis protocol 4.5).
+
+    Lags are relative to the configuration routed just before the burst (`incumbentBefore`); a
+    burst is `qualifying` if that is the run's initial configuration, the periodic probe schedule
+    was kept and the return came through an accepted probe. Schedule and acceptance fields are
+    None for policies other than the blind router."""
+    blind = policy is not None and policy.get('type') == 'blind-router'
+    periodic = blind and 'periodic' in policy.get('probeTriggers', []) and policy.get('signalTokens') is None
+    interval = policy.get('probeInterval') if periodic else None
+    by_index = {r['sequenceIndex']: r for r in rows}
+    routed = {r['sequenceIndex']: r['configuration'] for r in rows if not r['probe'] and r['configuration']}
+    probes = sorted(r['sequenceIndex'] for r in rows if r['probe'])
+    end_of_run = max(by_index, default=0)
+    initial = routed[min(routed)] if routed else None
+    result = []
+    for phase in phases:
+        if not phase.get('disturbance'):
+            continue
+        start, end = phase['firstRequest'], phase['lastRequest']
+        before = next((routed[i] for i in range(start-1, 0, -1) if i in routed), None)
+        detail = {'firstRequest': start, 'lastRequest': end, 'incumbentBefore': before,
+                  'leftBefore': before is not None and before != initial}
+        if before is None or detail['leftBefore']:
+            # Not on the initial configuration before the burst: there is no departure to time.
+            result.append(detail)
+            continue
+        away = next((i for i in range(start, end+1) if i in routed and routed[i] != before), None)
+        back = next((i for i in range(end+1, end_of_run+1) if routed.get(i) == before), None) if away else None
+        sustained = None
+        if away:
+            for candidate in (i for i in range(end+1, end_of_run+1) if routed.get(i) == before):
+                following = [routed[i] for i in range(candidate+1, end_of_run+1) if i in routed][:sustain]
+                if all(c == before for c in following):
+                    sustained = candidate
+                    break
+        by_probe = bool(back) and (back-1) in by_index and by_index[back-1]['probe'] \
+            and by_index[back-1]['configuration'] == before
+        stop = (back-1 if by_probe else back) if back else end_of_run+1
+        rejected = [i for i in probes if end < i < stop]
+        inside = [i for i in probes if start <= i <= end]
+        detail.update({
+            'reactionLag': None if away is None else away-start,
+            'recoveryLag': None if back is None else back-end-1,
+            'recoveryCensored': bool(away) and back is None,
+            'sustainedRecoveryLag': None if sustained is None else sustained-end-1,
+            'returnByProbe': by_probe if back else None,
+            'probesInside': len(inside),
+            'probesInsideTokens': sum(by_index[i]['tokenLowerBound'] or 0 for i in inside),
+            'rejectedAfter': len(rejected),
+            'rejectedAfterDetails': [{'sequenceIndex': i, 'variant': by_index[i].get('variant'),
+                                      'reason': _probe_reason(by_index[i], limit, rate)} for i in rejected]})
+        kept = None
+        if periodic and away:
+            events = [away] + [i for i in probes if away < i < (back or end_of_run+1)]
+            horizon = back-1 if back else end_of_run
+            kept = all(b-a == interval for a, b in zip(events, events[1:])) \
+                and horizon-events[-1] < interval+(0 if back else 1)
+        detail['scheduleKept'] = kept
+        qualifying = bool(periodic and away and back and not detail['leftBefore'] and kept and by_probe)
+        detail['qualifying'] = qualifying if periodic else None
+        if qualifying:
+            r, length, j = away-start, end-start+1, 0
+            while r + j*interval - length + 1 < 1:
+                j += 1
+            detail['predictedRecoveryLag'] = r + j*interval - length + 1 + interval*len(rejected)
+        result.append(detail)
+    return result
+
+
+def _episode_details(rows, planned, limit, phases, effects, rate=None, policy=None):
     """Derived per-episode metrics: all-request quality, switching, probe cost, overhead, phases, lags."""
     from statistics import mean
     from .replay import _lags, _phase_lags
@@ -547,6 +653,10 @@ def _episode_details(rows, planned, limit, phases, effects, rate=None):
     excess = _excess_flags(rows, rate) if rate else {}
     routed = [r['configuration'] for r in rows if not r['probe'] and r['configuration']]
     probes = [r for r in rows if r['probe']]
+    blind = policy is not None and policy.get('type') == 'blind-router'
+    accepted = [_probe_accepted(r, limit, rate) for r in probes] if blind else None
+    probe_latency = [r['latencyMs'] for r in probes if r['latencyMs'] is not None]
+    latencies = sorted(r['latencyMs'] for r in rows if r['latencyMs'] is not None)
     overhead = [r['controllerMs'] for r in rows if r['controllerMs'] is not None]
     def missed(r):
         return limit is not None and r['latencyMs'] is not None and r['latencyMs'] > limit
@@ -567,6 +677,13 @@ def _episode_details(rows, planned, limit, phases, effects, rate=None):
             'probeDeadlineMisses': sum(missed(r) for r in probes) if limit is not None else None,
             'controllerMsP50': _quantile(overhead, .5), 'controllerMsP95': _quantile(overhead, .95),
             'budgetExcess': sum(excess.values()) if rate else None,
+            **(_rate_details(rows, rate) if rate else {}),
+            'p95LatencyMs': _quantile(latencies, .95),
+            'probesAccepted': sum(accepted) if blind else None,
+            'probesRejected': len(accepted)-sum(accepted) if blind else None,
+            'probeMeanLatencyMs': mean(probe_latency) if probe_latency else None,
+            'unavailableUsage': sum(r['status'] != 'unserved' and r['tokens'] is None for r in rows),
+            'bursts': _burst_details(rows, phases, policy, limit, rate),
             'phaseSummaries': phase_rows,
             'lags': _lags(rows, effects) + (_phase_lags(rows, {'phases': phases})
                                             if any(p.get('disturbance') for p in phases) else [])}
@@ -574,7 +691,8 @@ def _episode_details(rows, planned, limit, phases, effects, rate=None):
 
 ARM_FIELDS = ('completed', 'success', 'failure', 'unserved', 'meanLatencyMs', 'deadlineMisses', 'knownTokens',
               'tokensLowerBound', 'passRate', 'passRateAllRequests', 'probes', 'fallbacks', 'switches', 'budgetExcess',
-              'probeTokensLowerBound', 'controllerMsP95')
+              'probeTokensLowerBound', 'controllerMsP95', 'fullWindowBudgetExcess', 'excessMagnitudeCumulative',
+              'excessMagnitudeMax', 'longestViolationRun', 'p95LatencyMs', 'probesRejected', 'unavailableUsage')
 
 
 def _arm_aggregates(summaries):

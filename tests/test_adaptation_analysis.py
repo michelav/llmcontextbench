@@ -132,3 +132,72 @@ def test_partial_usage_is_accounted_without_zero_for_missing_totals():
     assert not summary['resourceTotalsComplete']
     assert summarize([row(tokens=None)])['knownTotalTokens'] is None
     assert summarize([])['allRequestPassRate'] is None
+
+
+def _row(index, configuration, *, probe=False, tokens=1000, latency=2000.0, status='success', variant='2k'):
+    return {'sequenceIndex': index, 'configuration': configuration, 'probe': probe, 'tokens': tokens,
+            'tokenLowerBound': tokens, 'latencyMs': latency, 'status': status, 'variant': variant}
+
+
+def _w2_rows(probes, returns_at, end_of_run=48, leave_at=19):
+    """Inline before position leave_at, Direct after it; probes go to Inline; back on Inline from returns_at."""
+    rows = []
+    for i in range(1, end_of_run+1):
+        if i in probes:
+            rows.append(_row(i, 'inline', probe=True, **probes[i]))
+        elif i < leave_at or (returns_at and i >= returns_at):
+            rows.append(_row(i, 'inline'))
+        else:
+            rows.append(_row(i, 'direct'))
+    return rows
+
+
+W2 = [{'firstRequest': 1, 'lastRequest': 16}, {'firstRequest': 17, 'lastRequest': 32, 'disturbance': True},
+      {'firstRequest': 33, 'lastRequest': 48}]
+AP = {'type': 'blind-router', 'probeTriggers': ['periodic'], 'probeInterval': 8, 'signalTokens': None}
+RATE = {'perRequest': 12000, 'window': 8}
+
+
+def test_burst_details_qualifying_return_matches_the_schedule_prediction():
+    from ctxbench.studies.study import _burst_details
+    rows = _w2_rows({27: {'tokens': 48000, 'variant': '64k'}, 35: {'tokens': 4000}}, returns_at=36)
+    [burst] = _burst_details(rows, W2, AP, 8000, RATE)
+    assert (burst['reactionLag'], burst['recoveryLag'], burst['probesInside'], burst['rejectedAfter']) == (2, 3, 1, 0)
+    assert burst['scheduleKept'] and burst['returnByProbe'] and burst['qualifying']
+    assert burst['predictedRecoveryLag'] == 3 and burst['sustainedRecoveryLag'] == 3
+
+
+def test_burst_details_rejected_probe_adds_an_interval_and_skipped_probe_breaks_the_schedule():
+    from ctxbench.studies.study import _burst_details
+    rejected = _w2_rows({27: {'tokens': 48000}, 35: {'tokens': 12900, 'variant': '16k'}, 43: {'tokens': 3000}},
+                        returns_at=44)
+    [burst] = _burst_details(rejected, W2, AP, 8000, RATE)
+    assert burst['recoveryLag'] == 11 and burst['rejectedAfter'] == 1 and burst['predictedRecoveryLag'] == 11
+    assert burst['rejectedAfterDetails'] == [{'sequenceIndex': 35, 'variant': '16k', 'reason': 'tokens'}]
+    skipped = _w2_rows({27: {'tokens': 48000}, 39: {'tokens': 3000}}, returns_at=40)
+    [burst] = _burst_details(skipped, W2, AP, 8000, RATE)
+    assert burst['scheduleKept'] is False and burst['qualifying'] is False and 'predictedRecoveryLag' not in burst
+
+
+def test_burst_details_forced_return_censoring_and_departure_before_the_burst():
+    from ctxbench.studies.study import _burst_details
+    forced = _w2_rows({27: {'tokens': 48000}}, returns_at=31)
+    [burst] = _burst_details(forced, W2, AP, 8000, RATE)
+    assert burst['returnByProbe'] is False and burst['qualifying'] is False and burst['recoveryLag'] == 0
+    censored = _w2_rows({27: {'tokens': 48000}, 35: {'tokens': 13000}, 43: {'tokens': 13000}}, returns_at=None)
+    [burst] = _burst_details(censored, W2, AP, 8000, RATE)
+    assert burst['recoveryLag'] is None and burst['recoveryCensored'] and burst['rejectedAfter'] == 2
+    early = _w2_rows({}, returns_at=None, leave_at=10)
+    [burst] = _burst_details(early, W2, AP, 8000, RATE)
+    assert burst['leftBefore'] and 'reactionLag' not in burst
+    no_policy = _burst_details(_w2_rows({}, returns_at=33), W2, None, 8000, RATE)[0]
+    assert no_policy['scheduleKept'] is None and no_policy['qualifying'] is None and no_policy['recoveryLag'] == 0
+
+
+def test_rate_details_full_windows_magnitude_and_longest_run():
+    from ctxbench.studies.study import _rate_details
+    rows = [_row(i, 'inline', tokens=t) for i, t in enumerate([100000, 0, 0, 0, 30000, 30000, 30000, 0, 0, 0], 1)]
+    details = _rate_details(rows, {'perRequest': 10000, 'window': 4})
+    # Canonical means (window 4): 25k, 25k, 25k, 25k, 7.5k, 15k, 22.5k, 22.5k, 15k, 7.5k.
+    assert details['fullWindowBudgetExcess'] == 5 and details['longestViolationRun'] == 4
+    assert details['excessMagnitudeMax'] == 15000 and details['excessMagnitudeCumulative'] == 15000+5000+12500+12500+5000

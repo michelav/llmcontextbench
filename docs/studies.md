@@ -416,7 +416,22 @@ recovery lags relative to the configuration routed just before them.
 A study or replay point may set `tokenRateBudget` (`perRequest`, `window`): the mean tokens
 over the trailing `window` served requests should stay within `perRequest`. Reports add
 `budgetExcess` (requests at which that mean exceeded the budget), per phase as well, and probe
-tokens.
+tokens. The first `window-1` requests are included and divided by the full window;
+`fullWindowBudgetExcess` counts only full windows, and `excessMagnitudeCumulative` /
+`excessMagnitudeMax` sum and bound how far full-window means exceeded the budget;
+`longestViolationRun` is the longest run of consecutive excess requests. Each episode also
+reports `p95LatencyMs`, `unavailableUsage` (served requests without reported usage), and, for
+the blind router, `probesAccepted` / `probesRejected` by the router's own acceptance check.
+
+`bursts` lists every disturbance phase with lags relative to the configuration routed just
+before it: `reactionLag`, `recoveryLag` (first return; `recoveryCensored` if none),
+`sustainedRecoveryLag` (a return followed by 4 more requests on that configuration),
+`returnByProbe` (false: a forced return), probes inside the burst and rejected probes after it
+(`rejectedAfterDetails` with size and reason). `leftBefore` marks bursts that did not start on
+the run's initial configuration (no lags). For a periodic blind router, `scheduleKept` says
+whether every probe came exactly `probeInterval` requests after the previous switch or probe;
+`qualifying` bursts (schedule kept, return by probe) get `predictedRecoveryLag` =
+r + j·I − L + 1 + I·k (r reaction lag, I interval, L burst length, k rejected probes).
 
 The `blind-router` policy never reads request features (size, bin, target). It keeps
 its incumbent while the incumbent's recent latency (mean of the last `estimateWindow`
