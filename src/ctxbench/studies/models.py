@@ -282,6 +282,8 @@ class Study(Definition):
     tokenBudget: PositiveInt | None = None
     tokenRateBudget: TokenRateBudget | None = None
     workloads: dict[str, WorkloadOrder] = Field(default_factory=dict)
+    # Optional seed subset per scenario (e.g. burst placements assigned to seeds); others run every seed.
+    scenarioSeeds: dict[str, list[StrictInt]] = Field(default_factory=dict)
     derivedArms: dict[str, DerivedArm] = Field(default_factory=dict)
     minimumCalibrationPassRate: Annotated[float, Field(ge=0, le=1)] | None = None
 
@@ -301,6 +303,11 @@ class Study(Definition):
             raise ValueError('a blind router requires latencyLimitMs or tokenRateBudget')
         if any(name not in self.scenarios for name in self.workloads):
             raise ValueError('workload orders must name defined scenarios')
+        for name, seeds in self.scenarioSeeds.items():
+            if name not in self.scenarios:
+                raise ValueError('scenario seeds must name defined scenarios')
+            if not seeds or len(set(seeds)) != len(seeds) or not set(seeds) <= set(self.seeds):
+                raise ValueError('scenario seeds must be a nonempty, duplicate-free subset of seeds')
         if any(p.type == 'budget' for p in self.policies.values()) != (self.tokenBudget is not None):
             raise ValueError('tokenBudget requires a budget policy and vice versa')
         if self.minimumCalibrationPassRate is not None and self.tokenBudget is None:

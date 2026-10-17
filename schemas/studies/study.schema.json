@@ -920,6 +920,16 @@
       "title": "Workloads",
       "type": "object"
     },
+    "scenarioSeeds": {
+      "additionalProperties": {
+        "items": {
+          "type": "integer"
+        },
+        "type": "array"
+      },
+      "title": "Scenarioseeds",
+      "type": "object"
+    },
     "derivedArms": {
       "additionalProperties": {
         "discriminator": {

@@ -285,7 +285,8 @@ def replay(*, grid, prepared=None, baseline=None, output=None, replicates=None, 
                      for name, policy in POLICIES.validate_python(point.get('policies', {})).items()}
         point_policies = {**policies, **overrides}
         results = defaultdict(list)
-        for seed in spec['seeds']:
+        # A point may restrict seeds, e.g. to the seeds a live study assigns to its scenario.
+        for seed in point.get('seeds', spec['seeds']):
             rows = [{**r, 'sizeBin': plan['requests'][r['instanceId']]['sizeBin']}
                     for r in ordered_workload(plan['index'], targets, seed)]
             if shape:

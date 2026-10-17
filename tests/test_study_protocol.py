@@ -527,6 +527,27 @@ def test_workload_order_must_use_every_request_once(frozen, tmp_path):
                               'workloads': {'missing': {'phases': [{'lastRequest': 1, 'sizes': ['small']}]}}})
 
 
+
+def test_scenario_seeds_restrict_runs_and_pair_within_the_subset(frozen, tmp_path):
+    definition, (small, large, total) = _burst_study(tmp_path, frozen, seeds=[201, 202],
+                                                     scenarioSeeds={'burst': [202]}, comparisons=[['inline', 'mcp']])
+    path = Path(study.prepare(definition=definition, output=tmp_path/'placed')['prepared'])
+    plan = sealed_read(path)
+    runs = {(e['scenarioName'], e['seed']) for e in plan['episodes']}
+    assert runs == {('stationary', 201), ('stationary', 202), ('burst', 202)}
+    unrestricted, _ = _burst_study(tmp_path, frozen, seeds=[201, 202], comparisons=[['inline', 'mcp']])
+    full = sealed_read(Path(study.prepare(definition=unrestricted, output=tmp_path/'unplaced')['prepared']))
+    ids = {(e['policyName'], e['scenarioName'], e['seed']): e['id'] for e in full['episodes']}
+    assert all(ids[(e['policyName'], e['scenarioName'], e['seed'])] == e['id'] for e in plan['episodes'])
+    for policy in ('inline', 'mcp'):
+        study.episode(prepared=path, policy=policy, scenario='burst', seed=202, repeat=1, execution=mock_execute)
+    burst = next(c for c in study.analyze(path, bootstrap_replicates=20)['comparisons'] if c['scenario'] == 'burst')
+    assert burst['incomplete'] is False and burst['pairedRequests'] == total
+    for bad in ({'missing': [201]}, {'burst': [999]}, {'burst': []}, {'burst': [201, 201]}):
+        with pytest.raises(ValueError, match='scenario seeds'):
+            Study.model_validate({'baseline': 'b', 'seeds': [201], 'repeats': 1, 'scenarios': {'burst': []},
+                                  'policies': {'f': {'type': 'fixed', 'configuration': 'x'}}, 'scenarioSeeds': bad})
+
 def test_derived_arms_need_fixed_arms_and_a_budget(frozen, tmp_path):
     definition, _ = _burst_study(tmp_path, frozen, policies={
         'inline': {'type': 'fixed', 'configuration': 'inline-code-full'},

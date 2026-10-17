@@ -389,6 +389,14 @@ left over. Disturbance phases appear in `phases` with `disturbance: true` and ge
 recovery lags in `analyze`. A replay point reproduces a live order exactly with
 `"order": {...}` and `"scenario": "<scenario name>"`.
 
+`scenarioSeeds` runs a scenario on a subset of the study's seeds, for example one burst
+placement per seed group; scenarios not listed run every seed, and paired comparisons use
+only the listed seeds. A replay point may set `"seeds": [...]` to match.
+
+```json
+"scenarioSeeds": {"w2-burst-b1": [1103, 1171, 1237], "w2-burst-b2": [1129, 1193, 1259]}
+```
+
 Replay can also sample a synthetic sequence with repeats: a grid or point may set `workload`
 to replace the held-out order with a sequence, for example small repositories, then a burst of large ones, then small again:
 

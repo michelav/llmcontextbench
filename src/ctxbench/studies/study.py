@@ -146,6 +146,8 @@ def prepare(*, definition, output):
                 for r in ordered_workload(index, targets, seed)]
         for repeat in range(1, definition.repeats+1):
             for scenario, delays in definition.scenarios.items():
+                if seed not in definition.scenarioSeeds.get(scenario, definition.seeds):
+                    continue
                 workload = (ordered(rows, orders[scenario], seed, scenario) if scenario in orders
                             else [r['instanceId'] for r in rows])
                 for policy, config in definition.policies.items():
@@ -331,7 +333,8 @@ def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42, allow_source_
             units = {name: defaultdict(list) for name in paired_metrics}
             pairs = 0
             incomplete = False
-            for seed in plan['definition']['seeds']:
+            seeds = (plan['definition'].get('scenarioSeeds') or {}).get(scenario, plan['definition']['seeds'])
+            for seed in seeds:
                 for repeat in range(1,plan['definition']['repeats']+1):
                     a, b = (left,scenario,seed,repeat), (right,scenario,seed,repeat)
                     incomplete |= not (complete.get(a) and complete.get(b))
