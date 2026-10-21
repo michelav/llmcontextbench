@@ -2,8 +2,8 @@
 
 Per seed: a stationary sequence (S-A) with the five sizes equally frequent; a large-context burst
 (S-L) of 32k-64k requests in a 2k-16k stream; a contested burst (S-C) that swaps contested
-instances of the same size into the S-A sequence; and S-D, the S-A sequence itself (the slowdown is
-a scenario effect). Each seed gets one burst placement, cycling through `placements`. Sizes are
+instances of the same size into the S-A sequence; and S-D, a 32k-64k stream on which the slowdown
+(a scenario effect) falls. Each seed gets one burst placement, cycling through `placements`. Sizes are
 drawn in shuffled blocks, one of each size per block, and instances uniformly within a size, so the
 class mix is the evaluation split's.
 
@@ -74,6 +74,8 @@ def burst_workloads(selection, evaluation, *, seeds, length, burst, placements):
         normal = iter(_sizes(rng, NORMAL_SIZES, length-burst))
         large = iter(_sizes(rng, LARGE_SIZES, burst))
         large_burst = _draw(rng, pool, [next(large) if i in window else next(normal) for i in range(length)], set())
+        rng = random.Random(f'large-stream:{seed}')
+        large_stream = _draw(rng, pool, _sizes(rng, LARGE_SIZES, length), set())
         rng = random.Random(f'contested-burst:{seed}')
         swapped, used = list(stationary), set(stationary)
         for i in window:
@@ -86,7 +88,7 @@ def burst_workloads(selection, evaluation, *, seeds, length, burst, placements):
                 swapped[i] = rng.choice(choices)
                 used.add(swapped[i])
         for name, sequence in ((f'S-L-{start}', large_burst), (f'S-C-{start}', swapped),
-                               (f'S-D-{start}', stationary)):
+                               (f'S-D-{start}', large_stream)):
             workloads.setdefault(name, {})[str(seed)] = sequence
             scenario_seeds.setdefault(name, []).append(seed)
             disturbances[name] = {'firstRequest': start, 'lastRequest': start+burst-1}

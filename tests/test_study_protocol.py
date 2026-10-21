@@ -840,7 +840,9 @@ def test_burst_workloads_balance_sizes_and_swap_in_contested_instances():
     assert len(set(large)) == 48
     assert {size(i) for i in large[16:32]} == {'32k', '64k'}
     assert {size(i) for i in large[:16] + large[32:]} == {'2k', '8k', '16k'}
-    assert workloads['S-D-17']['2'] == stationary
+    slowdown = workloads['S-D-17']['2']
+    assert len(set(slowdown)) == 48 and [size(i) for i in slowdown].count('32k') == 24
+    assert {size(i) for i in slowdown} == {'32k', '64k'}
     swapped = workloads['S-C-17']['2']
     assert len(set(swapped)) == 48
     assert [size(i) for i in swapped] == [size(i) for i in stationary]
