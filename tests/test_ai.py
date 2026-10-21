@@ -1554,3 +1554,53 @@ def test_gemini_model_extracts_cached_input_tokens():
             self.usage_metadata = UsageMetadata()
 
     assert GeminiModel()._extract_cached_input_tokens(Response()) == 42
+
+
+class EchoMcpConfigModel(RecordingModel):
+    def generate(self, model_input: ModelInput, request: AIRequest, trace: TraceCollector | None = None) -> ModelResponse:
+        self.last_request = request
+        config = request.params["mcp_server"]
+        return ModelResponse(text=f"3 {config['auth_token']}", raw_response={"tools": [config]},
+                             input_tokens=11, output_tokens=1, total_tokens=12)
+
+
+def test_execute_runspec_resolves_mcp_credentials_only_in_the_request_and_redacts_echoes(monkeypatch, tmp_path):
+    secret = "s3cr3t-token-value-0123456789"
+    monkeypatch.setenv("CTXBENCH_TEST_MCP_TOKEN", secret)
+    dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
+    monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(FakeDatasetAdapter()))
+    engine = Engine()
+    model = EchoMcpConfigModel()
+    engine._models["recording"] = model
+    config = {"server_url": "https://example.test/mcp", "auth_token": "${CTXBENCH_TEST_MCP_TOKEN}",
+              "headers": {"X-Api-Key": "Bearer ${CTXBENCH_TEST_MCP_TOKEN}", "X-MCP-Delay-Ms": "500"}}
+    runspec = _runspec_for_executor(dataset, strategy="remote_mcp", params={"mcp_server": config})
+    runspec.trace.save_raw_response = True
+
+    result = execute_runspec(runspec, engine)
+
+    assert model.last_request.params["mcp_server"]["auth_token"] == secret
+    assert model.last_request.params["mcp_server"]["headers"]["X-Api-Key"] == f"Bearer {secret}"
+    assert runspec.params["mcp_server"] == config
+    persisted = result.model_dump_json()
+    assert secret not in persisted
+    assert result.response == "3 [REDACTED]"
+    assert result.trace.rawResponse["tools"][0]["headers"] == {"X-Api-Key": "[REDACTED]", "X-MCP-Delay-Ms": "500"}
+
+
+def test_plan_params_keep_mcp_credential_placeholders_and_check_them(monkeypatch):
+    from ctxbench.util.env import apply_lattes_mcp_env_overrides, resolve_plan_params
+
+    monkeypatch.setenv("CTXBENCH_TEST_MCP_URL", "https://example.test/mcp")
+    monkeypatch.setenv("CTXBENCH_TEST_MCP_TOKEN", "s3cr3t")
+    params = {"model_name": "m", "mcp_server": {"server_url": "${CTXBENCH_TEST_MCP_URL}",
+                                                "auth_token": "${CTXBENCH_TEST_MCP_TOKEN}",
+                                                "headers": {"Authorization": "Bearer ${CTXBENCH_TEST_MCP_TOKEN}"}}}
+    resolved = resolve_plan_params(params)
+    assert resolved["mcp_server"] == {**params["mcp_server"], "server_url": "https://example.test/mcp"}
+    monkeypatch.delenv("CTXBENCH_TEST_MCP_TOKEN")
+    with pytest.raises(ValueError, match="CTXBENCH_TEST_MCP_TOKEN"):
+        resolve_plan_params(params)
+    monkeypatch.setenv("LATTES_MCP_TOKEN", "s3cr3t")
+    overridden = apply_lattes_mcp_env_overrides({"mcp_server": {"server_url": "https://example.test/mcp"}})
+    assert overridden["mcp_server"]["auth_token"] == "${LATTES_MCP_TOKEN}"

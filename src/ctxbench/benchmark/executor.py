@@ -5,7 +5,7 @@ from pathlib import Path
 
 from ctxbench.adapters.registry import get_default_registry
 from ctxbench.ai.engine import Engine
-from ctxbench.ai.models.base import AIRequest
+from ctxbench.ai.models.base import AIRequest, AIResult
 from ctxbench.ai.runtime import LocalFunctionRuntime, MCPRuntime
 from ctxbench.benchmark.models import EvaluationResult, TrialResult, RunTiming, TrialTrace, TrialSpec
 from ctxbench.benchmark.runtime_adapter import TrialRuntimeAdapter
@@ -14,6 +14,7 @@ from ctxbench.dataset.package import DatasetPackage
 from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.runtime.runtime import ProvisioningRuntime
 from ctxbench.util.clock import utc_now_iso
+from ctxbench.util.env import redact_secrets, resolve_secret_params
 from ctxbench.util.logging import trial_log_context
 
 def execute_runspec(runspec: TrialSpec, engine: Engine, *, local_mcp_runtime_decorator=None) -> TrialResult:
@@ -39,7 +40,7 @@ def execute_runspec(runspec: TrialSpec, engine: Engine, *, local_mcp_runtime_dec
     elif runspec.strategy == "remote_mcp":
         if not isinstance(runspec.params.get("mcp_server"), dict):
             raise CapabilityUnavailableError("Strategy 'remote_mcp' requires params['mcp_server'].")
-    request_params = dict(runspec.params)
+    request_params, secrets = resolve_secret_params(dict(runspec.params))
     request_metadata = {
         **trial_log_context(runspec),
         "trialId": runspec.trialId,
@@ -98,6 +99,9 @@ def execute_runspec(runspec: TrialSpec, engine: Engine, *, local_mcp_runtime_dec
     finished_at = utc_now_iso()
     finish = datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
 
+    if secrets:
+        # Providers echo the MCP tool definition (headers, authorization) in raw responses and errors.
+        ai_result = AIResult.model_validate(redact_secrets(ai_result.model_dump(), secrets))
     is_empty_answer = ai_result.error is None and not (ai_result.answer or "").strip()
     error_message = ai_result.error or ("Model returned empty answer" if is_empty_answer else None)
     run_status = "error" if error_message is not None else "success"

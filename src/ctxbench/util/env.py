@@ -6,6 +6,10 @@ from typing import Any
 
 
 _ENV_PATTERN = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
+# MCP server fields that carry credentials. Their placeholders stay unresolved in plans and trial specs and are
+# resolved only when a request is built (resolve_secret_params), so no credential is written to disk.
+SECRET_MCP_FIELDS = ("auth_token", "authorization", "headers")
+REDACTED = "[REDACTED]"
 
 
 def resolve_env_placeholders(value: Any) -> Any:
@@ -22,6 +26,50 @@ def resolve_env_placeholders(value: Any) -> Any:
     return value
 
 
+def resolve_plan_params(value: dict[str, Any]) -> dict[str, Any]:
+    """Resolve placeholders except in the MCP server's credential fields, which are only checked."""
+    config = value.get("mcp_server")
+    if not isinstance(config, dict):
+        return resolve_env_placeholders(value)
+    secret = {key: config[key] for key in SECRET_MCP_FIELDS if key in config}
+    resolve_env_placeholders(secret)
+    resolved = resolve_env_placeholders({**value, "mcp_server": {k: v for k, v in config.items() if k not in secret}})
+    resolved["mcp_server"] = {**resolved["mcp_server"], **secret}
+    return resolved
+
+
+def resolve_secret_params(value: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """Resolve the MCP server's credential fields; return the params and the resolved values to redact."""
+    config = value.get("mcp_server")
+    if not isinstance(config, dict):
+        return value, []
+    resolved = dict(config)
+    secrets: list[str] = []
+    for key in SECRET_MCP_FIELDS:
+        if key not in config:
+            continue
+        resolved[key] = resolve_env_placeholders(config[key])
+        if isinstance(resolved[key], dict):
+            secrets += [item for name, item in resolved[key].items()
+                        if isinstance(item, str) and item != config[key].get(name)]
+        elif isinstance(resolved[key], str) and resolved[key] != config[key]:
+            secrets.append(resolved[key])
+    secrets += [item.removeprefix("Bearer ") for item in secrets if item.startswith("Bearer ")]
+    return {**value, "mcp_server": resolved}, sorted({item for item in secrets if item}, key=len, reverse=True)
+
+
+def redact_secrets(value: Any, secrets: list[str]) -> Any:
+    if isinstance(value, str):
+        for secret in secrets:
+            value = value.replace(secret, REDACTED)
+        return value
+    if isinstance(value, (list, tuple)):
+        return [redact_secrets(item, secrets) for item in value]
+    if isinstance(value, dict):
+        return {key: redact_secrets(item, secrets) for key, item in value.items()}
+    return value
+
+
 def apply_lattes_mcp_env_overrides(value: Any) -> Any:
     if not isinstance(value, dict):
         return value
@@ -31,7 +79,7 @@ def apply_lattes_mcp_env_overrides(value: Any) -> Any:
 
     resolved = dict(config)
     server_url = os.getenv("LATTES_MCP_URL")
-    auth_token = os.getenv("LATTES_MCP_TOKEN")
+    auth_token = "${LATTES_MCP_TOKEN}" if os.getenv("LATTES_MCP_TOKEN") else None
 
     if server_url:
         resolved["server_url"] = server_url

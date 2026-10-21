@@ -7,7 +7,7 @@ from typing import Any, Callable
 from ctxbench.benchmark.models import DatasetProvenance, Experiment, MODEL_ID_PATTERN, TrialMetadata, TrialSpec
 from ctxbench.dataset.package import DatasetPackage
 from ctxbench.util.artifacts import build_short_ids, canonical_trial_identity
-from ctxbench.util.env import apply_lattes_mcp_env_overrides, resolve_env_placeholders
+from ctxbench.util.env import apply_lattes_mcp_env_overrides, resolve_plan_params
 
 TASK_TEMPLATE_PATTERN = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
@@ -18,7 +18,7 @@ def resolve_params(experiment: Experiment, model_name: str, model_id: str | None
         model_specific = dict(experiment.models[model_id].params)
     else:
         model_specific = experiment.params.models.get(model_name, {})
-    params = resolve_env_placeholders({**common, **model_specific, "model_name": model_name})
+    params = resolve_plan_params({**common, **model_specific, "model_name": model_name})
     return apply_lattes_mcp_env_overrides(params)
 
 
