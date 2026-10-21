@@ -64,6 +64,46 @@
           "default": false,
           "title": "Budgetguard",
           "type": "boolean"
+        },
+        "materialImprovement": {
+          "anyOf": [
+            {
+              "exclusiveMaximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Materialimprovement"
+        },
+        "minimumObservations": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minimumobservations"
+        },
+        "estimateTtlRequests": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Estimatettlrequests"
         }
       },
       "required": [
@@ -888,6 +928,19 @@
       ],
       "default": null,
       "title": "Latencylimitms"
+    },
+    "latencyCostTokensPerSecond": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Latencycosttokenspersecond"
     },
     "tokenBudget": {
       "anyOf": [

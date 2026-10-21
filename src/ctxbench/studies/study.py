@@ -140,6 +140,8 @@ def prepare(*, definition, output):
                       'minimumCalibrationPassRate': definition.minimumCalibrationPassRate}
     if definition.tokenRateBudget is not None:
         study_identity['tokenRateBudget'] = definition.tokenRateBudget.model_dump()
+    if definition.latencyCostTokensPerSecond is not None:
+        study_identity['latencyCostTokensPerSecond'] = definition.latencyCostTokensPerSecond
     episodes = []
     for seed in definition.seeds:
         rows = [{**r, 'sizeBin': parent['requests'][r['instanceId']]['sizeBin']}
@@ -152,7 +154,7 @@ def prepare(*, definition, output):
                             else [r['instanceId'] for r in rows])
                 for policy, config in definition.policies.items():
                     identity = {'policyName': policy, 'scenarioName': scenario, 'seed': seed, 'repeat': repeat}
-                    behaviour = {**identity, 'policy': config.model_dump(), 'workload': workload,
+                    behaviour = {**identity, 'policy': _policy_identity(config), 'workload': workload,
                                  'scenario': [d.model_dump() for d in delays], 'study': study_identity}
                     episodes.append({**identity, 'id': digest(behaviour)[:24], 'workload': workload,
                                      'policy': config.model_dump(), 'scenario': [d.model_dump() for d in delays]})
@@ -321,6 +323,7 @@ def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42, allow_source_
             by_arm[key] = rows
             complete[key] = len(rows) == len(e['workload'])
     limit = plan['definition'].get('latencyLimitMs')
+    weight = plan['definition'].get('latencyCostTokensPerSecond')
     paired_metrics = {
         'latencyMs': lambda r: r['latencyMs'],
         'deadlineMiss': lambda r: None if limit is None or r['latencyMs'] is None else float(r['latencyMs'] > limit),
@@ -328,6 +331,8 @@ def analyze(path, *, bootstrap_replicates=1000, bootstrap_seed=42, allow_source_
         'failure': lambda r: float(r['status'] != 'success'),
         'passed': lambda r: float(r['passed'] is True),
     }
+    if weight is not None:
+        paired_metrics['utility'] = lambda r: _utility(r, weight)
     comparisons = []
     for left, right in plan['definition']['comparisons']:
         for scenario in plan['definition']['scenarios']:
@@ -405,12 +410,24 @@ def _latency_quantiles(frozen, configurations):
     return result
 
 
+def _policy_identity(config):
+    """Policy fields for the episode ID; unset utility-only fields are left out so earlier IDs are kept."""
+    dump = config.model_dump()
+    if config.type == 'blind-router':
+        for field in ('materialImprovement', 'minimumObservations', 'estimateTtlRequests'):
+            if dump[field] is None:
+                del dump[field]
+    return dump
+
+
 def _calibration_size_mix(parent):
-    counts = defaultdict(int)
+    """Size shares of the calibration requests; instance weights, when given, set the shares."""
+    counts = defaultdict(float)
     calibration = set(parent['split']['calibration'])
-    for request in parent['requests'].values():
+    weights = parent['split'].get('weights') or {}
+    for instance, request in parent['requests'].items():
         if request['target'] in calibration:
-            counts[request['sizeBin']] += 1
+            counts[request['sizeBin']] += weights.get(instance, 1)
     total = sum(counts.values())
     return {size: count/total for size, count in sorted(counts.items())} if total else {}
 
@@ -444,6 +461,7 @@ def _summary(identity, request_rows, planned, plan, effects, policy=None):
     tokens = [r['tokens'] for r in rows if r['tokens'] is not None]
     quality = [r['passed'] for r in rows if type(r['passed']) is bool]
     limit = plan['definition'].get('latencyLimitMs')
+    utility = [u for u in (_utility(r, plan['definition'].get('latencyCostTokensPerSecond')) for r in rows) if u is not None]
     row = dict(identity)
     row.update({'planned':planned, 'completed':len(rows),
         'success':sum(r['status']=='success' for r in rows),
@@ -461,9 +479,18 @@ def _summary(identity, request_rows, planned, plan, effects, policy=None):
         'passRate':mean(quality) if quality else None, 'evaluationCoverage':len(quality),
         'probes':sum(r['probe'] for r in rows),
         'budgetOvershoot':max(0,sum(tokens)-plan['definition']['tokenBudget']) if tokens and plan['definition'].get('tokenBudget') else None})
+    if plan['definition'].get('latencyCostTokensPerSecond') is not None:
+        row['meanUtility'] = mean(utility) if utility else None
     row.update(_episode_details(rows, planned, limit, plan['phases'][identity['scenarioName']], effects,
                                 plan['definition'].get('tokenRateBudget'), policy))
     return row
+
+
+def _utility(row, weight):
+    """Request cost J = tokens (lower bound) + lambda * latency in seconds; None without lambda."""
+    if weight is None or row['latencyMs'] is None or row['tokenLowerBound'] is None:
+        return None
+    return row['tokenLowerBound'] + weight*row['latencyMs']/1000
 
 
 def _first_fixed(plan):
@@ -705,7 +732,7 @@ def _arm_aggregates(summaries):
     arms = []
     for (policy, scenario), rows in groups.items():
         arm = {'policyName': policy, 'scenarioName': scenario, 'episodes': len(rows)}
-        for field in ARM_FIELDS:
+        for field in (*ARM_FIELDS, 'meanUtility') if 'meanUtility' in rows[0] else ARM_FIELDS:
             values = [r[field] for r in rows if r.get(field) is not None]
             arm[field] = {'mean': mean(values), 'min': min(values), 'max': max(values)} if values else None
         lags = [lag for r in rows for lag in r['lags']]

@@ -166,6 +166,10 @@ class BlindRouterPolicy(Definition):
     signalWindow: PositiveInt = 8
     signalTokens: PositiveInt | None = None
     budgetGuard: bool = False
+    # Utility objective only (study latencyCostTokensPerSecond); unset keeps earlier episode identities.
+    materialImprovement: Annotated[float, Field(ge=0, lt=1)] | None = None
+    minimumObservations: PositiveInt | None = None
+    estimateTtlRequests: PositiveInt | None = None
 
     @model_validator(mode='after')
     def validate_probing(self):
@@ -293,6 +297,8 @@ class Study(Definition):
     scenarios: dict[str, list[Effect]] = Field(min_length=1)
     comparisons: list[tuple[str, str]] = Field(default_factory=list)
     latencyLimitMs: Annotated[float, Field(gt=0)] | None = None
+    # Price of one second of latency in tokens (lambda): routers minimize tokens + lambda * latency in seconds.
+    latencyCostTokensPerSecond: Annotated[float, Field(gt=0)] | None = None
     tokenBudget: PositiveInt | None = None
     tokenRateBudget: TokenRateBudget | None = None
     workloads: dict[str, WorkloadOrder] = Field(default_factory=dict)
@@ -311,10 +317,20 @@ class Study(Definition):
             raise ValueError('duplicate study target')
         if any(not name for name in (*self.policies, *self.scenarios)):
             raise ValueError('policy and scenario names must be nonempty')
+        if self.latencyCostTokensPerSecond is not None and (self.latencyLimitMs is not None or self.tokenRateBudget is not None):
+            raise ValueError('a latency cost is the objective on its own, not with latencyLimitMs or tokenRateBudget')
         if any(p.type in ('router', 'reliability') for p in self.policies.values()) and self.latencyLimitMs is None:
             raise ValueError('routing requires latencyLimitMs')
-        if any(p.type == 'blind-router' for p in self.policies.values()) and self.latencyLimitMs is None and self.tokenRateBudget is None:
-            raise ValueError('a blind router requires latencyLimitMs or tokenRateBudget')
+        if (any(p.type == 'blind-router' for p in self.policies.values()) and self.latencyLimitMs is None
+                and self.tokenRateBudget is None and self.latencyCostTokensPerSecond is None):
+            raise ValueError('a blind router requires latencyLimitMs, tokenRateBudget or latencyCostTokensPerSecond')
+        utility_fields = ('materialImprovement', 'minimumObservations', 'estimateTtlRequests')
+        if self.latencyCostTokensPerSecond is None and any(
+                p.type == 'blind-router' and getattr(p, f) is not None for p in self.policies.values() for f in utility_fields):
+            raise ValueError('materialImprovement, minimumObservations and estimateTtlRequests apply to the latency-cost objective only')
+        if any(p.type == 'blind-router' and p.minimumObservations is not None and p.minimumObservations > p.estimateWindow
+               for p in self.policies.values()):
+            raise ValueError('minimumObservations cannot exceed estimateWindow')
         if any(name not in self.scenarios for name in self.workloads):
             raise ValueError('workload orders must name defined scenarios')
         for name, seeds in self.scenarioSeeds.items():

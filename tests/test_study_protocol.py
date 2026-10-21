@@ -576,3 +576,129 @@ def test_analysis_reports_excess_lags_and_derived_arms(frozen, tmp_path):
     assert rows[('budget-oracle', 'burst')]['budgetExcess'] <= min(rows[(n, 'burst')]['budgetExcess'] for n in ('inline', 'mcp'))
     burst_comparison = next(c for c in report['comparisons'] if c['scenario'] == 'burst')
     assert burst_comparison['pairedRequests'] == total
+
+
+
+def _blind_utility(frozen, tmp_path, name, weight, *, adaptive=True, **options):
+    policy = {'type':'blind-router','adaptive':adaptive,'estimateWindow':3,'minimumObservations':2, **options}
+    definition = make_study(tmp_path, frozen, latencyLimitMs=None, latencyCostTokensPerSecond=weight, comparisons=[],
+                            policies={'blind': policy})
+    plan = sealed_read(Path(study.prepare(definition=definition, output=tmp_path/name)['prepared']))
+    inline, mcp = plan['configurations']
+    # Inline: more tokens, faster; remote MCP: fewer tokens, slower. Break-even lambda = 900 tokens / 1 s = 900.
+    for size in plan['estimates'][inline]:
+        plan['estimates'][inline][size].update(latencyMs=1000, tokens=1000)
+        plan['estimates'][mcp][size].update(latencyMs=2000, tokens=100)
+    return plan, inline, mcp
+
+
+def _served(controller, cid, sequence, *, latency, tokens, size='small'):
+    controller.index = sequence
+    controller.observe({'configuration':cid, 'sizeBin':size, 'status':'success', 'durationMs':latency,
+                        'tokens':{'value':tokens,'knownPartial':None}, 'failures':[], 'sequenceIndex':sequence})
+
+
+@pytest.mark.parametrize('weight, expected', [(500, 'mcp'), (2000, 'inline')])
+def test_blind_utility_starts_on_the_lower_pooled_cost(frozen, tmp_path, weight, expected):
+    plan, inline, mcp = _blind_utility(frozen, tmp_path, f'blind-utility-{weight}', weight)
+    assert Controller(plan, plan['episodes'][0]).decide(0)['configuration'] == {'mcp': mcp, 'inline': inline}[expected]
+
+
+def test_blind_utility_never_reads_request_features(frozen, tmp_path):
+    plan, inline, mcp = _blind_utility(frozen, tmp_path, 'blind-features', 500)
+    sizes = {plan['requests'][i]['sizeBin'] for i in plan['episodes'][0]['workload']}
+    assert len(sizes) > 1
+    # Calibration that differs per size bin must not matter: the router only sees pooled values.
+    controller = Controller(plan, plan['episodes'][0])
+    choices = [controller.decide(i)['configuration'] for i in range(len(plan['episodes'][0]['workload']))]
+    assert set(choices) == {mcp}
+    plan['estimates'][inline]['small'].update(tokens=10)
+    pooled = Controller(plan, plan['episodes'][0])._blind_cost(inline)
+    for size in plan['estimates'][inline]:
+        plan['estimates'][inline][size]['tokens'] = 10 if size == 'small' else 1000
+    assert Controller(plan, plan['episodes'][0])._blind_cost(inline) == pooled
+
+
+def test_blind_utility_hysteresis_switches_only_on_a_material_gain(frozen, tmp_path):
+    # J(inline) = 1000 + 0.5*1000 = 1500 (calibration); J(mcp) observed = 100 + 0.5*latency:
+    # 1550 at 2900 ms (inline 3 % cheaper), 1700 at 3200 ms (12 % cheaper).
+    for latency, threshold, switches in ((2900, 0.05, False), (2900, 0, True), (3200, 0.05, True)):
+        plan, inline, mcp = _blind_utility(frozen, tmp_path, f'blind-hysteresis-{latency}-{threshold}', 500,
+                                           materialImprovement=threshold)
+        controller = Controller(plan, plan['episodes'][0])
+        assert controller.decide(0)['configuration'] == mcp
+        for sequence in (1, 2):
+            _served(controller, mcp, sequence, latency=latency, tokens=100)
+        decision = controller.decide(2)
+        assert (decision['configuration'] == inline) is switches
+        assert decision['reason'] == ('lower_cost' if switches else 'incumbent')
+
+
+def test_blind_utility_needs_minimum_fresh_observations(frozen, tmp_path):
+    plan, inline, mcp = _blind_utility(frozen, tmp_path, 'blind-fresh', 500, materialImprovement=0.05,
+                                       estimateTtlRequests=4)
+    controller = Controller(plan, plan['episodes'][0])
+    controller.decide(0)
+    _served(controller, mcp, 1, latency=5000, tokens=100)
+    assert controller.decide(1)['configuration'] == mcp        # one observation is below the minimum
+    _served(controller, mcp, 2, latency=5000, tokens=100)
+    assert controller.decide(2)['configuration'] == inline     # two slow observations: J(mcp) = 2600
+    controller.current = mcp
+    controller.index = 9
+    assert controller._blind_cost(mcp) == pytest.approx(100 + 500*2000/1000)  # expired: back to calibration
+
+
+def test_blind_utility_probes_the_alternative_either_way_and_frozen_never_probes(frozen, tmp_path):
+    plan, inline, mcp = _blind_utility(frozen, tmp_path, 'blind-probe', 500, probeTriggers=['periodic'],
+                                       probeInterval=3)
+    controller = Controller(plan, plan['episodes'][0])
+    decisions = [controller.decide(i) for i in range(7)]
+    # The incumbent (mcp) is cheaper and slower: the probe still goes to inline, the faster and dearer one.
+    assert [d["probe"] for d in decisions] == [False, False, False, True, False, False, True]
+    assert {d['configuration'] for d in decisions if d['probe']} == {inline}
+    # The frozen router cannot probe (rejected by the model) and ignores what it observes.
+    frozen_plan, _, _ = _blind_utility(frozen, tmp_path, 'blind-frozen', 500, adaptive=False)
+    controller = Controller(frozen_plan, frozen_plan['episodes'][0])
+    controller.decide(0)
+    for sequence in (1, 2, 3):
+        _served(controller, mcp, sequence, latency=9000, tokens=100)
+    assert [controller.decide(i) for i in range(3, 7)] == [{'configuration': mcp, 'reason': 'incumbent', 'probe': False}]*4
+
+
+def test_utility_objective_validation_ids_and_reporting(frozen, tmp_path):
+    base = {'baseline':str(frozen), 'seeds':[1], 'repeats':1, 'scenarios':{'stationary':[]}}
+    with pytest.raises(ValueError, match='on its own'):
+        Study.model_validate({**base, 'latencyLimitMs':1000, 'latencyCostTokensPerSecond':500,
+                              'policies':{'r':{'type':'blind-router','adaptive':True}}})
+    with pytest.raises(ValueError, match='latency-cost objective only'):
+        Study.model_validate({**base, 'latencyLimitMs':1000,
+                              'policies':{'r':{'type':'blind-router','adaptive':True,'materialImprovement':0.05}}})
+    with pytest.raises(ValueError, match='routing requires latencyLimitMs'):
+        Study.model_validate({**base, 'latencyCostTokensPerSecond':500,
+                              'policies':{'r':{'type':'router','adaptive':True}}})
+    blind = {'type':'blind-router','adaptive':True}
+    limit = make_study(tmp_path, frozen, policies={'blind': blind}, comparisons=[])
+    plan = sealed_read(Path(study.prepare(definition=limit, output=tmp_path/'blind-limit')['prepared']))
+    assert 'materialImprovement' in plan['episodes'][0]['policy']
+    from ctxbench.studies.study import _policy_identity
+    from ctxbench.studies.models import BlindRouterPolicy
+    assert set(_policy_identity(BlindRouterPolicy(**blind))) == set(BlindRouterPolicy(**blind).model_dump()) - {
+        'materialImprovement', 'minimumObservations', 'estimateTtlRequests'}
+    prepared = {}
+    for weight in (500, 600):
+        definition = make_study(tmp_path, frozen, latencyLimitMs=None, latencyCostTokensPerSecond=weight,
+                                policies={'fixed': {'type':'fixed','configuration':'inline-code-full'},
+                                          'blind': {**blind, 'materialImprovement':0.05}},
+                                comparisons=[['blind', 'fixed']])
+        prepared[weight] = Path(study.prepare(definition=definition, output=tmp_path/f'utility-{weight}')['prepared'])
+    ids = {weight: {e['id'] for e in sealed_read(path)['episodes']} for weight, path in prepared.items()}
+    assert ids[500].isdisjoint(ids[600])
+    for e in sealed_read(prepared[500])['episodes']:
+        study.episode(prepared=prepared[500], policy=e['policyName'], scenario='stationary', seed=201, repeat=1,
+                      execution=mock_execute)
+    report = study.analyze(prepared[500])
+    for summary in report['summaries']:
+        assert summary['meanUtility'] == pytest.approx(summary['tokensLowerBound']/summary['completed']
+                                                       + 500*summary['meanLatencyMs']/1000)
+    assert 'utility' in report['comparisons'][0]['metrics']
+    assert all(arm['meanUtility'] is not None for arm in report['arms'])

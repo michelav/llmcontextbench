@@ -283,14 +283,49 @@ class Controller:
         total = sum(share for share, _ in known)
         return sum(share*value for share, value in known)/total if total else None
 
-    def _recent(self, cid, metric, window):
+    def _recent(self, cid, metric, window, minimum=1):
         rows = self._fresh(self.observed[(cid, 'all')][self.since.get(cid, 0):])
         values = [o[metric] for o in rows if o['status'] == 'success' and o[metric] is not None][-window:]
-        return sum(values)/len(values) if values else None
+        return sum(values)/len(values) if values and len(values) >= minimum else None
 
     def _blind_estimate(self, cid, metric):
-        value = self._recent(cid, metric, self.policy['estimateWindow']) if self.policy['adaptive'] else None
+        value = (self._recent(cid, metric, self.policy['estimateWindow'], self.policy.get('minimumObservations') or 1)
+                 if self.policy['adaptive'] else None)
         return self._pooled(cid, metric) if value is None else value
+
+    def _blind_cost(self, cid):
+        """J = tokens + lambda * latency in seconds, from the configuration's pooled estimates."""
+        tokens, latency = self._blind_estimate(cid, 'tokens'), self._blind_estimate(cid, 'durationMs')
+        if tokens is None or latency is None:
+            return None
+        return tokens + self.plan['definition']['latencyCostTokensPerSecond']*latency/1000
+
+    def _blind_utility(self, index, eligible):
+        """Keep the incumbent unless another configuration's J is materially lower; probe the others periodically.
+
+        Estimates come only from served requests (recent mean per configuration) or pooled calibration;
+        probes go to every alternative in turn, whether it looks faster or not."""
+        cost = {cid: self._blind_cost(cid) for cid in eligible}
+        best = min(eligible, key=lambda cid: (cost[cid] is None, cost[cid] or 0, self.order.index(cid)))
+        current = self.current if self.current in eligible else None
+        threshold = self.policy.get('materialImprovement')
+        threshold = .10 if threshold is None else threshold
+        chosen, reason = current, 'incumbent'
+        if current is None:
+            chosen, reason = best, 'lowest_cost'
+        elif best != current and cost[best] is not None and (cost[current] is None or cost[best] <= cost[current]*(1-threshold)):
+            chosen, reason = best, 'lower_cost'
+        if chosen != current:
+            self.current, self.last_event = chosen, index+1
+        if (self.policy['adaptive'] and 'periodic' in self.policy['probeTriggers']
+                and index+1-self.last_event >= self.policy['probeInterval']):
+            others = [cid for cid in eligible if cid != self.current]
+            if others:
+                probe = others[self.probes % len(others)]
+                self.probes += 1
+                self.last_event = index+1
+                return probe, 'probe', True
+        return self.current, reason, False
 
     def _projected_rate(self, tokens):
         """Trailing-window mean if the next request costs `tokens`; non-adaptive routers ignore spend."""
@@ -424,6 +459,8 @@ class Controller:
             chosen, reason, probe = self._schedule(index, size, eligible)
         elif kind == 'random-eligible':
             chosen, reason, probe = self.rng.choice(eligible), 'random', False
+        elif kind == 'blind-router' and self.plan['definition'].get('latencyCostTokensPerSecond') is not None:
+            chosen, reason, probe = self._blind_utility(index, eligible)
         elif kind == 'blind-router':
             chosen, reason, probe = self._blind(index, eligible)
         else:
