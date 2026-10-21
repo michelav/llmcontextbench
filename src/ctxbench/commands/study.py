@@ -15,6 +15,7 @@ def register_study_commands(parser):
         if name == 'execute':
             command.add_argument('--resume', action='store_true')
             command.add_argument('--retry-uncertain', action='store_true')
+            command.add_argument('--seed', type=int, help='Run only the episodes of this seed (one session)')
     for command in baseline.choices.values():
         command.set_defaults(func=study_command)
     prepare = sub.add_parser('prepare', help='Bind a declarative study to a frozen baseline')

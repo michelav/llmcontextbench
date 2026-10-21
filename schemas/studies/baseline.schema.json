@@ -1,5 +1,25 @@
 {
   "$defs": {
+    "InstanceSplit": {
+      "additionalProperties": false,
+      "description": "Explicit instance lists (JSON files relative to the definition).\n\nCalibration entries are instance IDs or {\"instance\": ID, \"weight\": w}; weights make the frozen\nestimates weighted means (for strata sampled away from their natural shares). A target's\ninstances must all fall on one side.",
+      "properties": {
+        "calibrationInstances": {
+          "title": "Calibrationinstances",
+          "type": "string"
+        },
+        "evaluationInstances": {
+          "title": "Evaluationinstances",
+          "type": "string"
+        }
+      },
+      "required": [
+        "calibrationInstances",
+        "evaluationInstances"
+      ],
+      "title": "InstanceSplit",
+      "type": "object"
+    },
     "Split": {
       "additionalProperties": false,
       "properties": {
@@ -34,7 +54,31 @@
       "type": "string"
     },
     "split": {
-      "$ref": "#/$defs/Split"
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Split"
+        },
+        {
+          "$ref": "#/$defs/InstanceSplit"
+        }
+      ],
+      "title": "Split"
+    },
+    "sizeProfile": {
+      "anyOf": [
+        {
+          "enum": [
+            "standard",
+            "long64"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sizeprofile"
     },
     "seeds": {
       "items": {

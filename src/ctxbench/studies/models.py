@@ -15,10 +15,22 @@ class Split(Definition):
     calibrationTargetsPerLanguage: PositiveInt
 
 
+class InstanceSplit(Definition):
+    """Explicit instance lists (JSON files relative to the definition).
+
+    Calibration entries are instance IDs or {"instance": ID, "weight": w}; weights make the frozen
+    estimates weighted means (for strata sampled away from their natural shares). A target's
+    instances must all fall on one side.
+    """
+    calibrationInstances: str
+    evaluationInstances: str
+
+
 class Baseline(Definition):
     schemaVersion: Literal[1] = 1
     experiment: str
-    split: Split
+    split: Split | InstanceSplit
+    sizeProfile: Literal['standard', 'long64'] | None = None
     seeds: list[StrictInt] = Field(min_length=1)
     repeats: PositiveInt
     contextLimit: PositiveInt
@@ -30,6 +42,8 @@ class Baseline(Definition):
             raise ValueError('duplicate seeds')
         if self.outputReservation >= self.contextLimit:
             raise ValueError('output reservation must be below context limit')
+        if (self.sizeProfile is None) == isinstance(self.split, InstanceSplit):
+            raise ValueError('sizeProfile is required with an instance split, and only with it')
         return self
 
 class FixedPolicy(Definition):
