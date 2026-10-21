@@ -511,6 +511,27 @@
       "title": "ReliabilityPolicy",
       "type": "object"
     },
+    "RequestRange": {
+      "additionalProperties": false,
+      "properties": {
+        "firstRequest": {
+          "exclusiveMinimum": 0,
+          "title": "Firstrequest",
+          "type": "integer"
+        },
+        "lastRequest": {
+          "exclusiveMinimum": 0,
+          "title": "Lastrequest",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "firstRequest",
+        "lastRequest"
+      ],
+      "title": "RequestRange",
+      "type": "object"
+    },
     "RouterPolicy": {
       "additionalProperties": false,
       "properties": {
@@ -971,6 +992,35 @@
         "$ref": "#/$defs/WorkloadOrder"
       },
       "title": "Workloads",
+      "type": "object"
+    },
+    "workloadFile": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Workloadfile"
+    },
+    "disturbances": {
+      "additionalProperties": {
+        "$ref": "#/$defs/RequestRange"
+      },
+      "title": "Disturbances",
+      "type": "object"
+    },
+    "calibrationSizes": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "title": "Calibrationsizes",
       "type": "object"
     },
     "scenarioSeeds": {

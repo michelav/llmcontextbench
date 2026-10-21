@@ -126,7 +126,7 @@ class Controller:
         if self.policy.get('forecast', 'lookahead') == 'expected':
             # Request count is known; future request features are not read.
             per_request = 0.0
-            for size, share in self.plan['calibrationSizeMix'].items():
+            for size, share in self._size_mix().items():
                 value = self._estimate(cid, size, 'tokens')
                 if value is None:
                     return None
@@ -275,10 +275,13 @@ class Controller:
         actual, probe = self._probe(index, chosen, eligible)
         return actual, 'scheduled_probe' if probe else 'router', probe
 
+    def _size_mix(self):
+        """The scenario's normal-stream size mix when the study sets one, else the calibration mix."""
+        return self.episode.get('calibrationSizeMix') or self.plan.get('calibrationSizeMix') or {}
+
     def _pooled(self, cid, metric):
-        """Calibration value pooled over the calibration size mix: what a router that cannot see size knows."""
-        known = [(share, self._calibration(cid, size, metric))
-                 for size, share in (self.plan.get('calibrationSizeMix') or {}).items()]
+        """Calibration value pooled over the size mix: what a router that cannot see size knows."""
+        known = [(share, self._calibration(cid, size, metric)) for size, share in self._size_mix().items()]
         known = [(share, value) for share, value in known if value is not None]
         total = sum(share for share, _ in known)
         return sum(share*value for share, value in known)/total if total else None

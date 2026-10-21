@@ -728,3 +728,127 @@ def test_blind_router_reads_nothing_from_the_request(frozen, tmp_path, objective
     controller, decisions = run(plan)
     assert decisions == expected
     assert {size for _, size in controller.observed} <= {None, 'all'}
+
+
+def _explicit(frozen, tmp_path, workloads, **overrides):
+    (tmp_path / 'workloads.json').write_text(json.dumps(workloads))
+    return make_study(tmp_path, frozen, workloadFile=str(tmp_path / 'workloads.json'), **overrides)
+
+
+def _held_out(frozen):
+    plan = sealed_read(frozen)['plan']
+    held = set(plan['split']['heldOut'])
+    return sorted(i for i, r in plan['requests'].items() if r['target'] in held), plan
+
+
+def test_explicit_workloads_disturbances_and_scenario_calibration_sizes(frozen, tmp_path):
+    held, parent = _held_out(frozen)
+    workloads = {'normal': {'201': held[:6], '202': held[6:12]}, 'burst': {'202': held[12:18]}}
+    definition = _explicit(frozen, tmp_path, workloads, seeds=[201, 202], scenarios={'normal': [], 'burst': []},
+                           scenarioSeeds={'burst': [202]}, disturbances={'burst': {'firstRequest':3, 'lastRequest':4}},
+                           calibrationSizes={'burst': ['small']})
+    plan = sealed_read(Path(study.prepare(definition=definition, output=tmp_path/'explicit')['prepared']))
+    by = {(e['scenarioName'], e['seed'], e['policyName']): e for e in plan['episodes']}
+    assert len(by) == 6
+    assert by[('normal', 201, 'router')]['workload'] == held[:6]
+    assert by[('burst', 202, 'fixed')]['workload'] == held[12:18]
+    assert plan['phases']['burst'] == [{'firstRequest':1,'lastRequest':2,'disturbance':False},
+                                       {'firstRequest':3,'lastRequest':4,'disturbance':True},
+                                       {'firstRequest':5,'lastRequest':6,'disturbance':False}]
+    assert plan['phases']['normal'] == [{'firstRequest':1,'lastRequest':6}]
+    assert by[('burst', 202, 'router')]['calibrationSizeMix'] == {'small': 1.0}
+    assert 'calibrationSizeMix' not in by[('normal', 202, 'router')]
+    assert plan['workloadFile']['digest'] == baseline.file_hash(tmp_path / 'workloads.json')
+    # A scenario-specific mix is part of the episode identity; without one the identity is unchanged.
+    plain = make_study(tmp_path, frozen, workloadFile=str(tmp_path / 'workloads.json'), seeds=[201, 202],
+                       scenarios={'normal': [], 'burst': []}, scenarioSeeds={'burst': [202]},
+                       disturbances={'burst': {'firstRequest':3, 'lastRequest':4}})
+    other = sealed_read(Path(study.prepare(definition=plain, output=tmp_path/'explicit-plain')['prepared']))
+    ids = {(e['scenarioName'], e['seed'], e['policyName']): e['id'] for e in other['episodes']}
+    assert ids[('normal', 201, 'router')] == by[('normal', 201, 'router')]['id']
+    assert ids[('burst', 202, 'router')] != by[('burst', 202, 'router')]['id']
+
+
+def test_explicit_workloads_are_checked(frozen, tmp_path):
+    held, parent = _held_out(frozen)
+    calibration = sorted(i for i, r in parent['requests'].items() if r['target'] in parent['split']['calibration'])
+    cases = [({'stationary': {'201': held[:4]}, 'extra': {'201': held[:4]}}, {}, 'every scenario'),
+             ({'stationary': {'202': held[:4]}}, {}, 'exactly the seeds'),
+             ({'stationary': {'201': [held[0], held[0]]}}, {}, 'distinct instances'),
+             ({'stationary': {'201': calibration[:3]}}, {}, 'outside the evaluation split'),
+             ({'stationary': {'201': held[:4]}, 'other': {'201': held[:5]}},
+              {'scenarios': {'stationary': [], 'other': []}}, 'unequal study workloads'),
+             ({'stationary': {'201': held[:4]}}, {'calibrationSizes': {'stationary': ['huge']}}, 'size bins'),
+             ({'stationary': {'201': held[:4]}}, {'disturbances': {'stationary': {'firstRequest':3, 'lastRequest':5}}},
+              'disturbance range exceeds')]
+    for n, (workloads, overrides, message) in enumerate(cases):
+        definition = _explicit(frozen, tmp_path, workloads, **overrides)
+        with pytest.raises(ValueError, match=message):
+            study.prepare(definition=definition, output=tmp_path/f'bad-explicit-{n}')
+    base = {'baseline': 'b.json', 'seeds': [1], 'repeats': 1, 'scenarios': {'s': []},
+            'policies': {'f': {'type': 'fixed', 'configuration': 'c'}}}
+    for overrides, message in (({'workloadFile': 'w.json', 'targets': ['t']}, 'excludes'),
+                               ({'disturbances': {'x': {'firstRequest':1, 'lastRequest':1}}}, 'name defined scenarios'),
+                               ({'calibrationSizes': {'s': []}}, 'nonempty'),
+                               ({'workloads': {'s': {'phases': [{'lastRequest':2, 'sizes':['small']}]}},
+                                 'disturbances': {'s': {'firstRequest':1, 'lastRequest':1}}}, 'already marks')):
+        with pytest.raises(ValueError, match=message):
+            Study.model_validate({**base, **overrides})
+
+
+def test_blind_utility_pools_calibration_over_the_scenario_normal_stream(frozen, tmp_path):
+    held, _ = _held_out(frozen)
+    plans = []
+    for name, sizes in (('all', {}), ('small', {'calibrationSizes': {'stationary': ['small']}})):
+        definition = _explicit(frozen, tmp_path, {'stationary': {'201': held[:6]}}, latencyLimitMs=None,
+                               latencyCostTokensPerSecond=500, comparisons=[],
+                               policies={'blind': {'type':'blind-router','adaptive':False}}, **sizes)
+        plan = sealed_read(Path(study.prepare(definition=definition, output=tmp_path/f'pooled-{name}')['prepared']))
+        inline, mcp = plan['configurations']
+        assert set(plan['estimates'][inline]) == {'small', 'large'}
+        # Small: inline J 600 < remote 1100; large: inline 5500 > remote 1100.
+        plan['estimates'][inline]['small'].update(latencyMs=1000, tokens=100)
+        plan['estimates'][inline]['large'].update(latencyMs=1000, tokens=5000)
+        for size in ('small', 'large'):
+            plan['estimates'][mcp][size].update(latencyMs=2000, tokens=100)
+        plans.append((Controller(plan, plan['episodes'][0]).decide(0)['configuration'], inline, mcp))
+    (everything, inline, mcp), (small, _, _) = plans
+    assert (everything, small) == (mcp, inline)
+
+
+def test_burst_workloads_balance_sizes_and_swap_in_contested_instances():
+    from ctxbench.adapters.repoqa.burst_workloads import burst_workloads
+    selection, evaluation = [], []
+    for size in (2048, 8192, 16384, 32768, 65536):
+        for n in range(30):
+            klass = 'contested' if n < (2 if size == 2048 else 12) else ('isolated' if n % 2 else 'intermediate')
+            instance = f'r{n}_ctx{size // 1024}k'
+            selection.append({'instance': instance, 'size': size, 'class': klass})
+            evaluation.append(instance)
+    labels = {e['instance']: e for e in selection}
+    size = lambda i: f"{labels[i]['size'] // 1024}k"
+    workloads, seeds, disturbances = burst_workloads(selection, evaluation, seeds=[1, 2, 3, 4], length=48,
+                                                     burst=16, placements=[13, 17, 21])
+    assert seeds == {'S-L-13': [1, 4], 'S-C-13': [1, 4], 'S-D-13': [1, 4], 'S-L-17': [2], 'S-C-17': [2],
+                     'S-D-17': [2], 'S-L-21': [3], 'S-C-21': [3], 'S-D-21': [3]}
+    assert disturbances['S-L-17'] == {'firstRequest': 17, 'lastRequest': 32}
+    stationary = workloads['S-A']['2']
+    assert len(stationary) == len(set(stationary)) == 48
+    counts = {s: [size(i) for i in stationary].count(s) for s in ('2k', '8k', '16k', '32k', '64k')}
+    assert max(counts.values()) - min(counts.values()) <= 1
+    large = workloads['S-L-17']['2']
+    assert len(set(large)) == 48
+    assert {size(i) for i in large[16:32]} == {'32k', '64k'}
+    assert {size(i) for i in large[:16] + large[32:]} == {'2k', '8k', '16k'}
+    assert workloads['S-D-17']['2'] == stationary
+    swapped = workloads['S-C-17']['2']
+    assert len(set(swapped)) == 48
+    assert [size(i) for i in swapped] == [size(i) for i in stationary]
+    assert swapped[:16] == stationary[:16] and swapped[32:] == stationary[32:]
+    burst = [labels[i]['class'] for i in swapped[16:32]]
+    # Only 2k can run short of contested instances (two exist).
+    assert all(c == 'contested' or size(i) == '2k' for c, i in zip(burst, swapped[16:32]))
+    again, _, _ = burst_workloads(selection, evaluation, seeds=[1, 2, 3, 4], length=48, burst=16, placements=[13, 17, 21])
+    assert again == workloads
+    with pytest.raises(ValueError, match='fit the workload'):
+        burst_workloads(selection, evaluation, seeds=[1], length=48, burst=16, placements=[40])

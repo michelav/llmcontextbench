@@ -1,4 +1,5 @@
 """Prepare held-out episodes bound to exactly one frozen baseline."""
+import json
 from collections import defaultdict
 from pathlib import Path
 
@@ -111,10 +112,21 @@ def prepare(*, definition, output):
     targets = definition.targets or parent['split']['heldOut']
     if any(target not in parent['split']['heldOut'] for target in targets):
         raise ValueError('study targets must be held-out targets of the baseline')
-    lengths = {len(ordered_workload(index, targets, seed)) for seed in definition.seeds}
+    explicit = _explicit_workloads(definition, definition_path.parent, parent) if definition.workloadFile else None
+    if explicit is not None:
+        lengths = {len(ids) for by_seed in explicit.values() for ids in by_seed.values()}
+    else:
+        lengths = {len(ordered_workload(index, targets, seed)) for seed in definition.seeds}
     if len(lengths) != 1:
         raise ValueError('unequal study workloads')
     length = lengths.pop()
+    if any(d.lastRequest > length for d in definition.disturbances.values()):
+        raise ValueError('disturbance range exceeds workload')
+    mix = _calibration_size_mix(parent)
+    if any(size not in mix for sizes in definition.calibrationSizes.values() for size in sizes):
+        raise ValueError('calibration sizes must be size bins of the calibration requests')
+    scenario_mix = {scenario: {size: mix[size]/sum(mix[s] for s in sizes) for size in sorted(sizes)}
+                    for scenario, sizes in definition.calibrationSizes.items()}
     if any(delay.lastRequest > length for delays in definition.scenarios.values() for delay in delays):
         raise ValueError('delay range exceeds workload')
     if any(phase.lastRequest > length for policy in definition.policies.values() if policy.type == 'schedule'
@@ -126,8 +138,12 @@ def prepare(*, definition, output):
     phases = {}
     for scenario, delays in definition.scenarios.items():
         ordered_phases = order_phases(orders[scenario]) if scenario in orders else []
+        if scenario in definition.disturbances:
+            marked = definition.disturbances[scenario]
+            ordered_phases = [{'firstRequest': marked.firstRequest, 'lastRequest': marked.lastRequest, 'disturbance': True}]
         boundaries = sorted({1, length+1, *(d.firstRequest for d in delays),
-                             *(d.lastRequest+1 for d in delays), *(p['firstRequest'] for p in ordered_phases)})
+                             *(d.lastRequest+1 for d in delays), *(p['firstRequest'] for p in ordered_phases),
+                             *(p['lastRequest']+1 for p in ordered_phases)})
         phases[scenario] = [{'firstRequest': start, 'lastRequest': end-1} for start, end in zip(boundaries, boundaries[1:])]
         for phase in phases[scenario]:
             if ordered_phases:
@@ -144,20 +160,26 @@ def prepare(*, definition, output):
         study_identity['latencyCostTokensPerSecond'] = definition.latencyCostTokensPerSecond
     episodes = []
     for seed in definition.seeds:
-        rows = [{**r, 'sizeBin': parent['requests'][r['instanceId']]['sizeBin']}
-                for r in ordered_workload(index, targets, seed)]
+        rows = None if explicit is not None else [{**r, 'sizeBin': parent['requests'][r['instanceId']]['sizeBin']}
+                                                  for r in ordered_workload(index, targets, seed)]
         for repeat in range(1, definition.repeats+1):
             for scenario, delays in definition.scenarios.items():
                 if seed not in definition.scenarioSeeds.get(scenario, definition.seeds):
                     continue
-                workload = (ordered(rows, orders[scenario], seed, scenario) if scenario in orders
-                            else [r['instanceId'] for r in rows])
+                if explicit is not None:
+                    workload = list(explicit[scenario][str(seed)])
+                else:
+                    workload = (ordered(rows, orders[scenario], seed, scenario) if scenario in orders
+                                else [r['instanceId'] for r in rows])
+                # Set only when given, so earlier episode IDs are kept.
+                extra = {'calibrationSizeMix': scenario_mix[scenario]} if scenario in scenario_mix else {}
                 for policy, config in definition.policies.items():
                     identity = {'policyName': policy, 'scenarioName': scenario, 'seed': seed, 'repeat': repeat}
                     behaviour = {**identity, 'policy': _policy_identity(config), 'workload': workload,
-                                 'scenario': [d.model_dump() for d in delays], 'study': study_identity}
+                                 'scenario': [d.model_dump() for d in delays], 'study': study_identity, **extra}
                     episodes.append({**identity, 'id': digest(behaviour)[:24], 'workload': workload,
-                                     'policy': config.model_dump(), 'scenario': [d.model_dump() for d in delays]})
+                                     'policy': config.model_dump(), 'scenario': [d.model_dump() for d in delays],
+                                     **extra})
     estimates = {cid: frozen['estimates'][cid] for cid in selected}
     quality = {cid: frozen['quality'][cid] for cid in selected}
     if definition.minimumCalibrationPassRate is not None and not any(
@@ -166,6 +188,8 @@ def prepare(*, definition, output):
         raise ValueError('no configuration meets the calibration quality floor')
     cheapest = None
     if any(p.type == 'budget' for p in definition.policies.values()):
+        if explicit is not None:
+            raise ValueError('a budget study uses the target-ordered workload')
         fixed = {p.configuration for p in definition.policies.values() if p.type == 'fixed'}
         if fixed != set(selected):
             raise ValueError('budget study requires a fixed policy for every selected configuration')
@@ -202,7 +226,10 @@ def prepare(*, definition, output):
         'configurations': selected, 'requests': requests, 'estimates': estimates, 'quality': quality,
         'tokenQuantiles': _token_quantiles(frozen, selected),
         'latencyQuantiles': _latency_quantiles(frozen, selected),
-        'calibrationSizeMix': _calibration_size_mix(parent),
+        'calibrationSizeMix': mix,
+        **({'workloadFile': {'path': str((definition_path.parent / definition.workloadFile).resolve()),
+                             'digest': file_hash(definition_path.parent / definition.workloadFile)}}
+           if explicit is not None else {}),
         'episodes': episodes, 'manifest': manifest, 'budget': parent['budget'], 'phases': phases,
         'resolved': {'protocolVersion': 3, 'estimator': 'all-observations-v1',
                      'tieOrder': selected, 'failureMonitoring': 'execution-only',
@@ -418,6 +445,25 @@ def _policy_identity(config):
             if dump[field] is None:
                 del dump[field]
     return dump
+
+
+def _explicit_workloads(definition, base, parent):
+    """The workload file: every scenario, exactly the seeds it runs, distinct held-out instances per sequence."""
+    workloads = json.loads((base / definition.workloadFile).read_text())
+    held_out = set(parent['split']['heldOut'])
+    allowed = {instance for instance, request in parent['requests'].items() if request['target'] in held_out}
+    if not isinstance(workloads, dict) or set(workloads) != set(definition.scenarios):
+        raise ValueError('the workload file must give every scenario, and only them')
+    for scenario, by_seed in workloads.items():
+        seeds = definition.scenarioSeeds.get(scenario, definition.seeds)
+        if not isinstance(by_seed, dict) or set(by_seed) != {str(seed) for seed in seeds}:
+            raise ValueError(f'the workload file must give exactly the seeds {scenario} runs')
+        for ids in by_seed.values():
+            if not isinstance(ids, list) or not ids or len(set(ids)) != len(ids):
+                raise ValueError(f'{scenario} workloads must be nonempty lists of distinct instances')
+            if outside := sorted(set(ids) - allowed):
+                raise ValueError(f'{scenario} workload instances outside the evaluation split: {outside[:5]}')
+    return workloads
 
 
 def _calibration_size_mix(parent):

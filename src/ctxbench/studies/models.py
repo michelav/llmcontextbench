@@ -302,6 +302,13 @@ class Study(Definition):
     tokenBudget: PositiveInt | None = None
     tokenRateBudget: TokenRateBudget | None = None
     workloads: dict[str, WorkloadOrder] = Field(default_factory=dict)
+    # Explicit workloads (JSON relative to the definition): {scenario: {seed: [evaluation instance IDs]}},
+    # for every scenario and each seed it runs; replaces the target-ordered workload.
+    workloadFile: str | None = None
+    # Disturbance phase per scenario (marks phases for the phase oracle and the analysis).
+    disturbances: dict[str, RequestRange] = Field(default_factory=dict)
+    # Size bins a scenario's normal stream draws from: pooled calibration estimates use only these.
+    calibrationSizes: dict[str, list[str]] = Field(default_factory=dict)
     # Optional seed subset per scenario (e.g. burst placements assigned to seeds); others run every seed.
     scenarioSeeds: dict[str, list[StrictInt]] = Field(default_factory=dict)
     derivedArms: dict[str, DerivedArm] = Field(default_factory=dict)
@@ -333,6 +340,14 @@ class Study(Definition):
             raise ValueError('minimumObservations cannot exceed estimateWindow')
         if any(name not in self.scenarios for name in self.workloads):
             raise ValueError('workload orders must name defined scenarios')
+        if self.workloadFile is not None and (self.workloads or self.targets is not None):
+            raise ValueError('an explicit workload file excludes workload orders and a target subset')
+        if any(name not in self.scenarios for name in (*self.disturbances, *self.calibrationSizes)):
+            raise ValueError('disturbances and calibration sizes must name defined scenarios')
+        if set(self.disturbances) & set(self.workloads):
+            raise ValueError('a workload order already marks its disturbance phases')
+        if any(not sizes or len(set(sizes)) != len(sizes) for sizes in self.calibrationSizes.values()):
+            raise ValueError('calibration sizes must be nonempty and duplicate-free')
         for name, seeds in self.scenarioSeeds.items():
             if name not in self.scenarios:
                 raise ValueError('scenario seeds must name defined scenarios')
