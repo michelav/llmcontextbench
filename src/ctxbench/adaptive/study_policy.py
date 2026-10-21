@@ -441,9 +441,14 @@ class Controller:
     def decide(self, index):
         self.index = index
         instance = self.episode['workload'][index]
-        eligible = self._eligible(instance)
-        size = self.plan['requests'][instance]['sizeBin']
         kind = self.policy['type']
+        if kind == 'blind-router':
+            # A blind router reads nothing from the request: every study configuration is a candidate, and a
+            # request that does not fit a model fails at the provider, which the router observes as a failure.
+            eligible, size = list(self.order), None
+        else:
+            eligible = self._eligible(instance)
+            size = self.plan['requests'][instance]['sizeBin']
         if not eligible:
             chosen, reason, probe = None, 'no_eligible_candidate', False
         elif kind == 'fixed':
@@ -471,7 +476,8 @@ class Controller:
         if observation is None:
             return
         cid = observation['configuration']
-        size = observation['sizeBin']
+        # A blind router keeps no request feature, not even the size bin of what it served.
+        size = None if self.policy['type'] == 'blind-router' else observation['sizeBin']
         token = observation['tokens']
         row = {'status': observation['status'], 'durationMs': observation['durationMs'],
                'tokens': token['value'], 'failures': observation['failures'],

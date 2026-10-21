@@ -702,3 +702,29 @@ def test_utility_objective_validation_ids_and_reporting(frozen, tmp_path):
                                                        + 500*summary['meanLatencyMs']/1000)
     assert 'utility' in report['comparisons'][0]['metrics']
     assert all(arm['meanUtility'] is not None for arm in report['arms'])
+
+
+@pytest.mark.parametrize('objective', ['limit', 'utility'])
+def test_blind_router_reads_nothing_from_the_request(frozen, tmp_path, objective):
+    if objective == 'utility':
+        plan, inline, mcp = _blind_utility(frozen, tmp_path, 'blind-nothing', 500, probeTriggers=['periodic'],
+                                           probeInterval=3, materialImprovement=0.05)
+    else:
+        definition = make_study(tmp_path, frozen, comparisons=[], policies={'blind': {
+            'type':'blind-router','adaptive':True,'probeTriggers':['periodic'],'probeInterval':3}})
+        plan = sealed_read(Path(study.prepare(definition=definition, output=tmp_path/'blind-nothing')['prepared']))
+        inline, mcp = plan['configurations']
+    def run(plan):
+        controller, decisions = Controller(plan, plan['episodes'][0]), []
+        for i in range(8):
+            decisions.append(controller.decide(i))
+            controller.observe({'configuration': decisions[-1]['configuration'], 'status': 'success',
+                                'durationMs': 1000 + 500*i, 'tokens': {'value': 100 + 50*i, 'knownPartial': None},
+                                'failures': [], 'sequenceIndex': i+1})
+        return controller, decisions
+    _, expected = run(plan)
+    # Without any request record (size bin, context fit, executability, target), decisions are unchanged.
+    plan['requests'] = {}
+    controller, decisions = run(plan)
+    assert decisions == expected
+    assert {size for _, size in controller.observed} <= {None, 'all'}
