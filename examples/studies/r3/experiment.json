@@ -1,0 +1,73 @@
+{
+  "id": "repoqa-r3-v1",
+  "name": "R3: RepoQA native placement, inline-code-full vs remote-mcp-direct (remote MCP us-east1, no injected delay unless a study sets one)",
+  "output": "../../../outputs/repoqa-r3",
+  "dataset": {
+    "id": "ctxbench/repoqa",
+    "version": "2026-10-21-native.1",
+    "root": "../../../datasets/repoqa-2026-10-21-native.1"
+  },
+  "models": {
+    "answer": {
+      "provider": "openai",
+      "name": "gpt-6-luna"
+    }
+  },
+  "scope": {
+    "instances": [],
+    "tasks": ["snf_retrieve_function"]
+  },
+  "factors": {
+    "model": ["answer"],
+    "configuration": ["inline-code-full", "remote-mcp-direct"]
+  },
+  "params": {
+    "common": {
+      "mcp_server": {
+        "server_url": "${REPOQA_MCP_R3_URL}",
+        "server_label": "repoqa",
+        "server_description": "RepoQA repository tools (direct surface)",
+        "require_approval": "never",
+        "allowed_tools": ["find_symbol", "list_symbols_lean", "get_symbol_lean"],
+        "headers": {
+          "X-MCP-Token": "${REPOQA_MCP_TOKEN}"
+        }
+      }
+    }
+  },
+  "evaluation": {
+    "enabled": true
+  },
+  "trace": {
+    "enabled": true,
+    "writeFiles": true,
+    "save_raw_response": true,
+    "save_tool_calls": true,
+    "save_usage": true,
+    "save_errors": true
+  },
+  "execution": {
+    "repeats": 1
+  },
+  "configurations": {
+    "inline-code-full": {
+      "strategy": "inline",
+      "representation": "code",
+      "surface": "full"
+    },
+    "remote-mcp-direct": {
+      "strategy": "remote_mcp",
+      "representation": "json",
+      "surface": "repoqa-direct"
+    }
+  },
+  "surfaces": {
+    "full": {
+      "type": "full_context"
+    },
+    "repoqa-direct": {
+      "type": "operations",
+      "operations": ["find_symbol", "list_symbols_lean", "get_symbol_lean"]
+    }
+  }
+}

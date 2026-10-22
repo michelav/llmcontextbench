@@ -1,0 +1,155 @@
+{
+  "id": "repoqa-r3-delay-check-s1-v1",
+  "name": "R3 delay check, session 1: the 72 calibration instances at 32k-64k on remote-mcp-direct, every MCP request delayed by an exponential draw with mean 500 ms (the S-D slowdown)",
+  "output": "outputs/repoqa-r3-delay-check-s1",
+  "dataset": {
+    "id": "ctxbench/repoqa",
+    "version": "2026-10-21-native.1",
+    "root": "datasets/repoqa-2026-10-21-native.1"
+  },
+  "models": {
+    "answer": {
+      "provider": "openai",
+      "name": "gpt-6-luna"
+    }
+  },
+  "scope": {
+    "instances": [
+      "go_001_ctx32k",
+      "go_001_ctx64k",
+      "go_002_ctx32k",
+      "go_002_ctx64k",
+      "go_004_ctx64k",
+      "go_006_ctx32k",
+      "go_007_ctx64k",
+      "go_010_ctx32k",
+      "go_010_ctx64k",
+      "go_051_ctx64k",
+      "go_052_ctx32k",
+      "go_053_ctx64k",
+      "go_058_ctx32k",
+      "go_058_ctx64k",
+      "go_059_ctx32k",
+      "java_001_ctx64k",
+      "java_003_ctx32k",
+      "java_004_ctx64k",
+      "java_009_ctx32k",
+      "java_009_ctx64k",
+      "java_031_ctx64k",
+      "java_036_ctx32k",
+      "java_036_ctx64k",
+      "java_037_ctx64k",
+      "java_038_ctx32k",
+      "java_040_ctx32k",
+      "java_040_ctx64k",
+      "java_061_ctx32k",
+      "java_061_ctx64k",
+      "java_062_ctx32k",
+      "java_064_ctx32k",
+      "java_064_ctx64k",
+      "java_067_ctx32k",
+      "py_022_ctx32k",
+      "py_022_ctx64k",
+      "py_023_ctx32k",
+      "py_023_ctx64k",
+      "py_024_ctx32k",
+      "py_025_ctx64k",
+      "py_030_ctx64k",
+      "py_032_ctx32k",
+      "py_035_ctx64k",
+      "py_037_ctx32k",
+      "py_037_ctx64k",
+      "py_039_ctx32k",
+      "py_043_ctx32k",
+      "py_050_ctx64k",
+      "rs_017_ctx32k",
+      "rs_019_ctx64k",
+      "rs_022_ctx64k",
+      "rs_023_ctx64k",
+      "rs_024_ctx32k",
+      "rs_025_ctx32k",
+      "rs_027_ctx32k",
+      "rs_027_ctx64k",
+      "rs_052_ctx32k",
+      "rs_053_ctx32k",
+      "rs_053_ctx64k",
+      "rs_054_ctx32k",
+      "rs_054_ctx64k",
+      "ts_032_ctx32k",
+      "ts_036_ctx32k",
+      "ts_037_ctx64k",
+      "ts_040_ctx32k",
+      "ts_040_ctx64k",
+      "ts_076_ctx32k",
+      "ts_076_ctx64k",
+      "ts_078_ctx32k",
+      "ts_079_ctx64k",
+      "ts_082_ctx64k",
+      "ts_084_ctx32k",
+      "ts_088_ctx64k"
+    ],
+    "tasks": [
+      "snf_retrieve_function"
+    ]
+  },
+  "factors": {
+    "model": [
+      "answer"
+    ],
+    "configuration": [
+      "remote-mcp-direct"
+    ]
+  },
+  "params": {
+    "common": {
+      "mcp_server": {
+        "server_url": "${REPOQA_MCP_R3_URL}",
+        "server_label": "repoqa",
+        "server_description": "RepoQA repository tools (direct surface)",
+        "require_approval": "never",
+        "allowed_tools": [
+          "find_symbol",
+          "list_symbols_lean",
+          "get_symbol_lean"
+        ],
+        "headers": {
+          "X-MCP-Token": "${REPOQA_MCP_TOKEN}",
+          "X-MCP-Delay-Ms": "500",
+          "X-MCP-Delay-Mode": "requests-exp",
+          "X-MCP-Condition": "R3DC1"
+        }
+      }
+    }
+  },
+  "evaluation": {
+    "enabled": true
+  },
+  "trace": {
+    "enabled": true,
+    "writeFiles": true,
+    "save_raw_response": true,
+    "save_tool_calls": true,
+    "save_usage": true,
+    "save_errors": true
+  },
+  "execution": {
+    "repeats": 1
+  },
+  "configurations": {
+    "remote-mcp-direct": {
+      "strategy": "remote_mcp",
+      "representation": "json",
+      "surface": "repoqa-direct"
+    }
+  },
+  "surfaces": {
+    "repoqa-direct": {
+      "type": "operations",
+      "operations": [
+        "find_symbol",
+        "list_symbols_lean",
+        "get_symbol_lean"
+      ]
+    }
+  }
+}

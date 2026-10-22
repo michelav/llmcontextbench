@@ -930,3 +930,32 @@ def test_server_delay_is_validated(frozen, tmp_path):
                    {**base, 'configuration':'c', 'mode':'sometimes'}):
         with pytest.raises(ValueError):
             Study.model_validate({**model, 'scenarios': {'slow': [effect]}})
+
+
+def test_calibration_sample_strata_round_robin_and_weights():
+    from ctxbench.adapters.repoqa.calibration_sample import calibration_sample
+    selection = []
+    languages = ('go', 'java', 'python')
+    for size, available, natural in ((2048, {'isolated': 20, 'intermediate': 20, 'contested': 2}, (6, 3, 1)),
+                                     (8192, {'isolated': 20, 'intermediate': 20, 'contested': 20}, (2, 1, 1))):
+        for klass, n in available.items():
+            for i in range(n):
+                selection.append({'instance': f'{klass}{i}_{size}', 'size': size, 'class': klass,
+                                  'language': languages[i % 3], 'split': 'calibration'})
+        for klass, n in zip(('isolated', 'intermediate', 'contested'), natural):
+            selection += [{'instance': f'e{klass}{i}_{size}', 'size': size, 'class': klass, 'language': 'go',
+                           'split': 'evaluation'} for i in range(n)]
+    calibration, evaluation, counts = calibration_sample(selection, per_class=6, seed=2027)
+    assert counts == {'2k/isolated': 6, '2k/intermediate': 6, '2k/contested': 2,
+                      '8k/isolated': 6, '8k/intermediate': 6, '8k/contested': 6}
+    assert len(evaluation) == 14
+    chosen = {e['instance']: e['weight'] for e in calibration}
+    labels = {e['instance']: e for e in selection}
+    # Languages round-robin within a stratum.
+    assert sorted(labels[i]['language'] for i in chosen if i.startswith('isolated') and i.endswith('_2048')) == \
+        ['go', 'go', 'java', 'java', 'python', 'python']
+    for size in (2048, 8192):
+        assert abs(sum(w for i, w in chosen.items() if labels[i]['size'] == size) - 1) < 1e-12
+    assert abs(sum(w for i, w in chosen.items() if i.startswith('contested') and i.endswith('_2048')) - 0.1) < 1e-12
+    assert calibration_sample(selection, per_class=6, seed=2027)[0] == calibration
+    assert calibration_sample(selection, per_class=6, seed=1)[0] != calibration

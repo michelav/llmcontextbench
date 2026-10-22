@@ -1,0 +1,678 @@
+[
+ {
+  "instance": "go_001_ctx32k",
+  "weight": 0.029839883551673944
+ },
+ {
+  "instance": "go_001_ctx64k",
+  "weight": 0.02556818181818182
+ },
+ {
+  "instance": "go_002_ctx32k",
+  "weight": 0.041120815138282384
+ },
+ {
+  "instance": "go_002_ctx64k",
+  "weight": 0.039299242424242424
+ },
+ {
+  "instance": "go_004_ctx64k",
+  "weight": 0.039299242424242424
+ },
+ {
+  "instance": "go_004_ctx8k",
+  "weight": 0.042229729729729736
+ },
+ {
+  "instance": "go_005_ctx16k",
+  "weight": 0.0389093137254902
+ },
+ {
+  "instance": "go_006_ctx16k",
+  "weight": 0.0389093137254902
+ },
+ {
+  "instance": "go_006_ctx32k",
+  "weight": 0.041120815138282384
+ },
+ {
+  "instance": "go_007_ctx64k",
+  "weight": 0.02556818181818182
+ },
+ {
+  "instance": "go_008_ctx16k",
+  "weight": 0.0389093137254902
+ },
+ {
+  "instance": "go_008_ctx8k",
+  "weight": 0.036036036036036036
+ },
+ {
+  "instance": "go_010_ctx16k",
+  "weight": 0.007352941176470589
+ },
+ {
+  "instance": "go_010_ctx2k",
+  "weight": 0.026539278131634817
+ },
+ {
+  "instance": "go_010_ctx32k",
+  "weight": 0.012372634643377003
+ },
+ {
+  "instance": "go_010_ctx64k",
+  "weight": 0.018465909090909092
+ },
+ {
+  "instance": "go_051_ctx16k",
+  "weight": 0.03707107843137255
+ },
+ {
+  "instance": "go_051_ctx64k",
+  "weight": 0.02556818181818182
+ },
+ {
+  "instance": "go_052_ctx16k",
+  "weight": 0.03707107843137255
+ },
+ {
+  "instance": "go_052_ctx32k",
+  "weight": 0.029839883551673944
+ },
+ {
+  "instance": "go_053_ctx2k",
+  "weight": 0.05520169851380042
+ },
+ {
+  "instance": "go_053_ctx64k",
+  "weight": 0.018465909090909092
+ },
+ {
+  "instance": "go_054_ctx8k",
+  "weight": 0.036036036036036036
+ },
+ {
+  "instance": "go_057_ctx8k",
+  "weight": 0.042229729729729736
+ },
+ {
+  "instance": "go_058_ctx2k",
+  "weight": 0.026539278131634817
+ },
+ {
+  "instance": "go_058_ctx32k",
+  "weight": 0.041120815138282384
+ },
+ {
+  "instance": "go_058_ctx64k",
+  "weight": 0.039299242424242424
+ },
+ {
+  "instance": "go_059_ctx32k",
+  "weight": 0.029839883551673944
+ },
+ {
+  "instance": "go_060_ctx16k",
+  "weight": 0.03707107843137255
+ },
+ {
+  "instance": "go_071_ctx16k",
+  "weight": 0.007352941176470589
+ },
+ {
+  "instance": "go_071_ctx8k",
+  "weight": 0.005528255528255529
+ },
+ {
+  "instance": "go_072_ctx8k",
+  "weight": 0.036036036036036036
+ },
+ {
+  "instance": "go_073_ctx2k",
+  "weight": 0.026539278131634817
+ },
+ {
+  "instance": "go_075_ctx2k",
+  "weight": 0.05520169851380042
+ },
+ {
+  "instance": "go_076_ctx8k",
+  "weight": 0.042229729729729736
+ },
+ {
+  "instance": "go_077_ctx2k",
+  "weight": 0.05520169851380042
+ },
+ {
+  "instance": "go_078_ctx16k",
+  "weight": 0.007352941176470589
+ },
+ {
+  "instance": "go_078_ctx8k",
+  "weight": 0.005528255528255529
+ },
+ {
+  "instance": "java_001_ctx2k",
+  "weight": 0.05520169851380042
+ },
+ {
+  "instance": "java_001_ctx64k",
+  "weight": 0.039299242424242424
+ },
+ {
+  "instance": "java_002_ctx2k",
+  "weight": 0.026539278131634817
+ },
+ {
+  "instance": "java_003_ctx32k",
+  "weight": 0.029839883551673944
+ },
+ {
+  "instance": "java_003_ctx8k",
+  "weight": 0.042229729729729736
+ },
+ {
+  "instance": "java_004_ctx16k",
+  "weight": 0.0389093137254902
+ },
+ {
+  "instance": "java_004_ctx64k",
+  "weight": 0.039299242424242424
+ },
+ {
+  "instance": "java_006_ctx16k",
+  "weight": 0.0389093137254902
+ },
+ {
+  "instance": "java_009_ctx16k",
+  "weight": 0.007352941176470589
+ },
+ {
+  "instance": "java_009_ctx2k",
+  "weight": 0.009554140127388535
+ },
+ {
+  "instance": "java_009_ctx32k",
+  "weight": 0.012372634643377003
+ },
+ {
+  "instance": "java_009_ctx64k",
+  "weight": 0.018465909090909092
+ },
+ {
+  "instance": "java_009_ctx8k",
+  "weight": 0.005528255528255529
+ },
+ {
+  "instance": "java_010_ctx16k",
+  "weight": 0.03707107843137255
+ },
+ {
+  "instance": "java_031_ctx2k",
+  "weight": 0.05520169851380042
+ },
+ {
+  "instance": "java_031_ctx64k",
+  "weight": 0.018465909090909092
+ },
+ {
+  "instance": "java_032_ctx8k",
+  "weight": 0.036036036036036036
+ },
+ {
+  "instance": "java_034_ctx2k",
+  "weight": 0.026539278131634817
+ },
+ {
+  "instance": "java_034_ctx8k",
+  "weight": 0.036036036036036036
+ },
+ {
+  "instance": "java_035_ctx16k",
+  "weight": 0.007352941176470589
+ },
+ {
+  "instance": "java_035_ctx8k",
+  "weight": 0.005528255528255529
+ },
+ {
+  "instance": "java_036_ctx32k",
+  "weight": 0.012372634643377003
+ },
+ {
+  "instance": "java_036_ctx64k",
+  "weight": 0.018465909090909092
+ },
+ {
+  "instance": "java_037_ctx2k",
+  "weight": 0.05520169851380042
+ },
+ {
+  "instance": "java_037_ctx64k",
+  "weight": 0.02556818181818182
+ },
+ {
+  "instance": "java_038_ctx32k",
+  "weight": 0.041120815138282384
+ },
+ {
+  "instance": "java_040_ctx16k",
+  "weight": 0.03707107843137255
+ },
+ {
+  "instance": "java_040_ctx32k",
+  "weight": 0.029839883551673944
+ },
+ {
+  "instance": "java_040_ctx64k",
+  "weight": 0.02556818181818182
+ },
+ {
+  "instance": "java_040_ctx8k",
+  "weight": 0.042229729729729736
+ },
+ {
+  "instance": "java_061_ctx16k",
+  "weight": 0.03707107843137255
+ },
+ {
+  "instance": "java_061_ctx32k",
+  "weight": 0.029839883551673944
+ },
+ {
+  "instance": "java_061_ctx64k",
+  "weight": 0.02556818181818182
+ },
+ {
+  "instance": "java_062_ctx32k",
+  "weight": 0.041120815138282384
+ },
+ {
+  "instance": "java_064_ctx32k",
+  "weight": 0.041120815138282384
+ },
+ {
+  "instance": "java_064_ctx64k",
+  "weight": 0.039299242424242424
+ },
+ {
+  "instance": "java_064_ctx8k",
+  "weight": 0.036036036036036036
+ },
+ {
+  "instance": "java_065_ctx16k",
+  "weight": 0.0389093137254902
+ },
+ {
+  "instance": "java_066_ctx8k",
+  "weight": 0.005528255528255529
+ },
+ {
+  "instance": "java_067_ctx16k",
+  "weight": 0.007352941176470589
+ },
+ {
+  "instance": "java_067_ctx2k",
+  "weight": 0.026539278131634817
+ },
+ {
+  "instance": "java_067_ctx32k",
+  "weight": 0.012372634643377003
+ },
+ {
+  "instance": "java_067_ctx8k",
+  "weight": 0.005528255528255529
+ },
+ {
+  "instance": "java_069_ctx8k",
+  "weight": 0.042229729729729736
+ },
+ {
+  "instance": "py_022_ctx16k",
+  "weight": 0.007352941176470589
+ },
+ {
+  "instance": "py_022_ctx32k",
+  "weight": 0.012372634643377003
+ },
+ {
+  "instance": "py_022_ctx64k",
+  "weight": 0.018465909090909092
+ },
+ {
+  "instance": "py_022_ctx8k",
+  "weight": 0.005528255528255529
+ },
+ {
+  "instance": "py_023_ctx16k",
+  "weight": 0.007352941176470589
+ },
+ {
+  "instance": "py_023_ctx32k",
+  "weight": 0.012372634643377003
+ },
+ {
+  "instance": "py_023_ctx64k",
+  "weight": 0.018465909090909092
+ },
+ {
+  "instance": "py_024_ctx16k",
+  "weight": 0.007352941176470589
+ },
+ {
+  "instance": "py_024_ctx32k",
+  "weight": 0.012372634643377003
+ },
+ {
+  "instance": "py_025_ctx64k",
+  "weight": 0.02556818181818182
+ },
+ {
+  "instance": "py_027_ctx8k",
+  "weight": 0.036036036036036036
+ },
+ {
+  "instance": "py_030_ctx2k",
+  "weight": 0.05520169851380042
+ },
+ {
+  "instance": "py_030_ctx64k",
+  "weight": 0.039299242424242424
+ },
+ {
+  "instance": "py_032_ctx32k",
+  "weight": 0.041120815138282384
+ },
+ {
+  "instance": "py_035_ctx16k",
+  "weight": 0.0389093137254902
+ },
+ {
+  "instance": "py_035_ctx64k",
+  "weight": 0.018465909090909092
+ },
+ {
+  "instance": "py_037_ctx16k",
+  "weight": 0.03707107843137255
+ },
+ {
+  "instance": "py_037_ctx32k",
+  "weight": 0.029839883551673944
+ },
+ {
+  "instance": "py_037_ctx64k",
+  "weight": 0.02556818181818182
+ },
+ {
+  "instance": "py_039_ctx16k",
+  "weight": 0.03707107843137255
+ },
+ {
+  "instance": "py_039_ctx2k",
+  "weight": 0.05520169851380042
+ },
+ {
+  "instance": "py_039_ctx32k",
+  "weight": 0.029839883551673944
+ },
+ {
+  "instance": "py_039_ctx8k",
+  "weight": 0.042229729729729736
+ },
+ {
+  "instance": "py_040_ctx2k",
+  "weight": 0.026539278131634817
+ },
+ {
+  "instance": "py_043_ctx32k",
+  "weight": 0.041120815138282384
+ },
+ {
+  "instance": "py_043_ctx8k",
+  "weight": 0.036036036036036036
+ },
+ {
+  "instance": "py_046_ctx16k",
+  "weight": 0.0389093137254902
+ },
+ {
+  "instance": "py_046_ctx2k",
+  "weight": 0.026539278131634817
+ },
+ {
+  "instance": "py_050_ctx64k",
+  "weight": 0.039299242424242424
+ },
+ {
+  "instance": "py_050_ctx8k",
+  "weight": 0.042229729729729736
+ },
+ {
+  "instance": "rs_012_ctx8k",
+  "weight": 0.005528255528255529
+ },
+ {
+  "instance": "rs_013_ctx8k",
+  "weight": 0.036036036036036036
+ },
+ {
+  "instance": "rs_017_ctx32k",
+  "weight": 0.041120815138282384
+ },
+ {
+  "instance": "rs_018_ctx16k",
+  "weight": 0.0389093137254902
+ },
+ {
+  "instance": "rs_019_ctx64k",
+  "weight": 0.039299242424242424
+ },
+ {
+  "instance": "rs_022_ctx64k",
+  "weight": 0.039299242424242424
+ },
+ {
+  "instance": "rs_023_ctx64k",
+  "weight": 0.02556818181818182
+ },
+ {
+  "instance": "rs_024_ctx32k",
+  "weight": 0.029839883551673944
+ },
+ {
+  "instance": "rs_024_ctx8k",
+  "weight": 0.042229729729729736
+ },
+ {
+  "instance": "rs_025_ctx16k",
+  "weight": 0.0389093137254902
+ },
+ {
+  "instance": "rs_025_ctx32k",
+  "weight": 0.041120815138282384
+ },
+ {
+  "instance": "rs_025_ctx8k",
+  "weight": 0.036036036036036036
+ },
+ {
+  "instance": "rs_026_ctx2k",
+  "weight": 0.026539278131634817
+ },
+ {
+  "instance": "rs_027_ctx16k",
+  "weight": 0.03707107843137255
+ },
+ {
+  "instance": "rs_027_ctx32k",
+  "weight": 0.029839883551673944
+ },
+ {
+  "instance": "rs_027_ctx64k",
+  "weight": 0.02556818181818182
+ },
+ {
+  "instance": "rs_028_ctx8k",
+  "weight": 0.042229729729729736
+ },
+ {
+  "instance": "rs_051_ctx2k",
+  "weight": 0.026539278131634817
+ },
+ {
+  "instance": "rs_052_ctx32k",
+  "weight": 0.012372634643377003
+ },
+ {
+  "instance": "rs_052_ctx8k",
+  "weight": 0.005528255528255529
+ },
+ {
+  "instance": "rs_053_ctx32k",
+  "weight": 0.012372634643377003
+ },
+ {
+  "instance": "rs_053_ctx64k",
+  "weight": 0.018465909090909092
+ },
+ {
+  "instance": "rs_054_ctx16k",
+  "weight": 0.007352941176470589
+ },
+ {
+  "instance": "rs_054_ctx32k",
+  "weight": 0.012372634643377003
+ },
+ {
+  "instance": "rs_054_ctx64k",
+  "weight": 0.018465909090909092
+ },
+ {
+  "instance": "rs_054_ctx8k",
+  "weight": 0.005528255528255529
+ },
+ {
+  "instance": "rs_056_ctx2k",
+  "weight": 0.05520169851380042
+ },
+ {
+  "instance": "rs_057_ctx16k",
+  "weight": 0.007352941176470589
+ },
+ {
+  "instance": "rs_057_ctx2k",
+  "weight": 0.009554140127388535
+ },
+ {
+  "instance": "rs_057_ctx8k",
+  "weight": 0.005528255528255529
+ },
+ {
+  "instance": "rs_060_ctx16k",
+  "weight": 0.03707107843137255
+ },
+ {
+  "instance": "rs_060_ctx2k",
+  "weight": 0.05520169851380042
+ },
+ {
+  "instance": "ts_032_ctx16k",
+  "weight": 0.03707107843137255
+ },
+ {
+  "instance": "ts_032_ctx32k",
+  "weight": 0.029839883551673944
+ },
+ {
+  "instance": "ts_036_ctx16k",
+  "weight": 0.007352941176470589
+ },
+ {
+  "instance": "ts_036_ctx32k",
+  "weight": 0.012372634643377003
+ },
+ {
+  "instance": "ts_037_ctx2k",
+  "weight": 0.05520169851380042
+ },
+ {
+  "instance": "ts_037_ctx64k",
+  "weight": 0.039299242424242424
+ },
+ {
+  "instance": "ts_038_ctx2k",
+  "weight": 0.05520169851380042
+ },
+ {
+  "instance": "ts_040_ctx32k",
+  "weight": 0.029839883551673944
+ },
+ {
+  "instance": "ts_040_ctx64k",
+  "weight": 0.02556818181818182
+ },
+ {
+  "instance": "ts_040_ctx8k",
+  "weight": 0.042229729729729736
+ },
+ {
+  "instance": "ts_074_ctx16k",
+  "weight": 0.0389093137254902
+ },
+ {
+  "instance": "ts_074_ctx8k",
+  "weight": 0.036036036036036036
+ },
+ {
+  "instance": "ts_075_ctx2k",
+  "weight": 0.026539278131634817
+ },
+ {
+  "instance": "ts_076_ctx2k",
+  "weight": 0.026539278131634817
+ },
+ {
+  "instance": "ts_076_ctx32k",
+  "weight": 0.012372634643377003
+ },
+ {
+  "instance": "ts_076_ctx64k",
+  "weight": 0.018465909090909092
+ },
+ {
+  "instance": "ts_078_ctx32k",
+  "weight": 0.041120815138282384
+ },
+ {
+  "instance": "ts_079_ctx16k",
+  "weight": 0.03707107843137255
+ },
+ {
+  "instance": "ts_079_ctx64k",
+  "weight": 0.039299242424242424
+ },
+ {
+  "instance": "ts_080_ctx8k",
+  "weight": 0.036036036036036036
+ },
+ {
+  "instance": "ts_082_ctx64k",
+  "weight": 0.018465909090909092
+ },
+ {
+  "instance": "ts_084_ctx16k",
+  "weight": 0.0389093137254902
+ },
+ {
+  "instance": "ts_084_ctx32k",
+  "weight": 0.041120815138282384
+ },
+ {
+  "instance": "ts_088_ctx64k",
+  "weight": 0.02556818181818182
+ },
+ {
+  "instance": "ts_088_ctx8k",
+  "weight": 0.042229729729729736
+ }
+]
