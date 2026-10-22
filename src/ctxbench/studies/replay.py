@@ -269,6 +269,8 @@ def replay(*, grid, prepared=None, baseline=None, output=None, replicates=None, 
     points = []
     for point in spec['points']:
         effects = [e.model_dump() for e in EFFECTS.validate_python(point.get('effects', []))]
+        if any(e.get('kind') == 'server-delay' for e in effects):
+            raise ValueError('replay has no model of a server delay')
         definition = {**plan['definition'], **{k: point[k] for k in ('latencyLimitMs', 'tokenBudget') if k in point}}
         if 'tokenRateBudget' in point:
             definition['tokenRateBudget'] = TokenRateBudget.model_validate(point['tokenRateBudget']).model_dump()

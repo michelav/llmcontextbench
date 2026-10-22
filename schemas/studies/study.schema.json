@@ -721,6 +721,65 @@
       "title": "SchedulePolicy",
       "type": "object"
     },
+    "ServerDelay": {
+      "additionalProperties": false,
+      "description": "The remote MCP server delays this configuration's MCP requests (delay headers, read by the server).\n\nThe headers go on the request to the provider only; the controller never sees them. Each episode\ngets its own condition label (`label` plus the episode ID), which seeds the server's delay stream.",
+      "properties": {
+        "firstRequest": {
+          "exclusiveMinimum": 0,
+          "title": "Firstrequest",
+          "type": "integer"
+        },
+        "lastRequest": {
+          "exclusiveMinimum": 0,
+          "title": "Lastrequest",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "server-delay",
+          "title": "Kind",
+          "type": "string"
+        },
+        "configuration": {
+          "title": "Configuration",
+          "type": "string"
+        },
+        "delayMs": {
+          "enum": [
+            100,
+            250,
+            500,
+            1000
+          ],
+          "title": "Delayms",
+          "type": "integer"
+        },
+        "mode": {
+          "enum": [
+            "tools-fixed",
+            "requests-exp"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "label": {
+          "pattern": "^[A-Za-z0-9_-]{1,15}$",
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "firstRequest",
+        "lastRequest",
+        "kind",
+        "configuration",
+        "delayMs",
+        "mode",
+        "label"
+      ],
+      "title": "ServerDelay",
+      "type": "object"
+    },
     "TokenQuota": {
       "additionalProperties": false,
       "description": "Harness-simulated provider quota over the trailing 60 s of wall time, for every configuration.",
@@ -911,6 +970,9 @@
             },
             {
               "$ref": "#/$defs/TokenQuota"
+            },
+            {
+              "$ref": "#/$defs/ServerDelay"
             }
           ]
         },

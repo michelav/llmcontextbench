@@ -854,3 +854,79 @@ def test_burst_workloads_balance_sizes_and_swap_in_contested_instances():
     assert again == workloads
     with pytest.raises(ValueError, match='fit the workload'):
         burst_workloads(selection, evaluation, seeds=[1], length=48, burst=16, placements=[40])
+
+
+def _server_delay_plan(frozen, tmp_path, name, policies):
+    definition = make_study(tmp_path, frozen, latencyLimitMs=None, latencyCostTokensPerSecond=500, comparisons=[],
+                            policies=policies)
+    plan = sealed_read(Path(study.prepare(definition=definition, output=tmp_path/name)['prepared']))
+    inline, mcp = plan['configurations']
+    for request in plan['requests'].values():
+        request['trials'][mcp]['params'] = {**request['trials'][mcp].get('params', {}),
+            'mcp_server': {'server_url': 'https://mcp.example/mcp', 'headers': {'X-MCP-Token': '${TEST_MCP_TOKEN}'}}}
+    return plan, inline, mcp
+
+
+def _recording(seen):
+    def execute(trial, engine, **kwargs):
+        seen.append((trial.instanceId, trial.configurationId, trial.params.get('mcp_server', {}).get('headers')))
+        return mock_execute(trial, engine)
+    return execute
+
+
+def _clock():
+    ticks = iter(range(10**6))
+    return lambda: next(ticks) * 0.25
+
+
+def test_server_delay_sets_headers_on_the_delayed_configuration_in_range_only(frozen, tmp_path):
+    from ctxbench.adaptive.study_runner import run
+    mcp = sealed_read(frozen)['plan']['configurations'][1]
+    plan, inline, mcp = _server_delay_plan(frozen, tmp_path, 'server-delay', {'rd': {'type':'fixed','configuration':mcp}})
+    episode = dict(plan['episodes'][0], scenario=[{'kind':'server-delay','configuration':mcp,'delayMs':500,
+        'mode':'requests-exp','label':'SD500','firstRequest':3,'lastRequest':5}])
+    seen = []
+    (tmp_path/'ep').mkdir()
+    run(plan, episode, tmp_path/'ep', execution=_recording(seen), monotonic=_clock(), sleeper=lambda s: None)
+    delayed = [i+1 for i, (_, cid, headers) in enumerate(seen) if 'X-MCP-Delay-Ms' in headers]
+    assert delayed == [3, 4, 5]
+    assert seen[2][2] == {'X-MCP-Token': '${TEST_MCP_TOKEN}', 'X-MCP-Delay-Ms': '500', 'X-MCP-Delay-Mode': 'requests-exp',
+                          'X-MCP-Condition': f"SD500.{episode['id'][:16]}"}
+    assert seen[0][2] == {'X-MCP-Token': '${TEST_MCP_TOKEN}'}
+
+
+def test_server_delay_is_invisible_to_the_controller(frozen, tmp_path):
+    from ctxbench.adaptive.study_runner import run
+    policy = {'type':'blind-router','adaptive':True,'estimateWindow':3,'minimumObservations':2,
+              'probeTriggers':['periodic'],'probeInterval':2}
+    runs = []
+    for name, effect in (('plain', []), ('delayed', None)):
+        plan, inline, mcp = _server_delay_plan(frozen, tmp_path, f'invisible-{name}', {'blind': policy})
+        scenario = effect if effect is not None else [{'kind':'server-delay','configuration':mcp,'delayMs':1000,
+            'mode':'tools-fixed','label':'SD','firstRequest':1,'lastRequest':len(plan['episodes'][0]['workload'])}]
+        episode = dict(plan['episodes'][0], scenario=scenario)
+        seen = []
+        (tmp_path/name).mkdir()
+        packets = run(plan, episode, tmp_path/name, execution=_recording(seen), monotonic=_clock(), sleeper=lambda s: None)
+        runs.append(([p['selection'] for p in packets], [p['observation'] for p in packets], seen))
+    (plain_sel, plain_obs, plain_seen), (sel, obs, delayed_seen) = runs
+    assert any(cid == mcp for _, cid, _ in delayed_seen)
+    assert any(h and 'X-MCP-Delay-Ms' in h for _, _, h in delayed_seen)
+    # Same outcomes in, same decisions out: the headers never reach the controller.
+    assert sel == plain_sel and obs == plain_obs
+
+
+def test_server_delay_is_validated(frozen, tmp_path):
+    base = {'kind':'server-delay','delayMs':500,'mode':'requests-exp','label':'SD','firstRequest':1,'lastRequest':2}
+    plan = sealed_read(frozen)['plan']
+    inline, mcp = plan['configurations']
+    for n, (effects, message) in enumerate((([{**base, 'configuration': inline}], 'requires remote_mcp'),
+                                            ([{**base, 'configuration': mcp}], 'requires remote_mcp'))):
+        definition = make_study(tmp_path, frozen, scenarios={'slow': effects})
+        with pytest.raises(ValueError, match=message):
+            study.prepare(definition=definition, output=tmp_path/f'bad-server-{n}')
+    model = {'baseline':'b.json', 'seeds':[1], 'repeats':1, 'policies':{'f':{'type':'fixed','configuration':'c'}}}
+    for effect in ({**base, 'configuration':'c', 'delayMs':300}, {**base, 'configuration':'c', 'label':'a.b'},
+                   {**base, 'configuration':'c', 'mode':'sometimes'}):
+        with pytest.raises(ValueError):
+            Study.model_validate({**model, 'scenarios': {'slow': [effect]}})

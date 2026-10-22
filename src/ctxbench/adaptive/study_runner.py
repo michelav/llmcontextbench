@@ -138,6 +138,16 @@ def run(plan, episode, root, *, resume=False, retry_uncertain=False, execution=N
                       'outputRoot': str(root.resolve())}
             if params:
                 update['params'] = {**original.get('params', {}), **params}
+            server = [d for d in episode['scenario'] if d.get('kind') == 'server-delay' and d['configuration'] == cid
+                      and d['firstRequest'] <= position[0]+1 <= d['lastRequest']]
+            if server:
+                # Delay headers reach the MCP server through the provider; the controller never sees them.
+                merged = update.get('params', original.get('params', {}))
+                mcp = merged['mcp_server']
+                headers = {**mcp.get('headers', {}), 'X-MCP-Delay-Ms': str(server[0]['delayMs']),
+                           'X-MCP-Delay-Mode': server[0]['mode'],
+                           'X-MCP-Condition': f"{server[0]['label']}.{episode['id'][:16]}"}
+                update['params'] = {**merged, 'mcp_server': {**mcp, 'headers': headers}}
             return TrialSpec.model_validate(original).model_copy(update=update, deep=True)
 
         def execute_attempt(trial, cid, index, instance, uncertain):
@@ -202,11 +212,11 @@ def run(plan, episode, root, *, resume=False, retry_uncertain=False, execution=N
 
         # Quota history lives in this process only; it restarts empty after a resume.
         quota_log = []
-        instance_of = [None]
+        instance_of, position = [None], [None]
         try:
             for index in range(len(packets), len(episode['workload'])):
                 instance = episode['workload'][index]
-                instance_of[0] = instance
+                instance_of[0], position[0] = instance, index
                 controller_started = perf_counter()
                 selection = controller.decide(index)
                 controller_ms = (perf_counter()-controller_started)*1000

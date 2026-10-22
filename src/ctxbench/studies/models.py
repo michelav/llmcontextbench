@@ -278,12 +278,26 @@ class TokenQuota(RequestRange):
     tokensPerMinute: PositiveInt
 
 
+class ServerDelay(RequestRange):
+    """The remote MCP server delays this configuration's MCP requests (delay headers, read by the server).
+
+    The headers go on the request to the provider only; the controller never sees them. Each episode
+    gets its own condition label (`label` plus the episode ID), which seeds the server's delay stream.
+    """
+    kind: Literal['server-delay']
+    configuration: str
+    delayMs: Literal[100, 250, 500, 1000]
+    mode: Literal['tools-fixed', 'requests-exp']
+    label: Annotated[str, Field(pattern=r'^[A-Za-z0-9_-]{1,15}$')]
+
+
 def _effect_kind(value):
     return value.get('kind', 'delay') if isinstance(value, dict) else getattr(value, 'kind', 'delay')
 
 
 Effect = Annotated[Union[Annotated[Delay, Tag('delay')], Annotated[Fault, Tag('fault')],
-                         Annotated[TokenQuota, Tag('token-quota')]], Discriminator(_effect_kind)]
+                         Annotated[TokenQuota, Tag('token-quota')], Annotated[ServerDelay, Tag('server-delay')]],
+                   Discriminator(_effect_kind)]
 
 
 class Study(Definition):

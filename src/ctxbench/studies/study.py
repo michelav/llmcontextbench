@@ -91,6 +91,13 @@ def prepare(*, definition, output):
                 raise ValueError('tool-call delay requires local_mcp')
             if delay.kind == 'fault' and strategy != 'local_mcp':
                 raise ValueError('fault injection requires local_mcp')
+            if delay.kind == 'server-delay' and (strategy != 'remote_mcp' or not all(
+                    isinstance(r['trials'][delay.configuration].get('params', {}).get('mcp_server'), dict)
+                    for r in parent['requests'].values())):
+                raise ValueError('a server delay requires remote_mcp with mcp_server params')
+        server = sorted(((d.configuration, d.firstRequest, d.lastRequest) for d in delays if d.kind == 'server-delay'))
+        if any(a[0] == b[0] and b[1] <= a[2] for a, b in zip(server, server[1:])):
+            raise ValueError('server delays on one configuration must not overlap')
     for policy in definition.policies.values():
         if policy.type == 'schedule':
             mappings = [policy.default, *(phase.configurationBySize for phase in policy.phases)]
