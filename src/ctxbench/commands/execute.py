@@ -69,7 +69,9 @@ def execute_command(
         logger.event(level, phase, event_name, message, **payload)
 
     logger.info("EXECUTE", "trials.loading", "Loading trials", path=str(source))
-    validate_artifact_directory(source.parent)
+    manifest = validate_artifact_directory(source.parent)
+    from ctxbench.benchmark.fingerprint import verify_snapshot
+    verify_snapshot(source.parent, manifest, execution=True)
     runspecs = _load_runspecs(source)
 
     active_selector = selector or RunSelector()

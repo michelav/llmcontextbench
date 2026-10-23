@@ -34,17 +34,17 @@ documentation updates and a commit. Record command output summaries and commits 
 
 ## S03 — Frozen planning and identity
 
-- Status: pending
+- Status: complete
 - Purpose: Freeze inputs and validate execution identity and artifact versions.
 - Likely files: `commands/plan.py, benchmark/provisioning.py, util/artifacts.py, tests` (source paths relative to `src/ctxbench` where applicable).
 - Dependency: S02.
 - Risk: Combining different executions with identical design IDs.
 - Suggested commit: `feat: freeze execution inputs and validate identity`.
 
-- [ ] Implement the slice's behavior and document its public contract.
-- [ ] Verify: Source edits cannot alter snapshots; fingerprint conflicts and old versions fail.
-- [ ] Review diff and record changes, impacts, commands, results and limitations.
-- [ ] Commit only the verified slice files.
+- [x] Implement the slice's behavior and document its public contract.
+- [x] Verify: Source edits cannot alter snapshots; fingerprint conflicts and old versions fail.
+- [x] Review diff and record changes, impacts, commands, results and limitations.
+- [x] Commit only the verified slice files.
 
 ## S04 — One runtime and dataset boundary
 

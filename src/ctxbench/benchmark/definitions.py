@@ -70,6 +70,8 @@ No persisted-artifact compatibility reading is introduced here.
     if result.pop("kind", "benchmark") != "benchmark":
         raise ValueError("Adaptive definitions require the adaptive planner")
     result.pop("schemaVersion")
+    result["definitionVersion"] = DEFINITION_VERSION
+    result["resolvedDefinition"] = deepcopy(definition)
     models = result["models"]
     reserved = {"max_steps", "mcp_server", "timeout", "retry"}
     for params in [result.get("modelParams", {}), *(m.get("modelParams", {}) for m in models.values())]:

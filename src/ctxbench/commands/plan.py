@@ -4,6 +4,7 @@ from pathlib import Path
 
 from ctxbench.adapters.registry import get_default_registry
 from ctxbench.benchmark.experiment_loader import load_experiment
+from ctxbench.benchmark.fingerprint import digest, file_digest, implementation_digest, tree_digest
 from ctxbench.benchmark.models import DatasetProvenance
 from ctxbench.benchmark.provisioning import PROVISIONING_ARTIFACT_VERSION, validate_artifact_directory
 from ctxbench.benchmark.paths import resolve_output_root, resolve_trials_path
@@ -127,6 +128,18 @@ def plan_command(
         "trace": experiment.trace.model_dump(mode="json"),
         "artifacts": experiment.artifacts.model_dump(mode="json"),
     }
+    if experiment.definitionVersion == 3:
+        manifest["schemaVersion"] = 3
+        manifest["provisioningArtifactVersion"] = 3
+        write_json(output_root / "resolved.json", experiment.resolvedDefinition)
+        dataset_root = dataset_provenance.materialized_path
+        inputs = {
+            "artifacts": {name: file_digest(output_root / name) for name in ("resolved.json", "trials.jsonl")},
+            "implementation": implementation_digest(),
+            "dataset": tree_digest(Path(dataset_root)) if dataset_root else dataset_provenance.content_hash,
+        }
+        manifest["fingerprintInputs"] = inputs
+        manifest["executionFingerprint"] = digest(inputs)
     write_json(manifest_path, manifest)
     logger.info("PLAN", "manifest.written", "Manifest written", path=str(manifest_path))
 

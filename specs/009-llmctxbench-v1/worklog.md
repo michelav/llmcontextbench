@@ -25,3 +25,16 @@
 - Validation: 45 focused definition/provisioning/schema/fake-dataset tests passed; diff check passed.
 - Impact: v1 definitions are usable without replacing the runtime or altering existing study inputs.
 - Commit: `refactor: clarify experiment configuration contracts`.
+
+## S03 — complete
+
+- Versioned plans freeze resolved.json and trials.jsonl with content hashes, implementation/dependency
+  fingerprint and dataset digest. Full-length trial IDs use design keys. Execution verifies the
+  fingerprint; artifact-only readers verify snapshot integrity without accessing the dataset.
+- Cross-directory validation rejects conflicting fingerprints for an experiment identity.
+- Transitional boundary: version-2 artifacts remain supported only by the existing stack until S12;
+  version-3 artifacts require the frozen fingerprint. Public trial field migration remains in S06.
+- Validation: 33 focused planning/definition/provisioning tests passed, including source edit,
+  implementation edit, dataset edit, tampered snapshot and unknown-version cases. Diff check passed.
+- Impact: editing a definition cannot change a saved execution; code/data changes require replanning.
+- Commit: `feat: freeze execution inputs and validate identity`.

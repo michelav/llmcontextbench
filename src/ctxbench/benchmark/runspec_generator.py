@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 from typing import Any, Callable
 
+from ctxbench.benchmark.fingerprint import digest
 from ctxbench.benchmark.models import DatasetProvenance, Experiment, MODEL_ID_PATTERN, TrialMetadata, TrialSpec
 from ctxbench.dataset.package import DatasetPackage
 from ctxbench.util.artifacts import build_short_ids, canonical_trial_identity
@@ -156,7 +157,12 @@ def generate_runspecs(
                             }
                         )
 
-    run_ids = build_short_ids([item["canonical_id"] for item in draft_specs])
+    if experiment.definitionVersion == 3:
+        run_ids = [digest([experiment.id, item["instanceId"], item["taskId"],
+                          item["modelId"], item["configurationId"], item["repeatIndex"]])
+                   for item in draft_specs]
+    else:
+        run_ids = build_short_ids([item["canonical_id"] for item in draft_specs])
     runspecs: list[TrialSpec] = []
     for item, run_id in zip(draft_specs, run_ids):
         runspecs.append(

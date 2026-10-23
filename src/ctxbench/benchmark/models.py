@@ -368,6 +368,8 @@ class ProvisioningTreatment(ProvisioningConfiguration):
 
 
 class Experiment(BaseModel):
+    definitionVersion: int = 2
+    resolvedDefinition: dict[str, Any] = Field(default_factory=dict)
     selectedCandidates: list[tuple[str, str]] = Field(default_factory=list)
     taskParams: dict[str, Any] = Field(default_factory=dict)
     executionOptions: dict[str, Any] = Field(default_factory=dict)

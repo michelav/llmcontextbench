@@ -136,3 +136,10 @@ files resolve against their declaring file. The shared planner still uses its ol
 names during migration; this is a boundary translation, not a second runtime. Existing unversioned
 study definitions remain until their callers migrate in S12. Artifact names/authority below the
 planning boundary have not yet changed.
+
+## Implemented increment: frozen planning (S03)
+
+Version-3 plans write resolved.json and content fingerprints for frozen trials, dataset and installed
+implementation/dependencies. Execute verifies these before model work. Reporting verifies frozen
+artifacts without resolving datasets. Identical experiment IDs with conflicting fingerprints cannot
+be combined. Existing version-2 study support is transitional until S12; unknown versions are rejected.

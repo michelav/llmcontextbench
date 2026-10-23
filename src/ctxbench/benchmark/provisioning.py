@@ -21,8 +21,13 @@ def validate_manifest(root: Path) -> dict[str, Any]:
         raise ValueError(f"{LEGACY_MESSAGE} Missing {path}.")
     manifest = json.loads(path.read_text(encoding="utf-8"))
     version = manifest.get("provisioningArtifactVersion") if isinstance(manifest, dict) else None
-    if type(version) is not int or version != PROVISIONING_ARTIFACT_VERSION:
+    if type(version) is not int or version not in {PROVISIONING_ARTIFACT_VERSION, 3}:
         raise ValueError(LEGACY_MESSAGE)
+    if version == 3:
+        if manifest.get("schemaVersion") != 3 or not manifest.get("executionFingerprint"):
+            raise ValueError("Version 3 artifacts require a frozen execution fingerprint")
+        from ctxbench.benchmark.fingerprint import verify_snapshot
+        verify_snapshot(root, manifest)
     configurations = manifest.get("configurations")
     if not isinstance(configurations, dict) or not configurations:
         raise ValueError("Manifest requires selected configuration definitions.")
@@ -79,7 +84,14 @@ def validate_artifact_directory(root: Path) -> dict[str, Any]:
 
 def validate_configuration_union(manifests: list[dict[str, Any]]) -> None:
     definitions: dict[str, dict[str, str]] = {}
+    fingerprints: dict[str, str] = {}
     for manifest in manifests:
+        fingerprint = manifest.get("executionFingerprint")
+        identity = manifest.get("experimentId")
+        if fingerprint and identity:
+            if identity in fingerprints and fingerprints[identity] != fingerprint:
+                raise ValueError(f"Conflicting execution fingerprints for experiment {identity!r}")
+            fingerprints[identity] = fingerprint
         for key, definition in manifest["configurations"].items():
             if key in definitions and definitions[key] != definition:
                 raise ValueError(f"Conflicting definitions for configuration ID '{key}'.")
