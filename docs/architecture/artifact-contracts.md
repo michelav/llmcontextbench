@@ -1,5 +1,9 @@
 # Artifact Contracts
 
+> Transition note: this page describes the existing implementation. The accepted
+> [v1 target architecture and contracts](v1-contracts.md) describe the refactor;
+> [slice tracking](../../specs/009-llmctxbench-v1/tasks.md) identifies what is implemented.
+
 This document is the authoritative reference for the LLMContextBench artifact set, artifact classification, legacy no-alias policy, and metric provenance taxonomy.
 
 ## Provisioning contract v2 (clean break)

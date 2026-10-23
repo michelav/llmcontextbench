@@ -1,5 +1,9 @@
 # Runtime Extraction Baseline
 
+> Transition note: this page describes the existing implementation. The accepted
+> [v1 target architecture and contracts](v1-contracts.md) describe the refactor;
+> [slice tracking](../../specs/009-llmctxbench-v1/tasks.md) identifies what is implemented.
+
 This note records the first implementation boundary for the staged evolution in
 [`../llmcontextbench-evolution-plan.md`](../llmcontextbench-evolution-plan.md).
 It covers Phases 0–3: establish the current execution path, introduce

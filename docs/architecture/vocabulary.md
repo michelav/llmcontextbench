@@ -1,5 +1,9 @@
 # Vocabulary
 
+> Transition note: this page describes the existing implementation. The accepted
+> [v1 target architecture and contracts](v1-contracts.md) describe the refactor;
+> [slice tracking](../../specs/009-llmctxbench-v1/tasks.md) identifies what is implemented.
+
 ## Core terms
 
 | Term | Meaning |

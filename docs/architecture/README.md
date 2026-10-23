@@ -1,5 +1,9 @@
 # LLMContextBench Architecture
 
+> Transition note: this page describes the existing implementation. The accepted
+> [v1 target architecture and contracts](v1-contracts.md) describe the refactor;
+> [slice tracking](../../specs/009-llmctxbench-v1/tasks.md) identifies what is implemented.
+
 This document is the entry point for the LLMContextBench architecture documentation. It's loosely organized into [C4 Model](https://c4model.com/) style but with a few other structures added when necessary.
 
 LLMContextBench is a Python-based command-line benchmark framework for evaluating context provisioning strategies in LLM-based systems. It is a research tool: the architecture prioritizes simplicity, reproducibility, explicit artifacts, and comparability between strategies.

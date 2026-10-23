@@ -1,5 +1,9 @@
 # Runtime Extraction Implementation Slices
 
+> Transition note: this page describes the existing implementation. The accepted
+> [v1 target architecture and contracts](v1-contracts.md) describe the refactor;
+> [slice tracking](../../specs/009-llmctxbench-v1/tasks.md) identifies what is implemented.
+
 Use this sequence with the baseline in
 [`runtime-extraction.md`](runtime-extraction.md) and the long-term roadmap in
 [`../llmcontextbench-evolution-plan.md`](../llmcontextbench-evolution-plan.md).

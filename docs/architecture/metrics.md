@@ -1,4 +1,8 @@
 <!-- Provisioning update: schemas 2.0, required provisioning manifest v1. Historical artifacts require the preceding version. -->
+
+> Transition note: this page describes the existing implementation. The accepted
+> [v1 target architecture and contracts](v1-contracts.md) describe the refactor;
+> [slice tracking](../../specs/009-llmctxbench-v1/tasks.md) identifies what is implemented.
 # Specification: `llmctxbench metrics`
 
 > Design reference for the already-shipped `llmctxbench metrics` command. Relocated
