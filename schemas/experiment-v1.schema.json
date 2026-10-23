@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "dataset",
+    "models",
+    "configurations",
+    "surfaces",
+    "candidates"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 3
+    },
+    "kind": {
+      "const": "benchmark"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "type": "string"
+    },
+    "output": {
+      "type": "string"
+    },
+    "dataset": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "object"
+        }
+      ]
+    },
+    "scope": {
+      "type": "object"
+    },
+    "models": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "provider",
+          "name"
+        ],
+        "properties": {
+          "provider": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "modelParams": {
+            "type": "object"
+          }
+        }
+      }
+    },
+    "configurations": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "surfaces": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 2,
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "taskParams": {
+      "type": "object"
+    },
+    "modelParams": {
+      "type": "object"
+    },
+    "factorsMetadata": {
+      "type": "object"
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "repeats": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "output": {
+          "type": "string"
+        },
+        "jsonl": {
+          "type": "string"
+        },
+        "options": {
+          "type": "object"
+        }
+      }
+    },
+    "evaluation": {
+      "type": "object"
+    },
+    "trace": {
+      "type": "object"
+    },
+    "artifacts": {
+      "type": "object"
+    }
+  }
+}

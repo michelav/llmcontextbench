@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 3,
+  "kind": "benchmark",
+  "id": "v1-fake",
+  "dataset": {
+    "root": "../../tests/fixtures/fake_dataset/dataset"
+  },
+  "models": {
+    "mock": {
+      "provider": "mock",
+      "name": "mock",
+      "modelParams": {}
+    }
+  },
+  "surfaces": {
+    "full": {
+      "type": "full_context"
+    }
+  },
+  "configurations": {
+    "inline": {
+      "strategy": "inline",
+      "representation": "json",
+      "surface": "full"
+    }
+  },
+  "candidates": [
+    [
+      "mock",
+      "inline"
+    ]
+  ],
+  "taskParams": {},
+  "modelParams": {},
+  "execution": {
+    "repeats": 1
+  },
+  "evaluation": {
+    "enabled": false
+  }
+}

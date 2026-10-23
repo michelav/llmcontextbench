@@ -20,17 +20,17 @@ documentation updates and a commit. Record command output summaries and commits 
 
 ## S02 — Definitions and parameter names
 
-- Status: pending
+- Status: complete
 - Purpose: Separate taskParams/modelParams; validate candidates and single-parent extends.
 - Likely files: `benchmark/models.py, experiment_loader.py, runspec_generator.py, schemas, tests` (source paths relative to `src/ctxbench` where applicable).
 - Dependency: S01.
 - Risk: Silent prompt changes or provider settings in the wrong owner.
 - Suggested commit: `refactor: clarify experiment configuration contracts`.
 
-- [ ] Implement the slice's behavior and document its public contract.
-- [ ] Verify: Task rendering; candidate expansion; inheritance paths/precedence/cycles; invalid inputs.
-- [ ] Review diff and record changes, impacts, commands, results and limitations.
-- [ ] Commit only the verified slice files.
+- [x] Implement the slice's behavior and document its public contract.
+- [x] Verify: Task rendering; candidate expansion; inheritance paths/precedence/cycles; invalid inputs.
+- [x] Review diff and record changes, impacts, commands, results and limitations.
+- [x] Commit only the verified slice files.
 
 ## S03 — Frozen planning and identity
 

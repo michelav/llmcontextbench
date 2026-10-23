@@ -127,3 +127,12 @@ requires coverage and is not described as exact counterfactual replay.
 Derived datasets are ordinary materialized directories with recipes and lineage. Do not introduce a
 content-addressed store. Historical reproduction is delegated to tags and Zenodo; see the
 [accepted plan](../development/llmctxbench-v1-refactor-plan.md).
+
+## Implemented increment: definitions (S02)
+
+Version-3 benchmark definitions support taskParams, modelParams, candidate pairs, execution.options
+and single-parent extends; schema: `schemas/experiment-v1.schema.json`. Input paths in versioned
+files resolve against their declaring file. The shared planner still uses its old internal parameter
+names during migration; this is a boundary translation, not a second runtime. Existing unversioned
+study definitions remain until their callers migrate in S12. Artifact names/authority below the
+planning boundary have not yet changed.

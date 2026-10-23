@@ -87,7 +87,7 @@ def generate_runspecs(
             task = dataset_package.get_task(task_id)
             task_instance = dataset_package.get_task_instance(instance_id, task_id)
             raw_parameters = task_instance.get("parameters", {}) if task_instance else {}
-            parameters = dict(raw_parameters) if isinstance(raw_parameters, dict) else {}
+            parameters = {**experiment.taskParams, **(raw_parameters if isinstance(raw_parameters, dict) else {})}
             rendered_task_statement = render_task_template(
                 task.statement,
                 parameters,
@@ -100,12 +100,14 @@ def generate_runspecs(
                 model_id = model["id"]
                 model_name = model["name"]
                 for configuration_id in configurations:
+                    if experiment.selectedCandidates and (model_id, configuration_id) not in experiment.selectedCandidates:
+                        continue
                     configuration = experiment.configurations[configuration_id]
                     surface_declaration = experiment.surfaces[configuration.surface]
                     resolved_surface = dataset_package.resolve_surface(surface_declaration)
                     strategy_name = configuration.strategy
                     representation = configuration.representation
-                    params = resolve_params(experiment, model_name, model_id=model_id)
+                    params = {**experiment.executionOptions, **resolve_params(experiment, model_name, model_id=model_id)}
                     for repeat_index in range(1, experiment.execution.repeats + 1):
                         canonical_id = canonical_trial_identity(
                             experiment.id,

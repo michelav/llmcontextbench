@@ -368,6 +368,10 @@ class ProvisioningTreatment(ProvisioningConfiguration):
 
 
 class Experiment(BaseModel):
+    selectedCandidates: list[tuple[str, str]] = Field(default_factory=list)
+    taskParams: dict[str, Any] = Field(default_factory=dict)
+    executionOptions: dict[str, Any] = Field(default_factory=dict)
+    descriptiveFactors: dict[str, Any] = Field(default_factory=dict)
     id: str
     name: str | None = None
     output: str = "outputs"
@@ -436,6 +440,7 @@ class Experiment(BaseModel):
                             "provider": entry.provider,
                             "model": entry.name,
                             "temperature": entry.params.get("temperature"),
+                            "params": dict(entry.params),
                             "id": j,
                         })
                     elif isinstance(j, dict):
