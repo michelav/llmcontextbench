@@ -41,7 +41,7 @@ class ProvisioningRuntime:
         operations = request.surface_spec.get("operations")
         if strategy == "local_function":
             provider = self._capability("tool_provider", operations)
-            factories[strategy] = lambda: LocalFunctionRuntime(provider)
+            factories[strategy] = lambda: _decorate_runtime(LocalFunctionRuntime(provider), self._decorate)
         elif strategy == "local_mcp":
             server = self._capability("mcp_server", operations)
             factories[strategy] = lambda: create_local_mcp_runtime(server, self._decorate)
@@ -53,7 +53,7 @@ class ProvisioningRuntime:
                 **config,
                 "allowed_operations": operations if operations is not None else config.get("allowed_operations"),
             }
-            factories[strategy] = lambda: MCPRuntime.from_config(remote_config)
+            factories[strategy] = lambda: _decorate_runtime(MCPRuntime.from_config(remote_config), self._decorate)
 
         metadata = {**request.metadata, "instance_id": request.instance_id,
                     "context_obtained": strategy == "inline"}
@@ -95,6 +95,16 @@ def _context_to_text(content: object) -> str:
 def create_local_mcp_runtime(server, decorator=None):
     """Transfer ownership only after successful decoration."""
     runtime = MCPRuntime.for_local_server(server)
+    if decorator is None:
+        return runtime
+    try:
+        return decorator(runtime)
+    except BaseException:
+        runtime.close()
+        raise
+
+
+def _decorate_runtime(runtime, decorator=None):
     if decorator is None:
         return runtime
     try:

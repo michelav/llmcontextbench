@@ -104,17 +104,17 @@ documentation updates and a commit. Record command output summaries and commits 
 
 ## S08 — Minimal adaptive lifecycle
 
-- Status: pending
+- Status: complete
 - Purpose: Static/threshold control, knowledge, explicit/phased workloads, tool delay, all lifecycle commands.
 - Likely files: `adaptation, commands, benchmark, tests, examples/adaptive-minimal` (source paths relative to `src/ctxbench` where applicable).
 - Dependency: S07.
 - Risk: Hidden RepoQA coupling or evaluation evidence in control.
 - Suggested commit: `feat: add minimal adaptive experiment lifecycle`.
 
-- [ ] Implement the slice's behavior and document its public contract.
-- [ ] Verify: Fake dataset: calibration through request metrics; deterministic clock; rejection and leakage.
-- [ ] Review diff and record changes, impacts, commands, results and limitations.
-- [ ] Commit only the verified slice files.
+- [x] Implement static/threshold selection, frozen calibration knowledge, explicit workloads/phases, request records, tool delay, lifecycle readers and example; document the public contract.
+- [x] Verify: Fake dataset calibration metrics and overlap rejection; deterministic selection; empty eligibility; injected delay; adaptive plan/execute/status/export/metrics smoke check.
+- [x] Review diff and record changes, impacts, commands, results and limitations.
+- [x] Commit only the verified slice files.
 
 ## S09 — Fallback and request outcomes
 

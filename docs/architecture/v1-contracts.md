@@ -189,3 +189,23 @@ its configured MCP endpoint from the client and runs each tool call through the 
 the provider receives declared functions and no endpoint credentials. The execution surface's
 operation list limits tools visible and callable by the model. Judge request parameters continue to
 be merged with structured-output defaults, with configured values taking precedence.
+
+## Implemented increment: minimal adaptive lifecycle (S08)
+
+An adaptive v1 definition declares a static or threshold policy, an explicit ordered workload, and
+optional contiguous phases with per-tool-call delay. Planning writes `adaptive-plan.json`; threshold
+planning also freezes `knowledge.json` derived from a separate completed static run with evaluation
+disabled. Calibration and adaptive workload task/instance pairs cannot overlap. Calibration estimates
+are derived means grouped by candidate and size bin, with their source manifest and response digests.
+
+Execution processes requests serially. Each request record in `adaptive-records/` is canonical for its
+decision and references the selected trial and durable execution attempt; `requests.jsonl` is derived.
+Threshold selection prefers the lowest-token calibrated candidate meeting the latency target, then
+falls back to the fastest candidate if the target is missed. Successful observations update in-memory
+knowledge and are snapshotted in each request record for deterministic resume. Missing eligible or
+calibrated candidates produce an explicit rejected request without a trial attempt. The ordinary
+response collection contains selected trial attempts, so eval/export/metrics remain on the standard
+lifecycle. Phase delay wraps tool calls for local function, local MCP, and remote MCP strategies.
+
+This increment intentionally supports one execution per request (`repeats=1`); fallback, accepted
+delivery outcomes, richer controllers, and additional disturbances remain in later slices.

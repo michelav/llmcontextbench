@@ -177,11 +177,23 @@ def status_command(output_dir: str | None = None, *, by: str | None = None) -> i
     print(header)
     print(sep)
 
+    if manifest.get("experimentKind") == "adaptive":
+        from ctxbench.adaptive.v1 import load_adaptive_records
+        records = load_adaptive_records(root)
+        planned_requests = _count_adaptive_requests(root)
+        terminal = sum(row.get("state") in {"completed", "rejected"} for row in records)
+        succeeded = sum(row.get("state") == "completed" and row.get("resultStatus") == "success" for row in records)
+        failed = terminal - succeeded
+        started = sum(row.get("state") == "started" for row in records)
+        print(f"{'requests':<{col[0]}} {planned_requests:>{col[1]}} {succeeded:>{col[2]}} "
+              f"{failed:>{col[3]}} {started:>{col[4]}} {max(0, planned_requests - terminal - started):>{col[5]}}")
+
     execute_pending = max(0, trial_count - response_total - uncertain_count)
-    print(
-        f"{'execute':<{col[0]}} {trial_count:>{col[1]}} {response_success:>{col[2]}} "
-        f"{response_error:>{col[3]}} {uncertain_count:>{col[4]}} {execute_pending:>{col[5]}}"
-    )
+    if manifest.get("experimentKind") != "adaptive":
+        print(
+            f"{'execute':<{col[0]}} {trial_count:>{col[1]}} {response_success:>{col[2]}} "
+            f"{response_error:>{col[3]}} {uncertain_count:>{col[4]}} {execute_pending:>{col[5]}}"
+        )
 
     eval_pending = max(0, response_success - eval_total)
     print(
@@ -217,3 +229,12 @@ def status_command(output_dir: str | None = None, *, by: str | None = None) -> i
             raise ValueError(f"Unsupported status grouping: {by}")
 
     return 0
+
+
+def _count_adaptive_requests(root: Path) -> int:
+    path = root / "adaptive-plan.json"
+    if not path.exists():
+        return 0
+    plan = load_json(path)
+    workload = plan.get("workload", []) if isinstance(plan, dict) else []
+    return len(workload) if isinstance(workload, list) else 0

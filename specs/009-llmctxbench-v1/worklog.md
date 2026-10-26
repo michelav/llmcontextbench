@@ -1,5 +1,22 @@
 # LLMCtxBench v1 worklog
 
+## S08 — complete
+
+- Implemented schema and planning support for static and threshold adaptive definitions, explicit
+  request order, candidate eligibility, size bins, and phased tool delay.
+- Threshold plans freeze derived estimates from a separate static run; overlapping calibration and
+  evaluation requests are rejected. The knowledge file and adaptive plan are included in the execution
+  fingerprint.
+- Execution serially records each adaptive decision and reference to the durable trial attempt.
+  `requests.jsonl` is derived from these records; the shared response/eval/export/metrics lifecycle
+  remains the source for selected trial results. Status reports request-level progress.
+- Added a mock-backed minimal example and regression tests for deterministic selection, missing
+  candidates, derived calibration and leakage, and delay injection.
+- Validation: focused tests (24 passed), source compilation, and fake example plan/execute/status/
+  export/metrics smoke checks passed.
+- Limitation: one attempt per request (`repeats=1`); S09 owns fallback and accepted-delivery outcomes.
+- Commit: `feat: add minimal adaptive experiment lifecycle` (slice commit; hash is in Git history).
+
 ## S01 — complete
 
 - Created `refactor/llmctxbench-v1` from `r3`; existing untracked research data preserved.

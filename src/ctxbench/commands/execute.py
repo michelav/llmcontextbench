@@ -22,6 +22,7 @@ from ctxbench.benchmark.results import serialize_run_result
 from ctxbench.runtime.models import ExecutionResult
 from ctxbench.ai.models.base import AIResult
 from ctxbench.util.clock import utc_now_iso
+from ctxbench.util.fs import load_json
 from ctxbench.util.jsonl import append_jsonl, read_jsonl, write_jsonl
 from ctxbench.util.logging import PhaseLogger, ProgressTracker, trial_log_context
 
@@ -90,6 +91,14 @@ def execute_command(
             rebuild_responses(source.parent, execution_fingerprint=str(manifest["executionFingerprint"]))
             validate_artifact_directory(source.parent)
             runspecs = _load_runspecs(source)
+            if manifest.get("experimentKind") == "adaptive":
+                from ctxbench.adaptive.v1 import execute_adaptive
+                adaptive_plan = load_json(source.parent / "adaptive-plan.json")
+                knowledge_path = source.parent / "knowledge.json"
+                knowledge = load_json(knowledge_path) if knowledge_path.exists() else None
+                return execute_adaptive(adaptive_plan, knowledge, runspecs, root=source.parent,
+                                        manifest=manifest, force=force, retry_uncertain=retry_uncertain,
+                                        logger=logger, progress=progress)
             active_selector = selector or RunSelector()
             runspecs = [r for r in runspecs if matches_runspec(r, active_selector)]
             if not runspecs:
@@ -197,6 +206,7 @@ def _execute_durable(
     retry_uncertain: bool,
     logger: PhaseLogger,
     progress: bool,
+    local_mcp_runtime_decorator=None,
 ) -> int:
     latest_by_trial = {
         runspec.trialId: _latest_attempt(attempts_for_trial(artifact_root, runspec.trialId))
@@ -244,7 +254,7 @@ def _execute_durable(
             )
             logger.info("EXECUTE", "trial.response.started", "Generating response", **trial_log_context(runspec), attemptId=record["attemptId"])
             try:
-                result = execute_runspec(runspec, engine)
+                result = execute_runspec(runspec, engine, local_mcp_runtime_decorator=local_mcp_runtime_decorator)
             except Exception as exc:
                 result = TrialRuntimeAdapter().to_trial_result(
                     runspec,

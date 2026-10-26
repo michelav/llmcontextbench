@@ -88,6 +88,12 @@ def plan_command(
         experiment_path=path,
         on_warning=lambda message, **fields: logger.warn("PLAN", "trial.prepare.warning", message, **fields),
     )
+    adaptive_plan = knowledge = None
+    if experiment.experimentKind == "adaptive":
+        from ctxbench.adaptive.v1 import build_adaptive_plan
+        if experiment.adaptation.get("policy", {}).get("type") == "threshold" and not experiment.adaptation.get("calibration"):
+            raise ValueError("Threshold policy requires adaptation.calibration")
+        adaptive_plan, knowledge = build_adaptive_plan(experiment.adaptation, runspecs, adapter)
     logger.info("PLAN", "trials.expanded", "Expanding trials", input=path, total=len(runspecs))
 
     output_root = Path(output).resolve() if output else resolve_output_root(experiment, base_dir)
@@ -128,6 +134,11 @@ def plan_command(
         "trace": experiment.trace.model_dump(mode="json"),
         "artifacts": experiment.artifacts.model_dump(mode="json"),
     }
+    if experiment.experimentKind == "adaptive":
+        write_json(output_root / "adaptive-plan.json", adaptive_plan)
+        if knowledge is not None:
+            write_json(output_root / "knowledge.json", knowledge)
+        manifest["experimentKind"] = "adaptive"
     if experiment.definitionVersion == 3:
         manifest["schemaVersion"] = 3
         manifest["provisioningArtifactVersion"] = PROVISIONING_ARTIFACT_VERSION
@@ -135,7 +146,12 @@ def plan_command(
         write_json(output_root / "resolved.json", experiment.resolvedDefinition)
         dataset_root = dataset_provenance.materialized_path
         inputs = {
-            "artifacts": {name: file_digest(output_root / name) for name in ("resolved.json", "trials.jsonl")},
+            "artifacts": {name: file_digest(output_root / name) for name in
+                          (("resolved.json", "trials.jsonl", "adaptive-plan.json", "knowledge.json")
+                           if experiment.experimentKind == "adaptive" and (output_root / "knowledge.json").exists()
+                           else ("resolved.json", "trials.jsonl", "adaptive-plan.json")
+                           if experiment.experimentKind == "adaptive"
+                           else ("resolved.json", "trials.jsonl"))},
             "implementation": implementation_digest(),
             "dataset": tree_digest(Path(dataset_root)) if dataset_root else dataset_provenance.content_hash,
         }

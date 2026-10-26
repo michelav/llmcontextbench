@@ -369,6 +369,8 @@ class ProvisioningTreatment(ProvisioningConfiguration):
 
 class Experiment(BaseModel):
     definitionVersion: int = 2
+    experimentKind: str = "benchmark"
+    adaptation: dict[str, Any] = Field(default_factory=dict)
     resolvedDefinition: dict[str, Any] = Field(default_factory=dict)
     selectedCandidates: list[tuple[str, str]] = Field(default_factory=list)
     taskParams: dict[str, Any] = Field(default_factory=dict)

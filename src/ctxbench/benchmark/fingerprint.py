@@ -47,7 +47,7 @@ def verify_snapshot(root: Path, manifest: dict, *, execution: bool = False) -> N
     if not isinstance(inputs, dict) or digest(inputs) != fingerprint:
         raise ValueError('Execution fingerprint is corrupt')
     for filename, expected in inputs['artifacts'].items():
-        if filename not in {'resolved.json', 'trials.jsonl'}:
+        if filename not in {'resolved.json', 'trials.jsonl', 'adaptive-plan.json', 'knowledge.json'}:
             raise ValueError('Unexpected frozen artifact name')
         path = root / filename
         if not path.is_file() or file_digest(path) != expected:
