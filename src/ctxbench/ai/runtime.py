@@ -66,6 +66,7 @@ class MCPRuntime:
         verify: Any | None = None,
         sse_read_timeout: float | int | None = None,
         server_label: str = "ctxbench-lattes",
+        allowed_operations: list[str] | None = None,
     ) -> None:
         self._transport = transport.strip().lower().replace("-", "_")
         self._server = server
@@ -75,6 +76,7 @@ class MCPRuntime:
         self._verify = verify
         self._sse_read_timeout = sse_read_timeout
         self._server_label = server_label
+        self._allowed_operations = set(allowed_operations) if allowed_operations is not None else None
         self._closed = False
 
     @classmethod
@@ -98,14 +100,24 @@ class MCPRuntime:
             verify=config.get("verify"),
             sse_read_timeout=config.get("sse_read_timeout"),
             server_label=str(config.get("server_label") or config.get("label") or "ctxbench-lattes"),
+            allowed_operations=(
+                [str(name) for name in config["allowed_operations"]]
+                if isinstance(config.get("allowed_operations"), list)
+                else None
+            ),
         )
 
     def list_tools(self) -> list[ToolSpec]:
         self._ensure_open()
-        return asyncio.run(self._list_tools_async())
+        tools = asyncio.run(self._list_tools_async())
+        if self._allowed_operations is not None:
+            tools = [tool for tool in tools if tool.name in self._allowed_operations]
+        return tools
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         self._ensure_open()
+        if self._allowed_operations is not None and name not in self._allowed_operations:
+            raise ValueError(f"MCP operation is not allowed: {name}")
         return asyncio.run(self._call_tool_async(name, arguments))
 
     def close(self) -> None:
@@ -119,7 +131,7 @@ class MCPRuntime:
         async with self.session() as (session, _metadata):
             tools_result = await session.list_tools()
             tools = list(getattr(tools_result, "tools", []) or [])
-        return [
+        tools = [
             ToolSpec(
                 name=str(tool.name),
                 description=str(tool.description or ""),
@@ -127,6 +139,7 @@ class MCPRuntime:
             )
             for tool in tools
         ]
+        return tools
 
     async def _call_tool_async(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         started_at = perf_counter()

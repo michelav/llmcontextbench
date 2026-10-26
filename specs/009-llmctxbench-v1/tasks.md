@@ -90,17 +90,17 @@ documentation updates and a commit. Record command output summaries and commits 
 
 ## S07 — Providers and remote MCP
 
-- Status: pending
+- Status: complete
 - Purpose: Explicit providers/capabilities, preserved judge params, client-hosted remote MCP.
 - Likely files: `ai/models, ai/engine.py, ai/runtime, ai/rate_control.py, tests` (source paths relative to `src/ctxbench` where applicable).
 - Dependency: S06.
 - Risk: Assuming identical provider capabilities or token semantics.
 - Suggested commit: `feat: standardize providers and remote MCP execution`.
 
-- [ ] Implement the slice's behavior and document its public contract.
-- [ ] Verify: Provider fixtures; loopback MCP; unsupported mode and operation restrictions.
-- [ ] Review diff and record changes, impacts, commands, results and limitations.
-- [ ] Commit only the verified slice files.
+- [x] Implement provider resolution, client-hosted remote MCP and judge parameter preservation; document public contract.
+- [x] Verify: Provider fixtures; fake MCP; unsupported mode and operation restrictions.
+- [x] Review diff and record changes, impacts, commands, results and limitations.
+- [x] Commit only the verified slice files.
 
 ## S08 — Minimal adaptive lifecycle
 

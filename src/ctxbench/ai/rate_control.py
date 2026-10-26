@@ -294,6 +294,7 @@ class RateLimitedModelAdapter(ModelAdapter):
     ) -> None:
         super().__init__(params=dict(delegate.params))
         self.delegate = delegate
+        self.supports_tool_calling = getattr(delegate, "supports_tool_calling", True)
         self.registry = registry
         self.provider_name = provider_name
         self.model_name = model_name

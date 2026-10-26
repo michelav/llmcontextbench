@@ -116,8 +116,12 @@ runs by scenario, seed and repeat and report differences and pairing coverage.
 ## Deployment and reproducibility
 
 Client MCP means the benchmark owns the tool loop and observes client-side calls. Provider-hosted
-MCP keeps native connectors and their observability limits. Provider capability validation rejects
-unsupported modes and operation restrictions. Cache isolation requires provider evidence.
+MCP is not used by the v1 execution path. OpenAI, Anthropic, and Google integrations expose explicit
+provider identifiers and client function-calling capabilities; unknown providers fail instead of
+falling back to a mock. `remote_mcp` uses the same client-side tool loop as local MCP and connects to
+the configured remote server from the benchmark process. Surface operation allow-lists filter
+advertised tools and reject disallowed calls. Provider-reported token semantics remain provider
+specific. Cache isolation requires provider evidence.
 
 Frozen inputs plus relevant source/dependency/data digests define the execution fingerprint.
 Resume and cross-directory analysis reject mismatches for the same identity. Adaptive runs are
@@ -175,3 +179,13 @@ attempt while retaining the uncertain record. A writer lock prevents overlapping
 corrupt or fingerprint-mismatched records stop recovery. Eval, status, export and metrics rebuild the
 derived response collection without provider or dataset access. Version-2/3 artifacts remain on the
 transitional lifecycle path until S12.
+
+## Implemented increment: providers and client-hosted MCP (S07)
+
+Provider resolution accepts the explicit identifiers `openai`/`gpt`, `anthropic`/`claude`,
+`google`/`gemini`, `mock`, and `echo`. Unknown names are errors. Providers that do not support
+tool-calling cannot run local function, local MCP, or remote MCP strategies. `remote_mcp` now opens
+its configured MCP endpoint from the client and runs each tool call through the shared tool loop;
+the provider receives declared functions and no endpoint credentials. The execution surface's
+operation list limits tools visible and callable by the model. Judge request parameters continue to
+be merged with structured-output defaults, with configured values taking precedence.

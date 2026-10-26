@@ -8,6 +8,7 @@ from ctxbench.ai.models.base import AIRequest, ModelAdapter, ModelInput, ModelRe
 
 class MockModel(ModelAdapter):
     name = "mock"
+    supports_tool_calling = False
 
     def generate(self, model_input: ModelInput, request: AIRequest, trace: object | None = None) -> ModelResponse:
         task_id = request.task_id() or ""

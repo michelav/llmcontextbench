@@ -82,3 +82,20 @@
 - Validation: 143 focused execution-record, frozen-plan, CLI, lifecycle, artifact, metrics, AI and
   runtime tests passed; `git diff --check` passed. Execution tests used local mock providers only.
 - Commit: `feat: persist execution records and support recovery`.
+
+## S07 — complete
+
+- Provider resolution now uses explicit provider identifiers and rejects unknown values rather than
+  silently selecting the mock adapter. Tool-calling capability is declared by provider adapters;
+  mock rejects tool strategies while OpenAI, Anthropic and Google accept client-side function calls.
+- `remote_mcp` now uses the shared client tool loop and connects from the benchmark process. Its
+  endpoint and credentials stay in the client runtime; model requests carry function declarations.
+  Surface operation allow-lists filter advertised tools and guard calls. Judge-specific generation
+  parameters remain merged with structured-output defaults.
+- Impact: tool calls and their timing/results are visible to ctxbench for remote as well as local
+  MCP. Unknown provider typos fail clearly. Remote MCP verification uses fake runtimes and makes no
+  network or provider calls. Provider token semantics remain provider-reported.
+- Validation: `tests/test_ai.py` (50 passed) and `tests/test_runtime.py`,
+  `tests/test_mcp_operation_errors.py`, `tests/test_repoqa_evaluation.py` (21 passed); focused
+  provider/MCP/judge selection (13 passed); `git diff --check` passed.
+- Commit: `feat: standardize providers and remote MCP execution`.

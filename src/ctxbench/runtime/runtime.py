@@ -45,8 +45,15 @@ class ProvisioningRuntime:
         elif strategy == "local_mcp":
             server = self._capability("mcp_server", operations)
             factories[strategy] = lambda: create_local_mcp_runtime(server, self._decorate)
-        elif strategy == "remote_mcp" and not isinstance(params.get("mcp_server"), dict):
-            raise CapabilityUnavailableError("remote_mcp requires execution MCP server settings")
+        elif strategy == "remote_mcp":
+            config = params.get("mcp_server")
+            if not isinstance(config, dict):
+                raise CapabilityUnavailableError("remote_mcp requires execution MCP server settings")
+            remote_config = {
+                **config,
+                "allowed_operations": operations if operations is not None else config.get("allowed_operations"),
+            }
+            factories[strategy] = lambda: MCPRuntime.from_config(remote_config)
 
         metadata = {**request.metadata, "instance_id": request.instance_id,
                     "context_obtained": strategy == "inline"}

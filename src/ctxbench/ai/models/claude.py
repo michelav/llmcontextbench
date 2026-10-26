@@ -8,6 +8,7 @@ from ctxbench.ai.models.base import AIRequest, ModelAdapter, ModelInput, ModelRe
 
 
 class ClaudeModel(ModelAdapter):
+    supports_tool_calling = True
     def generate(self, model_input: ModelInput, request: AIRequest, trace: Any | None = None) -> ModelResponse:
         client = self._create_client()
         payload = self._build_payload(model_input, request)
@@ -61,11 +62,7 @@ class ClaudeModel(ModelAdapter):
         metadata = self._request_metadata(request)
         if metadata:
             payload["metadata"] = metadata
-        native_mcp_servers = self._build_native_mcp_servers(request)
-        if native_mcp_servers:
-            payload["mcp_servers"] = native_mcp_servers
-            payload["betas"] = ["mcp-client-2025-04-04"]
-        elif model_input.tools:
+        if model_input.tools:
             payload["tools"] = [
                 {
                     "name": tool.name,

@@ -527,6 +527,7 @@ def test_execute_runspec_remote_mcp_does_not_call_tool_provider(monkeypatch, tmp
     dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
     adapter = FakeDatasetAdapter(tool_provider=FakeLattesRuntime())
     monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
+    monkeypatch.setattr("ctxbench.runtime.runtime.MCPRuntime.from_config", classmethod(lambda cls, config: FakeLattesRuntime()))
     engine = Engine()
     model = RecordingModel()
     engine._models["recording"] = model
@@ -677,16 +678,57 @@ def test_engine_local_function_uses_resource_tools_and_records_calls():
 
 
 def test_engine_resolves_remote_mcp_and_keeps_local_mcp_distinct():
-    engine = Engine(tool_runtime_factories={"local_mcp": lambda: FakeLattesRuntime()})
+    engine = Engine(tool_runtime_factories={
+        "remote_mcp": lambda: FakeLattesRuntime(),
+        "local_mcp": lambda: FakeLattesRuntime(),
+    })
 
     remote_strategy, remote_runtime = engine._resolve_strategy("remote_mcp")
     local_strategy, local_runtime = engine._resolve_strategy("local_mcp")
 
     assert type(remote_strategy).__name__ == "MCPStrategy"
-    assert remote_runtime is None
+    assert remote_runtime is not None
     assert type(local_strategy).__name__ == "LocalMCPStrategy"
     assert local_runtime is not None
+    remote_runtime.close()
     local_runtime.close()
+
+
+def test_engine_rejects_unknown_provider_and_mock_tool_strategy():
+    engine = Engine()
+    unknown = engine.execute(make_request(provider_name="openai-compatible"))
+    unsupported = engine.execute(make_request(provider_name="mock", strategy_name="remote_mcp"))
+    assert "Unknown provider" in (unknown.error or "")
+    assert "does not support tool calling" in (unsupported.error or "")
+
+
+def test_engine_resolves_only_explicit_provider_aliases():
+    engine = Engine()
+    assert isinstance(engine._resolve_model("openai", "gpt-5").delegate, OpenAIModel)
+    assert isinstance(engine._resolve_model("claude", "claude-sonnet").delegate, ClaudeModel)
+    assert isinstance(engine._resolve_model("google", "gemini-flash").delegate, GeminiModel)
+
+
+def test_remote_mcp_runtime_applies_operation_allow_list(monkeypatch):
+    from ctxbench.ai.runtime import MCPRuntime
+
+    runtime = MCPRuntime.from_config({
+        "server_url": "https://example.test/mcp",
+        "allowed_operations": ["lookup"],
+    })
+
+    async def list_tools():
+        return [ToolSpec(name="lookup"), ToolSpec(name="delete")]
+
+    async def call_tool(name, arguments):
+        return ToolResult(name=name, content="ok")
+
+    monkeypatch.setattr(runtime, "_list_tools_async", list_tools)
+    monkeypatch.setattr(runtime, "_call_tool_async", call_tool)
+    assert [tool.name for tool in runtime.list_tools()] == ["lookup"]
+    with pytest.raises(ValueError, match="not allowed"):
+        runtime.call_tool("delete", {})
+    assert runtime.call_tool("lookup", {}).content == "ok"
 
 
 def test_trace_collector_recognizes_remote_mcp_strategy_span():
@@ -909,7 +951,7 @@ def test_judge_request_injects_structured_output_schema():
                 "provider": "openai",
                 "model": "recording_judge",
                 "temperature": 0,
-                "params": {},
+                "params": {"max_tokens": 256, "top_p": 0.4},
             },
         )(),
         prompt="Judge this response.",
@@ -929,9 +971,11 @@ def test_judge_request_injects_structured_output_schema():
     assert model.last_request.params["structured_output"]["schema"]["type"] == "object"
     assert model.last_request.params["structured_output"]["schema"]["required"] == ["correctness", "completeness"]
     assert model.last_request.params["prompt_cache_key"].startswith("jud:ctx:")
+    assert model.last_request.params["max_tokens"] == 256
+    assert model.last_request.params["top_p"] == 0.4
 
 
-def test_execute_runspec_persists_metrics_summary_with_nulls_for_remote_mcp(tmp_path):
+def test_execute_runspec_persists_metrics_summary_for_client_remote_mcp(monkeypatch, tmp_path):
     dataset = write_mock_dataset(tmp_path / "dataset")
     runspec = TrialSpec.model_validate(
         {
@@ -940,8 +984,8 @@ def test_execute_runspec_persists_metrics_summary_with_nulls_for_remote_mcp(tmp_
             "dataset": dataset.model_dump(mode="json"),
             "taskId": "q_year",
             "instanceId": "cv-demo",
-            "provider": "mock",
-            "model": "mock",
+            "provider": "recording",
+            "model": "recording",
             "strategy": "remote_mcp",
             "representation": "json",
             "surface": "ops",
@@ -951,11 +995,11 @@ def test_execute_runspec_persists_metrics_summary_with_nulls_for_remote_mcp(tmp_
             "params": {"mcp_server": {"server_url": "https://example.test/mcp"}},
             "trace": {"enabled": True},
             "metadata": {
-                "canonicalId": "exp-1|q_year|cv-demo|mock|mock|remote_mcp|json|1",
+                "canonicalId": "exp-1|q_year|cv-demo|recording|recording|remote_mcp|json|1",
                 "taskId": "q_year",
                 "instanceId": "cv-demo",
-                "provider": "mock",
-                "modelName": "mock",
+                "provider": "recording",
+                "modelName": "recording",
                 "strategy": "remote_mcp",
                 "representation": "json",
                 "surface": "ops",
@@ -966,7 +1010,10 @@ def test_execute_runspec_persists_metrics_summary_with_nulls_for_remote_mcp(tmp_
         }
     )
 
-    result = execute_runspec(runspec, Engine())
+    monkeypatch.setattr("ctxbench.runtime.runtime.MCPRuntime.from_config", classmethod(lambda cls, config: FakeLattesRuntime()))
+    engine = Engine(tool_runtime_factories={"remote_mcp": lambda: FakeLattesRuntime()})
+    engine._models["recording"] = RecordingModel()
+    result = execute_runspec(runspec, engine)
 
     assert isinstance(result.response, str)
     assert result.metricsSummary["toolCalls"] == 0
@@ -982,7 +1029,7 @@ def test_execute_runspec_persists_metrics_summary_with_nulls_for_remote_mcp(tmp_
 
     no_trace_runspec = runspec.model_copy(deep=True)
     no_trace_runspec.trace.enabled = False
-    no_trace_result = execute_runspec(no_trace_runspec, Engine())
+    no_trace_result = execute_runspec(no_trace_runspec, engine)
     assert no_trace_result.trace.aiTrace == {}
     assert no_trace_result.metricsSummary["modelAttempts"] == 1
     assert no_trace_result.metricsSummary["totalDurationMs"] == no_trace_result.timing.durationMs
@@ -1293,7 +1340,7 @@ def test_gemini_native_mcp_tool_accepts_remote_mcp_and_rejects_mcp():
         )
 
 
-def test_gemini_generate_uses_native_mcp_path_for_remote_mcp(monkeypatch):
+def test_gemini_remote_mcp_uses_client_supplied_tool_declarations(monkeypatch):
     model = GeminiModel()
     request = AIRequest(
         question="Task?",
@@ -1305,27 +1352,23 @@ def test_gemini_generate_uses_native_mcp_path_for_remote_mcp(monkeypatch):
         params={"mcp_server": {"server_url": "https://example.test/mcp"}},
         metadata={},
     )
-    expected = ModelResponse(text="ok")
-    called: dict[str, object] = {}
+    from types import SimpleNamespace
 
-    async def fake_generate_with_native_mcp(model_input, incoming_request):
-        called["strategy"] = incoming_request.strategy_name
-        return expected
+    sent: dict[str, object] = {}
+    response = SimpleNamespace(text="ok", candidates=[], usage_metadata=None)
+    client = SimpleNamespace(models=SimpleNamespace(generate_content=lambda **kwargs: (sent.update(kwargs) or response)))
+    monkeypatch.setattr(model, "_create_client", lambda: client)
+    monkeypatch.setattr(model, "_sdk_types", lambda: None)
+    tool_input = ModelInput(
+        system_instruction="System",
+        prompt="Prompt",
+        tools=[ToolSpec(name="lookup", description="Lookup", input_schema={"type": "object"})],
+    )
+    result = model.generate(tool_input, request)
 
-    def fake_run_async(coro):
-        called["used"] = True
-        try:
-            return coro.send(None)
-        except StopIteration as exc:
-            return exc.value
-
-    monkeypatch.setattr(model, "_generate_with_native_mcp", fake_generate_with_native_mcp)
-    monkeypatch.setattr(model, "_run_async", fake_run_async)
-
-    result = model.generate(ModelInput(system_instruction="System", prompt="Prompt"), request)
-
-    assert called == {"used": True, "strategy": "remote_mcp"}
     assert result.text == "ok"
+    assert "mcp_servers" not in sent["config"]
+    assert sent["config"]["tools"][0]["function_declarations"][0]["name"] == "lookup"
 
 
 def test_mock_model_uses_task_metadata_lookup():
@@ -1633,6 +1676,7 @@ def test_execute_runspec_resolves_mcp_credentials_only_in_the_request_and_redact
     monkeypatch.setenv("CTXBENCH_TEST_MCP_TOKEN", secret)
     dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
     monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(FakeDatasetAdapter()))
+    monkeypatch.setattr("ctxbench.runtime.runtime.MCPRuntime.from_config", classmethod(lambda cls, config: FakeLattesRuntime()))
     engine = Engine()
     model = EchoMcpConfigModel()
     engine._models["recording"] = model

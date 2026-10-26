@@ -8,6 +8,7 @@ from ctxbench.ai.models.base import AIRequest, ModelAdapter, ModelInput, ModelRe
 
 
 class OpenAIModel(ModelAdapter):
+    supports_tool_calling = True
     def generate(self, model_input: ModelInput, request: AIRequest, trace: Any | None = None) -> ModelResponse:
         client = self._create_client()
         payload = self._build_payload(model_input, request)
@@ -54,10 +55,7 @@ class OpenAIModel(ModelAdapter):
         metadata = self._request_metadata(request)
         if metadata:
             payload["metadata"] = metadata
-        native_mcp_tools = self._build_native_mcp_tools(request)
-        if native_mcp_tools:
-            payload["tools"] = native_mcp_tools
-        elif model_input.tools:
+        if model_input.tools:
             payload["tools"] = [self._serialize_tool(tool) for tool in model_input.tools]
         if "temperature" in params:
             payload["temperature"] = params["temperature"]

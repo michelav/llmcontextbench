@@ -29,7 +29,6 @@ class Engine:
         }
         self._strategies: dict[str, StrategyAdapter] = {
             "inline": InlineStrategy(),
-            "remote_mcp": MCPStrategy(),
         }
         self._tool_runtime_factories = dict(tool_runtime_factories or {})
         self._rate_control_registry = RateControlRegistry()
@@ -45,6 +44,7 @@ class Engine:
         try:
             with trace.span("engine.execute", "engine.execute"):
                 model = self._resolve_model(request.provider_name, request.model_name, request.params)
+                self._validate_capabilities(model, request.strategy_name)
                 strategy, owned_runtime = self._resolve_strategy(request.strategy_name)
                 result = strategy.execute(model, request, trace)
         except Exception as exc:
@@ -75,6 +75,7 @@ class Engine:
         try:
             with trace.span("engine.execute_model_input", "engine.execute_model_input"):
                 model = self._resolve_model(request.provider_name, request.model_name, request.params)
+                self._validate_capabilities(model, request.strategy_name)
                 model_response = model.generate(model_input, request, trace=trace)
                 trace.record_model_call(
                     duration_ms=model_response.duration_ms,
@@ -121,8 +122,8 @@ class Engine:
                 model_name=model_name,
                 event_logger=self._event_logger,
             )
-        lowered = name.lower()
-        if lowered.startswith("gpt") or lowered.startswith("openai"):
+        normalized = name.strip().lower()
+        if normalized in {"openai", "gpt"}:
             resolved = OpenAIModel(params=params)
             return RateLimitedModelAdapter(
                 resolved,
@@ -131,7 +132,7 @@ class Engine:
                 model_name=model_name,
                 event_logger=self._event_logger,
             )
-        if lowered.startswith("gemini") or lowered.startswith("google"):
+        if normalized in {"google", "gemini"}:
             resolved = GeminiModel(params=params)
             return RateLimitedModelAdapter(
                 resolved,
@@ -140,7 +141,7 @@ class Engine:
                 model_name=model_name,
                 event_logger=self._event_logger,
             )
-        if lowered.startswith("claude") or lowered.startswith("anthropic"):
+        if normalized in {"anthropic", "claude"}:
             resolved = ClaudeModel(params=params)
             return RateLimitedModelAdapter(
                 resolved,
@@ -149,14 +150,16 @@ class Engine:
                 model_name=model_name,
                 event_logger=self._event_logger,
             )
-        resolved = MockModel(params=params)
-        return RateLimitedModelAdapter(
-            resolved,
-            self._rate_control_registry,
-            provider_name=name,
-            model_name=model_name,
-            event_logger=self._event_logger,
-        )
+        raise ValueError(f"Unknown provider: {name}")
+
+    @staticmethod
+    def _validate_capabilities(model: ModelAdapter, strategy_name: str) -> None:
+        if strategy_name in {"local_function", "local_mcp", "remote_mcp"} and not getattr(
+            model, "supports_tool_calling", True
+        ):
+            raise ValueError(
+                f"Provider {model.__class__.__name__} does not support tool calling required by {strategy_name}."
+            )
 
     def _resolve_strategy(self, name: str) -> tuple[StrategyAdapter, ToolRuntime | None]:
         strategy = self._strategies.get(name)
@@ -166,7 +169,11 @@ class Engine:
         if runtime_factory is None:
             raise ValueError(f"Unknown strategy: {name}")
         runtime = runtime_factory()
-        client_strategies = {"local_function": LocalFunctionStrategy, "local_mcp": LocalMCPStrategy}
+        client_strategies = {
+            "local_function": LocalFunctionStrategy,
+            "local_mcp": LocalMCPStrategy,
+            "remote_mcp": MCPStrategy,
+        }
         if name in client_strategies:
             return client_strategies[name](runtime), runtime
         runtime.close()

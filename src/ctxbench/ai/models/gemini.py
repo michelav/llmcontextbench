@@ -9,11 +9,10 @@ from ctxbench.ai.models.base import AIRequest, ModelAdapter, ModelInput, ModelRe
 
 
 class GeminiModel(ModelAdapter):
+    supports_tool_calling = True
     def generate(self, model_input: ModelInput, request: AIRequest, trace: Any | None = None) -> ModelResponse:
         if request.strategy_name == "mcp":
             raise ValueError("unknown strategy: mcp")
-        if request.strategy_name == "remote_mcp":
-            return self._run_async(self._generate_with_native_mcp(model_input, request))
         client = self._create_client()
         generation_config = self._build_generation_config(request, model_input)
         started_at = perf_counter()
