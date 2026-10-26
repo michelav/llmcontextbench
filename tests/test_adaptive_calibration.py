@@ -6,7 +6,7 @@ import pytest
 
 from ctxbench.adaptive.calibration import DelayedRuntime, delay_at, freeze_calibration, load_estimates, quantile
 from ctxbench.adaptive.types import Observation, SizeBin, TokenUsage, Provenance
-from ctxbench.benchmark.executor import _build_tool_runtime_factories
+from ctxbench.runtime.runtime import create_local_mcp_runtime
 
 
 def packets(local_duration=100):
@@ -58,21 +58,16 @@ def test_delay_schedule_and_runtime_preservation():
 
 
 def test_hook_default_and_failed_decoration_cleanup(monkeypatch):
-    class Trial:
-        strategy = 'local_mcp'
     class Runtime:
         def close(self):
             closed.append(True)
     closed = []
-    monkeypatch.setattr('ctxbench.benchmark.executor.MCPRuntime.for_local_server', lambda server: Runtime())
-    factory = _build_tool_runtime_factories(Trial(), dataset_tool_provider=None, dataset_mcp_server=object())['local_mcp']
-    assert isinstance(factory(), Runtime)
+    monkeypatch.setattr('ctxbench.runtime.runtime.MCPRuntime.for_local_server', lambda server: Runtime())
+    assert isinstance(create_local_mcp_runtime(object()), Runtime)
     def fail(runtime):
         raise RuntimeError('decorator')
-    factory = _build_tool_runtime_factories(Trial(), dataset_tool_provider=None, dataset_mcp_server=object(),
-                                          local_mcp_runtime_decorator=fail)['local_mcp']
     with pytest.raises(RuntimeError):
-        factory()
+        create_local_mcp_runtime(object(), fail)
     assert closed == [True]
 
 

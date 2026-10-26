@@ -50,6 +50,21 @@ def _capability_report(*, conformant: bool = True) -> DatasetCapabilityReport:
 
 
 class CompleteDatasetPackage:
+    def dataset_instructions(self):
+        return None
+
+    def resolve_surface(self, surface):
+        return surface
+
+    def mcp_server(self, *, allowed_operations=None):
+        return None
+
+    def request_features(self, instance_id, task_id):
+        return {}
+
+    def validators(self):
+        return {}
+
     def metadata(self) -> DatasetMetadata:
         return _metadata()
 

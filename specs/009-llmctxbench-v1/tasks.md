@@ -48,17 +48,17 @@ documentation updates and a commit. Record command output summaries and commits 
 
 ## S04 — One runtime and dataset boundary
 
-- Status: pending
+- Status: complete
 - Purpose: Route strategies through one runtime with domain-neutral capabilities.
 - Likely files: `runtime, benchmark/runtime_adapter.py, benchmark/executor.py, dataset, ai/strategies` (source paths relative to `src/ctxbench` where applicable).
 - Dependency: S03.
 - Risk: Changing transport behavior while consolidating execution.
 - Suggested commit: `refactor: unify runtime and dataset boundaries`.
 
-- [ ] Implement the slice's behavior and document its public contract.
-- [ ] Verify: Fake-adapter strategy regressions and import boundaries.
-- [ ] Review diff and record changes, impacts, commands, results and limitations.
-- [ ] Commit only the verified slice files.
+- [x] Implement the slice's behavior and document its public contract.
+- [x] Verify: Fake-adapter strategy regressions and import boundaries.
+- [x] Review diff and record changes, impacts, commands, results and limitations.
+- [x] Commit only the verified slice files.
 
 ## S05 — Usage and timing
 
@@ -171,4 +171,3 @@ documentation updates and a commit. Record command output summaries and commits 
 - [ ] Verify: No remaining callers; provider-free regression suite; old-version rejection.
 - [ ] Review diff and record changes, impacts, commands, results and limitations.
 - [ ] Commit only the verified slice files.
-

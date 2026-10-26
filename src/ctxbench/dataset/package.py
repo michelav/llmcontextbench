@@ -71,6 +71,16 @@ class DatasetPackage(Protocol):
     def get_task_instance(self, instance_id: str, task_id: str) -> dict[str, object] | None:
         return None
 
+    def dataset_instructions(self) -> str | None: ...
+
+    def resolve_surface(self, surface: object) -> object: ...
+
+    def mcp_server(self, *, allowed_operations=None) -> object | None: ...
+
+    def request_features(self, instance_id: str, task_id: str) -> dict[str, object]: ...
+
+    def validators(self) -> dict[str, object]: ...
+
     def tool_provider(self) -> object | None:
         return None
 

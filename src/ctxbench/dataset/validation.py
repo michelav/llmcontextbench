@@ -25,6 +25,11 @@ _OPTIONAL_METHODS = (
     "get_task_instance",
     "tool_provider",
     "fixtures",
+    "dataset_instructions",
+    "resolve_surface",
+    "mcp_server",
+    "request_features",
+    "validators",
 )
 
 _DESCRIPTOR_FIELDS = (

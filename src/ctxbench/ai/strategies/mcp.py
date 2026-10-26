@@ -66,7 +66,7 @@ class MCPStrategy(StrategyAdapter):
 
 
 def _resolve_instance_id(request: AIRequest) -> str:
-    value = request.metadata.get("instance_id") or request.metadata.get("lattes_id")
+    value = request.metadata.get("instance_id")
     if not isinstance(value, str) or not value:
-        raise ValueError("MCP strategy requires request.metadata['instance_id'] or 'lattes_id'.")
+        raise ValueError("MCP strategy requires request.metadata['instance_id'].")
     return value

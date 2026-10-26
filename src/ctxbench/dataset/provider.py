@@ -252,7 +252,16 @@ class LocalDatasetPackage:
             conformant=True,
         )
 
-    def tool_provider(self) -> object | None:
+    def mcp_server(self, *, allowed_operations=None) -> object | None:
+        return None
+
+    def request_features(self, instance_id: str, task_id: str) -> dict[str, object]:
+        return {}
+
+    def validators(self) -> dict[str, object]:
+        return {}
+
+    def tool_provider(self, *, allowed_operations=None) -> object | None:
         return None
 
     def evaluation_helpers(self) -> object | None:

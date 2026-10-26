@@ -127,6 +127,22 @@ class FakeDatasetAdapter:
         self.get_task(task_id)
         return {"parameters": {}}
 
+    def dataset_instructions(self) -> str | None:
+        return None
+
+    def resolve_surface(self, surface: object) -> object:
+        return surface
+
+    def mcp_server(self, *, allowed_operations=None) -> object | None:
+        return None
+
+    def request_features(self, instance_id: str, task_id: str) -> dict[str, object]:
+        self.get_task_instance(instance_id, task_id)
+        return {}
+
+    def validators(self) -> dict[str, object]:
+        return {}
+
     def tool_provider(self) -> object | None:
         return None
 

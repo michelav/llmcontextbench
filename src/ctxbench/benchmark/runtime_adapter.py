@@ -113,7 +113,7 @@ def _request_metadata(trial: TrialSpec) -> dict[str, Any]:
         "task_tags": list(trial.taskTags),
         "validation_type": trial.validationType,
         "context_representation": trial.representation,
-        "context_obtained": True,
+        "context_obtained": trial.strategy == "inline",
         "surface_spec": dict(trial.surfaceSpec),
     }
 

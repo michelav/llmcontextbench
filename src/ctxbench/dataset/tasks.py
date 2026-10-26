@@ -16,8 +16,8 @@ class TaskValidation(BaseModel):
         if not isinstance(data, dict):
             raise ValidationError("Task validation requires an object input.")
         validation_type = str(data.get("type", "")).strip()
-        if validation_type not in {"judge", "repoqa-scorer"}:
-            raise ValidationError("Task validation.type must be 'judge' or 'repoqa-scorer'.")
+        if not validation_type:
+            raise ValidationError("Task validation.type must name a judge or registered validator.")
         config = {
             str(key): value
             for key, value in data.items()

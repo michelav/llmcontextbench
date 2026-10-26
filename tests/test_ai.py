@@ -45,7 +45,7 @@ def make_request(**overrides: object) -> AIRequest:
         "strategy_name": "inline",
         "context_representation": "json",
         "params": {},
-        "metadata": {"taskId": "q1", "lattes_id": "cv-demo", "instanceId": "cv-demo", "surface": "full", "surfaceSpec": {"type": "full_context"}},
+        "metadata": {"taskId": "q1", "instance_id": "cv-demo", "instanceId": "cv-demo", "surface": "full", "surfaceSpec": {"type": "full_context"}},
     }
     payload.update(overrides)
     return AIRequest(**payload)
@@ -473,7 +473,7 @@ def test_execute_runspec_local_function_uses_tool_provider_runtime(monkeypatch, 
             super().__init__()
             constructed.append(provider)
 
-    monkeypatch.setattr(executor_module, "LocalFunctionRuntime", SpyLocalFunctionRuntime)
+    monkeypatch.setattr("ctxbench.runtime.runtime.LocalFunctionRuntime", SpyLocalFunctionRuntime)
     engine = Engine()
     model = RecordingModel()
     engine._models["recording"] = model
@@ -504,7 +504,7 @@ def test_execute_runspec_local_mcp_uses_dataset_mcp_server(monkeypatch, tmp_path
         constructed.append(mcp_server)
         return FakeLattesRuntime()
 
-    monkeypatch.setattr(executor_module.MCPRuntime, "for_local_server", staticmethod(fake_for_local_server))
+    monkeypatch.setattr("ctxbench.runtime.runtime.MCPRuntime.for_local_server", staticmethod(fake_for_local_server))
     engine = Engine()
     model = RecordingModel()
     engine._models["recording"] = model
@@ -566,7 +566,7 @@ def test_execute_runspec_local_mcp_missing_server_raises(monkeypatch, tmp_path):
     adapter = FakeDatasetAdapter(tool_provider=FakeLattesRuntime(), mcp_server=None)
     monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
 
-    with pytest.raises(CapabilityUnavailableError, match="dataset MCP server"):
+    with pytest.raises(CapabilityUnavailableError, match="mcp_server capability"):
         execute_runspec(_runspec_for_executor(dataset, strategy="local_mcp"), Engine())
 
     assert adapter.tool_provider_calls == 0
@@ -578,7 +578,7 @@ def test_execute_runspec_remote_mcp_missing_config_raises_without_tool_provider(
     adapter = FakeDatasetAdapter(tool_provider=FakeLattesRuntime())
     monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
 
-    with pytest.raises(CapabilityUnavailableError, match=r"params\['mcp_server'\]"):
+    with pytest.raises(CapabilityUnavailableError, match="execution MCP server settings"):
         execute_runspec(_runspec_for_executor(dataset, strategy="remote_mcp"), Engine())
 
     assert adapter.tool_provider_calls == 0
@@ -637,7 +637,8 @@ def test_engine_local_function_uses_resource_tools_and_records_calls():
 
     assert result.answer == "Software engineering"
     assert runtime.calls == [("get_publications", {"lattes_id": "cv-demo", "start_year": 2020})]
-    assert "Researcher Lattes ID:" in model.inputs[0].prompt
+    assert "# Instance ID:\ncv-demo" in model.inputs[0].prompt
+    assert "Researcher Lattes ID:" not in model.inputs[0].prompt
     assert result.trace["metrics"]["mcpToolCalls"] == 1
 
 
@@ -1589,7 +1590,8 @@ def test_execute_runspec_resolves_mcp_credentials_only_in_the_request_and_redact
 
 
 def test_plan_params_keep_mcp_credential_placeholders_and_check_them(monkeypatch):
-    from ctxbench.util.env import apply_lattes_mcp_env_overrides, resolve_plan_params
+    from ctxbench.util.env import resolve_plan_params
+    from ctxbench.adapters.lattes.environment import apply_lattes_mcp_env_overrides
 
     monkeypatch.setenv("CTXBENCH_TEST_MCP_URL", "https://example.test/mcp")
     monkeypatch.setenv("CTXBENCH_TEST_MCP_TOKEN", "s3cr3t")

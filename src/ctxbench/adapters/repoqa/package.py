@@ -30,6 +30,10 @@ REPRESENTATION_ARTIFACTS = {
 
 
 class RepoQADatasetAdapter(LocalDatasetPackage):
+    def validators(self) -> dict[str, object]:
+        from ctxbench.adapters.repoqa.evaluation import evaluate_configured_response
+        return {"repoqa-scorer": evaluate_configured_response}
+
     REPRESENTATION_ARTIFACTS: dict[str, str] = REPRESENTATION_ARTIFACTS
 
     def __init__(self, dataset_root: str | Path) -> None:

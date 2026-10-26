@@ -173,10 +173,9 @@ class Engine:
         if runtime_factory is None:
             raise ValueError(f"Unknown strategy: {name}")
         runtime = runtime_factory()
-        if name == "local_function":
-            return LocalFunctionStrategy(runtime), runtime
-        if name == "local_mcp":
-            return LocalMCPStrategy(runtime), runtime
+        client_strategies = {"local_function": LocalFunctionStrategy, "local_mcp": LocalMCPStrategy}
+        if name in client_strategies:
+            return client_strategies[name](runtime), runtime
         runtime.close()
         raise ValueError(f"Unknown strategy: {name}")
 

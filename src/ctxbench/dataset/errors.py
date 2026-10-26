@@ -5,8 +5,7 @@ class AdapterUnavailableError(ValueError):
     """Raised when no adapter is available for a dataset reference."""
 
 
-class CapabilityUnavailableError(ValueError):
-    """Raised when an adapter lacks a capability required by a lifecycle phase."""
+from ctxbench.core.errors import CapabilityUnavailableError
 
 
 class UnsupportedRepresentationError(ValueError):

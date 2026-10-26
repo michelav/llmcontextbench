@@ -316,3 +316,13 @@ def _build_result(
         summary=EvaluationRunSummary(itemCount=1),
         metadata=result.metadata,
     )
+
+
+def evaluate_configured_response(result: TrialResult) -> EvaluationTrialResult:
+    config = dict(result.validationConfig or result.metadata.validationConfig)
+    raw = config.get("threshold", 0.8)
+    try:
+        threshold = float(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"RepoQA validationConfig.threshold must be numeric, got {raw!r}.") from exc
+    return evaluate_response(result, threshold=threshold, ignore_comments=bool(config.get("ignoreComments", False)))

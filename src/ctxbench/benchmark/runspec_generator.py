@@ -8,7 +8,7 @@ from ctxbench.benchmark.fingerprint import digest
 from ctxbench.benchmark.models import DatasetProvenance, Experiment, MODEL_ID_PATTERN, TrialMetadata, TrialSpec
 from ctxbench.dataset.package import DatasetPackage
 from ctxbench.util.artifacts import build_short_ids, canonical_trial_identity
-from ctxbench.util.env import apply_lattes_mcp_env_overrides, resolve_plan_params
+from ctxbench.util.env import resolve_plan_params
 
 TASK_TEMPLATE_PATTERN = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
 
@@ -20,7 +20,7 @@ def resolve_params(experiment: Experiment, model_name: str, model_id: str | None
     else:
         model_specific = experiment.params.models.get(model_name, {})
     params = resolve_plan_params({**common, **model_specific, "model_name": model_name})
-    return apply_lattes_mcp_env_overrides(params)
+    return params
 
 
 def resolve_models(experiment: Experiment) -> list[dict[str, str]]:
@@ -109,6 +109,9 @@ def generate_runspecs(
                     strategy_name = configuration.strategy
                     representation = configuration.representation
                     params = {**experiment.executionOptions, **resolve_params(experiment, model_name, model_id=model_id)}
+                    prepare = getattr(dataset_package, "prepare_execution_params", None)
+                    if prepare is not None and experiment.definitionVersion < 3:
+                        params = prepare(params)
                     for repeat_index in range(1, experiment.execution.repeats + 1):
                         canonical_id = canonical_trial_identity(
                             experiment.id,

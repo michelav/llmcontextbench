@@ -1,170 +1,22 @@
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 from ctxbench.adapters.registry import get_default_registry
 from ctxbench.ai.engine import Engine
-from ctxbench.ai.models.base import AIRequest, AIResult
-from ctxbench.ai.runtime import LocalFunctionRuntime, MCPRuntime
-from ctxbench.benchmark.models import EvaluationResult, TrialResult, RunTiming, TrialTrace, TrialSpec
-from ctxbench.benchmark.runtime_adapter import TrialRuntimeAdapter
-from ctxbench.dataset.errors import AdapterUnavailableError, CapabilityUnavailableError
+from ctxbench.benchmark.models import TrialResult, TrialSpec
+from ctxbench.benchmark.runtime_adapter import TrialRuntimeAdapter, build_metrics_summary
+from ctxbench.dataset.errors import AdapterUnavailableError
 from ctxbench.dataset.package import DatasetPackage
 from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.runtime.runtime import ProvisioningRuntime
-from ctxbench.util.clock import utc_now_iso
-from ctxbench.util.env import redact_secrets, resolve_secret_params
-from ctxbench.util.logging import trial_log_context
+
 
 def execute_runspec(runspec: TrialSpec, engine: Engine, *, local_mcp_runtime_decorator=None) -> TrialResult:
     adapter = _resolve_adapter(runspec)
-    if runspec.strategy == "inline":
-        trial_adapter = TrialRuntimeAdapter()
-        execution = ProvisioningRuntime(engine, adapter).execute(trial_adapter.to_runtime_request(runspec))
-        return trial_adapter.to_trial_result(runspec, execution)
-
-    context = ""
-    dataset_tool_provider: object | None = None
-    dataset_mcp_server: object | None = None
-    if runspec.strategy == "local_function":
-        dataset_tool_provider = _resolve_tool_provider(adapter, runspec)
-        if dataset_tool_provider is None:
-            raise CapabilityUnavailableError(
-                f"Strategy '{runspec.strategy}' requires a dataset tool provider."
-            )
-    elif runspec.strategy == "local_mcp":
-        dataset_mcp_server = _resolve_mcp_server(adapter, runspec)
-        if dataset_mcp_server is None:
-            raise CapabilityUnavailableError("Strategy 'local_mcp' requires a dataset MCP server.")
-    elif runspec.strategy == "remote_mcp":
-        if not isinstance(runspec.params.get("mcp_server"), dict):
-            raise CapabilityUnavailableError("Strategy 'remote_mcp' requires params['mcp_server'].")
-    request_params, secrets = resolve_secret_params(dict(runspec.params))
-    request_metadata = {
-        **trial_log_context(runspec),
-        "trialId": runspec.trialId,
-        "experimentId": runspec.experimentId,
-        "taskId": runspec.taskId,
-        "instanceId": runspec.instanceId,
-        "phase": "EXECUTE",
-        "representation": runspec.representation,
-        "surface": runspec.surface,
-        "provider": runspec.provider,
-        "modelId": runspec.modelId,
-        "modelName": runspec.modelName,
-        "configurationId": runspec.configurationId,
-        "strategy": runspec.strategy,
-        "repeatIndex": runspec.repeatIndex,
-        "validationType": runspec.validationType,
-        "instance_id": runspec.instanceId,
-        "task_tags": list(runspec.taskTags),
-        "validation_type": runspec.validationType,
-        "context_representation": runspec.representation,
-        "context_obtained": runspec.strategy == "inline",
-        "surface_spec": dict(runspec.surfaceSpec),
-    }
-    dataset_instructions = getattr(adapter, "dataset_instructions", lambda: None)()
-    if dataset_instructions:
-        request_metadata["dataset_instructions"] = dataset_instructions
-    request = AIRequest(
-        question=runspec.taskStatement,
-        context=context,
-        provider_name=runspec.provider,
-        model_name=str(runspec.params.get("model_name", "")),
-        strategy_name=runspec.strategy,
-        context_representation=runspec.representation,
-        params=request_params,
-        metadata=request_metadata,
-    )
-
-    started_at = utc_now_iso()
-    start = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-    active_engine = engine
-    owned_engine: Engine | None = None
-    if runspec.strategy in {"local_function", "local_mcp"}:
-        tool_runtime_factories = _build_tool_runtime_factories(
-            runspec,
-            dataset_tool_provider=dataset_tool_provider,
-            dataset_mcp_server=dataset_mcp_server,
-            local_mcp_runtime_decorator=local_mcp_runtime_decorator,
-        )
-        owned_engine = engine.copy_with_tool_runtime_factories(tool_runtime_factories)
-        active_engine = owned_engine
-    try:
-        ai_result = active_engine.execute(request)
-    finally:
-        if owned_engine is not None:
-            owned_engine.close()
-    finished_at = utc_now_iso()
-    finish = datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
-
-    if secrets:
-        # Providers echo the MCP tool definition (headers, authorization) in raw responses and errors.
-        ai_result = AIResult.model_validate(redact_secrets(ai_result.model_dump(), secrets))
-    is_empty_answer = ai_result.error is None and not (ai_result.answer or "").strip()
-    error_message = ai_result.error or ("Model returned empty answer" if is_empty_answer else None)
-    run_status = "error" if error_message is not None else "success"
-
-    trace = TrialTrace()
-    if runspec.trace.enabled:
-        trace.aiTrace = ai_result.trace
-        if runspec.trace.save_tool_calls:
-            trace.toolCalls = ai_result.tool_calls
-        native_mcp = ai_result.metadata.get("native_mcp")
-        if isinstance(native_mcp, dict):
-            trace.nativeMcp = native_mcp
-        server_mcp = ai_result.metadata.get("server_mcp")
-        if isinstance(server_mcp, list):
-            trace.serverMcp = [item for item in server_mcp if isinstance(item, dict)]
-        if runspec.trace.save_raw_response:
-            trace.rawResponse = ai_result.raw_response
-        if runspec.trace.save_errors:
-            trace.error = error_message
-
-    usage = ai_result.usage if runspec.trace.save_usage or run_status == "error" else {}
-    metrics_summary = _build_metrics_summary(
-        ai_trace=trace.aiTrace,
-        strategy=runspec.strategy,
-    )
-    result = TrialResult(
-        trialId=runspec.trialId,
-        experimentId=runspec.experimentId,
-        dataset=runspec.dataset,
-        taskId=runspec.taskId,
-        taskStatement=runspec.taskStatement,
-        taskTemplate=runspec.taskTemplate,
-        taskTags=list(runspec.taskTags),
-        validationType=runspec.validationType,
-        validationConfig=dict(runspec.validationConfig),
-        contextBlocks=list(runspec.contextBlocks),
-        parameters=dict(runspec.parameters),
-        instanceId=runspec.instanceId,
-        provider=runspec.provider,
-        modelId=runspec.modelId,
-        modelName=runspec.modelName,
-        strategy=runspec.strategy,
-        representation=runspec.representation,
-        surface=runspec.surface,
-        configurationId=runspec.configurationId,
-        repeatIndex=runspec.repeatIndex,
-        outputRoot=runspec.outputRoot,
-        response=ai_result.answer,
-        status=run_status,
-        errorMessage=error_message,
-        timing=RunTiming(
-            startedAt=started_at,
-            finishedAt=finished_at,
-            durationMs=max(0, int((finish - start).total_seconds() * 1000)),
-        ),
-        usage=usage,
-        metricsSummary=metrics_summary,
-        trace=trace,
-        evaluation=EvaluationResult(),
-        metadata=runspec.metadata,
-        surfaceSpec=dict(runspec.surfaceSpec),
-    )
-    return result
+    bridge = TrialRuntimeAdapter()
+    runtime = ProvisioningRuntime(engine, adapter, local_mcp_runtime_decorator=local_mcp_runtime_decorator)
+    return bridge.to_trial_result(runspec, runtime.execute(bridge.to_runtime_request(runspec)))
 
 
 def _resolve_adapter(runspec: TrialSpec) -> DatasetPackage:
@@ -177,110 +29,6 @@ def _resolve_adapter(runspec: TrialSpec) -> DatasetPackage:
         raise AdapterUnavailableError(str(exc)) from exc
 
 
-def _build_tool_runtime_factories(
-    runspec: TrialSpec,
-    *,
-    dataset_tool_provider: object | None,
-    dataset_mcp_server: object | None,
-    local_mcp_runtime_decorator=None,
-) -> dict[str, object]:
-    tool_runtime_factories: dict[str, object] = {}
-    if runspec.strategy == "local_function":
-        if dataset_tool_provider is None:
-            raise CapabilityUnavailableError("Strategy 'local_function' requires a dataset tool provider.")
-        tool_runtime_factories["local_function"] = lambda: LocalFunctionRuntime(dataset_tool_provider)
-    if runspec.strategy == "local_mcp":
-        if dataset_mcp_server is None:
-            raise CapabilityUnavailableError("Strategy 'local_mcp' requires a dataset MCP server.")
-        def build_local_runtime():
-            runtime = MCPRuntime.for_local_server(dataset_mcp_server)
-            if local_mcp_runtime_decorator is None:
-                return runtime
-            try:
-                return local_mcp_runtime_decorator(runtime)
-            except BaseException:
-                runtime.close()
-                raise
-        tool_runtime_factories["local_mcp"] = build_local_runtime
-    return tool_runtime_factories
 
-
-def _resolve_tool_provider(adapter: DatasetPackage, runspec: TrialSpec) -> object | None:
-    provider = getattr(adapter, "tool_provider", None)
-    if not callable(provider):
-        return None
-    operations = runspec.surfaceSpec.get("operations")
-    try:
-        return provider(allowed_operations=operations)
-    except TypeError:
-        return provider()
-
-
-def _resolve_mcp_server(adapter: DatasetPackage, runspec: TrialSpec) -> object | None:
-    mcp_server = getattr(adapter, "mcp_server", None)
-    if not callable(mcp_server):
-        return None
-    operations = runspec.surfaceSpec.get("operations")
-    try:
-        server = mcp_server(allowed_operations=operations)
-    except TypeError:
-        server = mcp_server()
-    if server is None or not hasattr(server, "app"):
-        return None
-    return server
-
-
-def _build_metrics_summary(*, ai_trace: dict[str, object], strategy: str) -> dict[str, int | None]:
-    metrics = ai_trace.get("metrics", {}) if isinstance(ai_trace, dict) else {}
-    if not isinstance(metrics, dict):
-        metrics = {}
-    legacy_task_statement_chars_key = "question" + "Chars"
-    summary: dict[str, int | None] = {
-        "totalDurationMs": _as_int(metrics.get("totalDurationMs")),
-        "strategyDurationMs": _as_int(metrics.get("strategyDurationMs")),
-        "modelDurationMs": _as_int(metrics.get("modelDurationMs")),
-        "toolDurationMs": _as_int(metrics.get("toolDurationMs")),
-        "benchmarkDurationMsEstimated": _as_int(metrics.get("benchmarkDurationMsEstimated")),
-        "loopControlDurationMsEstimated": _as_int(metrics.get("loopControlDurationMsEstimated")),
-        "modelCalls": _as_int(metrics.get("modelCalls")),
-        "mcpToolCalls": _as_int(metrics.get("mcpToolCalls")),
-        "toolCalls": _as_int(metrics.get("toolCalls")),
-        "functionCalls": _as_int(metrics.get("functionCalls")),
-        "steps": _as_int(metrics.get("steps")),
-        "retryCount": _as_int(metrics.get("retryCount")),
-        "inputTokens": _as_int(metrics.get("inputTokens")),
-        "outputTokens": _as_int(metrics.get("outputTokens")),
-        "totalTokens": _as_int(metrics.get("totalTokens")),
-        "totalTokensEstimated": _as_int(metrics.get("totalTokensEstimated")),
-        "cachedInputTokens": _as_int(metrics.get("cachedInputTokens")),
-        "cacheReadInputTokens": _as_int(metrics.get("cacheReadInputTokens")),
-        "cacheCreationInputTokens": _as_int(metrics.get("cacheCreationInputTokens")),
-        "taskStatementTokensEstimated": _as_int(metrics.get("taskStatementTokensEstimated", metrics.get("questionTokensEstimated"))),
-        "estimatedInputTokens": _as_int(metrics.get("estimatedInputTokens")),
-        "estimatedOutputTokens": _as_int(metrics.get("estimatedOutputTokens")),
-        "reservedTokens": _as_int(metrics.get("reservedTokens")),
-        "contextChars": _as_int(metrics.get("contextChars")),
-        "contextBytes": _as_int(metrics.get("contextBytes")),
-        "taskStatementChars": _as_int(
-            metrics.get("taskStatementChars", metrics.get(legacy_task_statement_chars_key))
-        ),
-        "promptChars": _as_int(metrics.get("promptChars")),
-        "rateLimitWaitMs": _as_int(metrics.get("rateLimitWaitMs")),
-        "retrySleepMs": _as_int(metrics.get("retrySleepMs")),
-    }
-    if strategy == "inline":
-        summary["toolDurationMs"] = 0
-        summary["toolCalls"] = 0
-        summary["functionCalls"] = 0
-        summary["mcpToolCalls"] = 0
-    return summary
-
-
-def _as_int(value: object) -> int | None:
-    if isinstance(value, bool) or value is None:
-        return None
-    if isinstance(value, int):
-        return value
-    if isinstance(value, float):
-        return int(value)
-    return None
+# Kept for existing analysis callers during migration.
+_build_metrics_summary = build_metrics_summary

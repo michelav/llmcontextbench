@@ -932,7 +932,9 @@ class EvaluationItemResult(BaseModel):
         judge_error_count = sum(1 for j in judges if isinstance(j, dict) and j.get("error"))
         if self.status == "skipped":
             eval_status = "skipped"
-        elif self.evaluationMethod == "repoqa-scorer":
+        elif self.status == "error":
+            eval_status = "error"
+        elif self.evaluationMethod not in {None, "judge"}:
             eval_status = "evaluated"
         elif judge_success_count == 0:
             eval_status = "error"
@@ -967,7 +969,7 @@ class EvaluationItemResult(BaseModel):
             "evaluationDurationMs": self.evaluationDurationMs,
             "contextBlocks": self.contextBlocks if self.contextBlocks else None,
         }
-        if self.evaluationMethod == "repoqa-scorer":
+        if self.evaluationMethod not in {None, "judge"}:
             payload["details"] = details
         return payload
 

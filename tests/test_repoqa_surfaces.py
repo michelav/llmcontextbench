@@ -10,7 +10,8 @@ from ctxbench.adapters.repoqa.tools import REPOQA_OPERATIONS, RepoQAToolService
 from ctxbench.benchmark.models import DatasetProvenance, Experiment
 from ctxbench.benchmark.runspec_generator import generate_runspecs
 from ctxbench.benchmark.surfaces import FullContextSurface, OperationSurface
-from ctxbench.benchmark.executor import _resolve_mcp_server
+from ctxbench.runtime.runtime import ProvisioningRuntime
+from ctxbench.ai.engine import Engine
 
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "repoqa_tools_dataset"
@@ -125,7 +126,7 @@ def test_repoqa_planning_and_executor_preserve_operation_allow_list(tmp_path: Pa
     assert inline_trial.surfaceSpec == {"type": "full_context"}
     assert mcp_trial.surfaceSpec["operations"] == list(REPOQA_OPERATIONS)
 
-    server = _resolve_mcp_server(adapter, mcp_trial)
+    server = ProvisioningRuntime(Engine(), adapter)._capability("mcp_server", mcp_trial.surfaceSpec["operations"])
     try:
         assert [tool.name for tool in server.list_tools()] == list(REPOQA_OPERATIONS)
     finally:

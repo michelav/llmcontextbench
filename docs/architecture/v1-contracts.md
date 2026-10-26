@@ -143,3 +143,11 @@ Version-3 plans write resolved.json and content fingerprints for frozen trials, 
 implementation/dependencies. Execute verifies these before model work. Reporting verifies frozen
 artifacts without resolving datasets. Identical experiment IDs with conflicting fingerprints cannot
 be combined. Existing version-2 study support is transitional until S12; unknown versions are rejected.
+
+## Implemented increment: runtime and dataset boundaries (S04)
+
+All provisioning strategies now enter through one domain-neutral runtime. Local function and
+client MCP share the client-side tool loop; dataset packages declare their capabilities, and
+evaluation dispatches through validator registrations. Lattes environment configuration lives
+with its adapter. The runtime no longer imports benchmark orchestration. Usage and timing accounting
+remain the next slice (S05).

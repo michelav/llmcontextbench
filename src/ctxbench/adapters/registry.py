@@ -25,3 +25,9 @@ _registry.register("ctxbench/repoqa", _repoqa_factory)
 
 def get_default_registry() -> AdapterRegistry:
     return _registry
+
+
+def get_default_validators() -> dict[str, object]:
+    """First-party deterministic validators; third parties need no discovery framework."""
+    from ctxbench.adapters.repoqa.evaluation import evaluate_configured_response
+    return {"repoqa-scorer": evaluate_configured_response}

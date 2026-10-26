@@ -38,3 +38,16 @@
   implementation edit, dataset edit, tampered snapshot and unknown-version cases. Diff check passed.
 - Impact: editing a definition cannot change a saved execution; code/data changes require replanning.
 - Commit: `feat: freeze execution inputs and validate identity`.
+
+## S04 — complete
+
+- Consolidated provisioning behind a domain-neutral runtime and shared local function/client-MCP
+  tool loop; removed benchmark-specific inline execution and runtime-to-benchmark imports.
+- Dataset packages now expose instructions, surfaces, MCP server, request features and validators
+  through the package contract. Lattes-specific environment parsing lives in its adapter; evaluation
+  dispatches through validator registration.
+- Impact: execution and evaluation boundaries are simpler while current strategy behavior and
+  first-party dataset support remain intact. Expenditure/timing standardization remains S05.
+- Validation: 219 focused runtime, strategy, adapter, CLI and lifecycle tests passed; `git diff --check`
+  passed. No provider-backed commands or dependency changes were used.
+- Commit: `refactor: unify runtime and dataset boundaries`.
