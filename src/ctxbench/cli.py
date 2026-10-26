@@ -268,7 +268,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     execute_parser.add_argument(
         "--force", action="store_true",
-        help="Re-execute even when responses already exist",
+        help="Create a new attempt even when the latest attempt is complete",
+    )
+    execute_parser.add_argument(
+        "--retry-uncertain", action="store_true",
+        help="Create a new attempt when the previous attempt may have been interrupted",
     )
     _add_selector_args(execute_parser)
     execute_parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
@@ -277,6 +281,7 @@ def build_parser() -> argparse.ArgumentParser:
         func=lambda args: execute_command(
             args.trials,
             force=args.force,
+            retry_uncertain=args.retry_uncertain,
             verbose=args.verbose,
             progress=args.progress,
             selector=_selector_from_args(args),

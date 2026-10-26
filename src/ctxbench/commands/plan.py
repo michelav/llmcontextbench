@@ -115,7 +115,7 @@ def plan_command(
     logger.info("PLAN", "trials.written", "Trials written", path=str(trials_path), total=len(payloads))
 
     manifest = {
-        "provisioningArtifactVersion": PROVISIONING_ARTIFACT_VERSION,
+        "provisioningArtifactVersion": 2,
         "configurations": {key: experiment.configurations[key].model_dump(mode="json") for key in experiment.factors["configuration"]},
         "surfaces": {key: value.model_dump(mode="json") for key, value in experiment.surfaces.items()},
         "experimentId": experiment.id,
@@ -130,7 +130,8 @@ def plan_command(
     }
     if experiment.definitionVersion == 3:
         manifest["schemaVersion"] = 3
-        manifest["provisioningArtifactVersion"] = 3
+        manifest["provisioningArtifactVersion"] = PROVISIONING_ARTIFACT_VERSION
+        manifest["executionRecordVersion"] = 1
         write_json(output_root / "resolved.json", experiment.resolvedDefinition)
         dataset_root = dataset_provenance.materialized_path
         inputs = {

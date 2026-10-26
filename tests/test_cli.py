@@ -85,7 +85,8 @@ def test_execute_help_uses_target_public_terms(capsys):
     out = capsys.readouterr().out
     assert "usage: llmctxbench execute" in out
     assert "Path to trials.jsonl" in out
-    assert "responses already exist" in out
+    assert "--retry-uncertain" in out
+    assert "Create a new attempt" in out
 
 
 def test_execute_help_uses_target_selector_flags(capsys):

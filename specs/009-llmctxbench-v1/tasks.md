@@ -76,17 +76,17 @@ documentation updates and a commit. Record command output summaries and commits 
 
 ## S06 — Durable execution and lifecycle readers
 
-- Status: pending
+- Status: complete
 - Purpose: Persist atomic attempts; recover and rebuild collections consistently.
 - Likely files: `benchmark/checkpoints.py, commands/{execute,eval,export,status,metrics}.py, tests` (source paths relative to `src/ctxbench` where applicable).
 - Dependency: S05.
 - Risk: Duplicate external execution or loss of failure expenditure.
 - Suggested commit: `feat: persist execution records and support recovery`.
 
-- [ ] Implement the slice's behavior and document its public contract.
-- [ ] Verify: Completed attempts never rerun; uncertain retries distinct; lock/corruption handling; static lifecycle.
-- [ ] Review diff and record changes, impacts, commands, results and limitations.
-- [ ] Commit only the verified slice files.
+- [x] Implement the slice's behavior and document its public contract.
+- [x] Verify: Completed attempts never rerun; uncertain retries distinct; lock/corruption handling; static lifecycle.
+- [x] Review diff and record changes, impacts, commands, results and limitations.
+- [x] Commit only the verified slice files.
 
 ## S07 — Providers and remote MCP
 

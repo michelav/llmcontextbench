@@ -33,6 +33,12 @@ def write_text_atomic(path: str | Path, text: str) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temp_name, target)
+        if hasattr(os, "O_DIRECTORY"):
+            directory_fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     except Exception:
         try:
             os.unlink(temp_name)

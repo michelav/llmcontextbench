@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any
 
 from ctxbench.util.jsonl import read_jsonl
-from ctxbench.benchmark.provisioning import validate_artifact_directory, validate_configuration_union
+from ctxbench.benchmark.provisioning import validate_artifact_directory, validate_configuration_union, validate_manifest
+from ctxbench.benchmark.execution_records import rebuild_responses
 from ctxbench.util.logging import PhaseLogger
 
 
@@ -31,6 +32,9 @@ def load_inputs(inputs: list[str], logger: PhaseLogger) -> list[ExperimentArtifa
                 raise ValueError(message)
             logger.warn("METRICS", "metrics.input.skipped", message, experimentDir=str(root))
             continue
+        manifest = validate_manifest(root)
+        if manifest.get("provisioningArtifactVersion") == 4:
+            rebuild_responses(root, execution_fingerprint=str(manifest["executionFingerprint"]))
         manifest = validate_artifact_directory(root)
         valid.append(
             ExperimentArtifacts(
@@ -106,4 +110,3 @@ def _validate_unique_trial_ids(inputs: list[ExperimentArtifacts]) -> None:
                     f"({previous} and {artifacts.root})"
                 )
             seen[trial_id] = artifacts.root
-

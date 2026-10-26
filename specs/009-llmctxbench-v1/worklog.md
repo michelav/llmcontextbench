@@ -66,3 +66,19 @@
 - Validation: 129 focused AI, runtime, metric, CLI, export and adaptive token accounting tests passed;
   `git diff --check` passed. No provider-backed commands or dependencies were used.
 - Commit: `fix: standardize execution accounting`.
+
+## S06 — complete
+
+- New schema-version-3 plans use provisioning artifact version 4 and execution-record contract 1.
+  Execution writes an atomic `started` record before dispatch, then replaces it with a terminal
+  record containing the self-contained response. A POSIX advisory lock prevents concurrent writers;
+  file and directory sync protect the atomic replacements.
+- `responses.jsonl` is rebuilt from the latest terminal attempt in plan order. Completed successes
+  and failures are skipped on resume; uncertain `started` records block until `--retry-uncertain`
+  creates a new attempt ID, retaining the earlier record. `--force` creates another explicit attempt.
+  Eval, status, export and metrics rebuild the derived collection without a provider or dataset.
+- Impact: interruption leaves an inspectable uncertain attempt rather than an absent/ambiguous response;
+  corruption and fingerprint mismatches stop recovery. Version-2/3 artifact flows remain transitional.
+- Validation: 143 focused execution-record, frozen-plan, CLI, lifecycle, artifact, metrics, AI and
+  runtime tests passed; `git diff --check` passed. Execution tests used local mock providers only.
+- Commit: `feat: persist execution records and support recovery`.

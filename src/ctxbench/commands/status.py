@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from ctxbench.benchmark.provisioning import validate_artifact_directory
+from ctxbench.benchmark.execution_records import latest_attempt_states, rebuild_responses
+from ctxbench.benchmark.provisioning import validate_manifest
 
 from ctxbench.benchmark.evaluation import judge_identifier
 from ctxbench.benchmark.models import EvaluationModelConfig
@@ -135,6 +137,11 @@ def _load_experiment_id(root: Path) -> str:
 def status_command(output_dir: str | None = None, *, by: str | None = None) -> int:
     root = Path(output_dir).resolve() if output_dir else Path(".").resolve()
 
+    manifest = validate_manifest(root)
+    attempt_states: dict[str, str] = {}
+    if manifest.get("provisioningArtifactVersion") == 4:
+        rebuild_responses(root, execution_fingerprint=str(manifest["executionFingerprint"]))
+        attempt_states = latest_attempt_states(root)
     validate_artifact_directory(root)
     trials_path = root / "trials.jsonl"
     responses_path = root / "responses.jsonl"
@@ -156,10 +163,11 @@ def status_command(output_dir: str | None = None, *, by: str | None = None) -> i
     eval_error = eval_tally.get("error", 0)
     eval_total = sum(eval_tally.values())
 
-    col = (10, 8, 10, 8, 8)
+    uncertain_count = sum(state == "started" for state in attempt_states.values())
+    col = (10, 8, 10, 8, 8, 8)
     header = (
         f"{'Phase':<{col[0]}} {'Total':>{col[1]}} {'Success':>{col[2]}} "
-        f"{'Failed':>{col[3]}} {'Pending':>{col[4]}}"
+        f"{'Failed':>{col[3]}} {'Started':>{col[4]}} {'Pending':>{col[5]}}"
     )
     sep = "─" * len(header)
 
@@ -169,16 +177,16 @@ def status_command(output_dir: str | None = None, *, by: str | None = None) -> i
     print(header)
     print(sep)
 
-    execute_pending = max(0, trial_count - response_total)
+    execute_pending = max(0, trial_count - response_total - uncertain_count)
     print(
         f"{'execute':<{col[0]}} {trial_count:>{col[1]}} {response_success:>{col[2]}} "
-        f"{response_error:>{col[3]}} {execute_pending:>{col[4]}}"
+        f"{response_error:>{col[3]}} {uncertain_count:>{col[4]}} {execute_pending:>{col[5]}}"
     )
 
     eval_pending = max(0, response_success - eval_total)
     print(
         f"{'eval':<{col[0]}} {response_success:>{col[1]}} {eval_done:>{col[2]}} "
-        f"{eval_error:>{col[3]}} {eval_pending:>{col[4]}}"
+        f"{eval_error:>{col[3]}} {0:>{col[4]}} {eval_pending:>{col[5]}}"
     )
 
     if by:

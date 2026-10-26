@@ -8,7 +8,7 @@ from typing import Any
 from ctxbench.benchmark.models import CONFIGURATION_ID_PATTERN, ProvisioningConfiguration
 from ctxbench.benchmark.surfaces import parse_surface
 
-PROVISIONING_ARTIFACT_VERSION = 2
+PROVISIONING_ARTIFACT_VERSION = 4
 LEGACY_MESSAGE = (
     "Unsupported provisioning artifact contract. Historical artifacts require the previous "
     "benchmark version; define configurations and run 'llmctxbench plan' in a fresh directory."
@@ -21,11 +21,14 @@ def validate_manifest(root: Path) -> dict[str, Any]:
         raise ValueError(f"{LEGACY_MESSAGE} Missing {path}.")
     manifest = json.loads(path.read_text(encoding="utf-8"))
     version = manifest.get("provisioningArtifactVersion") if isinstance(manifest, dict) else None
-    if type(version) is not int or version not in {PROVISIONING_ARTIFACT_VERSION, 3}:
+    if type(version) is not int or version not in {2, 3, PROVISIONING_ARTIFACT_VERSION}:
         raise ValueError(LEGACY_MESSAGE)
-    if version == 3:
+    if version >= 3:
         if manifest.get("schemaVersion") != 3 or not manifest.get("executionFingerprint"):
-            raise ValueError("Version 3 artifacts require a frozen execution fingerprint")
+            raise ValueError(f"Version {version} artifacts require a frozen execution fingerprint")
+    if version == 4 and manifest.get("executionRecordVersion") != 1:
+        raise ValueError("Version 4 artifacts require executionRecordVersion 1")
+    if version >= 3:
         from ctxbench.benchmark.fingerprint import verify_snapshot
         verify_snapshot(root, manifest)
     configurations = manifest.get("configurations")

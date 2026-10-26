@@ -139,10 +139,11 @@ planning boundary have not yet changed.
 
 ## Implemented increment: frozen planning (S03)
 
-Version-3 plans write resolved.json and content fingerprints for frozen trials, dataset and installed
-implementation/dependencies. Execute verifies these before model work. Reporting verifies frozen
-artifacts without resolving datasets. Identical experiment IDs with conflicting fingerprints cannot
-be combined. Existing version-2 study support is transitional until S12; unknown versions are rejected.
+Schema-version-3 plans freeze resolved.json, trials, dataset and implementation/dependency inputs.
+The current provisioning artifact version is 4 (execution-record contract 1). Execute verifies the
+frozen inputs before model work. Reporting verifies frozen artifacts without resolving datasets.
+Identical experiment IDs with conflicting fingerprints cannot be combined. Existing version-2/3
+artifact support is transitional until S12; unknown versions are rejected.
 
 ## Implemented increment: runtime and dataset boundaries (S04)
 
@@ -161,3 +162,16 @@ Token totals include `totalTokensProvenance` and `usageCompleteness`. When all c
 have known totals, `totalTokens` is available; otherwise it is null and `knownTotalTokens` retains
 the known subtotal. Failed calls with no provider usage remain unknown, not zero. Cached and
 reasoning tokens remain separate provider-reported details.
+
+## Implemented increment: durable execution (S06)
+
+Version-4 manifests declare `executionRecordVersion: 1`. Each attempt has an atomic canonical record
+under `execution-records/`, first in `started` state and then `succeeded` or `failed` with its complete
+response result. `responses.jsonl` is rebuilt in plan order from the latest terminal attempt; a latest
+`started` record is shown as started and does not produce a response. If the writer exits before a
+terminal record is saved, that attempt is uncertain. A completed success or failure is skipped on resume.
+`--force` explicitly creates another attempt; `--retry-uncertain` creates a new
+attempt while retaining the uncertain record. A writer lock prevents overlapping executions, and
+corrupt or fingerprint-mismatched records stop recovery. Eval, status, export and metrics rebuild the
+derived response collection without provider or dataset access. Version-2/3 artifacts remain on the
+transitional lifecycle path until S12.

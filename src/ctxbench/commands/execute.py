@@ -1,15 +1,27 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import perf_counter
 
-from ctxbench.benchmark.provisioning import validate_artifact_directory
+from ctxbench.benchmark.provisioning import validate_artifact_directory, validate_manifest
 from typing import Any
 
 from ctxbench.ai.engine import Engine
 from ctxbench.benchmark.executor import execute_runspec
 from ctxbench.benchmark.models import TrialSpec
+from ctxbench.benchmark.execution_records import (
+    attempts_for_trial,
+    begin_attempt,
+    execution_lock,
+    finish_attempt,
+    rebuild_responses,
+)
+from ctxbench.benchmark.runtime_adapter import TrialRuntimeAdapter
 from ctxbench.benchmark.selectors import RunSelector, matches_runspec
 from ctxbench.benchmark.results import serialize_run_result
+from ctxbench.runtime.models import ExecutionResult
+from ctxbench.ai.models.base import AIResult
+from ctxbench.util.clock import utc_now_iso
 from ctxbench.util.jsonl import append_jsonl, read_jsonl, write_jsonl
 from ctxbench.util.logging import PhaseLogger, ProgressTracker, trial_log_context
 
@@ -59,6 +71,7 @@ def execute_command(
     verbose: bool = False,
     progress: bool = False,
     selector: RunSelector | None = None,
+    retry_uncertain: bool = False,
 ) -> int:
     source = Path(queries).resolve() if queries else Path("trials.jsonl").resolve()
     logger = PhaseLogger(verbose=verbose)
@@ -69,8 +82,30 @@ def execute_command(
         logger.event(level, phase, event_name, message, **payload)
 
     logger.info("EXECUTE", "trials.loading", "Loading trials", path=str(source))
-    manifest = validate_artifact_directory(source.parent)
     from ctxbench.benchmark.fingerprint import verify_snapshot
+    manifest = validate_manifest(source.parent)
+    if manifest.get("provisioningArtifactVersion") == 4:
+        with execution_lock(source.parent):
+            verify_snapshot(source.parent, manifest, execution=True)
+            rebuild_responses(source.parent, execution_fingerprint=str(manifest["executionFingerprint"]))
+            validate_artifact_directory(source.parent)
+            runspecs = _load_runspecs(source)
+            active_selector = selector or RunSelector()
+            runspecs = [r for r in runspecs if matches_runspec(r, active_selector)]
+            if not runspecs:
+                print("No trials matched the selector.")
+                return 0
+            return _execute_durable(
+                runspecs,
+                artifact_root=source.parent,
+                manifest=manifest,
+                force=force,
+                retry_uncertain=retry_uncertain,
+                logger=logger,
+                progress=progress,
+            )
+
+    manifest = validate_artifact_directory(source.parent)
     verify_snapshot(source.parent, manifest, execution=True)
     runspecs = _load_runspecs(source)
 
@@ -151,3 +186,100 @@ def execute_command(
         + (f" ({skipped} skipped)" if skipped else "")
     )
     return 0
+
+
+def _execute_durable(
+    runspecs: list[TrialSpec],
+    *,
+    artifact_root: Path,
+    manifest: dict[str, Any],
+    force: bool,
+    retry_uncertain: bool,
+    logger: PhaseLogger,
+    progress: bool,
+) -> int:
+    latest_by_trial = {
+        runspec.trialId: _latest_attempt(attempts_for_trial(artifact_root, runspec.trialId))
+        for runspec in runspecs
+    }
+    expected_fingerprint = str(manifest["executionFingerprint"])
+    for trial_id, latest in latest_by_trial.items():
+        if latest and latest.get("executionFingerprint") != expected_fingerprint:
+            raise ValueError(f"Execution fingerprint mismatch in attempt record for trialId {trial_id}.")
+    uncertain = [trial_id for trial_id, record in latest_by_trial.items() if record and record["state"] == "started"]
+    if uncertain and not retry_uncertain:
+        ids = ", ".join(uncertain[:5])
+        suffix = "…" if len(uncertain) > 5 else ""
+        raise ValueError(
+            f"Execution has uncertain started attempts for trialId(s): {ids}{suffix}. "
+            "Inspect execution-records; pass --retry-uncertain to create new attempts."
+        )
+
+    progress_tracker = ProgressTracker(total=len(runspecs), enabled=progress)
+    logger.progress = progress_tracker
+    progress_tracker.start()
+    engine = Engine(event_logger=_event_logger(logger))
+    processed = skipped = 0
+    try:
+        for runspec in runspecs:
+            latest = latest_by_trial[runspec.trialId]
+            if latest and latest["state"] in {"succeeded", "failed"} and not force:
+                skipped += 1
+                processed += 1
+                progress_tracker.advance()
+                logger.info(
+                    "EXECUTE", "trial.response.skipped", "Attempt already completed; skipping",
+                    **trial_log_context(runspec), status=latest["result"]["status"],
+                )
+                continue
+
+            write_traces = runspec.trace.writeFiles
+            started_at = utc_now_iso()
+            started_clock = perf_counter()
+            record = begin_attempt(
+                artifact_root,
+                trial_id=runspec.trialId,
+                experiment_id=runspec.experimentId,
+                execution_fingerprint=str(manifest["executionFingerprint"]),
+            )
+            logger.info("EXECUTE", "trial.response.started", "Generating response", **trial_log_context(runspec), attemptId=record["attemptId"])
+            try:
+                result = execute_runspec(runspec, engine)
+            except Exception as exc:
+                result = TrialRuntimeAdapter().to_trial_result(
+                    runspec,
+                    ExecutionResult(
+                        ai_result=AIResult(answer="", error=str(exc)),
+                        started_at=started_at,
+                        finished_at=utc_now_iso(),
+                        duration_ms=max(0, int((perf_counter() - started_clock) * 1000)),
+                    ),
+                )
+            payload = serialize_run_result(result, artifact_root=artifact_root, write_trace=write_traces)
+            finish_attempt(artifact_root, record, payload)
+            logger.info("EXECUTE", "trial.response.completed", "Response generated", **trial_log_context(result), status=result.status)
+            progress_tracker.advance()
+            processed += 1
+    finally:
+        engine.close()
+
+    rebuild_responses(artifact_root, execution_fingerprint=str(manifest["executionFingerprint"]))
+    responses_path = artifact_root / "responses.jsonl"
+    print(
+        f"Processed {processed} trial(s) → {responses_path}"
+        + (f" ({skipped} skipped)" if skipped else "")
+    )
+    return 0
+
+
+def _latest_attempt(attempts: list[dict[str, Any]]) -> dict[str, Any] | None:
+    return attempts[-1] if attempts else None
+
+
+def _event_logger(logger: PhaseLogger):
+    def emit(event_name: str, message: str, fields: dict[str, object]) -> None:
+        payload = dict(fields)
+        level = str(payload.pop("level", "INFO"))
+        phase = str(payload.pop("phase", "EXECUTE"))
+        logger.event(level, phase, event_name, message, **payload)
+    return emit
