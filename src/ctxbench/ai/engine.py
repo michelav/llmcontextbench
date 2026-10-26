@@ -86,17 +86,10 @@ class Engine:
                     cache_creation_input_tokens=model_response.cache_creation_input_tokens,
                     reasoning_tokens=model_response.reasoning_tokens,
                     metadata=model_response.metadata,
+                    raw_response=model_response.raw_response,
+                    provider=model_response.metadata.get("provider"),
                 )
-                usage = {
-                    "inputTokens": model_response.input_tokens,
-                    "outputTokens": model_response.output_tokens,
-                    "totalTokens": model_response.total_tokens,
-                    "cachedInputTokens": model_response.cached_input_tokens,
-                    "cacheReadInputTokens": model_response.cache_read_input_tokens,
-                    "cacheCreationInputTokens": model_response.cache_creation_input_tokens,
-                    "reasoningTokens": model_response.reasoning_tokens,
-                }
-                usage = {key: value for key, value in usage.items() if value is not None}
+                usage = trace.usage_summary()
                 result = AIResult(
                     answer=model_response.text,
                     raw_response=model_response.raw_response,

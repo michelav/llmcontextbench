@@ -70,19 +70,12 @@ class ClientToolStrategy(StrategyAdapter):
                     cache_creation_input_tokens=model_response.cache_creation_input_tokens,
                     reasoning_tokens=model_response.reasoning_tokens,
                     metadata=model_response.metadata,
+                    raw_response=model_response.raw_response,
+                    provider=model_response.metadata.get("provider"),
                 )
                 if not model_response.requested_tool_calls:
                     trace.record_steps(step + 1)
-                    usage = {
-                        "inputTokens": trace.metrics.inputTokens,
-                        "outputTokens": trace.metrics.outputTokens,
-                        "totalTokens": trace.metrics.totalTokens,
-                        "cachedInputTokens": trace.metrics.cachedInputTokens,
-                        "cacheReadInputTokens": trace.metrics.cacheReadInputTokens,
-                        "cacheCreationInputTokens": trace.metrics.cacheCreationInputTokens,
-                        "reasoningTokens": trace.metrics.reasoningTokens,
-                    }
-                    usage = {key: value for key, value in usage.items() if value is not None}
+                    usage = trace.usage_summary()
                     return AIResult(
                         answer=model_response.text,
                         raw_response=raw_responses[-1] if len(raw_responses) == 1 else raw_responses,

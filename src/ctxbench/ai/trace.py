@@ -5,6 +5,7 @@ from time import perf_counter
 from typing import Any, Iterator
 
 from ctxbench._compat import BaseModel, Field
+from ctxbench.ai.models.usage import account_tokens
 
 
 class TraceEvent(BaseModel):
@@ -22,6 +23,9 @@ class AIMetrics(BaseModel):
     benchmarkDurationMsEstimated: int | None = None
     loopControlDurationMsEstimated: int | None = None
     modelCalls: int = 0
+    modelAttempts: int = 0
+    failedModelAttempts: int = 0
+    modelAttemptDurationMs: int | None = None
     toolCalls: int = 0
     mcpToolCalls: int = 0
     functionCalls: int = 0
@@ -30,6 +34,9 @@ class AIMetrics(BaseModel):
     inputTokens: int | None = None
     outputTokens: int | None = None
     totalTokens: int | None = None
+    knownTotalTokens: int | None = None
+    totalTokensProvenance: str = "unavailable"
+    usageCompleteness: str = "unavailable"
     totalTokensEstimated: int | None = None
     cachedInputTokens: int | None = None
     cacheReadInputTokens: int | None = None
@@ -56,6 +63,22 @@ class TraceCollector:
     def __init__(self) -> None:
         self.events: list[TraceEvent] = []
         self.metrics = AIMetrics()
+        self._known_total_tokens = 0
+        self._unknown_usage_calls = 0
+        self._total_token_provenance: set[str] = set()
+
+    def record_model_attempt(self, *, duration_ms: int, failed: bool) -> None:
+        self.metrics.modelAttempts += 1
+        if failed:
+            self.metrics.failedModelAttempts += 1
+            self._unknown_usage_calls += 1
+        self.metrics.modelAttemptDurationMs = self._sum_optional(
+            self.metrics.modelAttemptDurationMs, duration_ms
+        )
+        self.events.append(TraceEvent(
+            type="model.attempt", name="model.attempt", duration_ms=duration_ms,
+            metadata={"failed": failed, "durationProvenance": "measured"},
+        ))
 
     @contextmanager
     def span(
@@ -90,6 +113,8 @@ class TraceCollector:
         cache_creation_input_tokens: int | None = None,
         reasoning_tokens: int | None = None,
         metadata: dict[str, Any] | None = None,
+        raw_response: Any | None = None,
+        provider: str | None = None,
     ) -> None:
         self.events.append(
             TraceEvent(
@@ -110,13 +135,25 @@ class TraceCollector:
             cache_creation_input_tokens,
         )
         self.metrics.reasoningTokens = self._sum_optional(self.metrics.reasoningTokens, reasoning_tokens)
-        if total_tokens is not None:
-            self.metrics.totalTokens = self._sum_optional(self.metrics.totalTokens, total_tokens)
-        elif input_tokens is not None and output_tokens is not None:
-            self.metrics.totalTokensEstimated = self._sum_optional(
-                self.metrics.totalTokensEstimated,
-                input_tokens + output_tokens,
+        model_total = total_tokens
+        if model_total is None and input_tokens is not None and output_tokens is not None:
+            model_total = input_tokens + output_tokens
+        known_total = model_total
+        provenance = "unavailable"
+        if known_total is None and (input_tokens is not None or output_tokens is not None):
+            known_total = (input_tokens or 0) + (output_tokens or 0)
+        if known_total is not None and provider:
+            _, provenance, _ = account_tokens(
+                provider, model_total, raw_response=raw_response,
+                partial_total=known_total if model_total is None else None,
             )
+        elif known_total is not None:
+            provenance = "derived"
+        if known_total is not None:
+            self._known_total_tokens += known_total
+            self._total_token_provenance.add(provenance)
+        if known_total is None or provenance == "unavailable":
+            self._unknown_usage_calls += 1
 
     def record_tool_call(self, *, name: str, arguments: dict[str, Any] | None = None) -> None:
         self.events.append(
@@ -310,6 +347,22 @@ class TraceCollector:
         self._finalize_derived_metrics()
         return AITrace(events=list(self.events), metrics=self.metrics)
 
+    def usage_summary(self) -> dict[str, Any]:
+        self._finalize_derived_metrics()
+        values = {
+            "inputTokens": self.metrics.inputTokens,
+            "outputTokens": self.metrics.outputTokens,
+            "totalTokens": self.metrics.totalTokens,
+            "knownTotalTokens": self.metrics.knownTotalTokens,
+            "totalTokensProvenance": self.metrics.totalTokensProvenance,
+            "usageCompleteness": self.metrics.usageCompleteness,
+            "cachedInputTokens": self.metrics.cachedInputTokens,
+            "cacheReadInputTokens": self.metrics.cacheReadInputTokens,
+            "cacheCreationInputTokens": self.metrics.cacheCreationInputTokens,
+            "reasoningTokens": self.metrics.reasoningTokens,
+        }
+        return {key: value for key, value in values.items() if value is not None}
+
     def _apply_span_metrics(self, event: TraceEvent) -> None:
         if event.name == "engine.execute":
             self.metrics.totalDurationMs = event.duration_ms
@@ -331,6 +384,24 @@ class TraceCollector:
         return current + value
 
     def _finalize_derived_metrics(self) -> None:
+        self.metrics.knownTotalTokens = self._known_total_tokens or None
+        if self.metrics.modelCalls and self._unknown_usage_calls == 0:
+            self.metrics.totalTokens = self._known_total_tokens
+            self.metrics.usageCompleteness = "complete"
+            self.metrics.totalTokensProvenance = (
+                next(iter(self._total_token_provenance))
+                if len(self._total_token_provenance) == 1
+                else "estimated" if "estimated" in self._total_token_provenance
+                else "derived"
+            )
+        elif self._known_total_tokens:
+            self.metrics.totalTokens = None
+            self.metrics.usageCompleteness = "partial"
+            self.metrics.totalTokensProvenance = "unavailable"
+        else:
+            self.metrics.totalTokens = None
+            self.metrics.usageCompleteness = "unavailable"
+            self.metrics.totalTokensProvenance = "unavailable"
         strategy = self.metrics.strategyDurationMs
         model = self.metrics.modelDurationMs or 0
         function = self.metrics.toolDurationMs or 0

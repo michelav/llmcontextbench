@@ -353,7 +353,11 @@ def test_export_reads_responses_and_emits_target_fields(tmp_path):
     assert row["trialId"] == "run-1"
     assert row["taskId"] == "q_one"
     assert row["response"] == "Answer"
-    assert {"trialId", "taskId", "response"} <= set(row)
+    assert {
+        "trialId", "taskId", "response", "knownTotalTokens", "totalTokensProvenance",
+        "usageCompleteness", "modelAttempts", "failedModelAttempts",
+        "modelAttemptDurationMs", "modelAttemptDurationProvenance", "totalDurationProvenance",
+    } <= set(row)
 
 
 def test_status_counts_trials_and_responses(tmp_path, capsys):

@@ -149,5 +149,15 @@ be combined. Existing version-2 study support is transitional until S12; unknown
 All provisioning strategies now enter through one domain-neutral runtime. Local function and
 client MCP share the client-side tool loop; dataset packages declare their capabilities, and
 evaluation dispatches through validator registrations. Lattes environment configuration lives
-with its adapter. The runtime no longer imports benchmark orchestration. Usage and timing accounting
-remain the next slice (S05).
+with its adapter. The runtime no longer imports benchmark orchestration. This boundary supports the
+usage and timing contract implemented in S05 below.
+
+## Implemented increment: usage and timing (S05)
+
+Each model attempt records measured elapsed time and whether it failed. `modelAttemptDurationMs`
+is the sum of those direct spans; `totalDurationMs` is measured around the full provisioning request,
+including context preparation and waits. Neither is inferred by subtracting model or tool spans.
+Token totals include `totalTokensProvenance` and `usageCompleteness`. When all calls and attempts
+have known totals, `totalTokens` is available; otherwise it is null and `knownTotalTokens` retains
+the known subtotal. Failed calls with no provider usage remain unknown, not zero. Cached and
+reasoning tokens remain separate provider-reported details.

@@ -51,3 +51,18 @@
 - Validation: 219 focused runtime, strategy, adapter, CLI and lifecycle tests passed; `git diff --check`
   passed. No provider-backed commands or dependency changes were used.
 - Commit: `refactor: unify runtime and dataset boundaries`.
+
+## S05 — complete
+
+- Added measured model-attempt counts, failures and elapsed spans, including failed calls and
+  automatic retries. Trial request duration now comes from the runtime's monotonic measurement and
+  includes context preparation and waits, independent of trace-file settings.
+- Token aggregation now distinguishes complete totals from known subtotals. `totalTokens` stays null
+  if any model call or failed attempt has unknown usage; `knownTotalTokens`, `totalTokensProvenance`
+  and `usageCompleteness` make partial accounting explicit. Export and metric rows expose these fields.
+- Impact: failed requests retain measured time and unknown expenditure is not silently treated as
+  zero; cached and reasoning token details remain separately reported. Provider failures that return
+  no usage cannot reveal exact expenditure, so only their elapsed time and unknown status are saved.
+- Validation: 129 focused AI, runtime, metric, CLI, export and adaptive token accounting tests passed;
+  `git diff --check` passed. No provider-backed commands or dependencies were used.
+- Commit: `fix: standardize execution accounting`.

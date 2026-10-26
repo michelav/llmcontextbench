@@ -5,6 +5,7 @@ import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any, Callable
 
 from ctxbench.ai.models.base import AIRequest, ModelAdapter, ModelInput, ModelResponse
@@ -306,7 +307,7 @@ class RateLimitedModelAdapter(ModelAdapter):
     ) -> ModelResponse:
         config = extract_rate_limit_config(request, self.delegate.params)
         if not config.enabled:
-            return self.delegate.generate(model_input, request, trace=trace)
+            return self._generate_attempt(model_input, request, trace)
         controller = self.registry.get_controller(self.provider_name, self.model_name, config)
         estimated_input, estimated_output, reserved_tokens = estimate_tokens(model_input, request, config)
         if trace is not None:
@@ -413,7 +414,7 @@ class RateLimitedModelAdapter(ModelAdapter):
             while True:
                 attempt += 1
                 try:
-                    response = self.delegate.generate(model_input, request, trace=trace)
+                    response = self._generate_attempt(model_input, request, trace)
                     actual_tokens = response.total_tokens
                     if actual_tokens is None and response.input_tokens is not None and response.output_tokens is not None:
                         actual_tokens = response.input_tokens + response.output_tokens
@@ -489,6 +490,24 @@ class RateLimitedModelAdapter(ModelAdapter):
                         },
                     )
                     time.sleep(sleep_ms / 1000.0)
+
+    def _generate_attempt(
+        self, model_input: ModelInput, request: AIRequest, trace: TraceCollector | None
+    ) -> ModelResponse:
+        started = perf_counter()
+        try:
+            response = self.delegate.generate(model_input, request, trace=trace)
+        except Exception:
+            if trace is not None:
+                trace.record_model_attempt(
+                    duration_ms=max(0, int((perf_counter() - started) * 1000)), failed=True
+                )
+            raise
+        if trace is not None:
+            trace.record_model_attempt(
+                duration_ms=max(0, int((perf_counter() - started) * 1000)), failed=False
+            )
+        return response
 
     def _log_event(self, level: str, event_name: str, message: str, fields: dict[str, object]) -> None:
         if self.event_logger is None:

@@ -599,7 +599,41 @@ def test_engine_inline_execution_records_prompt_trace_and_usage():
         "totalTokens": 12,
         "cachedInputTokens": 4,
         "cacheReadInputTokens": 4,
+        "knownTotalTokens": 12,
+        "totalTokensProvenance": "derived",
+        "usageCompleteness": "complete",
     }
+
+
+def test_trace_preserves_known_partial_usage_without_reporting_it_as_complete():
+    trace = TraceCollector()
+    trace.record_model_call(duration_ms=1, input_tokens=10, output_tokens=2, total_tokens=12,
+                            metadata={"provider": "mock"}, provider="mock")
+    trace.record_model_call(duration_ms=1, input_tokens=5, output_tokens=None, total_tokens=None,
+                            metadata={"provider": "recording"}, provider="recording")
+
+    metrics = trace.to_trace().metrics
+    assert metrics.totalTokens is None
+    assert metrics.knownTotalTokens == 17
+    assert metrics.usageCompleteness == "partial"
+    assert metrics.totalTokensProvenance == "unavailable"
+
+
+def test_failed_model_attempt_retains_measured_time_and_unknown_usage():
+    class FailingModel(ModelAdapter):
+        def generate(self, model_input, request, trace=None):
+            raise TimeoutError("provider timeout")
+
+    engine = Engine()
+    engine._models["failing"] = FailingModel()
+    result = engine.execute(make_request(provider_name="failing"))
+
+    metrics = result.trace["metrics"]
+    assert metrics["modelAttempts"] == 1
+    assert metrics["failedModelAttempts"] == 1
+    assert metrics["modelAttemptDurationMs"] is not None
+    assert metrics["usageCompleteness"] == "unavailable"
+    assert metrics["totalTokens"] is None
 
 
 def test_classify_provider_error_treats_taskgroup_as_transient():
@@ -942,6 +976,29 @@ def test_execute_runspec_persists_metrics_summary_with_nulls_for_remote_mcp(tmp_
     assert any(event["name"] == "strategy.remote_mcp.execute" for event in events)
     assert not any(event["name"] == "strategy.mcp.execute" for event in events)
     assert result.trace.aiTrace.get("metrics", {}).get("strategyDurationMs") is not None
+    assert result.metricsSummary["totalDurationMs"] == result.timing.durationMs
+    assert result.metricsSummary["totalDurationProvenance"] == "measured"
+    assert result.metricsSummary["modelAttempts"] == 1
+
+    no_trace_runspec = runspec.model_copy(deep=True)
+    no_trace_runspec.trace.enabled = False
+    no_trace_result = execute_runspec(no_trace_runspec, Engine())
+    assert no_trace_result.trace.aiTrace == {}
+    assert no_trace_result.metricsSummary["modelAttempts"] == 1
+    assert no_trace_result.metricsSummary["totalDurationMs"] == no_trace_result.timing.durationMs
+
+    class FailingModel(ModelAdapter):
+        def generate(self, model_input, request, trace=None):
+            raise TimeoutError("provider timeout")
+
+    failing_engine = Engine()
+    failing_engine._models["broken"] = FailingModel()
+    failed_spec = no_trace_runspec.model_copy(update={"provider": "broken"})
+    failed_result = execute_runspec(failed_spec, failing_engine)
+    assert failed_result.status == "error"
+    assert failed_result.metricsSummary["failedModelAttempts"] == 1
+    assert failed_result.metricsSummary["totalTokens"] is None
+    assert failed_result.metricsSummary["usageCompleteness"] == "unavailable"
 
 
 def test_execute_runspec_injects_openai_inline_prompt_cache_key(tmp_path):
@@ -1049,8 +1106,9 @@ def test_rate_limited_model_retry_logs_structured_context(monkeypatch):
             "repeatIndex": 1,
         },
     )
+    trace = TraceCollector()
 
-    response = adapter.generate(ModelInput(prompt="Prompt"), request)
+    response = adapter.generate(ModelInput(prompt="Prompt"), request, trace=trace)
 
     assert response.text == "ok"
     started = [item for item in events if item[0] == "model.retry.started"]
@@ -1064,6 +1122,11 @@ def test_rate_limited_model_retry_logs_structured_context(monkeypatch):
     assert fields["taskId"] == "q_year"
     assert fields["modelId"] == "mock"
     assert fields["modelName"] == "mock"
+    metrics = trace.to_trace().metrics
+    assert metrics.modelAttempts == 2
+    assert metrics.failedModelAttempts == 1
+    assert metrics.modelAttemptDurationMs is not None
+    assert metrics.usageCompleteness == "unavailable"
 
 
 def test_rate_limited_model_tpm_wait_logs_info_and_logger_suppresses_without_verbose(monkeypatch):

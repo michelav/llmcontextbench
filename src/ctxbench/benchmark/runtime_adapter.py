@@ -84,7 +84,11 @@ class TrialRuntimeAdapter:
                 durationMs=execution.duration_ms,
             ),
             usage=usage,
-            metricsSummary=build_metrics_summary(ai_trace=trace.aiTrace, strategy=trial.strategy),
+            metricsSummary={
+                **build_metrics_summary(ai_trace=ai_result.trace, strategy=trial.strategy),
+                "totalDurationMs": execution.duration_ms,
+                "totalDurationProvenance": "measured",
+            },
             trace=trace,
             evaluation=EvaluationResult(),
             metadata=trial.metadata,
@@ -118,13 +122,14 @@ def _request_metadata(trial: TrialSpec) -> dict[str, Any]:
     }
 
 
-def build_metrics_summary(*, ai_trace: dict[str, object], strategy: str) -> dict[str, int | None]:
+def build_metrics_summary(*, ai_trace: dict[str, object], strategy: str) -> dict[str, Any]:
     metrics = ai_trace.get("metrics", {}) if isinstance(ai_trace, dict) else {}
     if not isinstance(metrics, dict):
         metrics = {}
     legacy_task_statement_chars_key = "question" + "Chars"
-    summary: dict[str, int | None] = {
+    summary: dict[str, Any] = {
         "totalDurationMs": _as_int(metrics.get("totalDurationMs")),
+        "totalDurationProvenance": "measured" if metrics.get("totalDurationMs") is not None else "unavailable",
         "strategyDurationMs": _as_int(metrics.get("strategyDurationMs")),
         "modelDurationMs": _as_int(metrics.get("modelDurationMs")),
         "toolDurationMs": _as_int(metrics.get("toolDurationMs")),
@@ -136,9 +141,16 @@ def build_metrics_summary(*, ai_trace: dict[str, object], strategy: str) -> dict
         "functionCalls": _as_int(metrics.get("functionCalls")),
         "steps": _as_int(metrics.get("steps")),
         "retryCount": _as_int(metrics.get("retryCount")),
+        "modelAttempts": _as_int(metrics.get("modelAttempts")),
+        "failedModelAttempts": _as_int(metrics.get("failedModelAttempts")),
+        "modelAttemptDurationMs": _as_int(metrics.get("modelAttemptDurationMs")),
+        "modelAttemptDurationProvenance": "measured" if metrics.get("modelAttemptDurationMs") is not None else "unavailable",
         "inputTokens": _as_int(metrics.get("inputTokens")),
         "outputTokens": _as_int(metrics.get("outputTokens")),
         "totalTokens": _as_int(metrics.get("totalTokens")),
+        "knownTotalTokens": _as_int(metrics.get("knownTotalTokens")),
+        "totalTokensProvenance": str(metrics.get("totalTokensProvenance", "unavailable")),
+        "usageCompleteness": str(metrics.get("usageCompleteness", "unavailable")),
         "totalTokensEstimated": _as_int(metrics.get("totalTokensEstimated")),
         "cachedInputTokens": _as_int(metrics.get("cachedInputTokens")),
         "cacheReadInputTokens": _as_int(metrics.get("cacheReadInputTokens")),

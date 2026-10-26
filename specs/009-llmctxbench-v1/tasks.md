@@ -62,17 +62,17 @@ documentation updates and a commit. Record command output summaries and commits 
 
 ## S05 — Usage and timing
 
-- Status: pending
+- Status: complete
 - Purpose: Preserve complete/partial expenditure and directly measured latency.
 - Likely files: `ai/models, ai/trace.py, runtime, metrics, tests` (source paths relative to `src/ctxbench` where applicable).
 - Dependency: S04.
 - Risk: Double counting and treating unknown expenditure as zero.
 - Suggested commit: `fix: standardize execution accounting`.
 
-- [ ] Implement the slice's behavior and document its public contract.
-- [ ] Verify: Cached/reasoning tokens; retries; failed calls; unknown totals; provenance.
-- [ ] Review diff and record changes, impacts, commands, results and limitations.
-- [ ] Commit only the verified slice files.
+- [x] Implement the slice's behavior and document its public contract.
+- [x] Verify: Cached/reasoning tokens; retries; failed calls; unknown totals; provenance.
+- [x] Review diff and record changes, impacts, commands, results and limitations.
+- [x] Commit only the verified slice files.
 
 ## S06 — Durable execution and lifecycle readers
 
