@@ -150,3 +150,15 @@
   `tests/test_mcp_operation_errors.py`, `tests/test_repoqa_evaluation.py` (21 passed); focused
   provider/MCP/judge selection (13 passed); `git diff --check` passed.
 - Commit: `feat: standardize providers and remote MCP execution`.
+# S11 — complete
+
+- Added provider-free deterministic workload sampling with declared lineage-group exclusions,
+  seeded calibration bootstrap with estimated provenance and explicit missing-coverage failures,
+  immutable knowledge diffs, full-tree derived dataset materialization with provenance, and paired
+  request difference summaries with incomplete-pair coverage.
+- Public contract: `docs/development/adaptive-research-utilities.md`. Dataset-specific filtering and
+  lineage discovery remain adapter responsibilities; derivation copies the base tree unchanged.
+- Validation: `PYTHONPATH=src pytest -q tests/test_adaptive_research.py tests/test_adaptive_v1.py`
+  (10 passed); `git diff --check` passed. No provider calls.
+- Limitations: materialization records selected requests but does not rewrite/filter source data;
+  bootstrap supports numeric row fields and is explicitly estimated.

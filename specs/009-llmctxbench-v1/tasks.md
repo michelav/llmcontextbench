@@ -146,17 +146,17 @@ documentation updates and a commit. Record command output summaries and commits 
 
 ## S11 — Research preparation and analysis utilities
 
-- Status: pending
+- Status: complete
 - Purpose: Workloads, seeded resampling, knowledge diff, materialized derivation and simple reports.
 - Likely files: `adaptation, dataset, adapters, commands, metrics, tests` (source paths relative to `src/ctxbench` where applicable).
 - Dependency: S10.
 - Risk: Expanding into a simulation or storage framework.
 - Suggested commit: `feat: add experiment preparation and analysis utilities`.
 
-- [ ] Implement the slice's behavior and document its public contract.
-- [ ] Verify: Lineage overlap; missing coverage; deterministic sampling; base immutability; paired differences.
-- [ ] Review diff and record changes, impacts, commands, results and limitations.
-- [ ] Commit only the verified slice files.
+- [x] Implement the slice's behavior and document its public contract.
+- [x] Verify: Lineage overlap; missing coverage; deterministic sampling; base immutability; paired differences.
+- [x] Review diff and record changes, impacts, commands, results and limitations.
+- [x] Commit only the verified slice files.
 
 ## S12 — Remove superseded code
 
