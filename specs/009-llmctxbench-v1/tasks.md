@@ -132,17 +132,17 @@ documentation updates and a commit. Record command output summaries and commits 
 
 ## S10 — Additional controllers and disturbances
 
-- Status: pending
+- Status: complete
 - Purpose: Utility/circuit breaker/budget/exploration and required disturbances using existing interfaces.
 - Likely files: `adaptation, tests` (source paths relative to `src/ctxbench` where applicable).
 - Dependency: S09.
 - Risk: Changing budget or disturbance semantics silently.
 - Suggested commit: `feat: extend adaptive policies and disturbances`.
 
-- [ ] Implement the slice's behavior and document its public contract.
-- [ ] Verify: Admission/best effort; unknown estimates; quota restoration; deterministic random streams.
-- [ ] Review diff and record changes, impacts, commands, results and limitations.
-- [ ] Commit only the verified slice files.
+- [x] Implement the slice's behavior and document its public contract.
+- [x] Verify: Admission/best effort; unknown estimates; quota restoration; deterministic random streams.
+- [x] Review diff and record changes, impacts, commands, results and limitations.
+- [x] Commit only the verified slice files.
 
 ## S11 — Research preparation and analysis utilities
 

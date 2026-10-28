@@ -98,3 +98,21 @@ def test_cascade_policy_accepts_one_fallback_and_rejects_more():
     data['adaptation']['policy']['fallbacks'].append(['one', 'b'])
     with pytest.raises(ValidationError):
         planner_payload(data)
+
+
+@pytest.mark.parametrize('policy', [
+    {'type': 'utility', 'latencyWeight': 1, 'tokenWeight': 1},
+    {'type': 'budget', 'tokenBudget': 100, 'bestEffort': True},
+    {'type': 'explore', 'seed': 7, 'explorationProbability': 0.2,
+     'latencyWeight': 1, 'tokenWeight': 1},
+    {'type': 'circuit_breaker', 'candidate': ['one', 'a'], 'fallbacks': [['two', 'b']]},
+])
+def test_s10_controller_shapes_are_in_definition_schema(policy):
+    data = definition()
+    data['kind'] = 'adaptive'
+    data['adaptation'] = {'policy': policy,
+                          'tokenQuota': {'tokens': 1000, 'windowSeconds': 60},
+                          'workload': [{'taskId': 'task_role', 'instanceId': 'person-001'}],
+                          'phases': [{'name': 'fault', 'firstRequest': 1, 'lastRequest': 1,
+                                      'toolFailureRate': 0.1, 'failureSeed': 4}]}
+    assert planner_payload(data)['experimentKind'] == 'adaptive'

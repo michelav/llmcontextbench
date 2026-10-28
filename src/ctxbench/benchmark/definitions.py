@@ -158,8 +158,41 @@ def definition_schema() -> dict[str, Any]:
                                         "fallbacks": {"type": "array", "maxItems": 1, "items": {
                                             "type": "array", "minItems": 2, "maxItems": 2,
                                             "items": {"type": "string", "minLength": 1}}},
-                                        "minimumResponseLength": {"type": "integer", "minimum": 0}}}
+                                        "minimumResponseLength": {"type": "integer", "minimum": 0}}},
+                        {"type": "object", "additionalProperties": False,
+                         "required": ["type", "candidate", "fallbacks"],
+                         "properties": {"type": {"const": "circuit_breaker"},
+                                        "candidate": {"type": "array", "minItems": 2, "maxItems": 2,
+                                                      "items": {"type": "string", "minLength": 1}},
+                                        "fallbacks": {"type": "array", "minItems": 1, "maxItems": 1,
+                                            "items": {"type": "array", "minItems": 2, "maxItems": 2,
+                                                      "items": {"type": "string", "minLength": 1}}},
+                                        "window": {"type": "integer", "minimum": 1},
+                                        "minimumObservations": {"type": "integer", "minimum": 1},
+                                        "failureRateThreshold": {"type": "number", "minimum": 0, "maximum": 1}}},
+                        {"type": "object", "additionalProperties": False,
+                         "required": ["type", "latencyWeight", "tokenWeight"],
+                         "properties": {"type": {"const": "utility"},
+                                        "latencyWeight": {"type": "number", "minimum": 0},
+                                        "tokenWeight": {"type": "number", "minimum": 0}}},
+                        {"type": "object", "additionalProperties": False,
+                         "required": ["type", "tokenBudget"],
+                         "properties": {"type": {"const": "budget"},
+                                        "tokenBudget": {"type": "integer", "minimum": 0},
+                                        "bestEffort": {"type": "boolean"}}},
+                        {"type": "object", "additionalProperties": False,
+                         "required": ["type", "seed", "explorationProbability", "latencyWeight", "tokenWeight"],
+                         "properties": {"type": {"const": "explore"},
+                                        "seed": {"type": "integer"},
+                                        "explorationProbability": {"type": "number", "minimum": 0, "maximum": 1},
+                                        "latencyWeight": {"type": "number", "minimum": 0},
+                                        "tokenWeight": {"type": "number", "minimum": 0}}}
                     ]},
+                    "tokenQuota": {"type": "object", "additionalProperties": False,
+                                   "required": ["tokens", "windowSeconds"],
+                                   "properties": {"tokens": {"type": "integer", "minimum": 1},
+                                                  "windowSeconds": {"type": "integer", "minimum": 1},
+                                                  "bestEffort": {"type": "boolean"}}},
                     "calibration": {"type": "string", "minLength": 1},
                     "workload": {"type": "array", "minItems": 1, "items": {
                         "type": "object", "additionalProperties": False,
@@ -176,7 +209,9 @@ def definition_schema() -> dict[str, Any]:
                         "properties": {"name": {"type": "string", "minLength": 1},
                                        "firstRequest": {"type": "integer", "minimum": 1},
                                        "lastRequest": {"type": "integer", "minimum": 1},
-                                       "toolDelayMs": {"type": "integer", "minimum": 0}}}}
+                                       "toolDelayMs": {"type": "integer", "minimum": 0},
+                                       "toolFailureRate": {"type": "number", "minimum": 0, "maximum": 1},
+                                       "failureSeed": {"type": "integer"}}}}
                 }
             },
             "execution": {"type": "object", "additionalProperties": False, "properties": {

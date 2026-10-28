@@ -216,3 +216,20 @@ token usage is zero. The ordinary response collection contains each candidate's 
 delivery outcomes remain authoritative in the request records. Adaptive definitions support one
 scheduled execution per request (`repeats=1`); operator recovery attempts remain separate from
 automatic fallback attempts.
+
+## Implemented increment: adaptive controllers and disturbances (S10)
+
+The v1 lifecycle also supports utility selection using the configured weighted sum of calibrated
+latency and token estimates, a rolling failure-window circuit breaker with one configured fallback,
+total-token budget admission, and seeded exploration with utility exploitation. Utility, budget,
+exploration, and strict quota policies require a separate static calibration run. Unknown observations
+remain unavailable: utility selection skips candidates missing a weighted metric; budget admission
+rejects unknown prior spend unless `bestEffort` is enabled. Budget decisions count every known attempt,
+including failed calls and fallback attempts, and retain the estimate separately from observed usage.
+
+An optional `tokenQuota` enforces a rolling token window using calibrated estimates before dispatch.
+Completed request attempt records persist observed usage timestamps, allowing the quota window to be
+restored on resume. Unknown usage blocks strict quota admission; `bestEffort` explicitly permits it.
+The quota wait and total request duration are recorded separately from provider attempt duration.
+Phases can add deterministic tool-call failures using `toolFailureRate` and `failureSeed`, alongside
+the existing tool delay. Fault draws use a stable per-request seed/call stream and are provider-free.

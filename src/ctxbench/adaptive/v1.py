@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime, timezone
+from hashlib import sha256
 from pathlib import Path
 from statistics import mean
-from time import monotonic, sleep
+from time import monotonic, sleep, time
 from typing import Any
 
 from ctxbench.benchmark.fingerprint import file_digest
@@ -27,25 +29,58 @@ def build_adaptive_plan(adaptation: dict[str, Any], trials: list[TrialSpec], dat
     if trials and any(trial.repeatIndex != 1 for trial in trials):
         raise ValueError("Adaptive definitions currently require execution.repeats=1")
     configurations = sorted({candidate_id(t.modelId, t.configurationId) for t in trials})
-    if policy.get("type") in {"static", "cascade"}:
+    if policy.get("type") in {"static", "cascade", "circuit_breaker"}:
         selected = _candidate(policy.get("candidate"))
         if selected not in configurations:
             raise ValueError("Policy candidate must be selected in the experiment candidates")
         fallbacks = policy.get("fallbacks", [])
         if not isinstance(fallbacks, list) or len(fallbacks) > 1:
-            raise ValueError("Fallbacks must contain at most one candidate in this slice")
+            raise ValueError("Fallbacks must contain at most one candidate")
         for fallback in fallbacks:
             if _candidate(fallback) not in configurations or _candidate(fallback) == selected:
                 raise ValueError("Fallback candidates must be distinct selected experiment candidates")
+        if policy.get("type") == "circuit_breaker":
+            window = policy.get("window", 3)
+            minimum = policy.get("minimumObservations", 3)
+            threshold = policy.get("failureRateThreshold", 0.5)
+            if (type(window) is not int or window < 1 or type(minimum) is not int or not 1 <= minimum <= window
+                    or type(threshold) not in (int, float) or not 0 < threshold <= 1):
+                raise ValueError("Circuit breaker requires valid window, minimumObservations and failureRateThreshold")
     elif policy.get("type") == "threshold":
         if type(policy.get("latencyTargetMs")) not in (int, float) or policy["latencyTargetMs"] < 0:
             raise ValueError("Threshold policy requires a nonnegative latencyTargetMs")
         if "calibration" not in adaptation:
             raise ValueError("Threshold policy requires a separate static calibration run")
+    elif policy.get("type") == "utility":
+        if any(type(policy.get(key)) not in (int, float) or policy[key] < 0
+               for key in ("latencyWeight", "tokenWeight")) or policy["latencyWeight"] + policy["tokenWeight"] <= 0:
+            raise ValueError("Utility policy requires nonnegative latencyWeight and tokenWeight, not both zero")
+        if "calibration" not in adaptation:
+            raise ValueError("Utility policy requires a separate static calibration run")
+    elif policy.get("type") == "budget":
+        if type(policy.get("tokenBudget")) is not int or policy["tokenBudget"] < 0:
+            raise ValueError("Budget policy requires a nonnegative integer tokenBudget")
+        if "calibration" not in adaptation:
+            raise ValueError("Budget policy requires a separate static calibration run")
+    elif policy.get("type") == "explore":
+        if type(policy.get("seed")) is not int or type(policy.get("explorationProbability")) not in (int, float) or not 0 <= policy["explorationProbability"] <= 1:
+            raise ValueError("Explore policy requires an integer seed and explorationProbability in [0, 1]")
+        if "calibration" not in adaptation:
+            raise ValueError("Explore policy requires a separate static calibration run")
+        if any(type(policy.get(key)) not in (int, float) or policy[key] < 0
+               for key in ("latencyWeight", "tokenWeight")) or policy["latencyWeight"] + policy["tokenWeight"] <= 0:
+            raise ValueError("Explore policy requires nonnegative utility weights, not both zero")
     else:
-        raise ValueError("Adaptive policy type must be static or threshold")
+        raise ValueError("Unsupported adaptive policy type")
 
     phases = _validate_phases(adaptation.get("phases", []), len(workload))
+    quota = adaptation.get("tokenQuota")
+    if quota is not None and (not isinstance(quota, dict) or type(quota.get("tokens")) is not int
+                              or quota["tokens"] < 1 or type(quota.get("windowSeconds")) is not int
+                              or quota["windowSeconds"] < 1 or type(quota.get("bestEffort", False)) is not bool):
+        raise ValueError("tokenQuota requires positive integer tokens/windowSeconds and optional bestEffort")
+    if quota and not quota.get("bestEffort", False) and "calibration" not in adaptation:
+        raise ValueError("Strict tokenQuota requires a separate static calibration run")
     planned = []
     seen_repeats: defaultdict[tuple[str, str], int] = defaultdict(int)
     for index, item in enumerate(workload, 1):
@@ -84,9 +119,11 @@ def build_adaptive_plan(adaptation: dict[str, Any], trials: list[TrialSpec], dat
             "rejectionReason": "no_eligible_candidate" if not by_candidate else None,
         })
     knowledge = None
-    if policy["type"] == "threshold":
+    if policy["type"] == "threshold" or policy["type"] in {"utility", "budget", "explore"} or (
+            quota and not quota.get("bestEffort", False)):
         knowledge = _load_calibration(adaptation["calibration"], trials, planned, dataset)
-    return {"schemaVersion": 1, "policy": dict(policy), "candidateIds": configurations,
+    return {"schemaVersion": 1, "policy": dict(policy), "tokenQuota": quota,
+            "candidateIds": configurations,
             "workload": planned, "phases": phases,
             "calibration": adaptation.get("calibration") if knowledge else None}, knowledge
 
@@ -180,18 +217,27 @@ def _validate_phases(phases: Any, workload_size: int) -> list[dict]:
             raise ValueError("workload phases must be objects")
         name, first, last = phase.get("name"), phase.get("firstRequest"), phase.get("lastRequest")
         delay = phase.get("toolDelayMs", 0)
+        failure_rate = phase.get("toolFailureRate", 0)
+        failure_seed = phase.get("failureSeed")
         if (not isinstance(name, str) or not name or type(first) is not int or type(last) is not int
                 or first != expected_start or last < first or last > workload_size
-                or type(delay) is not int or delay < 0):
-            raise ValueError("phases must cover contiguous workload ranges with valid toolDelayMs")
-        result.append({"name": name, "firstRequest": first, "lastRequest": last, "toolDelayMs": delay})
+                or type(delay) is not int or delay < 0
+                or type(failure_rate) not in (int, float) or not 0 <= failure_rate <= 1
+                or (failure_rate > 0 and type(failure_seed) is not int)):
+            raise ValueError("phases must cover contiguous workload ranges with valid delay/fault settings")
+        result.append({"name": name, "firstRequest": first, "lastRequest": last,
+                       "toolDelayMs": delay, "toolFailureRate": failure_rate,
+                       "failureSeed": failure_seed})
         expected_start = last + 1
     if result and expected_start != workload_size + 1:
         raise ValueError("phases must cover the complete workload")
     return result
 
 
-def choose_candidate(plan: dict, request: dict, knowledge: dict | None) -> tuple[str | None, str]:
+def choose_candidate(plan: dict, request: dict, knowledge: dict | None, *,
+                     history: dict[str, list[dict]] | None = None,
+                     spent_tokens: int = 0, unknown_spend: bool = False,
+                     request_index: int = 1) -> tuple[str | None, str]:
     candidates = request["candidates"]
     policy = plan["policy"]
     if not candidates:
@@ -199,6 +245,57 @@ def choose_candidate(plan: dict, request: dict, knowledge: dict | None) -> tuple
     if policy["type"] in {"static", "cascade"}:
         cid = _candidate(policy["candidate"])
         return (cid, "static") if cid in candidates else (None, "static_candidate_ineligible")
+    if policy["type"] == "circuit_breaker":
+        primary = _candidate(policy["candidate"])
+        rows = (history or {}).get(primary, [])[-policy.get("window", 3):]
+        failures = sum(row.get("status") != "success" for row in rows)
+        open_now = len(rows) >= policy.get("minimumObservations", 3) and failures / len(rows) >= policy.get("failureRateThreshold", 0.5)
+        if not open_now and primary in candidates:
+            return primary, "circuit_closed"
+        fallbacks = [_candidate(value) for value in policy.get("fallbacks", [])]
+        chosen = next((cid for cid in fallbacks if cid in candidates), None)
+        return chosen, "circuit_open" if chosen else "circuit_open_no_fallback"
+    if policy["type"] == "budget":
+        if unknown_spend and not policy.get("bestEffort", False):
+            return None, "unknown_consumption"
+        remaining = policy["tokenBudget"] - spent_tokens
+        estimates = (knowledge or {}).get("estimates", {})
+        costs = [(cid, estimates.get(f"{cid}|{request['sizeBin']}", {}).get("totalTokens")) for cid in candidates]
+        feasible = [(cid, cost) for cid, cost in costs if isinstance(cost, (int, float)) and cost <= remaining]
+        if feasible:
+            return min(feasible, key=lambda row: (row[1], row[0]))[0], "budget_admitted"
+        if policy.get("bestEffort"):
+            known = [(cid, cost) for cid, cost in costs if isinstance(cost, (int, float))]
+            chosen = min(known, key=lambda row: (row[1], row[0]))[0] if known else sorted(candidates)[0]
+            return chosen, "budget_best_effort"
+        return None, "budget_infeasible"
+    if policy["type"] == "utility":
+        estimates = (knowledge or {}).get("estimates", {})
+        latency_weight = policy["latencyWeight"]
+        token_weight = policy["tokenWeight"]
+        ranked = []
+        for cid in candidates:
+            estimate = estimates.get(f"{cid}|{request['sizeBin']}", {})
+            latency, tokens = estimate.get("latencyMs"), estimate.get("totalTokens")
+            if ((latency_weight and not isinstance(latency, (int, float)))
+                    or (token_weight and not isinstance(tokens, (int, float)))):
+                continue
+            score = latency_weight * (latency or 0) + token_weight * (tokens or 0)
+            ranked.append((score, cid))
+        return (min(ranked)[1], "minimum_weighted_cost") if ranked else (None, "unknown_utility_estimate")
+    if policy["type"] == "explore":
+        estimates = (knowledge or {}).get("estimates", {})
+        baseline = min(candidates, key=lambda cid: _utility_rank(
+            cid, request, estimates, policy["latencyWeight"], policy["tokenWeight"]))
+        stream = sha256(f"{policy['seed']}:{request['requestId']}".encode()).digest()
+        draw = int.from_bytes(stream[:8], "big") / (2**64)
+        alternatives = sorted(cid for cid in candidates if cid != baseline)
+        if alternatives and draw < policy["explorationProbability"]:
+            offset = int.from_bytes(stream[8:16], "big") % len(alternatives)
+            return alternatives[offset], "seeded_exploration"
+        if _utility_rank(baseline, request, estimates, policy["latencyWeight"], policy["tokenWeight"])[0]:
+            return None, "unknown_utility_estimate"
+        return baseline, "utility_exploitation"
     estimates = (knowledge or {}).get("estimates", {})
     eligible = []
     for cid in candidates:
@@ -215,10 +312,79 @@ def choose_candidate(plan: dict, request: dict, knowledge: dict | None) -> tuple
     return chosen[0], "threshold"
 
 
+def _utility_rank(candidate: str, request: dict, estimates: dict,
+                  latency_weight: float, token_weight: float) -> tuple[bool, float, str]:
+    estimate = estimates.get(f"{candidate}|{request['sizeBin']}", {})
+    tokens = estimate.get("totalTokens")
+    latency = estimate.get("latencyMs")
+    if ((latency_weight and not isinstance(latency, (int, float)))
+            or (token_weight and not isinstance(tokens, (int, float)))):
+        value = None
+    else:
+        value = latency_weight * (latency or 0) + token_weight * (tokens or 0)
+    return value is None, float(value) if value is not None else float("inf"), candidate
+
+
+class TokenQuota:
+    """Restorable rolling token quota; rows are persisted observed usage with UTC timestamps."""
+
+    def __init__(self, config: dict, records: list[dict], *, clock=time, sleeper=sleep,
+                 monotonic_clock=monotonic):
+        self.limit = config["tokens"]
+        self.window = config["windowSeconds"]
+        self.best_effort = config.get("bestEffort", False)
+        self.clock, self.sleeper = clock, sleeper
+        self.monotonic_clock = monotonic_clock
+        self.rows = []
+        self.unknown_usage = False
+        for record in records:
+            for attempt in record.get("attempts", []):
+                timestamp, tokens = attempt.get("quotaTimestamp"), attempt.get("totalTokens")
+                known_tokens = attempt.get("knownTotalTokens")
+                if not isinstance(known_tokens, (int, float)) and isinstance(tokens, (int, float)):
+                    known_tokens = tokens
+                if timestamp and isinstance(known_tokens, (int, float)):
+                    try:
+                        parsed = datetime.fromisoformat(timestamp)
+                        if parsed.tzinfo is None:
+                            raise ValueError("timestamp must include a timezone")
+                        self.rows.append((parsed.timestamp(), int(known_tokens)))
+                        if not isinstance(tokens, (int, float)):
+                            self.unknown_usage = True
+                    except (TypeError, ValueError):
+                        raise ValueError("Invalid persisted token quota timestamp")
+                elif timestamp:
+                    self.unknown_usage = True
+
+    def wait_for_capacity(self, estimate: int | float | None) -> float | None:
+        if self.unknown_usage and not self.best_effort:
+            return None
+        if estimate is None:
+            return 0.0 if self.best_effort else None
+        if estimate > self.limit and not self.best_effort:
+            return None
+        start = self.monotonic_clock()
+        while True:
+            now = self.clock()
+            self.rows = [(stamp, tokens) for stamp, tokens in self.rows if now - stamp < self.window]
+            if sum(tokens for _, tokens in self.rows) + estimate <= self.limit or self.best_effort:
+                return (self.monotonic_clock() - start) * 1000
+            oldest = min(stamp for stamp, _ in self.rows)
+            self.sleeper(max(0.001, oldest + self.window - now))
+
+    def record(self, timestamp: str, tokens: int | None, known_tokens: int | None = None) -> None:
+        observed = known_tokens if isinstance(known_tokens, (int, float)) else tokens
+        if observed is not None:
+            self.rows.append((datetime.fromisoformat(timestamp).timestamp(), int(observed)))
+        if tokens is None:
+            self.unknown_usage = True
+
+
 class DelayedToolRuntime:
     """Add an explicit per-call delay while preserving runtime ownership."""
-    def __init__(self, inner, delay_ms: int, sleeper=sleep):
+    def __init__(self, inner, delay_ms: int, sleeper=sleep, *, failure_rate: float = 0, failure_seed: int = 0):
         self.inner, self.delay_ms, self.sleeper = inner, delay_ms, sleeper
+        self.failure_rate, self.failure_seed, self.call_index = failure_rate, failure_seed, 0
 
     def list_tools(self):
         return self.inner.list_tools()
@@ -226,6 +392,12 @@ class DelayedToolRuntime:
     def call_tool(self, name, arguments):
         if self.delay_ms:
             self.sleeper(self.delay_ms / 1000)
+        if self.failure_rate:
+            digest = sha256(f"{self.failure_seed}:{self.call_index}:{name}".encode()).digest()
+            self.call_index += 1
+            draw = int.from_bytes(digest[:8], "big") / (2**64)
+            if draw < self.failure_rate:
+                raise RuntimeError("Injected adaptive tool failure")
         return self.inner.call_tool(name, arguments)
 
     def close(self):
@@ -257,6 +429,7 @@ def execute_adaptive(plan: dict, knowledge: dict | None, runspecs: list[TrialSpe
     if any(row.get("executionFingerprint") != fingerprint for row in records.values()):
         raise ValueError("Adaptive request record execution fingerprint mismatch")
     learned = {key: dict(value) for key, value in (knowledge or {}).get("estimates", {}).items()}
+    quota = TokenQuota(plan["tokenQuota"], list(records.values())) if plan.get("tokenQuota") else None
     progressed = 0
     requests = plan["workload"]
     for item in requests:
@@ -266,7 +439,23 @@ def execute_adaptive(plan: dict, knowledge: dict | None, runspecs: list[TrialSpe
                 learned = {key: dict(value) for key, value in existing["knowledgeAfter"].items()}
             progressed += 1
             continue
-        candidate, reason = choose_candidate(plan, item, {"estimates": learned})
+        history: defaultdict[str, list[dict]] = defaultdict(list)
+        spent_tokens, unknown_spend = 0, False
+        for previous in records.values():
+            for previous_attempt in previous.get("attempts", []):
+                history[previous_attempt["candidate"]].append(previous_attempt)
+                tokens = previous_attempt.get("totalTokens")
+                known_tokens = previous_attempt.get("knownTotalTokens")
+                if not isinstance(known_tokens, (int, float)) and isinstance(tokens, (int, float)):
+                    known_tokens = tokens
+                if isinstance(known_tokens, (int, float)):
+                    spent_tokens += int(known_tokens)
+                if not isinstance(tokens, (int, float)):
+                    unknown_spend = True
+        candidate, reason = choose_candidate(plan, item, {"estimates": learned},
+                                             history=history, spent_tokens=spent_tokens,
+                                             unknown_spend=unknown_spend,
+                                             request_index=item["sequenceIndex"])
         policy = plan["policy"]
         if policy.get("type") == "cascade":
             configured_order = [_candidate(policy["candidate"])] + [
@@ -274,12 +463,19 @@ def execute_adaptive(plan: dict, knowledge: dict | None, runspecs: list[TrialSpe
             eligible_order = [cid for cid in configured_order if cid in item["candidates"]]
             candidate = eligible_order[0] if eligible_order else None
             reason = "cascade" if candidate else "no_eligible_candidate"
+        phase_settings = next((row for row in plan.get("phases", []) if row["name"] == item["phase"]), {})
         record = {"schemaVersion": 1, "requestId": item["requestId"], "sequenceIndex": item["sequenceIndex"],
                   "executionFingerprint": fingerprint,
                   "state": "rejected" if candidate is None else "started", "taskId": item["taskId"],
                   "instanceId": item["instanceId"], "sizeBin": item["sizeBin"], "phase": item["phase"],
                   "selectedCandidate": candidate, "decision": reason, "toolDelayMs": item["toolDelayMs"],
+                  "toolFailureRate": phase_settings.get("toolFailureRate", 0),
+                  "failureSeed": phase_settings.get("failureSeed"),
                   "attempts": [], "delivery": None}
+        selected_estimate = learned.get(f"{candidate}|{item['sizeBin']}", {}).get("totalTokens") if candidate else None
+        record["selectionEstimate"] = {"totalTokens": selected_estimate,
+                                        "provenance": "derived" if isinstance(selected_estimate, (int, float))
+                                        else "unavailable"}
         directory = root / "adaptive-records"
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{item['requestId']}.json"
@@ -291,18 +487,35 @@ def execute_adaptive(plan: dict, knowledge: dict | None, runspecs: list[TrialSpe
         order = ([cid for cid in configured_order if cid in item["candidates"]]
                  if policy.get("type") == "cascade" else [candidate])
         accepted = None
+        request_started = monotonic()
         for cid in order:
             trial_id = item["candidates"].get(cid)
             if trial_id is None:
                 continue
             trial = by_id[trial_id]
             attempt = _latest_attempt(attempts_for_trial(root, trial_id))
+            if attempt and attempt["state"] == "started" and quota:
+                if not quota.best_effort:
+                    raise ValueError("An uncertain attempt has unknown token usage; strict tokenQuota blocks recovery")
+                quota.unknown_usage = True
+            quota_wait_ms = 0.0
+            quota_estimate = None
+            if quota:
+                quota_estimate = learned.get(f"{cid}|{item['sizeBin']}", {}).get("totalTokens")
+                quota_wait_ms = quota.wait_for_capacity(quota_estimate)
+                if quota_wait_ms is None:
+                    record.setdefault("admissionRejections", []).append({"candidate": cid, "reason": "token_quota"})
+                    write_json(path, record)
+                    continue
             if attempt and attempt["state"] == "started" and not retry_uncertain:
                 raise ValueError(f"Adaptive request {item['requestId']} has an uncertain attempt; pass --retry-uncertain")
             if attempt and attempt["state"] in {"succeeded", "failed"} and not force:
                 result = attempt["result"]
             else:
-                decorator = lambda runtime, delay=item["toolDelayMs"]: DelayedToolRuntime(runtime, delay)
+                decorator = lambda runtime, phase=phase_settings, seq=item["sequenceIndex"]: DelayedToolRuntime(
+                    runtime, phase.get("toolDelayMs", item["toolDelayMs"]),
+                    failure_rate=phase.get("toolFailureRate", 0),
+                    failure_seed=(phase.get("failureSeed") or 0) + seq)
                 _execute_durable([trial], artifact_root=root, manifest=manifest, force=force,
                                  retry_uncertain=retry_uncertain, logger=logger, progress=False,
                                  local_mcp_runtime_decorator=decorator)
@@ -321,12 +534,19 @@ def execute_adaptive(plan: dict, knowledge: dict | None, runspecs: list[TrialSpe
                    "durationMs": (result.get("timing") or {}).get("durationMs"),
                    "totalTokens": metrics.get("totalTokens"),
                    "knownTotalTokens": metrics.get("knownTotalTokens"),
+                   "quotaWaitMs": quota_wait_ms,
+                   "quotaEstimate": {"totalTokens": quota_estimate,
+                                     "provenance": "derived" if isinstance(quota_estimate, (int, float))
+                                     else "unavailable"} if quota else None,
+                   "quotaTimestamp": datetime.now(timezone.utc).isoformat() if quota else None,
                    "sensor": {"type": "minimum_response_length",
                               "minimumResponseLength": min_length,
                               "accepted": bool(success and sensor_accepted),
                               "durationMs": sensor_duration, "totalTokens": 0,
                               "totalTokensProvenance": "measured"}}
             record["attempts"].append(row)
+            if quota:
+                quota.record(row["quotaTimestamp"], row["totalTokens"], row["knownTotalTokens"])
             if success:
                 key = f"{cid}|{item['sizeBin']}"
                 prior = learned.get(key, {})
@@ -346,7 +566,9 @@ def execute_adaptive(plan: dict, knowledge: dict | None, runspecs: list[TrialSpe
                         else row.get("totalTokens") for row in record["attempts"]]
         known_tokens = [value for value in known_tokens if isinstance(value, (int, float))]
         all_tokens_known = all(isinstance(row.get("totalTokens"), (int, float)) for row in record["attempts"])
-        record.update({"state": "delivered" if accepted else "failed",
+        rejected_for_quota = bool(record.get("admissionRejections")) and not record["attempts"]
+        request_duration_ms = (monotonic() - request_started) * 1000
+        record.update({"state": "rejected" if rejected_for_quota else "delivered" if accepted else "failed",
                        "delivery": ({"candidate": accepted["candidate"], "trialId": accepted["trialId"],
                                      "attemptId": accepted["attemptId"]} if accepted else None),
                        "durationMs": sum(durations) if len(durations) == len(record["attempts"]) else None,
@@ -355,6 +577,9 @@ def execute_adaptive(plan: dict, knowledge: dict | None, runspecs: list[TrialSpe
                        "knownTotalTokensProvenance": "derived" if known_tokens else "unavailable",
                        "sensorDurationMs": sum(row["sensor"]["durationMs"] for row in record["attempts"]),
                        "sensorTotalTokens": sum(row["sensor"]["totalTokens"] for row in record["attempts"]),
+                       "quotaWaitMs": sum(row["quotaWaitMs"] for row in record["attempts"]),
+                       "requestDurationMs": request_duration_ms,
+                       "requestDurationProvenance": "measured",
                        "totalTokens": sum(row["totalTokens"] for row in record["attempts"])
                            if all_tokens_known else None,
                        "totalTokensProvenance": "derived" if all_tokens_known else "unavailable",

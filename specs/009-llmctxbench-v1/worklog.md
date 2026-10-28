@@ -1,5 +1,21 @@
 # LLMCtxBench v1 worklog
 
+## S10 — complete
+
+- Added calibrated utility selection, a rolling failure-window circuit breaker with one fallback,
+  token-budget admission with explicit best-effort behavior, and deterministic seeded exploration.
+- Added rolling token-quota admission with persisted per-attempt usage timestamps, quota restoration,
+  unknown-usage blocking in strict mode, measured quota waits, and best-effort override. Admission
+  estimates remain separately recorded from observed expenditure.
+- Extended phases with seeded deterministic tool-call failure injection alongside the existing delay.
+  Updated the definition schema, public architecture contract, and adaptive example guidance.
+- Validation: focused adaptive, accounting, calibration, and definition suites (49 passed); Python
+  compilation, JSON schema parsing, and `git diff --check` passed. No provider calls or dependency
+  changes. Limitations: token quota admission uses calibrated/runtime mean estimates and can overshoot
+  when actual usage differs; best-effort explicitly permits unknown or infeasible estimates.
+- `token_provenance: "unavailable"`.
+- Commit: `feat: extend adaptive policies and disturbances` (hash recorded in Git history).
+
 ## S09 — complete
 
 - Added a bounded cascade policy with one optional fallback. Execution tries eligible candidates in
