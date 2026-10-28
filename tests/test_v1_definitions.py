@@ -84,3 +84,17 @@ def test_invalid_definitions_fail(change):
 
 def test_published_schema_matches_installed_schema():
     assert json.loads(Path('schemas/experiment-v1.schema.json').read_text()) == definition_schema()
+
+
+def test_cascade_policy_accepts_one_fallback_and_rejects_more():
+    data = definition()
+    data['kind'] = 'adaptive'
+    data['adaptation'] = {
+        'policy': {'type': 'cascade', 'candidate': ['one', 'a'],
+                   'fallbacks': [['two', 'b']], 'minimumResponseLength': 4},
+        'workload': [{'taskId': 'task_role', 'instanceId': 'person-001'}],
+    }
+    assert planner_payload(data)['experimentKind'] == 'adaptive'
+    data['adaptation']['policy']['fallbacks'].append(['one', 'b'])
+    with pytest.raises(ValidationError):
+        planner_payload(data)

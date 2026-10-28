@@ -118,17 +118,17 @@ documentation updates and a commit. Record command output summaries and commits 
 
 ## S09 — Fallback and request outcomes
 
-- Status: pending
+- Status: complete
 - Purpose: Ordered fresh attempts; accepted delivery; sensors and cumulative request expenditure.
 - Likely files: `adaptation, metrics, tests` (source paths relative to `src/ctxbench` where applicable).
 - Dependency: S08.
 - Risk: Mistaking execution success for accepted delivery.
 - Suggested commit: `feat: add fallback and delivered request outcomes`.
 
-- [ ] Implement the slice's behavior and document its public contract.
-- [ ] Verify: Failure then success; sensor rejection; candidate exhaustion; interruption; all-attempt accounting.
-- [ ] Review diff and record changes, impacts, commands, results and limitations.
-- [ ] Commit only the verified slice files.
+- [x] Implement the slice's behavior and document its public contract.
+- [x] Verify: Failure then success; sensor rejection; candidate exhaustion; interruption; all-attempt accounting.
+- [x] Review diff and record changes, impacts, commands, results and limitations.
+- [x] Commit only the verified slice files.
 
 ## S10 — Additional controllers and disturbances
 

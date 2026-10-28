@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import defaultdict
 from pathlib import Path
 from statistics import mean
-from time import sleep
+from time import monotonic, sleep
 from typing import Any
 
 from ctxbench.benchmark.fingerprint import file_digest
@@ -27,10 +27,16 @@ def build_adaptive_plan(adaptation: dict[str, Any], trials: list[TrialSpec], dat
     if trials and any(trial.repeatIndex != 1 for trial in trials):
         raise ValueError("Adaptive definitions currently require execution.repeats=1")
     configurations = sorted({candidate_id(t.modelId, t.configurationId) for t in trials})
-    if policy.get("type") == "static":
+    if policy.get("type") in {"static", "cascade"}:
         selected = _candidate(policy.get("candidate"))
         if selected not in configurations:
-            raise ValueError("Static policy candidate must be selected in the experiment candidates")
+            raise ValueError("Policy candidate must be selected in the experiment candidates")
+        fallbacks = policy.get("fallbacks", [])
+        if not isinstance(fallbacks, list) or len(fallbacks) > 1:
+            raise ValueError("Fallbacks must contain at most one candidate in this slice")
+        for fallback in fallbacks:
+            if _candidate(fallback) not in configurations or _candidate(fallback) == selected:
+                raise ValueError("Fallback candidates must be distinct selected experiment candidates")
     elif policy.get("type") == "threshold":
         if type(policy.get("latencyTargetMs")) not in (int, float) or policy["latencyTargetMs"] < 0:
             raise ValueError("Threshold policy requires a nonnegative latencyTargetMs")
@@ -190,7 +196,7 @@ def choose_candidate(plan: dict, request: dict, knowledge: dict | None) -> tuple
     policy = plan["policy"]
     if not candidates:
         return None, "no_eligible_candidate"
-    if policy["type"] == "static":
+    if policy["type"] in {"static", "cascade"}:
         cid = _candidate(policy["candidate"])
         return (cid, "static") if cid in candidates else (None, "static_candidate_ineligible")
     estimates = (knowledge or {}).get("estimates", {})
@@ -241,7 +247,7 @@ def load_adaptive_records(root: Path) -> list[dict]:
 def execute_adaptive(plan: dict, knowledge: dict | None, runspecs: list[TrialSpec], *,
                      root: Path, manifest: dict, force: bool, retry_uncertain: bool,
                      logger, progress: bool) -> int:
-    """Serially select and execute one candidate per explicit request."""
+    """Serially select, attempt, and record delivery outcomes per request."""
     from ctxbench.commands.execute import _execute_durable, _latest_attempt
     from ctxbench.benchmark.execution_records import attempts_for_trial
 
@@ -255,17 +261,25 @@ def execute_adaptive(plan: dict, knowledge: dict | None, runspecs: list[TrialSpe
     requests = plan["workload"]
     for item in requests:
         existing = records.get(item["requestId"])
-        if existing and existing.get("state") in {"completed", "rejected"} and not force:
+        if existing and existing.get("state") in {"delivered", "failed", "rejected"} and not force:
             if isinstance(existing.get("knowledgeAfter"), dict):
                 learned = {key: dict(value) for key, value in existing["knowledgeAfter"].items()}
             progressed += 1
             continue
         candidate, reason = choose_candidate(plan, item, {"estimates": learned})
+        policy = plan["policy"]
+        if policy.get("type") == "cascade":
+            configured_order = [_candidate(policy["candidate"])] + [
+                _candidate(value) for value in policy.get("fallbacks", [])]
+            eligible_order = [cid for cid in configured_order if cid in item["candidates"]]
+            candidate = eligible_order[0] if eligible_order else None
+            reason = "cascade" if candidate else "no_eligible_candidate"
         record = {"schemaVersion": 1, "requestId": item["requestId"], "sequenceIndex": item["sequenceIndex"],
                   "executionFingerprint": fingerprint,
                   "state": "rejected" if candidate is None else "started", "taskId": item["taskId"],
                   "instanceId": item["instanceId"], "sizeBin": item["sizeBin"], "phase": item["phase"],
-                  "selectedCandidate": candidate, "decision": reason, "toolDelayMs": item["toolDelayMs"]}
+                  "selectedCandidate": candidate, "decision": reason, "toolDelayMs": item["toolDelayMs"],
+                  "attempts": [], "delivery": None}
         directory = root / "adaptive-records"
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{item['requestId']}.json"
@@ -274,39 +288,80 @@ def execute_adaptive(plan: dict, knowledge: dict | None, runspecs: list[TrialSpe
             records[item["requestId"]] = record
             progressed += 1
             continue
-        trial_id = item["candidates"][candidate]
-        trial = by_id[trial_id]
-        attempt = _latest_attempt(attempts_for_trial(root, trial_id))
-        if attempt and attempt["state"] == "started" and not retry_uncertain:
-            raise ValueError(f"Adaptive request {item['requestId']} has an uncertain attempt; pass --retry-uncertain")
-        if attempt and attempt["state"] in {"succeeded", "failed"} and not force:
-            result = attempt["result"]
-        else:
-            decorator = lambda runtime, delay=item["toolDelayMs"]: DelayedToolRuntime(runtime, delay)
-            _execute_durable([trial], artifact_root=root, manifest=manifest, force=force,
-                             retry_uncertain=retry_uncertain, logger=logger, progress=False,
-                             local_mcp_runtime_decorator=decorator)
-            latest = _latest_attempt(attempts_for_trial(root, trial_id))
-            result = latest["result"]
-            attempt = latest
-        record.update({"state": "completed", "trialId": trial_id,
-                       "attemptId": attempt.get("attemptId"), "resultStatus": result.get("status"),
-                       "timing": result.get("timing"), "metricsSummary": result.get("metricsSummary")})
-        write_json(path, record)
-        records[item["requestId"]] = record
-        timing = result.get("timing", {}).get("durationMs")
-        tokens = result.get("metricsSummary", {}).get("totalTokens")
-        key = f"{candidate}|{item['sizeBin']}"
-        prior = learned.get(key, {})
-        for name, value in (("latencyMs", timing), ("totalTokens", tokens)):
-            if isinstance(value, (int, float)):
-                count_key = "latencyObservationCount" if name == "latencyMs" else "tokenObservationCount"
-                count = prior.get(count_key, 0)
-                prior[name] = (prior.get(name, 0) * count + value) / (count + 1)
-                prior[count_key] = count + 1
-        learned[key] = prior
+        order = ([cid for cid in configured_order if cid in item["candidates"]]
+                 if policy.get("type") == "cascade" else [candidate])
+        accepted = None
+        for cid in order:
+            trial_id = item["candidates"].get(cid)
+            if trial_id is None:
+                continue
+            trial = by_id[trial_id]
+            attempt = _latest_attempt(attempts_for_trial(root, trial_id))
+            if attempt and attempt["state"] == "started" and not retry_uncertain:
+                raise ValueError(f"Adaptive request {item['requestId']} has an uncertain attempt; pass --retry-uncertain")
+            if attempt and attempt["state"] in {"succeeded", "failed"} and not force:
+                result = attempt["result"]
+            else:
+                decorator = lambda runtime, delay=item["toolDelayMs"]: DelayedToolRuntime(runtime, delay)
+                _execute_durable([trial], artifact_root=root, manifest=manifest, force=force,
+                                 retry_uncertain=retry_uncertain, logger=logger, progress=False,
+                                 local_mcp_runtime_decorator=decorator)
+                attempt = _latest_attempt(attempts_for_trial(root, trial_id))
+                result = attempt["result"]
+            metrics = result.get("metricsSummary") or {}
+            response = result.get("response")
+            response_text = response if isinstance(response, str) else str(response or "")
+            min_length = policy.get("minimumResponseLength", 0)
+            sensor_started = monotonic()
+            sensor_accepted = len(response_text.strip()) >= min_length
+            sensor_duration = (monotonic() - sensor_started) * 1000
+            success = result.get("status") == "success"
+            row = {"candidate": cid, "trialId": trial_id, "attemptId": attempt.get("attemptId"),
+                   "status": result.get("status"), "accepted": bool(success and sensor_accepted),
+                   "durationMs": (result.get("timing") or {}).get("durationMs"),
+                   "totalTokens": metrics.get("totalTokens"),
+                   "knownTotalTokens": metrics.get("knownTotalTokens"),
+                   "sensor": {"type": "minimum_response_length",
+                              "minimumResponseLength": min_length,
+                              "accepted": bool(success and sensor_accepted),
+                              "durationMs": sensor_duration, "totalTokens": 0,
+                              "totalTokensProvenance": "measured"}}
+            record["attempts"].append(row)
+            if success:
+                key = f"{cid}|{item['sizeBin']}"
+                prior = learned.get(key, {})
+                for name, value in (("latencyMs", row["durationMs"]), ("totalTokens", row["totalTokens"])):
+                    if isinstance(value, (int, float)):
+                        count_key = "latencyObservationCount" if name == "latencyMs" else "tokenObservationCount"
+                        count = prior.get(count_key, 0)
+                        prior[name] = (prior.get(name, 0) * count + value) / (count + 1)
+                        prior[count_key] = count + 1
+                learned[key] = prior
+            write_json(path, record)
+            if row["accepted"]:
+                accepted = row
+                break
+        durations = [row["durationMs"] for row in record["attempts"] if isinstance(row.get("durationMs"), (int, float))]
+        known_tokens = [row.get("knownTotalTokens") if isinstance(row.get("knownTotalTokens"), (int, float))
+                        else row.get("totalTokens") for row in record["attempts"]]
+        known_tokens = [value for value in known_tokens if isinstance(value, (int, float))]
+        all_tokens_known = all(isinstance(row.get("totalTokens"), (int, float)) for row in record["attempts"])
+        record.update({"state": "delivered" if accepted else "failed",
+                       "delivery": ({"candidate": accepted["candidate"], "trialId": accepted["trialId"],
+                                     "attemptId": accepted["attemptId"]} if accepted else None),
+                       "durationMs": sum(durations) if len(durations) == len(record["attempts"]) else None,
+                       "durationProvenance": "measured" if len(durations) == len(record["attempts"]) else "unavailable",
+                       "knownTotalTokens": sum(known_tokens) if known_tokens else None,
+                       "knownTotalTokensProvenance": "derived" if known_tokens else "unavailable",
+                       "sensorDurationMs": sum(row["sensor"]["durationMs"] for row in record["attempts"]),
+                       "sensorTotalTokens": sum(row["sensor"]["totalTokens"] for row in record["attempts"]),
+                       "totalTokens": sum(row["totalTokens"] for row in record["attempts"])
+                           if all_tokens_known else None,
+                       "totalTokensProvenance": "derived" if all_tokens_known else "unavailable",
+                       "usageCompleteness": "complete" if all_tokens_known else "partial"})
         record["knowledgeAfter"] = {name: dict(value) for name, value in learned.items()}
         write_json(path, record)
+        records[item["requestId"]] = record
         progressed += 1
     write_jsonl(root / "requests.jsonl", [records[key] for key in sorted(records)])
     print(f"Processed {progressed} adaptive request(s) → {root / 'requests.jsonl'}")

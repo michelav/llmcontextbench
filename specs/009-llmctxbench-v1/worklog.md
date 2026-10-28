@@ -1,5 +1,23 @@
 # LLMCtxBench v1 worklog
 
+## S09 — complete
+
+- Added a bounded cascade policy with one optional fallback. Execution tries eligible candidates in
+  configured order, persists each attempt reference, and distinguishes delivered, failed, and
+  admission-rejected requests. A deterministic minimum-response-length sensor can reject successful
+  attempts and trigger fallback; rejected responses are never marked as delivered.
+- Request records aggregate measured attempt duration and complete/known token usage while retaining
+  per-attempt accounting. Sensor duration and its zero model-token cost are recorded separately.
+- Updated the v1 definition schema and architecture/example documentation.
+- Validation: `pytest -q tests/test_adaptive_v1.py tests/test_adaptive_v1_fallback.py
+  tests/test_v1_definitions.py` (21 passed); Python compilation, JSON schema syntax parsing, and
+  `git diff --check` passed. Coverage includes failure then success, sensor rejection, exhaustion,
+  interruption/uncertain recovery, aggregate known and complete usage, and schema constraints.
+- Impact: request delivery is now separate from execution success; all automatic fallback expenditure
+  remains visible, with unknown totals preserved as unavailable. Evaluation expenditure stays separate.
+- No provider calls or dependency changes. `token_provenance: "unavailable"`.
+- Commit: `feat: add fallback and delivered request outcomes` (hash recorded in Git history).
+
 ## S08 — complete
 
 - Implemented schema and planning support for static and threshold adaptive definitions, explicit

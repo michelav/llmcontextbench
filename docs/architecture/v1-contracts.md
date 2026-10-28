@@ -190,16 +190,16 @@ the provider receives declared functions and no endpoint credentials. The execut
 operation list limits tools visible and callable by the model. Judge request parameters continue to
 be merged with structured-output defaults, with configured values taking precedence.
 
-## Implemented increment: minimal adaptive lifecycle (S08)
+## Implemented increment: minimal adaptive lifecycle (S08) and request outcomes (S09)
 
-An adaptive v1 definition declares a static or threshold policy, an explicit ordered workload, and
+An adaptive v1 definition declares a static, threshold, or cascade policy, an explicit ordered workload, and
 optional contiguous phases with per-tool-call delay. Planning writes `adaptive-plan.json`; threshold
 planning also freezes `knowledge.json` derived from a separate completed static run with evaluation
 disabled. Calibration and adaptive workload task/instance pairs cannot overlap. Calibration estimates
 are derived means grouped by candidate and size bin, with their source manifest and response digests.
 
 Execution processes requests serially. Each request record in `adaptive-records/` is canonical for its
-decision and references the selected trial and durable execution attempt; `requests.jsonl` is derived.
+decision and references every durable execution attempt; `requests.jsonl` is derived.
 Threshold selection prefers the lowest-token calibrated candidate meeting the latency target, then
 falls back to the fastest candidate if the target is missed. Successful observations update in-memory
 knowledge and are snapshotted in each request record for deterministic resume. Missing eligible or
@@ -207,5 +207,12 @@ calibrated candidates produce an explicit rejected request without a trial attem
 response collection contains selected trial attempts, so eval/export/metrics remain on the standard
 lifecycle. Phase delay wraps tool calls for local function, local MCP, and remote MCP strategies.
 
-This increment intentionally supports one execution per request (`repeats=1`); fallback, accepted
-delivery outcomes, richer controllers, and additional disturbances remain in later slices.
+Cascade policies try the configured primary and each fallback at most once, using fresh trial context.
+Execution failures and responses rejected by the optional minimum-response-length sensor trigger the
+next candidate. The first accepted response is the delivery; an exhausted cascade is a failed request.
+Request records retain every attempt, cumulative known and complete token usage, measured request and
+sensor durations, and sensor token usage. The built-in sensor is local and deterministic, so its model
+token usage is zero. The ordinary response collection contains each candidate's durable trial result;
+delivery outcomes remain authoritative in the request records. Adaptive definitions support one
+scheduled execution per request (`repeats=1`); operator recovery attempts remain separate from
+automatic fallback attempts.

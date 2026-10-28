@@ -149,7 +149,16 @@ def definition_schema() -> dict[str, Any]:
                          "required": ["type", "latencyTargetMs"],
                          "properties": {"type": {"const": "threshold"},
                                         "latencyTargetMs": {"type": "number", "minimum": 0},
-                                        }}
+                                        }},
+                        {"type": "object", "additionalProperties": False,
+                         "required": ["type", "candidate"],
+                         "properties": {"type": {"const": "cascade"},
+                                        "candidate": {"type": "array", "minItems": 2, "maxItems": 2,
+                                                      "items": {"type": "string", "minLength": 1}},
+                                        "fallbacks": {"type": "array", "maxItems": 1, "items": {
+                                            "type": "array", "minItems": 2, "maxItems": 2,
+                                            "items": {"type": "string", "minLength": 1}}},
+                                        "minimumResponseLength": {"type": "integer", "minimum": 0}}}
                     ]},
                     "calibration": {"type": "string", "minLength": 1},
                     "workload": {"type": "array", "minItems": 1, "items": {
