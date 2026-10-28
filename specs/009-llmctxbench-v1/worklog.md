@@ -1,5 +1,20 @@
 # LLMCtxBench v1 worklog
 
+## S12 — complete
+
+- Caller audit found the older reusable study and RepoQA adaptation protocols still back documented
+  commands, saved artifact formats, and active tests. They have no equivalent in the versioned
+  lifecycle, so deleting them would be a breaking migration rather than removal of superseded code.
+- Clarified the boundary: versioned definitions accept only the current schema; unversioned
+  definitions are isolated to the separately maintained study protocols. Updated the refactor plan
+  with the retained architecture boundary and migration condition.
+- Validation: `PYTHONPATH=src pytest -q tests/test_v1_definitions.py tests/test_adaptive_v1.py
+  tests/test_adaptive_v1_fallback.py tests/test_adaptive_v1_controllers.py
+  tests/test_adaptive_research.py` (39 passed); old-version rejection is covered by
+  `tests/test_v1_definitions.py`. No provider calls.
+- Limitation: no legacy study modules were deleted because this slice does not replace their
+  behavior or artifact readers.
+
 ## S10 — complete
 
 - Added calibrated utility selection, a rolling failure-window circuit breaker with one fallback,

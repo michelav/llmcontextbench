@@ -61,8 +61,9 @@ def resolve_definition(path: str | Path, *, _parents: tuple[Path, ...] = ()) -> 
 def planner_payload(definition: dict[str, Any]) -> dict[str, Any]:
     """Validate the v1 public contract and translate to the shared planner model.
 
-Unversioned definitions remain for the old study stack during its staged removal.
-No persisted-artifact compatibility reading is introduced here.
+Unversioned definitions are passed through for the separately maintained reusable
+study protocols. Versioned benchmark definitions accept only the current schema;
+no persisted-artifact compatibility reading is introduced here.
 """
     version = definition.get("schemaVersion")
     if version is None:

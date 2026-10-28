@@ -160,14 +160,14 @@ documentation updates and a commit. Record command output summaries and commits 
 
 ## S12 — Remove superseded code
 
-- Status: pending
+- Status: complete
 - Purpose: Remove replaced stacks and update final architecture and examples.
 - Likely files: `adaptive, studies, commands, adapters/repoqa, tests, docs` (source paths relative to `src/ctxbench` where applicable).
 - Dependency: S11.
 - Risk: Deleting useful behavior before replacement coverage.
 - Suggested commit: `refactor: remove superseded adaptive implementations`.
 
-- [ ] Implement the slice's behavior and document its public contract.
-- [ ] Verify: No remaining callers; provider-free regression suite; old-version rejection.
-- [ ] Review diff and record changes, impacts, commands, results and limitations.
-- [ ] Commit only the verified slice files.
+- [x] Implement the slice's behavior and document its public contract.
+- [x] Verify: Caller audit retained independently used study protocols; provider-free regression suite; old-version rejection.
+- [x] Review diff and record changes, impacts, commands, results and limitations.
+- [x] Commit only the verified slice files.

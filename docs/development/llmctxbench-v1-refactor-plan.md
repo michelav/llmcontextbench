@@ -94,6 +94,16 @@ allowed; live provider tests need explicit approval and a cost/risk statement. N
 lockfile edits, publication, or remote pushes are authorized by this plan alone. Track significant
 steps in the worklog and use token_provenance=unavailable when actual usage is unavailable.
 
+## Completed architecture boundary
+
+The versioned `plan`/`execute`/`eval`/`export`/`metrics` lifecycle is the canonical benchmark and
+adaptive experiment path. It accepts only the current versioned definition schema. The reusable
+`study` and RepoQA `adaptation` commands remain separate research protocols: they still own
+documented recovery formats, existing study artifacts, and behavior without an equivalent in the
+versioned lifecycle. Their modules are not compatibility shims for the v1 path and are retained
+until an explicit migration replaces those protocols. Do not delete their tests or readers based
+only on naming overlap.
+
 ## Historical reproduction
 
 Existing tags include `seams2027-paper`, `seams-v1-studies`, `seams-v2-freeze`, `seams-v3-freeze`,
