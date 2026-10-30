@@ -89,6 +89,21 @@ class ResolvedDatasetPackage:
     def get_task_instance(self, instance_id: str, task_id: str) -> dict[str, object] | None:
         return None
 
+    def dataset_instructions(self) -> str | None:
+        return None
+
+    def resolve_surface(self, surface: object) -> object:
+        return surface
+
+    def mcp_server(self, *, allowed_operations=None) -> object | None:
+        return None
+
+    def request_features(self, instance_id: str, task_id: str) -> dict[str, object]:
+        return {}
+
+    def validators(self) -> dict[str, object]:
+        return {}
+
     def fixtures(self) -> object:
         return {}
 
