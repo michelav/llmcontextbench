@@ -1,2 +1,0 @@
-When a tool requires a `workspace_id`, use the `Instance ID`.
-Do not invent or modify dataset identifiers.
