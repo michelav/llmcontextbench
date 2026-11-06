@@ -9,14 +9,13 @@ Copy an existing experiment, then edit:
 - `configurations` and `surfaces` to define each concrete treatment;
 - `scope.instances` and `scope.tasks` to hold the request population constant;
 - `execution.repeats` to set repetitions consistently;
-- scenario-specific settings such as RepoQA `params` and controlled tool delay
-  settings used by a research runner.
+- scenario-specific settings required by the dataset adapter and experimental
+  treatment.
 
 `llmctxbench execute` executes the configurations declared in the experiment file.
-It does not perform per-request adaptive selection. Adaptive policies and
-latency-injection scenarios use the experimental `llmctxbench adaptation repoqa`
-group; see the [first-study guide](repoqa-first-study-guide.md) for preparation, calibration,
-freezing, resume and analysis.
+It does not perform per-request adaptive selection. Adaptive policy and runtime
+code is maintained under `src/ctxbench/adaptive/`; use the
+[provider-free validation guide](validation-guide.md) to inspect lifecycle behavior.
 
 ## Provider-free CLI smoke check
 
@@ -35,21 +34,21 @@ provider-backed execution test.
 
 ## Standard scenario lifecycle
 
-For a scenario experiment at `experiments/repoqa-control.json`, allocate a
-fresh directory such as `runs/repoqa-control`, then run:
+For a scenario experiment, allocate a fresh output directory such as
+`runs/scenario`, then run:
 
 ```bash
-llmctxbench plan experiments/repoqa-control.json --output runs/repoqa-control
-llmctxbench status runs/repoqa-control
-llmctxbench execute runs/repoqa-control/trials.jsonl
-llmctxbench eval runs/repoqa-control/responses.jsonl
-llmctxbench export runs/repoqa-control/evals.jsonl \
-  --output runs/repoqa-control/results.csv
-llmctxbench metrics runs/repoqa-control
+llmctxbench plan path/to/experiment.json --output runs/scenario
+llmctxbench status runs/scenario
+llmctxbench execute runs/scenario/trials.jsonl
+llmctxbench eval runs/scenario/responses.jsonl
+llmctxbench export runs/scenario/evals.jsonl \
+  --output runs/scenario/results.csv
+llmctxbench metrics runs/scenario
 ```
 
 Repeat the lifecycle with a separate experiment and output directory for each
-comparison arm, for example `runs/repoqa-inline` and `runs/repoqa-local-mcp`.
+comparison arm, for example `runs/arm-one` and `runs/arm-two`.
 Keep dataset snapshot, scope, model, evaluation settings, and repeat count
 identical unless that item is the scenario treatment. Review `status` and the
 manifest before execution. `execute` and `eval` can invoke configured providers
@@ -57,15 +56,6 @@ and may incur cost.
 
 The scenario files should declare their own `factors`, `configurations`,
 `surfaces`, `scope`, and `execution.repeats`; do not rely on changing CLI
-selectors to define an undocumented treatment. For an adaptive experiment,
-plan the complete candidate catalog as required by the research runner, then
-give each policy, seed, and scenario its own output root. Canonical artifacts
-remain the standard CLI artifacts; policy decisions belong in the runner's
-versioned sidecar as specified by the prototype.
-
-## Adaptive episode recovery
-
-Use `--resume` on the research runner, including calibration operations. An uncertain
-provider attempt additionally requires `--retry-uncertain`; prior cost stays unavailable.
-Evaluate only completed episodes. The [protocol](repoqa-resumable-workflow.md) defines
-fingerprints, atomic packets, paired schedules and interrupted-block sensitivity.
+selectors to define an undocumented treatment. For adaptive policies, preserve the
+standard benchmark artifacts and version any additional decision sidecars. Test
+deterministic selection and recovery behavior with provider-free fixtures.

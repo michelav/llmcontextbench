@@ -12,7 +12,7 @@ from ctxbench.adaptive.calibration import DELAYS_MS
 def register_repoqa_commands(parser: argparse.ArgumentParser) -> None:
     sub = parser.add_subparsers(dest='operation', required=True)
     prepare_parser = sub.add_parser('prepare', help='Prepare a study without provider calls')
-    prepare_parser.add_argument('--experiment', default='experiment.repoqa-adaptive.json')
+    prepare_parser.add_argument('--experiment', required=True)
     prepare_parser.add_argument('--context-limit', type=int, required=True)
     prepare_parser.add_argument('--output-reservation', type=int, required=True)
     prepare_parser.add_argument('--output', required=True)

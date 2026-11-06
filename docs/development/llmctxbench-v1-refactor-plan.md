@@ -106,7 +106,5 @@ only on naming overlap.
 
 ## Historical reproduction
 
-Existing tags include `seams2027-paper`, `seams-v1-studies`, `seams-v2-freeze`, `seams-v3-freeze`,
-and `seams-r3-freeze`. The owner has been asked for the Zenodo deposit reference. No DOI has been
-verified, and this plan does not claim the historical evidence chain is complete. This omission does
-not block tool implementation. Existing datasets, baselines, and runs remain untouched.
+Experiment-specific tags and artifacts are maintained with their external research archive.
+This plan covers the general tool architecture and does not define experiment reproduction steps.

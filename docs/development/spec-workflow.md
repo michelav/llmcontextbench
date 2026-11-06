@@ -77,7 +77,20 @@ Do not log every prompt. Log meaningful steps:
 - audit-run;
 - spec-completed.
 
-Token usage may be unavailable. Do not invent token counts.
+Token usage may be unavailable. Do not invent token counts. Record `token_provenance` as
+`reported`, `estimated` (documented heuristic), or `unavailable`; prefer `unavailable` over false precision.
+
+## Compact slice prompt
+
+```text
+Spec: <path>
+Slice: <goal>
+Tasks: <ids>
+Do: <short list>
+Don't: provider calls, full benchmark, opportunistic refactors
+Run: focused tests
+Report: files, tests, risks
+```
 
 ## Converting existing specs to lite format
 

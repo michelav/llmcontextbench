@@ -16,6 +16,9 @@ result
 outputs/
 results/
 temp/
+/baselines/
+/runs/
+/studies/
 .specify/feature.json
 .codex
 .claude

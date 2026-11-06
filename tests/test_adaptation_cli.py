@@ -10,8 +10,8 @@ from ctxbench.adapters.repoqa import workflow
 
 
 OPERATIONS = [
-    ('prepare', ['--context-limit', '200000', '--output-reservation', '2048'],
-     {'experiment': 'experiment.repoqa-adaptive.json', 'context_limit': 200000, 'output_reservation': 2048}),
+    ('prepare', ['--experiment', 'experiment.json', '--context-limit', '200000', '--output-reservation', '2048'],
+     {'experiment': 'experiment.json', 'context_limit': 200000, 'output_reservation': 2048}),
     ('calibrate', ['--prepared', 'prepared.json'],
      {'prepared': 'prepared.json', 'delay_ms': 0, 'seed': 20261001, 'resume': False, 'retry_uncertain': False}),
     ('freeze', ['--prepared', 'prepared.json'], {'prepared': 'prepared.json', 'application_slo_ms': None}),
