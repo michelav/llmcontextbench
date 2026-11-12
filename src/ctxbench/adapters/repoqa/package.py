@@ -6,7 +6,7 @@ from typing import override
 
 from ctxbench.benchmark.models import ExperimentDataset
 from ctxbench.benchmark.surfaces import ResolvedSurface, SurfaceSpec
-from ctxbench.dataset.capabilities import DatasetCapabilityReport
+from ctxbench.dataset.capabilities import DatasetCapabilityReport, SignalCapability, SignalCost
 from ctxbench.dataset.errors import UnsupportedRepresentationError
 from ctxbench.dataset.package import DatasetMetadata
 from ctxbench.dataset.payloads import ContextPayload, EvidencePayload, TaskPayload
@@ -30,6 +30,19 @@ REPRESENTATION_ARTIFACTS = {
 
 
 class RepoQADatasetAdapter(LocalDatasetPackage):
+    def semantic_quality_assessors(self) -> tuple[SignalCapability, ...]:
+        return (SignalCapability(
+            signal_id="repoqa-reference-scorer",
+            version="1",
+            metric_id="repoqa_correctness",
+            sensor_class="oracle",
+            value_provenance="derived",
+            cost=SignalCost(None, "unavailable", 0, "derived"),
+            value_scale="binary",
+            uses_reference_data=True,
+            deployment_scope="reference-data",
+        ),)
+
     def validators(self) -> dict[str, object]:
         from ctxbench.adapters.repoqa.evaluation import evaluate_configured_response
         return {"repoqa-scorer": evaluate_configured_response}

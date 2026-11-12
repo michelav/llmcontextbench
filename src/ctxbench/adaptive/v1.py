@@ -12,6 +12,7 @@ from typing import Any
 from ctxbench.benchmark.fingerprint import file_digest
 from ctxbench.benchmark.models import TrialSpec
 from ctxbench.benchmark.provisioning import validate_artifact_directory
+from ctxbench.runtime.disturbances import RuntimeComponent, ToolRuntimeDisturbance
 from ctxbench.util.jsonl import read_jsonl
 from ctxbench.util.fs import load_json, write_json
 from ctxbench.util.jsonl import write_jsonl
@@ -383,25 +384,19 @@ class TokenQuota:
 class DelayedToolRuntime:
     """Add an explicit per-call delay while preserving runtime ownership."""
     def __init__(self, inner, delay_ms: int, sleeper=sleep, *, failure_rate: float = 0, failure_seed: int = 0):
-        self.inner, self.delay_ms, self.sleeper = inner, delay_ms, sleeper
-        self.failure_rate, self.failure_seed, self.call_index = failure_rate, failure_seed, 0
+        self._delegate = ToolRuntimeDisturbance(
+            inner, name="legacy-adaptive-tool-disturbance", component=RuntimeComponent.LOCAL_MCP,
+            delay_ms=delay_ms, failure_rate=failure_rate, failure_seed=failure_seed, sleeper=sleeper,
+        )
 
     def list_tools(self):
-        return self.inner.list_tools()
+        return self._delegate.list_tools()
 
     def call_tool(self, name, arguments):
-        if self.delay_ms:
-            self.sleeper(self.delay_ms / 1000)
-        if self.failure_rate:
-            digest = sha256(f"{self.failure_seed}:{self.call_index}:{name}".encode()).digest()
-            self.call_index += 1
-            draw = int.from_bytes(digest[:8], "big") / (2**64)
-            if draw < self.failure_rate:
-                raise RuntimeError("Injected adaptive tool failure")
-        return self.inner.call_tool(name, arguments)
+        return self._delegate.call_tool(name, arguments)
 
     def close(self):
-        self.inner.close()
+        self._delegate.close()
 
 
 def load_adaptive_records(root: Path) -> list[dict]:
@@ -426,6 +421,7 @@ def execute_adaptive(plan: dict, knowledge: dict | None, runspecs: list[TrialSpe
     from ctxbench.benchmark.runtime_adapter import TrialRuntimeAdapter
     from ctxbench.execution.service import ExecutionRequest, ExecutionSession, TrialExecutionService
     from ctxbench.benchmark.execution_records import rebuild_responses
+    from ctxbench.adaptive.sensors import MinimumResponseLengthSensor
     from ctxbench.runtime.models import ExecutionResult
     from ctxbench.ai.models.base import AIResult
     from ctxbench.util.clock import utc_now_iso
@@ -575,9 +571,11 @@ def execute_adaptive(plan: dict, knowledge: dict | None, runspecs: list[TrialSpe
                 response = result.get("response")
                 response_text = response if isinstance(response, str) else str(response or "")
                 min_length = policy.get("minimumResponseLength", 0)
-                sensor_started = monotonic()
-                sensor_accepted = len(response_text.strip()) >= min_length
-                sensor_duration = (monotonic() - sensor_started) * 1000
+                sensor_observation = MinimumResponseLengthSensor(min_length).observe(
+                    item["requestId"], cid, response_text,
+                )
+                sensor_accepted = sensor_observation.accepted
+                sensor_duration = sensor_observation.cost.duration_ms
                 success = result.get("status") == "success"
                 row = {"candidate": cid, "trialId": trial_id, "attemptId": attempt_id,
                        "status": result.get("status"), "accepted": bool(success and sensor_accepted),
@@ -589,11 +587,16 @@ def execute_adaptive(plan: dict, knowledge: dict | None, runspecs: list[TrialSpe
                                          "provenance": "derived" if isinstance(quota_estimate, (int, float))
                                          else "unavailable"} if quota else None,
                        "quotaTimestamp": datetime.now(timezone.utc).isoformat() if quota else None,
-                       "sensor": {"type": "minimum_response_length",
+                           "sensor": {"type": sensor_observation.sensor_id,
+                                      "sensorVersion": sensor_observation.sensor_version,
+                                      "sensorClass": sensor_observation.sensor_class.value,
+                                      "provenance": sensor_observation.provenance.value,
                                   "minimumResponseLength": min_length,
                                   "accepted": bool(success and sensor_accepted),
-                                  "durationMs": sensor_duration, "totalTokens": 0,
-                                  "totalTokensProvenance": "measured"}}
+                                      "durationMs": sensor_duration,
+                                      "durationProvenance": sensor_observation.cost.duration_provenance.value,
+                                      "totalTokens": sensor_observation.cost.tokens.value,
+                                      "totalTokensProvenance": sensor_observation.cost.tokens.provenance.value}}
                 record["attempts"].append(row)
                 if quota:
                     quota.record(row["quotaTimestamp"], row["totalTokens"], row["knownTotalTokens"])

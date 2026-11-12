@@ -3,7 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from ctxbench.benchmark.models import DatasetProvenance, Experiment, ExperimentDataset
-from ctxbench.dataset.capabilities import DatasetCapabilityReport
+from ctxbench.dataset.capabilities import (
+    DatasetCapabilityReport,
+    FeatureCapability,
+    FeaturePartitionCapability,
+    RequestFeatureSchema,
+)
 from ctxbench.dataset.contexts import artifact_name_for_representation
 from ctxbench.dataset.package import DatasetMetadata
 from ctxbench.dataset.payloads import (
@@ -243,6 +248,8 @@ class LocalDatasetPackage:
                 "get_task_instance": True,
                 "tool_provider": False,
                 "fixtures": True,
+                "request_feature_schema": True,
+                "semantic_quality_assessors": False,
             },
             contributed_tools=None,
             evaluation_helpers=None,
@@ -250,13 +257,39 @@ class LocalDatasetPackage:
             missing_mandatory=[],
             nonconformant_descriptors=[],
             conformant=True,
+            request_feature_schema=self.request_feature_schema(),
         )
 
     def mcp_server(self, *, allowed_operations=None) -> object | None:
         return None
 
     def request_features(self, instance_id: str, task_id: str) -> dict[str, object]:
-        return {}
+        task = self.get_task(task_id)
+        try:
+            context_bytes = self.get_context_artifact_path(instance_id, "blocks").stat().st_size
+        except FileNotFoundError:
+            context_bytes = None
+        return {
+            "context_bytes": context_bytes,
+            "validation_type": task.validation_type,
+            "task_tag_count": len(task.tags),
+        }
+
+    def request_feature_schema(self) -> RequestFeatureSchema:
+        return RequestFeatureSchema(
+            schema_id="ctxbench.local-request-features",
+            version="1",
+            features=(
+                FeatureCapability("context_bytes", "number", "measured", unit="bytes"),
+                FeatureCapability("validation_type", "category", "reported"),
+                FeatureCapability("task_tag_count", "number", "derived", unit="count"),
+            ),
+            partition_keys=("context_bytes", "validation_type"),
+            partitions=(FeaturePartitionCapability(
+                "context_bytes", boundaries=(4096, 16384), labels=("compact", "medium", "large")
+            ),),
+            missing_partition_policy="explicit",
+        )
 
     def validators(self) -> dict[str, object]:
         return {}

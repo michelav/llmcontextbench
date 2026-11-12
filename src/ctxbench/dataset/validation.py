@@ -3,7 +3,12 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
-from ctxbench.dataset.capabilities import DatasetCapabilityReport
+from ctxbench.dataset.capabilities import (
+    DatasetCapabilityReport,
+    DEFAULT_RESPONSE_ACCEPTANCE_SENSORS,
+    RequestFeatureSchema,
+    SignalCapability,
+)
 from ctxbench.dataset.package import DatasetMetadata, DatasetPackage, StrategyDescriptor
 
 
@@ -30,6 +35,8 @@ _OPTIONAL_METHODS = (
     "mcp_server",
     "request_features",
     "validators",
+    "request_feature_schema",
+    "semantic_quality_assessors",
 )
 
 _DESCRIPTOR_FIELDS = (
@@ -90,6 +97,15 @@ def validate_package(package: DatasetPackage) -> DatasetCapabilityReport:
     contributed_tools = _safe_call(package, "tool_provider", None)
     evaluation_helpers = _safe_call(package, "evaluation_helpers", None)
     raw_descriptors = _safe_call(package, "strategy_descriptors", None) or []
+    request_feature_schema = _safe_call(package, "request_feature_schema", None)
+    if request_feature_schema is not None and not isinstance(request_feature_schema, RequestFeatureSchema):
+        raise ValueError("request_feature_schema must return a RequestFeatureSchema or None")
+    acceptance_sensors = _safe_call(package, "response_acceptance_sensors", None)
+    if acceptance_sensors is not None and not _valid_signals(acceptance_sensors):
+        raise ValueError("response_acceptance_sensors must return SignalCapability records")
+    quality_assessors = _safe_call(package, "semantic_quality_assessors", None) or ()
+    if not _valid_signals(quality_assessors):
+        raise ValueError("semantic_quality_assessors must return SignalCapability records")
 
     strategy_descriptors: list[StrategyDescriptor] = []
     nonconformant_descriptors: list[str] = []
@@ -120,4 +136,12 @@ def validate_package(package: DatasetPackage) -> DatasetCapabilityReport:
         missing_mandatory=missing_mandatory,
         nonconformant_descriptors=nonconformant_descriptors,
         conformant=not missing_mandatory and not nonconformant_descriptors,
+        request_feature_schema=request_feature_schema,
+        response_acceptance_sensors=tuple(acceptance_sensors) if acceptance_sensors is not None else
+            DEFAULT_RESPONSE_ACCEPTANCE_SENSORS,
+        semantic_quality_assessors=tuple(quality_assessors),
     )
+
+
+def _valid_signals(value: object) -> bool:
+    return isinstance(value, (tuple, list)) and all(isinstance(item, SignalCapability) for item in value)

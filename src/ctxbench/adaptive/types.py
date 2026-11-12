@@ -37,14 +37,14 @@ class RequestFeatures:
     """Permitted features; identities and nominal variants belong to workload preparation."""
     sequence_index: int
     context_bytes: int
-    size_bin: SizeBin
+    size_bin: SizeBin | None = None
 
     def __post_init__(self) -> None:
         if (type(self.sequence_index) is not int or type(self.context_bytes) is not int
                 or self.sequence_index < 1 or self.context_bytes < 0):
             raise ValueError("invalid request features")
-        if not isinstance(self.size_bin, SizeBin):
-            raise ValueError("explicit SizeBin required")
+        if self.size_bin is not None and not isinstance(self.size_bin, SizeBin):
+            raise ValueError("size_bin must be a declared SizeBin or None")
 
 
 @dataclass(frozen=True)
@@ -105,7 +105,7 @@ class Estimate:
 @dataclass(frozen=True)
 class EstimateKey:
     configuration_id: str
-    size_bin: SizeBin
+    size_bin: SizeBin | None
 
 
 @dataclass(frozen=True)
@@ -126,13 +126,15 @@ class TokenUsage:
 @dataclass(frozen=True)
 class Observation:
     configuration_id: str
-    size_bin: SizeBin
+    size_bin: SizeBin | None
     status: str
     end_to_end_duration_ms: float | None
     tokens: TokenUsage
     duration_provenance: Provenance = Provenance.MEASURED
 
     def __post_init__(self) -> None:
+        if not self.configuration_id or (self.size_bin is not None and not isinstance(self.size_bin, SizeBin)):
+            raise ValueError("observation requires a configuration and optional legacy SizeBin")
         validate_metric(self.end_to_end_duration_ms, self.duration_provenance)
 
     @property

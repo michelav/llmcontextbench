@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from time import perf_counter
+from typing import Callable, Mapping
 
 from ctxbench.ai.cache import build_inline_prompt_cache_key
 from ctxbench.ai.engine import Engine
@@ -16,10 +17,23 @@ from ctxbench.util.env import redact_secrets, resolve_secret_params
 
 class ProvisioningRuntime:
     def __init__(self, engine: Engine, context_source: ContextSource, *,
-                 local_mcp_runtime_decorator=None, monotonic=perf_counter) -> None:
+                 local_mcp_runtime_decorator=None,
+                 runtime_interceptors: Mapping[str, Callable] | None = None,
+                 monotonic=perf_counter) -> None:
         self._engine = engine
         self._context_source = context_source
-        self._decorate = local_mcp_runtime_decorator
+        self._interceptors = dict(runtime_interceptors or {})
+        unknown_components = set(self._interceptors) - {"local_function", "local_mcp", "remote_mcp"}
+        if unknown_components:
+            raise ValueError(f"Unknown runtime interceptor components: {', '.join(sorted(unknown_components))}")
+        if any(not callable(interceptor) for interceptor in self._interceptors.values()):
+            raise ValueError("runtime interceptors must be callable")
+        if local_mcp_runtime_decorator is not None:
+            if "local_mcp" in self._interceptors:
+                raise ValueError("local MCP interceptor was provided twice")
+            if not callable(local_mcp_runtime_decorator):
+                raise ValueError("local MCP runtime decorator must be callable")
+            self._interceptors["local_mcp"] = local_mcp_runtime_decorator
         self._monotonic = monotonic
 
     def execute(self, request: RuntimeRequest) -> ExecutionResult:
@@ -41,10 +55,12 @@ class ProvisioningRuntime:
         operations = request.surface_spec.get("operations")
         if strategy == "local_function":
             provider = self._capability("tool_provider", operations)
-            factories[strategy] = lambda: _decorate_runtime(LocalFunctionRuntime(provider), self._decorate)
+            interceptor = self._interceptors.get("local_function")
+            factories[strategy] = lambda: _decorate_runtime(LocalFunctionRuntime(provider), interceptor)
         elif strategy == "local_mcp":
             server = self._capability("mcp_server", operations)
-            factories[strategy] = lambda: create_local_mcp_runtime(server, self._decorate)
+            interceptor = self._interceptors.get("local_mcp")
+            factories[strategy] = lambda: create_local_mcp_runtime(server, interceptor)
         elif strategy == "remote_mcp":
             config = params.get("mcp_server")
             if not isinstance(config, dict):
@@ -53,7 +69,8 @@ class ProvisioningRuntime:
                 **config,
                 "allowed_operations": operations if operations is not None else config.get("allowed_operations"),
             }
-            factories[strategy] = lambda: _decorate_runtime(MCPRuntime.from_config(remote_config), self._decorate)
+            interceptor = self._interceptors.get("remote_mcp")
+            factories[strategy] = lambda: _decorate_runtime(MCPRuntime.from_config(remote_config), interceptor)
 
         metadata = {**request.metadata, "instance_id": request.instance_id,
                     "context_obtained": strategy == "inline"}

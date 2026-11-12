@@ -1,7 +1,14 @@
 """Dataset and provider helpers."""
 
 from ctxbench.benchmark.models import DatasetProvenance
-from ctxbench.dataset.capabilities import DatasetCapabilityReport
+from ctxbench.dataset.capabilities import (
+    DatasetCapabilityReport,
+    FeatureCapability,
+    FeaturePartitionCapability,
+    RequestFeatureSchema,
+    SignalCapability,
+    SignalCost,
+)
 from ctxbench.dataset.cache import DatasetCache, DatasetConflictError
 from ctxbench.dataset.conflicts import AmbiguousDatasetError, DatasetConflictDetector
 from ctxbench.dataset.inspect import build_inspect_result
@@ -17,6 +24,8 @@ __all__ = [
     "DatasetConflictDetector",
     "DatasetConflictError",
     "DatasetCapabilityReport",
+    "FeatureCapability",
+    "FeaturePartitionCapability",
     "DatasetMetadata",
     "DatasetNotFoundError",
     "DatasetPackage",
@@ -26,6 +35,9 @@ __all__ = [
     "LocalDatasetPackage",
     "MaterializationManifest",
     "MultiDatasetError",
+    "RequestFeatureSchema",
+    "SignalCapability",
+    "SignalCost",
     "StrategyDescriptor",
     "build_inspect_result",
     "validate_package",

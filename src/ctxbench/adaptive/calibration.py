@@ -5,6 +5,7 @@ from math import ceil, isfinite
 from time import sleep
 
 from .types import EstimateKey, Observation, SizeBin, Provenance, TokenUsage, estimate_from_observations
+from ctxbench.runtime.disturbances import RuntimeComponent, ToolRuntimeDisturbance
 
 DELAYS_MS = (100, 250, 500, 1000)
 
@@ -13,17 +14,19 @@ class DelayedRuntime:
     def __init__(self, runtime, delay_ms, sleeper=sleep):
         if not isfinite(delay_ms) or delay_ms < 0:
             raise ValueError('delay must be finite and nonnegative')
-        self.runtime, self.delay_ms, self.sleeper = runtime, delay_ms, sleeper
+        self._delegate = ToolRuntimeDisturbance(
+            runtime, name="legacy-calibration-delay", component=RuntimeComponent.LOCAL_MCP,
+            delay_ms=delay_ms, sleeper=sleeper,
+        )
 
     def list_tools(self):
-        return self.runtime.list_tools()
+        return self._delegate.list_tools()
 
     def call_tool(self, name, arguments):
-        self.sleeper(self.delay_ms / 1000)
-        return self.runtime.call_tool(name, arguments)
+        return self._delegate.call_tool(name, arguments)
 
     def close(self):
-        self.runtime.close()
+        self._delegate.close()
 
 
 def delay_at(index, scenario, delay_ms):
