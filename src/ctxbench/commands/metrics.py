@@ -35,6 +35,8 @@ def metrics_command(
             if manifest_path.exists():
                 manifest = load_json(manifest_path)
                 if isinstance(manifest, dict) and manifest.get("workflowKind", manifest.get("experimentKind")) == "adaptive":
+                    from ctxbench.adaptive.artifacts import validate_workflow_manifest
+                    manifest = validate_workflow_manifest(inputs[0])
                     if selector and (selector.configuration or selector.strategy or selector.representation or selector.surface or selector.repetition):
                         raise ValueError("Adaptive metrics selectors support task, instance, status, and request ID only.")
                     requests, attempts = build_adaptive_metrics(inputs[0])

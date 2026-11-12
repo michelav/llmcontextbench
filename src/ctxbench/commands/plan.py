@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 from ctxbench.adapters.registry import get_default_registry
 from ctxbench.benchmark.experiment_loader import load_experiment
@@ -41,8 +42,35 @@ def plan_command(
     cache_dir: Path | None = None,
 ) -> int:
     logger = PhaseLogger(verbose=verbose)
+    source_path = Path(path).resolve()
+    with source_path.open(encoding="utf-8") as stream:
+        definition_header = json.load(stream)
+    if isinstance(definition_header, dict) and definition_header.get("workflowKind") == "adaptive":
+        from ctxbench.adaptive.artifacts import validate_adaptive_definition, write_adaptive_artifacts
+        target = Path(output).resolve() if output else source_path.parent / str(definition_header.get("output", "outputs"))
+        plan = validate_adaptive_definition(definition_header)
+        dataset_metadata = definition_header.get("dataset")
+        evaluation = definition_header.get("evaluation")
+        trace = definition_header.get("trace")
+        if target.exists() and any(target.iterdir()):
+            raise ValueError("Adaptive planning requires a fresh output directory; existing plans are never migrated.")
+        dataset = dataset_metadata if isinstance(dataset_metadata, dict) else {
+            "id": plan.dataset_id or "unknown", "version": plan.dataset_version or "unknown",
+            "origin": None, "materializedPath": None,
+        }
+        if ((plan.dataset_id and dataset.get("id") != plan.dataset_id)
+                or (plan.dataset_version and dataset.get("version") != plan.dataset_version)):
+            raise ValueError("Adaptive definition dataset differs from its frozen plan provenance.")
+        write_adaptive_artifacts(target, plan, dataset=dataset, evaluation=evaluation, trace=trace)
+        print(f"Planned {len(plan.requests)} adaptive request(s) → {target / 'adaptive-plan.json'}")
+        return 0
     logger.info("PLAN", "experiment.loaded", "Loading experiment", path=path)
     experiment = load_experiment(path)
+    if experiment.experimentKind == "adaptive":
+        raise ValueError(
+            "Legacy kind=adaptive definitions are not planned. Provide a fresh workflowKind=adaptive "
+            "definition with adaptive plan schemaVersion 2."
+        )
     base_dir = Path(path).resolve().parent
     cache = DatasetCache(cache_dir=cache_dir)
     resolver = DatasetResolver()
@@ -88,12 +116,6 @@ def plan_command(
         experiment_path=path,
         on_warning=lambda message, **fields: logger.warn("PLAN", "trial.prepare.warning", message, **fields),
     )
-    adaptive_plan = knowledge = None
-    if experiment.experimentKind == "adaptive":
-        from ctxbench.adaptive.v1 import build_adaptive_plan
-        if experiment.adaptation.get("policy", {}).get("type") == "threshold" and not experiment.adaptation.get("calibration"):
-            raise ValueError("Threshold policy requires adaptation.calibration")
-        adaptive_plan, knowledge = build_adaptive_plan(experiment.adaptation, runspecs, adapter)
     logger.info("PLAN", "trials.expanded", "Expanding trials", input=path, total=len(runspecs))
 
     output_root = Path(output).resolve() if output else resolve_output_root(experiment, base_dir)
@@ -134,11 +156,6 @@ def plan_command(
         "trace": experiment.trace.model_dump(mode="json"),
         "artifacts": experiment.artifacts.model_dump(mode="json"),
     }
-    if experiment.experimentKind == "adaptive":
-        write_json(output_root / "adaptive-plan.json", adaptive_plan)
-        if knowledge is not None:
-            write_json(output_root / "knowledge.json", knowledge)
-        manifest["experimentKind"] = "adaptive"
     if experiment.definitionVersion == 3:
         manifest["schemaVersion"] = 3
         manifest["provisioningArtifactVersion"] = PROVISIONING_ARTIFACT_VERSION
@@ -146,12 +163,7 @@ def plan_command(
         write_json(output_root / "resolved.json", experiment.resolvedDefinition)
         dataset_root = dataset_provenance.materialized_path
         inputs = {
-            "artifacts": {name: file_digest(output_root / name) for name in
-                          (("resolved.json", "trials.jsonl", "adaptive-plan.json", "knowledge.json")
-                           if experiment.experimentKind == "adaptive" and (output_root / "knowledge.json").exists()
-                           else ("resolved.json", "trials.jsonl", "adaptive-plan.json")
-                           if experiment.experimentKind == "adaptive"
-                           else ("resolved.json", "trials.jsonl"))},
+            "artifacts": {name: file_digest(output_root / name) for name in ("resolved.json", "trials.jsonl")},
             "implementation": implementation_digest(),
             "dataset": tree_digest(Path(dataset_root)) if dataset_root else dataset_provenance.content_hash,
         }

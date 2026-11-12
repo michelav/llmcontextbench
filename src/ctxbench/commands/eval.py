@@ -4,7 +4,6 @@ from pathlib import Path
 
 from ctxbench.benchmark.provisioning import validate_artifact_directory
 from ctxbench.benchmark.execution_records import rebuild_responses
-from ctxbench.benchmark.provisioning import validate_manifest
 from typing import Any
 
 from ctxbench.adapters.registry import get_default_validators
@@ -261,7 +260,8 @@ def eval_command(
 
     source = Path(responses).resolve() if responses else Path("responses.jsonl").resolve()
     source_root = source.parent
-    manifest = validate_manifest(source_root)
+    from ctxbench.adaptive.artifacts import validate_workflow_manifest
+    manifest = validate_workflow_manifest(source_root)
     adaptive = manifest.get("workflowKind", manifest.get("experimentKind")) == "adaptive"
     if adaptive:
         from ctxbench.adaptive.projections import rebuild_adaptive_responses

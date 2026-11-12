@@ -13,7 +13,7 @@ from ctxbench.util.jsonl import read_jsonl
 
 
 def _trial_id(row: dict[str, object]) -> str:
-    return str(row.get("trialId", ""))
+    return str(row.get("responseId") or row.get("requestId") or row.get("trialId", ""))
 
 
 def _last_status_map(path: Path) -> dict[str, str]:
@@ -137,6 +137,12 @@ def _load_experiment_id(root: Path) -> str:
 def status_command(output_dir: str | None = None, *, by: str | None = None) -> int:
     root = Path(output_dir).resolve() if output_dir else Path(".").resolve()
 
+    manifest_path = root / "manifest.json"
+    if manifest_path.exists():
+        raw_manifest = load_json(manifest_path)
+        if isinstance(raw_manifest, dict) and raw_manifest.get("workflowKind") == "adaptive":
+            return _adaptive_status_command(root, by=by)
+
     manifest = validate_manifest(root)
     attempt_states: dict[str, str] = {}
     if manifest.get("provisioningArtifactVersion") == 4:
@@ -238,3 +244,97 @@ def _count_adaptive_requests(root: Path) -> int:
     plan = load_json(path)
     workload = plan.get("workload", []) if isinstance(plan, dict) else []
     return len(workload) if isinstance(workload, list) else 0
+
+
+def _adaptive_status_command(root: Path, *, by: str | None) -> int:
+    from ctxbench.adaptive.artifacts import adaptive_plan_from_payload, validate_workflow_manifest
+    from ctxbench.adaptive.projections import rebuild_adaptive_responses
+    from ctxbench.execution.service import TrialExecutionService
+
+    manifest = validate_workflow_manifest(root)
+    plan = adaptive_plan_from_payload(load_json(root / "adaptive-plan.json"))
+    rebuild_adaptive_responses(root)
+    records_path = root / "adaptive-records"
+    records = [load_json(path) for path in sorted(records_path.glob("*.json"))] if records_path.exists() else []
+    by_request = {str(row["requestId"]): row for row in records}
+    if len(by_request) != len(records):
+        raise ValueError("Adaptive request ledger contains duplicate request IDs.")
+    planned_requests = {request.request_id: request for request in plan.requests}
+    unknown_requests = set(by_request) - set(planned_requests)
+    if unknown_requests:
+        raise ValueError(f"Adaptive ledger contains request IDs outside its plan: {', '.join(sorted(unknown_requests))}")
+    terminal_states = {"delivered", "failed", "rejected"}
+    if any(row.get("state") not in terminal_states | {"started"} for row in records):
+        raise ValueError("Adaptive request ledger contains an unsupported state.")
+    for request_id, record in by_request.items():
+        request = planned_requests[request_id]
+        if (record.get("sequenceIndex") != request.sequence_index
+                or record.get("taskId") != request.task_id
+                or record.get("instanceId") != request.instance_id):
+            raise ValueError(f"Adaptive ledger identity differs from frozen request {request_id}.")
+    state_counts = {state: sum(row.get("state") == state for row in records)
+                    for state in ("delivered", "failed", "rejected", "started")}
+    response_count = state_counts["delivered"]
+    eval_tally = _tally(_last_status_map(root / "evals.jsonl"))
+    eval_done = eval_tally.get("evaluated", 0)
+    eval_error = eval_tally.get("error", 0)
+    service = TrialExecutionService(root)
+    execution_ids = {
+        invocation.execution.execution_id
+        for request in plan.requests
+        for invocation in request.candidates.values()
+    }
+    attempts_by_execution = {execution_id: service.attempts(execution_id) for execution_id in execution_ids}
+    attempt_records = [row for rows in attempts_by_execution.values() for row in rows]
+    uncertain = sum(bool(rows) and rows[-1].get("state") == "started" for rows in attempts_by_execution.values())
+    planned = len(plan.requests)
+    pending = max(0, planned - len(records))
+
+    print(f"Experiment : {manifest.get('experimentId', plan.workflow_id)}")
+    print(f"Directory  : {root}")
+    print("Workflow   : adaptive")
+    print()
+    col = (12, 8, 10, 8, 10, 8, 8)
+    header = (f"{'Phase':<{col[0]}} {'Total':>{col[1]}} {'Delivered':>{col[2]}} "
+              f"{'Failed':>{col[3]}} {'Rejected':>{col[4]}} {'Started':>{col[5]}} {'Pending':>{col[6]}}")
+    print(header)
+    print("─" * len(header))
+    print(f"{'requests':<{col[0]}} {planned:>{col[1]}} {state_counts['delivered']:>{col[2]}} "
+          f"{state_counts['failed']:>{col[3]}} {state_counts['rejected']:>{col[4]}} "
+          f"{state_counts['started']:>{col[5]}} {pending:>{col[6]}}")
+    delivered_attempts = sum(
+        row.get("attemptId") == ((by_request.get(str(row.get("correlationId")), {}).get("delivery") or {}).get("attemptId"))
+        for row in attempt_records
+    )
+    print(f"{'attempts':<{col[0]}} {len(attempt_records):>{col[1]}} {delivered_attempts:>{col[2]}} "
+          f"{sum(row.get('state') == 'failed' for row in attempt_records):>{col[3]}} {0:>{col[4]}} "
+          f"{uncertain:>{col[5]}} {0:>{col[6]}}")
+    print(f"{'eval':<{col[0]}} {response_count:>{col[1]}} {eval_done:>{col[2]}} "
+          f"{eval_error:>{col[3]}} {0:>{col[4]}} {0:>{col[5]}} "
+          f"{max(0, response_count - eval_done - eval_error):>{col[6]}}")
+
+    if by == "judge":
+        rows = _judge_breakdown(root, response_count)
+        print()
+        print(f"{'Judge':<24} {'Total':>8} {'Success':>8} {'Failed':>8} {'Pending':>8}")
+        print("─" * 64)
+        for judge_id, total, success, failed, pending_count in rows:
+            print(f"{judge_id:<24} {total:>8} {success:>8} {failed:>8} {pending_count:>8}")
+    elif by in {"task", "instance", "candidate"}:
+        counts: dict[str, dict[str, int]] = {}
+        for request in plan.requests:
+            record = by_request.get(request.request_id, {})
+            value = (record.get("delivery") or {}).get("candidateId") if by == "candidate" else getattr(request, f"{by}_id")
+            label = str(value or "<unassigned>")
+            bucket = counts.setdefault(label, {"total": 0, "delivered": 0, "failed": 0, "pending": 0})
+            bucket["total"] += 1
+            state = record.get("state")
+            bucket["delivered"] += state == "delivered"
+            bucket["failed"] += state in {"failed", "rejected"}
+            bucket["pending"] += state not in terminal_states
+        print(f"\n{by:<24} {'Total':>8} {'Delivered':>10} {'Failed':>8} {'Pending':>8}")
+        for label, row in sorted(counts.items()):
+            print(f"{label:<24} {row['total']:>8} {row['delivered']:>10} {row['failed']:>8} {row['pending']:>8}")
+    elif by is not None:
+        raise ValueError("Adaptive status --by supports task, instance, candidate, or judge.")
+    return 0

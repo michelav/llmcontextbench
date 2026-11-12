@@ -100,6 +100,21 @@ def test_cascade_policy_accepts_one_fallback_and_rejects_more():
         planner_payload(data)
 
 
+def test_legacy_kind_adaptive_definition_cannot_create_a_v1_plan(tmp_path):
+    from ctxbench.commands.plan import plan_command
+
+    data = definition()
+    data["kind"] = "adaptive"
+    data["adaptation"] = {
+        "policy": {"type": "static", "candidate": ["one", "a"]},
+        "workload": [{"taskId": "task_role", "instanceId": "person-001"}],
+    }
+    source = tmp_path / "old-adaptive-definition.json"
+    source.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="Legacy kind=adaptive definitions"):
+        plan_command(str(source), str(tmp_path / "output"))
+
+
 @pytest.mark.parametrize('policy', [
     {'type': 'utility', 'latencyWeight': 1, 'tokenWeight': 1},
     {'type': 'budget', 'tokenBudget': 100, 'bestEffort': True},

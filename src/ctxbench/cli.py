@@ -238,9 +238,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ── ctxbench plan ──────────────────────────────────────────────────────
     plan_parser = subparsers.add_parser(
-        "plan", help="Expand an experiment into trials.jsonl"
+        "plan", help="Freeze a benchmark trial plan or versioned adaptive workflow plan"
     )
-    plan_parser.add_argument("path", help="Path to the experiment JSON file")
+    plan_parser.add_argument("path", help="Benchmark definition or workflowKind=adaptive plan definition JSON")
     plan_parser.add_argument(
         "--output", metavar="DIR",
         help="Override output directory (default: experiment.output/<id>/)",
@@ -260,11 +260,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ── ctxbench execute ───────────────────────────────────────────────────
     execute_parser = subparsers.add_parser(
-        "execute", help="Execute trials and collect responses"
+        "execute", help="Execute a frozen benchmark or adaptive workflow plan"
     )
     execute_parser.add_argument(
         "trials", nargs="?", default=None,
-        help="Path to trials.jsonl (default: ./trials.jsonl)",
+        help="Path to trials.jsonl or adaptive-plan.json (default: ./trials.jsonl)",
     )
     execute_parser.add_argument(
         "--force", action="store_true",
@@ -395,7 +395,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     metrics_parser.add_argument(
         "inputs", nargs="+",
-        help="Experiment output directory containing trials.jsonl",
+        help="Benchmark or adaptive workflow output directory",
     )
     metrics_parser.add_argument(
         "--output", metavar="DIR",
@@ -450,7 +450,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Experiment output directory (default: current directory)",
     )
     status_parser.add_argument(
-        "--by", metavar="FIELD", choices=["model", "configuration", "representation", "strategy", "instance", "task", "judge"],
+        "--by", metavar="FIELD", choices=["model", "configuration", "representation", "strategy", "instance", "task", "candidate", "judge"],
         help="Break down counts by field",
     )
     status_parser.set_defaults(

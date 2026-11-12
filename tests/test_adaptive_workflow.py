@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import replace
 
 import pytest
 
@@ -267,9 +268,13 @@ def test_quality_slo_requires_declared_assessor_before_any_execution(tmp_path):
 
 
 def test_adaptive_metrics_command_writes_request_and_attempt_artifacts(tmp_path):
+    from ctxbench.adaptive.artifacts import write_adaptive_artifacts
+
     plan = _plan()
+    write_adaptive_artifacts(
+        tmp_path, plan, dataset={"id": "fixture", "version": "1", "materializedPath": str(tmp_path)},
+    )
     _run(plan, tmp_path, lambda request, _session: _result(request))
-    write_json(tmp_path / "manifest.json", {"workflowKind": "adaptive"})
 
     output = tmp_path / "metrics"
     assert metrics_command([str(tmp_path)], output=str(output)) == 0
@@ -278,6 +283,155 @@ def test_adaptive_metrics_command_writes_request_and_attempt_artifacts(tmp_path)
     request_csv = (output / "adaptive_request_metrics.csv").read_text(encoding="utf-8")
     assert "requestId" in request_csv.splitlines()[0]
     assert "generationTotalTokens" in request_csv.splitlines()[0]
+
+
+def test_adaptive_plan_cli_contract_and_status_cover_all_request_states(tmp_path, capsys):
+    from ctxbench.adaptive.artifacts import adaptive_plan_payload, validate_workflow_manifest
+    from ctxbench.commands.plan import plan_command
+    from ctxbench.commands.status import status_command
+
+    base = _plan(
+        ("request-1", "request-2", "request-3"),
+        policy=AdaptiveWorkflowPolicy(quality_slos=(QualitySLO("quality", 0.8),)),
+    )
+    requests = list(base.requests)
+    rejected_candidates = {
+        candidate_id: replace(
+            invocation,
+            candidate=Candidate(
+                invocation.candidate.configuration_id, False, invocation.candidate.context_fit,
+            ),
+        )
+        for candidate_id, invocation in requests[2].candidates.items()
+    }
+    requests[2] = replace(requests[2], candidates=rejected_candidates)
+    plan = replace(base, requests=tuple(requests))
+    definition_path = tmp_path / "adaptive-definition.json"
+    write_json(definition_path, {
+        "workflowKind": "adaptive",
+        **adaptive_plan_payload(plan),
+        "dataset": {"id": "fixture", "version": "1", "materializedPath": str(tmp_path)},
+    })
+    output_root = tmp_path / "fresh-adaptive"
+
+    assert plan_command(str(definition_path), str(output_root)) == 0
+    manifest = validate_workflow_manifest(output_root)
+    assert manifest["adaptivePlanVersion"] == 2
+    with pytest.raises(ValueError, match="schemaVersion 1.*not supported"):
+        from ctxbench.adaptive.artifacts import adaptive_plan_from_payload
+        adaptive_plan_from_payload({"schemaVersion": 1})
+
+    _run(
+        plan, output_root,
+        lambda request, _session: _result(request),
+        assessor=QualityAssessor({
+            ("request-1", "candidate-a"): 0.9,
+            ("request-2", "candidate-a"): 0.2,
+            ("request-2", "candidate-b"): 0.2,
+        }),
+    )
+    assert status_command(str(output_root)) == 0
+    report = capsys.readouterr().out
+    assert "Workflow   : adaptive" in report
+    assert "requests" in report and "Rejected" in report
+    request_status = next(line.split() for line in report.splitlines() if line.strip().startswith("requests"))
+    assert request_status == ["requests", "3", "1", "1", "1", "0", "0"]
+    states = [load_json(output_root / "adaptive-records" / f"request-{index}.json")["state"]
+              for index in range(1, 4)]
+    assert states == ["delivered", "failed", "rejected"]
+
+
+def test_adaptive_cli_rejects_legacy_manifest_without_migration(tmp_path):
+    from ctxbench.adaptive.artifacts import validate_workflow_manifest
+    from ctxbench.commands.execute import execute_command
+
+    write_json(tmp_path / "manifest.json", {
+        "schemaVersion": 1,
+        "workflowKind": "adaptive",
+        "adaptiveArtifactVersion": 1,
+        "adaptivePlanVersion": 1,
+    })
+    with pytest.raises(ValueError, match="fresh adaptive plan"):
+        validate_workflow_manifest(tmp_path)
+    with pytest.raises(ValueError, match="fresh adaptive plan"):
+        execute_command(str(tmp_path / "adaptive-plan.json"))
+
+
+def test_adaptive_plan_schema_rejects_unknown_fields():
+    from ctxbench.adaptive.artifacts import adaptive_plan_from_payload, adaptive_plan_payload
+
+    payload = adaptive_plan_payload(_plan())
+    payload["workflowGuess"] = "adaptive"
+    with pytest.raises(Exception, match="Additional properties are not allowed"):
+        adaptive_plan_from_payload(payload)
+
+
+def test_execute_cli_dispatches_fresh_adaptive_plan_without_trial_specs(tmp_path):
+    from ctxbench.benchmark.selectors import RunSelector
+    from ctxbench.adaptive.artifacts import write_adaptive_artifacts
+    from ctxbench.commands.execute import execute_command
+    from ctxbench.commands.export import export_command
+
+    dataset_root = Path(__file__).parent / "fixtures" / "fake_dataset" / "dataset"
+    base = _plan()
+    original_request = base.requests[0]
+    candidate_invocations = {}
+    for candidate_id, invocation in original_request.candidates.items():
+        execution = replace(
+            invocation.execution,
+            task_id="task_role",
+            instance_id="person-001",
+            payload={
+                "runtimeRequest": {
+                    "task": "What role does Avery Example have?",
+                    "provider": "mock",
+                    "model_name": "mock",
+                    "configuration": {
+                        "strategy": "inline", "representation": "json", "surface": "full",
+                    },
+                    "surface_spec": {"type": "full_context"},
+                    "params": {},
+                },
+                "resultMetadata": {
+                    "configurationId": candidate_id,
+                    "modelId": "mock",
+                    "taskTags": ["synthetic"],
+                    "contextBlocks": ["profile"],
+                },
+            },
+        )
+        candidate_invocations[candidate_id] = replace(invocation, execution=execution)
+    request = replace(
+        original_request,
+        task_id="task_role",
+        instance_id="person-001",
+        candidates=candidate_invocations,
+    )
+    plan = replace(
+        base,
+        dataset_id="ctxbench/fake-dataset",
+        dataset_version="0.1.0",
+        requests=(request,),
+    )
+    dataset = {
+        "id": "ctxbench/fake-dataset", "version": "0.1.0",
+        "origin": str(dataset_root), "materializedPath": str(dataset_root),
+    }
+    write_adaptive_artifacts(tmp_path, plan, dataset=dataset)
+
+    with pytest.raises(ValueError, match="--force is not supported for adaptive"):
+        execute_command(str(tmp_path / "adaptive-plan.json"), force=True)
+    with pytest.raises(ValueError, match="Selectors cannot filter an adaptive workload"):
+        execute_command(str(tmp_path / "adaptive-plan.json"), selector=RunSelector(task=("task_role",)))
+    assert execute_command(str(tmp_path / "adaptive-plan.json")) == 0
+    responses = read_jsonl(tmp_path / "responses.jsonl")
+    assert len(responses) == 1
+    assert responses[0]["requestId"] == "request-1"
+    assert "trialId" not in responses[0]
+    assert export_command(str(tmp_path / "evals.jsonl")) == 0
+    exported = (tmp_path / "results.csv").read_text(encoding="utf-8").splitlines()
+    assert "responseId" in exported[0] and "requestId" in exported[0]
+    assert (tmp_path / "results.csv.manifest.json").exists()
 
 
 def test_quota_admission_is_persisted_and_does_not_invoke_provider(tmp_path):

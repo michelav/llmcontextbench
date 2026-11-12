@@ -74,23 +74,27 @@ def execute_command(
 
     logger.info("EXECUTE", "trials.loading", "Loading trials", path=str(source))
     from ctxbench.benchmark.fingerprint import verify_snapshot
-    manifest = validate_manifest(source.parent)
+    from ctxbench.adaptive.artifacts import validate_workflow_manifest
+    manifest = validate_workflow_manifest(source.parent)
+    if manifest.get("workflowKind") == "adaptive":
+        return _execute_adaptive_plan(
+            source.parent, manifest, force=force, retry_uncertain=retry_uncertain,
+            selector=selector, verbose=verbose,
+        )
+    if manifest.get("experimentKind") == "adaptive":
+        adaptive_plan = load_json(source.parent / "adaptive-plan.json")
+        version = adaptive_plan.get("schemaVersion") if isinstance(adaptive_plan, dict) else None
+        if version == 1:
+            raise ValueError(
+                "Adaptive plan schemaVersion 1 is not supported or migrated. "
+                "Create a fresh adaptive plan using the versioned adaptive workflow contract."
+            )
+        raise ValueError("Legacy adaptive artifacts require a fresh plan using the versioned adaptive workflow contract.")
     if manifest.get("provisioningArtifactVersion") == 4:
         with execution_lock(source.parent):
             verify_snapshot(source.parent, manifest, execution=True)
             rebuild_responses(source.parent, execution_fingerprint=str(manifest["executionFingerprint"]))
             validate_artifact_directory(source.parent)
-            if manifest.get("experimentKind") == "adaptive":
-                adaptive_plan = load_json(source.parent / "adaptive-plan.json")
-                if adaptive_plan.get("schemaVersion") == 1:
-                    raise ValueError(
-                        "Adaptive plan schemaVersion 1 is not supported by the MAPE-K workflow. "
-                        "It is not migrated or executed; create a fresh adaptive plan with the current definition contract."
-                    )
-                raise ValueError(
-                    f"Unsupported adaptive plan schemaVersion {adaptive_plan.get('schemaVersion')!r}; "
-                    "create a fresh plan using the current definition contract."
-                )
             runspecs = _load_runspecs(source)
             active_selector = selector or RunSelector()
             runspecs = [r for r in runspecs if matches_runspec(r, active_selector)]
@@ -186,5 +190,63 @@ def execute_command(
     print(
         f"Processed {completed} trial(s) → {responses_path}"
         + (f" ({skipped} skipped)" if skipped else "")
+    )
+    return 0
+
+
+def _execute_adaptive_plan(
+    root: Path,
+    manifest: dict[str, Any],
+    *,
+    force: bool,
+    retry_uncertain: bool,
+    selector: RunSelector | None,
+    verbose: bool,
+) -> int:
+    from dataclasses import replace
+
+    from ctxbench.adaptive.artifacts import adaptive_plan_from_payload
+    from ctxbench.adaptive.runtime_adapter import invoke_adaptive_execution, resolve_adaptive_dataset
+    from ctxbench.adaptive.workflow import run_adaptive_workflow
+    from ctxbench.execution.service import ExecutionSession, TrialExecutionService
+
+    if force:
+        raise ValueError("--force is not supported for adaptive workflows; create a fresh plan and output directory.")
+    selected = selector or RunSelector()
+    if any(getattr(selected, name) for name in selected.__dataclass_fields__):
+        raise ValueError("Selectors cannot filter an adaptive workload because decisions require its frozen order.")
+    plan = adaptive_plan_from_payload(load_json(root / "adaptive-plan.json"))
+    dataset_metadata = manifest.get("dataset")
+    if not isinstance(dataset_metadata, dict):
+        raise ValueError("Adaptive manifest requires dataset provenance.")
+    dataset = resolve_adaptive_dataset(dataset_metadata)
+    logger = PhaseLogger(verbose=verbose)
+    service = TrialExecutionService(root)
+    engine = Engine(event_logger=lambda event, message, fields: logger.event(
+        str(fields.pop("level", "INFO")), str(fields.pop("phase", "EXECUTE")), event, message, **fields
+    ))
+
+    def invoke(request, session):
+        payload = request.payload
+        if not isinstance(payload, dict):
+            raise ValueError("adaptive execution payload must be an object")
+        metadata = dict(payload.get("resultMetadata") or {})
+        metadata.setdefault("dataset", dataset_metadata)
+        metadata.setdefault("experimentId", manifest.get("experimentId", plan.workflow_id))
+        metadata.setdefault("configurationId", request.candidate_id)
+        invocation = replace(request, payload={**payload, "resultMetadata": metadata})
+        return invoke_adaptive_execution(
+            invocation, session, dataset=dataset,
+            trace_options=dict(payload.get("traceOptions") or manifest.get("trace") or {}),
+        )
+
+    with ExecutionSession(engine) as session:
+        outcome = run_adaptive_workflow(
+            plan, root=root, service=service, session=session, invoke=invoke,
+            retry_uncertain=retry_uncertain,
+        )
+    print(
+        f"Adaptive requests: {outcome.delivered} delivered, "
+        f"{outcome.rejected} rejected, {outcome.failed} failed."
     )
     return 0
