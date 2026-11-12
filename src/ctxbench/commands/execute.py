@@ -7,20 +7,15 @@ from ctxbench.benchmark.provisioning import validate_artifact_directory, validat
 from typing import Any
 
 from ctxbench.ai.engine import Engine
-from ctxbench.benchmark.executor import execute_runspec
+from ctxbench.benchmark.executor import execute_runspec, execute_runtime_request, resolve_trial_dataset
 from ctxbench.benchmark.models import TrialSpec
-from ctxbench.benchmark.execution_records import (
-    attempts_for_trial,
-    begin_attempt,
-    execution_lock,
-    finish_attempt,
-    rebuild_responses,
-)
+from ctxbench.benchmark.execution_records import execution_lock, rebuild_responses
 from ctxbench.benchmark.runtime_adapter import TrialRuntimeAdapter
 from ctxbench.benchmark.selectors import RunSelector, matches_runspec
 from ctxbench.benchmark.results import serialize_run_result
 from ctxbench.runtime.models import ExecutionResult
 from ctxbench.ai.models.base import AIResult
+from ctxbench.execution.service import ExecutionRequest, ExecutionSession, TrialExecutionService
 from ctxbench.util.clock import utc_now_iso
 from ctxbench.util.fs import load_json
 from ctxbench.util.jsonl import append_jsonl, read_jsonl, write_jsonl
@@ -208,8 +203,9 @@ def _execute_durable(
     progress: bool,
     local_mcp_runtime_decorator=None,
 ) -> int:
+    service = TrialExecutionService(artifact_root)
     latest_by_trial = {
-        runspec.trialId: _latest_attempt(attempts_for_trial(artifact_root, runspec.trialId))
+        runspec.trialId: _latest_attempt(service.attempts(runspec.trialId))
         for runspec in runspecs
     }
     expected_fingerprint = str(manifest["executionFingerprint"])
@@ -228,7 +224,7 @@ def _execute_durable(
     progress_tracker = ProgressTracker(total=len(runspecs), enabled=progress)
     logger.progress = progress_tracker
     progress_tracker.start()
-    engine = Engine(event_logger=_event_logger(logger))
+    session = ExecutionSession(Engine(event_logger=_event_logger(logger)))
     processed = skipped = 0
     try:
         for runspec in runspecs:
@@ -244,34 +240,52 @@ def _execute_durable(
                 continue
 
             write_traces = runspec.trace.writeFiles
-            started_at = utc_now_iso()
-            started_clock = perf_counter()
-            record = begin_attempt(
-                artifact_root,
-                trial_id=runspec.trialId,
+            runtime_adapter = TrialRuntimeAdapter()
+            dataset = resolve_trial_dataset(runspec)
+            request = ExecutionRequest(
+                execution_id=runspec.trialId,
+                workflow_id=runspec.experimentId,
+                correlation_id=runspec.trialId,
                 experiment_id=runspec.experimentId,
-                execution_fingerprint=str(manifest["executionFingerprint"]),
+                execution_fingerprint=expected_fingerprint,
+                task_id=runspec.taskId,
+                instance_id=runspec.instanceId,
+                candidate_id=runspec.configurationId,
+                payload=runtime_adapter.to_runtime_request(runspec),
+                trial_id=runspec.trialId,
             )
-            logger.info("EXECUTE", "trial.response.started", "Generating response", **trial_log_context(runspec), attemptId=record["attemptId"])
-            try:
-                result = execute_runspec(runspec, engine, local_mcp_runtime_decorator=local_mcp_runtime_decorator)
-            except Exception as exc:
-                result = TrialRuntimeAdapter().to_trial_result(
-                    runspec,
-                    ExecutionResult(
-                        ai_result=AIResult(answer="", error=str(exc)),
-                        started_at=started_at,
-                        finished_at=utc_now_iso(),
-                        duration_ms=max(0, int((perf_counter() - started_clock) * 1000)),
-                    ),
-                )
-            payload = serialize_run_result(result, artifact_root=artifact_root, write_trace=write_traces)
-            finish_attempt(artifact_root, record, payload)
-            logger.info("EXECUTE", "trial.response.completed", "Response generated", **trial_log_context(result), status=result.status)
+
+            def invoke(_request, active_session):
+                started_at = utc_now_iso()
+                started_clock = perf_counter()
+                try:
+                    execution = execute_runtime_request(
+                        _request.payload, active_session.resource, dataset,
+                        local_mcp_runtime_decorator=local_mcp_runtime_decorator,
+                    )
+                    result = runtime_adapter.to_trial_result(runspec, execution)
+                except Exception as exc:
+                    result = TrialRuntimeAdapter().to_trial_result(
+                        runspec,
+                        ExecutionResult(
+                            ai_result=AIResult(answer="", error=str(exc)),
+                            started_at=started_at,
+                            finished_at=utc_now_iso(),
+                            duration_ms=max(0, int((perf_counter() - started_clock) * 1000)),
+                        ),
+                    )
+                return serialize_run_result(result, artifact_root=artifact_root, write_trace=write_traces)
+
+            outcome = service.execute(
+                request, session, invoke, force=force,
+                retry_uncertain=retry_uncertain,
+            )
+            payload = outcome.result
+            logger.info("EXECUTE", "trial.response.completed", "Response generated", **trial_log_context(runspec), status=payload.get("status"), attemptId=outcome.attempt_id)
             progress_tracker.advance()
             processed += 1
     finally:
-        engine.close()
+        session.close()
 
     rebuild_responses(artifact_root, execution_fingerprint=str(manifest["executionFingerprint"]))
     responses_path = artifact_root / "responses.jsonl"

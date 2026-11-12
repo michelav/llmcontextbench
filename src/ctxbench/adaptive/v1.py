@@ -420,10 +420,18 @@ def execute_adaptive(plan: dict, knowledge: dict | None, runspecs: list[TrialSpe
                      root: Path, manifest: dict, force: bool, retry_uncertain: bool,
                      logger, progress: bool) -> int:
     """Serially select, attempt, and record delivery outcomes per request."""
-    from ctxbench.commands.execute import _execute_durable, _latest_attempt
-    from ctxbench.benchmark.execution_records import attempts_for_trial
+    from ctxbench.ai.engine import Engine
+    from ctxbench.benchmark.executor import execute_runtime_request, resolve_trial_dataset
+    from ctxbench.benchmark.results import serialize_run_result
+    from ctxbench.benchmark.runtime_adapter import TrialRuntimeAdapter
+    from ctxbench.execution.service import ExecutionRequest, ExecutionSession, TrialExecutionService
+    from ctxbench.benchmark.execution_records import rebuild_responses
+    from ctxbench.runtime.models import ExecutionResult
+    from ctxbench.ai.models.base import AIResult
+    from ctxbench.util.clock import utc_now_iso
 
     by_id = {trial.trialId: trial for trial in runspecs}
+    service = TrialExecutionService(root)
     records = {row["requestId"]: row for row in load_adaptive_records(root)}
     fingerprint = str(manifest["executionFingerprint"])
     if any(row.get("executionFingerprint") != fingerprint for row in records.values()):
@@ -432,162 +440,220 @@ def execute_adaptive(plan: dict, knowledge: dict | None, runspecs: list[TrialSpe
     quota = TokenQuota(plan["tokenQuota"], list(records.values())) if plan.get("tokenQuota") else None
     progressed = 0
     requests = plan["workload"]
-    for item in requests:
-        existing = records.get(item["requestId"])
-        if existing and existing.get("state") in {"delivered", "failed", "rejected"} and not force:
-            if isinstance(existing.get("knowledgeAfter"), dict):
-                learned = {key: dict(value) for key, value in existing["knowledgeAfter"].items()}
-            progressed += 1
-            continue
-        history: defaultdict[str, list[dict]] = defaultdict(list)
-        spent_tokens, unknown_spend = 0, False
-        for previous in records.values():
-            for previous_attempt in previous.get("attempts", []):
-                history[previous_attempt["candidate"]].append(previous_attempt)
-                tokens = previous_attempt.get("totalTokens")
-                known_tokens = previous_attempt.get("knownTotalTokens")
-                if not isinstance(known_tokens, (int, float)) and isinstance(tokens, (int, float)):
-                    known_tokens = tokens
-                if isinstance(known_tokens, (int, float)):
-                    spent_tokens += int(known_tokens)
-                if not isinstance(tokens, (int, float)):
-                    unknown_spend = True
-        candidate, reason = choose_candidate(plan, item, {"estimates": learned},
-                                             history=history, spent_tokens=spent_tokens,
-                                             unknown_spend=unknown_spend,
-                                             request_index=item["sequenceIndex"])
-        policy = plan["policy"]
-        if policy.get("type") == "cascade":
-            configured_order = [_candidate(policy["candidate"])] + [
-                _candidate(value) for value in policy.get("fallbacks", [])]
-            eligible_order = [cid for cid in configured_order if cid in item["candidates"]]
-            candidate = eligible_order[0] if eligible_order else None
-            reason = "cascade" if candidate else "no_eligible_candidate"
-        phase_settings = next((row for row in plan.get("phases", []) if row["name"] == item["phase"]), {})
-        record = {"schemaVersion": 1, "requestId": item["requestId"], "sequenceIndex": item["sequenceIndex"],
-                  "executionFingerprint": fingerprint,
-                  "state": "rejected" if candidate is None else "started", "taskId": item["taskId"],
-                  "instanceId": item["instanceId"], "sizeBin": item["sizeBin"], "phase": item["phase"],
-                  "selectedCandidate": candidate, "decision": reason, "toolDelayMs": item["toolDelayMs"],
-                  "toolFailureRate": phase_settings.get("toolFailureRate", 0),
-                  "failureSeed": phase_settings.get("failureSeed"),
-                  "attempts": [], "delivery": None}
-        selected_estimate = learned.get(f"{candidate}|{item['sizeBin']}", {}).get("totalTokens") if candidate else None
-        record["selectionEstimate"] = {"totalTokens": selected_estimate,
-                                        "provenance": "derived" if isinstance(selected_estimate, (int, float))
-                                        else "unavailable"}
-        directory = root / "adaptive-records"
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{item['requestId']}.json"
-        write_json(path, record)
-        if candidate is None:
+    session = ExecutionSession(Engine(event_logger=_adaptive_event_logger(logger)))
+    try:
+        for item in requests:
+            existing = records.get(item["requestId"])
+            if existing and existing.get("state") in {"delivered", "failed", "rejected"} and not force:
+                if isinstance(existing.get("knowledgeAfter"), dict):
+                    learned = {key: dict(value) for key, value in existing["knowledgeAfter"].items()}
+                progressed += 1
+                continue
+            history: defaultdict[str, list[dict]] = defaultdict(list)
+            spent_tokens, unknown_spend = 0, False
+            for previous in records.values():
+                for previous_attempt in previous.get("attempts", []):
+                    history[previous_attempt["candidate"]].append(previous_attempt)
+                    tokens = previous_attempt.get("totalTokens")
+                    known_tokens = previous_attempt.get("knownTotalTokens")
+                    if not isinstance(known_tokens, (int, float)) and isinstance(tokens, (int, float)):
+                        known_tokens = tokens
+                    if isinstance(known_tokens, (int, float)):
+                        spent_tokens += int(known_tokens)
+                    if not isinstance(tokens, (int, float)):
+                        unknown_spend = True
+            candidate, reason = choose_candidate(plan, item, {"estimates": learned},
+                                                 history=history, spent_tokens=spent_tokens,
+                                                 unknown_spend=unknown_spend,
+                                                 request_index=item["sequenceIndex"])
+            policy = plan["policy"]
+            if policy.get("type") == "cascade":
+                configured_order = [_candidate(policy["candidate"])] + [
+                    _candidate(value) for value in policy.get("fallbacks", [])]
+                eligible_order = [cid for cid in configured_order if cid in item["candidates"]]
+                candidate = eligible_order[0] if eligible_order else None
+                reason = "cascade" if candidate else "no_eligible_candidate"
+            phase_settings = next((row for row in plan.get("phases", []) if row["name"] == item["phase"]), {})
+            record = {"schemaVersion": 1, "requestId": item["requestId"], "sequenceIndex": item["sequenceIndex"],
+                      "executionFingerprint": fingerprint,
+                      "state": "rejected" if candidate is None else "started", "taskId": item["taskId"],
+                      "instanceId": item["instanceId"], "sizeBin": item["sizeBin"], "phase": item["phase"],
+                      "selectedCandidate": candidate, "decision": reason, "toolDelayMs": item["toolDelayMs"],
+                      "toolFailureRate": phase_settings.get("toolFailureRate", 0),
+                      "failureSeed": phase_settings.get("failureSeed"),
+                      "attempts": [], "delivery": None}
+            selected_estimate = learned.get(f"{candidate}|{item['sizeBin']}", {}).get("totalTokens") if candidate else None
+            record["selectionEstimate"] = {"totalTokens": selected_estimate,
+                                            "provenance": "derived" if isinstance(selected_estimate, (int, float))
+                                            else "unavailable"}
+            directory = root / "adaptive-records"
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / f"{item['requestId']}.json"
+            write_json(path, record)
+            if candidate is None:
+                records[item["requestId"]] = record
+                progressed += 1
+                continue
+            order = ([cid for cid in configured_order if cid in item["candidates"]]
+                     if policy.get("type") == "cascade" else [candidate])
+            accepted = None
+            request_started = monotonic()
+            for cid in order:
+                trial_id = item["candidates"].get(cid)
+                if trial_id is None:
+                    continue
+                trial = by_id[trial_id]
+                prior_attempts = service.attempts(trial_id)
+                attempt = prior_attempts[-1] if prior_attempts else None
+                if attempt and attempt["state"] == "started" and quota:
+                    if not quota.best_effort:
+                        raise ValueError("An uncertain attempt has unknown token usage; strict tokenQuota blocks recovery")
+                    quota.unknown_usage = True
+                quota_wait_ms = 0.0
+                quota_estimate = None
+                if quota:
+                    quota_estimate = learned.get(f"{cid}|{item['sizeBin']}", {}).get("totalTokens")
+                    quota_wait_ms = quota.wait_for_capacity(quota_estimate)
+                    if quota_wait_ms is None:
+                        record.setdefault("admissionRejections", []).append({"candidate": cid, "reason": "token_quota"})
+                        write_json(path, record)
+                        continue
+                if attempt and attempt["state"] in {"succeeded", "failed"} and not force:
+                    result = attempt["result"]
+                    attempt_id = attempt["attemptId"]
+                else:
+                    decorator = lambda runtime, phase=phase_settings, seq=item["sequenceIndex"]: DelayedToolRuntime(
+                        runtime, phase.get("toolDelayMs", item["toolDelayMs"]),
+                        failure_rate=phase.get("toolFailureRate", 0),
+                        failure_seed=(phase.get("failureSeed") or 0) + seq)
+
+                    request = ExecutionRequest(
+                        execution_id=trial_id,
+                        workflow_id=str(manifest.get("experimentId", "adaptive")),
+                        correlation_id=item["requestId"],
+                        experiment_id=trial.experimentId,
+                        execution_fingerprint=fingerprint,
+                        task_id=trial.taskId,
+                        instance_id=trial.instanceId,
+                        candidate_id=cid,
+                        payload=TrialRuntimeAdapter().to_runtime_request(trial),
+                        trial_id=trial_id,
+                    )
+                    dataset = resolve_trial_dataset(trial)
+                    runtime_adapter = TrialRuntimeAdapter()
+
+                    def invoke(_request, active_session):
+                        started_at = utc_now_iso()
+                        started_clock = monotonic()
+                        try:
+                            runtime_result = execute_runtime_request(
+                                _request.payload, active_session.resource, dataset,
+                                local_mcp_runtime_decorator=decorator,
+                            )
+                            execution = runtime_adapter.to_trial_result(trial, runtime_result)
+                        except Exception as exc:
+                            execution = TrialRuntimeAdapter().to_trial_result(
+                                trial,
+                                ExecutionResult(
+                                    ai_result=AIResult(answer="", error=str(exc)),
+                                    started_at=started_at,
+                                    finished_at=utc_now_iso(),
+                                    duration_ms=max(0, int((monotonic() - started_clock) * 1000)),
+                                ),
+                            )
+                        return serialize_run_result(
+                            execution, artifact_root=root, write_trace=trial.trace.writeFiles,
+                        )
+
+                    outcome = service.execute(
+                        request, session, invoke, force=force,
+                        retry_uncertain=retry_uncertain,
+                    )
+                    result = outcome.result
+                    attempt_id = outcome.attempt_id
+                metrics = result.get("metricsSummary") or {}
+                response = result.get("response")
+                response_text = response if isinstance(response, str) else str(response or "")
+                min_length = policy.get("minimumResponseLength", 0)
+                sensor_started = monotonic()
+                sensor_accepted = len(response_text.strip()) >= min_length
+                sensor_duration = (monotonic() - sensor_started) * 1000
+                success = result.get("status") == "success"
+                row = {"candidate": cid, "trialId": trial_id, "attemptId": attempt_id,
+                       "status": result.get("status"), "accepted": bool(success and sensor_accepted),
+                       "durationMs": (result.get("timing") or {}).get("durationMs"),
+                       "totalTokens": metrics.get("totalTokens"),
+                       "knownTotalTokens": metrics.get("knownTotalTokens"),
+                       "quotaWaitMs": quota_wait_ms,
+                       "quotaEstimate": {"totalTokens": quota_estimate,
+                                         "provenance": "derived" if isinstance(quota_estimate, (int, float))
+                                         else "unavailable"} if quota else None,
+                       "quotaTimestamp": datetime.now(timezone.utc).isoformat() if quota else None,
+                       "sensor": {"type": "minimum_response_length",
+                                  "minimumResponseLength": min_length,
+                                  "accepted": bool(success and sensor_accepted),
+                                  "durationMs": sensor_duration, "totalTokens": 0,
+                                  "totalTokensProvenance": "measured"}}
+                record["attempts"].append(row)
+                if quota:
+                    quota.record(row["quotaTimestamp"], row["totalTokens"], row["knownTotalTokens"])
+                if success:
+                    key = f"{cid}|{item['sizeBin']}"
+                    prior = learned.get(key, {})
+                    for name, value in (("latencyMs", row["durationMs"]), ("totalTokens", row["totalTokens"])):
+                        if isinstance(value, (int, float)):
+                            count_key = "latencyObservationCount" if name == "latencyMs" else "tokenObservationCount"
+                            count = prior.get(count_key, 0)
+                            prior[name] = (prior.get(name, 0) * count + value) / (count + 1)
+                            prior[count_key] = count + 1
+                    learned[key] = prior
+                write_json(path, record)
+                if row["accepted"]:
+                    accepted = row
+                    break
+            durations = [row["durationMs"] for row in record["attempts"] if isinstance(row.get("durationMs"), (int, float))]
+            known_tokens = [row.get("knownTotalTokens") if isinstance(row.get("knownTotalTokens"), (int, float))
+                            else row.get("totalTokens") for row in record["attempts"]]
+            known_tokens = [value for value in known_tokens if isinstance(value, (int, float))]
+            all_tokens_known = all(isinstance(row.get("totalTokens"), (int, float)) for row in record["attempts"])
+            rejected_for_quota = bool(record.get("admissionRejections")) and not record["attempts"]
+            request_duration_ms = (monotonic() - request_started) * 1000
+            record.update({"state": "rejected" if rejected_for_quota else "delivered" if accepted else "failed",
+                           "delivery": ({"candidate": accepted["candidate"], "trialId": accepted["trialId"],
+                                         "attemptId": accepted["attemptId"]} if accepted else None),
+                           "durationMs": sum(durations) if len(durations) == len(record["attempts"]) else None,
+                           "durationProvenance": "measured" if len(durations) == len(record["attempts"]) else "unavailable",
+                           "knownTotalTokens": sum(known_tokens) if known_tokens else None,
+                           "knownTotalTokensProvenance": "derived" if known_tokens else "unavailable",
+                           "sensorDurationMs": sum(row["sensor"]["durationMs"] for row in record["attempts"]),
+                           "sensorTotalTokens": sum(row["sensor"]["totalTokens"] for row in record["attempts"]),
+                           "quotaWaitMs": sum(row["quotaWaitMs"] for row in record["attempts"]),
+                           "requestDurationMs": request_duration_ms,
+                           "requestDurationProvenance": "measured",
+                           "totalTokens": sum(row["totalTokens"] for row in record["attempts"])
+                               if all_tokens_known else None,
+                           "totalTokensProvenance": "derived" if all_tokens_known else "unavailable",
+                           "usageCompleteness": "complete" if all_tokens_known else "partial"})
+            record["knowledgeAfter"] = {name: dict(value) for name, value in learned.items()}
+            write_json(path, record)
             records[item["requestId"]] = record
             progressed += 1
-            continue
-        order = ([cid for cid in configured_order if cid in item["candidates"]]
-                 if policy.get("type") == "cascade" else [candidate])
-        accepted = None
-        request_started = monotonic()
-        for cid in order:
-            trial_id = item["candidates"].get(cid)
-            if trial_id is None:
-                continue
-            trial = by_id[trial_id]
-            attempt = _latest_attempt(attempts_for_trial(root, trial_id))
-            if attempt and attempt["state"] == "started" and quota:
-                if not quota.best_effort:
-                    raise ValueError("An uncertain attempt has unknown token usage; strict tokenQuota blocks recovery")
-                quota.unknown_usage = True
-            quota_wait_ms = 0.0
-            quota_estimate = None
-            if quota:
-                quota_estimate = learned.get(f"{cid}|{item['sizeBin']}", {}).get("totalTokens")
-                quota_wait_ms = quota.wait_for_capacity(quota_estimate)
-                if quota_wait_ms is None:
-                    record.setdefault("admissionRejections", []).append({"candidate": cid, "reason": "token_quota"})
-                    write_json(path, record)
-                    continue
-            if attempt and attempt["state"] == "started" and not retry_uncertain:
-                raise ValueError(f"Adaptive request {item['requestId']} has an uncertain attempt; pass --retry-uncertain")
-            if attempt and attempt["state"] in {"succeeded", "failed"} and not force:
-                result = attempt["result"]
-            else:
-                decorator = lambda runtime, phase=phase_settings, seq=item["sequenceIndex"]: DelayedToolRuntime(
-                    runtime, phase.get("toolDelayMs", item["toolDelayMs"]),
-                    failure_rate=phase.get("toolFailureRate", 0),
-                    failure_seed=(phase.get("failureSeed") or 0) + seq)
-                _execute_durable([trial], artifact_root=root, manifest=manifest, force=force,
-                                 retry_uncertain=retry_uncertain, logger=logger, progress=False,
-                                 local_mcp_runtime_decorator=decorator)
-                attempt = _latest_attempt(attempts_for_trial(root, trial_id))
-                result = attempt["result"]
-            metrics = result.get("metricsSummary") or {}
-            response = result.get("response")
-            response_text = response if isinstance(response, str) else str(response or "")
-            min_length = policy.get("minimumResponseLength", 0)
-            sensor_started = monotonic()
-            sensor_accepted = len(response_text.strip()) >= min_length
-            sensor_duration = (monotonic() - sensor_started) * 1000
-            success = result.get("status") == "success"
-            row = {"candidate": cid, "trialId": trial_id, "attemptId": attempt.get("attemptId"),
-                   "status": result.get("status"), "accepted": bool(success and sensor_accepted),
-                   "durationMs": (result.get("timing") or {}).get("durationMs"),
-                   "totalTokens": metrics.get("totalTokens"),
-                   "knownTotalTokens": metrics.get("knownTotalTokens"),
-                   "quotaWaitMs": quota_wait_ms,
-                   "quotaEstimate": {"totalTokens": quota_estimate,
-                                     "provenance": "derived" if isinstance(quota_estimate, (int, float))
-                                     else "unavailable"} if quota else None,
-                   "quotaTimestamp": datetime.now(timezone.utc).isoformat() if quota else None,
-                   "sensor": {"type": "minimum_response_length",
-                              "minimumResponseLength": min_length,
-                              "accepted": bool(success and sensor_accepted),
-                              "durationMs": sensor_duration, "totalTokens": 0,
-                              "totalTokensProvenance": "measured"}}
-            record["attempts"].append(row)
-            if quota:
-                quota.record(row["quotaTimestamp"], row["totalTokens"], row["knownTotalTokens"])
-            if success:
-                key = f"{cid}|{item['sizeBin']}"
-                prior = learned.get(key, {})
-                for name, value in (("latencyMs", row["durationMs"]), ("totalTokens", row["totalTokens"])):
-                    if isinstance(value, (int, float)):
-                        count_key = "latencyObservationCount" if name == "latencyMs" else "tokenObservationCount"
-                        count = prior.get(count_key, 0)
-                        prior[name] = (prior.get(name, 0) * count + value) / (count + 1)
-                        prior[count_key] = count + 1
-                learned[key] = prior
-            write_json(path, record)
-            if row["accepted"]:
-                accepted = row
-                break
-        durations = [row["durationMs"] for row in record["attempts"] if isinstance(row.get("durationMs"), (int, float))]
-        known_tokens = [row.get("knownTotalTokens") if isinstance(row.get("knownTotalTokens"), (int, float))
-                        else row.get("totalTokens") for row in record["attempts"]]
-        known_tokens = [value for value in known_tokens if isinstance(value, (int, float))]
-        all_tokens_known = all(isinstance(row.get("totalTokens"), (int, float)) for row in record["attempts"])
-        rejected_for_quota = bool(record.get("admissionRejections")) and not record["attempts"]
-        request_duration_ms = (monotonic() - request_started) * 1000
-        record.update({"state": "rejected" if rejected_for_quota else "delivered" if accepted else "failed",
-                       "delivery": ({"candidate": accepted["candidate"], "trialId": accepted["trialId"],
-                                     "attemptId": accepted["attemptId"]} if accepted else None),
-                       "durationMs": sum(durations) if len(durations) == len(record["attempts"]) else None,
-                       "durationProvenance": "measured" if len(durations) == len(record["attempts"]) else "unavailable",
-                       "knownTotalTokens": sum(known_tokens) if known_tokens else None,
-                       "knownTotalTokensProvenance": "derived" if known_tokens else "unavailable",
-                       "sensorDurationMs": sum(row["sensor"]["durationMs"] for row in record["attempts"]),
-                       "sensorTotalTokens": sum(row["sensor"]["totalTokens"] for row in record["attempts"]),
-                       "quotaWaitMs": sum(row["quotaWaitMs"] for row in record["attempts"]),
-                       "requestDurationMs": request_duration_ms,
-                       "requestDurationProvenance": "measured",
-                       "totalTokens": sum(row["totalTokens"] for row in record["attempts"])
-                           if all_tokens_known else None,
-                       "totalTokensProvenance": "derived" if all_tokens_known else "unavailable",
-                       "usageCompleteness": "complete" if all_tokens_known else "partial"})
-        record["knowledgeAfter"] = {name: dict(value) for name, value in learned.items()}
-        write_json(path, record)
-        records[item["requestId"]] = record
-        progressed += 1
-    write_jsonl(root / "requests.jsonl", [records[key] for key in sorted(records)])
+        write_jsonl(root / "requests.jsonl", [records[key] for key in sorted(records)])
+        rebuild_responses(root, execution_fingerprint=fingerprint)
+    finally:
+        session.close()
     print(f"Processed {progressed} adaptive request(s) → {root / 'requests.jsonl'}")
     return 0
+
+
+def _adaptive_event_logger(logger):
+    if logger is None:
+        return None
+
+    def emit(event_name: str, message: str, fields: dict[str, object]) -> None:
+        payload = dict(fields)
+        level = str(payload.pop("level", "INFO"))
+        phase = str(payload.pop("phase", "EXECUTE"))
+        logger.event(level, phase, event_name, message, **payload)
+
+    return emit
