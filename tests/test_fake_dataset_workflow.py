@@ -4,7 +4,14 @@ import json
 from pathlib import Path
 
 from ctxbench.ai.engine import Engine
+from ctxbench.benchmark import evaluation as evaluation_module
+from ctxbench.benchmark.evaluation import EvaluationTrace
 from ctxbench.commands.plan import plan_command
+from ctxbench.commands.execute import execute_command
+from ctxbench.commands.eval import eval_command
+from ctxbench.commands.export import export_command
+from ctxbench.commands.metrics import metrics_command
+from ctxbench.commands.status import status_command
 from ctxbench.dataset.cache import DatasetCache
 from ctxbench.dataset.materialization import MaterializationManifest
 from ctxbench.dataset.provider import LocalDatasetPackage
@@ -114,3 +121,67 @@ def test_fake_dataset_plan_workflow_uses_env_cache_root_for_cached_dataset(
     manifest = json.loads((output_root / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["dataset"]["id"] == "ctxbench/fake-dataset"
     assert manifest["dataset"]["materializedPath"]
+
+
+def test_fake_dataset_static_benchmark_lifecycle_preserves_assignments(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    monkeypatch.chdir(REPO_ROOT)
+    output_root = tmp_path / "benchmark"
+    experiment = json.loads(EXPERIMENT_PATH.read_text(encoding="utf-8"))
+    experiment["definitionVersion"] = 3
+    experiment["evaluation"] = {
+        "enabled": True,
+        "judges": [{"provider": "mock", "model": "mock-judge"}],
+    }
+    versioned_experiment = tmp_path / "experiment-v3.json"
+    versioned_experiment.write_text(json.dumps(experiment), encoding="utf-8")
+    assert plan_command(
+        str(versioned_experiment), output=str(output_root), cache_dir=tmp_path / "cache"
+    ) == 0
+    manifest = json.loads((output_root / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["provisioningArtifactVersion"] == 4
+
+    trial_rows = read_jsonl(output_root / "trials.jsonl")
+    assert trial_rows
+    assignments = {
+        row["trialId"]: (row["configurationId"], row["strategy"], row["representation"])
+        for row in trial_rows
+    }
+
+    assert execute_command(str(output_root / "trials.jsonl")) == 0
+    response_rows = read_jsonl(output_root / "responses.jsonl")
+    assert {row["trialId"] for row in response_rows} == set(assignments)
+    assert {
+        row["trialId"]: (row["configurationId"], row["strategy"], row["representation"])
+        for row in response_rows
+    } == assignments
+
+    def fake_judge_request(**kwargs):
+        config = kwargs["config"]
+        return (
+            {
+                "correctness": {"rating": "meets", "justification": "fixture"},
+                "completeness": {"rating": "meets", "justification": "fixture"},
+            },
+            evaluation_module.EvaluationJudgeInfo(
+                used=True, role="judge", provider=config.provider, model=config.model
+            ),
+            EvaluationTrace(),
+        )
+
+    monkeypatch.setattr(evaluation_module, "_judge_request", fake_judge_request)
+    assert eval_command(str(output_root / "responses.jsonl")) == 0
+    eval_rows = read_jsonl(output_root / "evals.jsonl")
+    assert len(eval_rows) == len(response_rows)
+    assert {row["trialId"] for row in eval_rows} == set(assignments)
+    assert export_command(str(output_root / "evals.jsonl")) == 0
+    assert (output_root / "results.csv").exists()
+    assert metrics_command([str(output_root)]) == 0
+    assert (output_root / "metrics" / "trial_metrics.csv").exists()
+    assert status_command(str(output_root)) == 0
+    status_output = capsys.readouterr().out
+    assert "execute" in status_output
+    assert "eval" in status_output
