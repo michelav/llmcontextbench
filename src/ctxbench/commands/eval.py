@@ -38,7 +38,7 @@ from ctxbench.util.logging import PhaseLogger, ProgressTracker, evaluation_log_c
 # ---------------------------------------------------------------------------
 
 def _trial_id(row: dict[str, Any]) -> str:
-    return str(row.get("trialId", ""))
+    return str(row.get("responseId") or row.get("trialId") or "")
 
 
 def _load_responses(path: Path) -> list[TrialResult]:
@@ -262,9 +262,14 @@ def eval_command(
     source = Path(responses).resolve() if responses else Path("responses.jsonl").resolve()
     source_root = source.parent
     manifest = validate_manifest(source_root)
-    if manifest.get("provisioningArtifactVersion") == 4:
+    adaptive = manifest.get("workflowKind", manifest.get("experimentKind")) == "adaptive"
+    if adaptive:
+        from ctxbench.adaptive.projections import rebuild_adaptive_responses
+        rebuild_adaptive_responses(source_root)
+    elif manifest.get("provisioningArtifactVersion") == 4:
         rebuild_responses(source_root, execution_fingerprint=str(manifest["executionFingerprint"]))
-    validate_artifact_directory(source_root)
+    if not adaptive:
+        validate_artifact_directory(source_root)
 
     logger.info("EVAL", "responses.loading", "Loading responses", path=str(source))
     results = _load_responses(source)

@@ -726,6 +726,9 @@ class EvaluationResult(BaseModel):
 
 class TrialResult(ProvisioningTreatment):
     trialId: str
+    responseId: str | None = None
+    requestId: str | None = None
+    executionId: str | None = None
     experimentId: str
     dataset: DatasetProvenance
     taskId: str
@@ -777,8 +780,11 @@ class TrialResult(ProvisioningTreatment):
         if "instanceId" not in payload and "contextId" in payload:
             payload["instanceId"] = payload.get("contextId")
         original_id = str(payload.get("id") or "")
-        run_id = str(payload.get("trialId") or payload.get("id") or "")
+        response_id = str(payload.get("responseId") or "")
+        run_id = str(payload.get("trialId") or response_id or payload.get("id") or "")
         payload["trialId"] = run_id
+        if response_id:
+            payload["responseId"] = response_id
         if "metadata" not in payload:
             payload["metadata"] = {
                 "canonicalId": original_id or run_id,
@@ -807,8 +813,11 @@ class TrialResult(ProvisioningTreatment):
         return super().model_validate(payload)
 
     def to_persisted_artifact(self, *, trace_ref: str | None = None) -> dict[str, Any]:
+        identity = ({"responseId": self.responseId or self.trialId,
+                     "requestId": self.requestId, "executionId": self.executionId}
+                    if self.requestId else {"trialId": self.trialId})
         return {
-            "trialId": self.trialId,
+            **identity,
             "experimentId": self.experimentId,
             "taskId": self.taskId,
             "taskStatement": self.taskStatement,
@@ -882,6 +891,9 @@ class EvaluationItemResult(BaseModel):
     metadata: TrialMetadata
     experimentId: str
     trialId: str
+    responseId: str | None = None
+    requestId: str | None = None
+    executionId: str | None = None
     dataset: DatasetProvenance
     taskId: str
     instanceId: str | None = None
@@ -949,8 +961,12 @@ class EvaluationItemResult(BaseModel):
             if self.evaluationInputTokens is not None or self.evaluationOutputTokens is not None
             else None
         )
+        identity = ({"responseId": self.responseId or self.trialId,
+                     "requestId": self.requestId, "executionId": self.executionId}
+                    if self.requestId else {"trialId": self.trialId})
         payload = {
-            "trialId": self.trialId,
+            **identity,
+            **({"evaluationSchemaVersion": 2} if self.requestId else {}),
             "experimentId": self.experimentId,
             "dataset": self.dataset.model_dump(mode="json"),
             "instanceId": self.instanceId,
@@ -989,8 +1005,12 @@ class EvaluationItemResult(BaseModel):
             out = judge.get("outputTokens")
             if inp is not None or out is not None:
                 total_tokens = (inp or 0) + (out or 0)
+            identity = ({"responseId": self.responseId or self.trialId,
+                         "requestId": self.requestId, "executionId": self.executionId}
+                        if self.requestId else {"trialId": self.trialId})
             votes.append({
-                "trialId": self.trialId,
+                **identity,
+                **({"judgeVoteSchemaVersion": 2} if self.requestId else {}),
                 "experimentId": self.experimentId,
                 "dataset": self.dataset.model_dump(mode="json"),
                 "instanceId": self.instanceId,
@@ -1028,6 +1048,9 @@ class EvaluationRunSummary(BaseModel):
 class EvaluationTrialResult(BaseModel):
     experimentId: str
     trialId: str
+    responseId: str | None = None
+    requestId: str | None = None
+    executionId: str | None = None
     dataset: DatasetProvenance
     taskId: str
     items: list[EvaluationItemResult] = Field(default_factory=list)

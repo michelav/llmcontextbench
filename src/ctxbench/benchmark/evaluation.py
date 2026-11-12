@@ -583,6 +583,9 @@ def _build_skipped_evaluation_result(
     item = EvaluationItemResult(
         experimentId=result.experimentId,
         trialId=result.trialId,
+        responseId=result.responseId,
+        requestId=result.requestId,
+        executionId=result.executionId,
         dataset=result.dataset,
         taskId=result.taskId,
         instanceId=result.instanceId,
@@ -604,6 +607,9 @@ def _build_skipped_evaluation_result(
     return EvaluationTrialResult(
         experimentId=result.experimentId,
         trialId=result.trialId,
+        responseId=result.responseId,
+        requestId=result.requestId,
+        executionId=result.executionId,
         dataset=result.dataset,
         taskId=result.taskId,
         items=[item],
@@ -627,6 +633,9 @@ def _build_evaluation_result(
     item = EvaluationItemResult(
         experimentId=result.experimentId,
         trialId=result.trialId,
+        responseId=result.responseId,
+        requestId=result.requestId,
+        executionId=result.executionId,
         dataset=result.dataset,
         taskId=result.taskId,
         instanceId=result.instanceId,
@@ -660,6 +669,9 @@ def _build_evaluation_result(
     return EvaluationTrialResult(
         experimentId=result.experimentId,
         trialId=result.trialId,
+        responseId=result.responseId,
+        requestId=result.requestId,
+        executionId=result.executionId,
         dataset=result.dataset,
         taskId=result.taskId,
         items=[item],

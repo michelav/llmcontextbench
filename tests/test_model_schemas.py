@@ -244,6 +244,19 @@ def test_runresult_model_validate_rejects_legacy_metadata_field():
         TrialResult.model_validate(payload)
 
 
+def test_adaptive_response_model_uses_request_identity_without_trial_id():
+    payload = make_runresult_payload()
+    payload.pop("trialId")
+    payload.update({"responseId": "request-1", "requestId": "request-1", "executionId": "execution-1"})
+    result = TrialResult.model_validate(payload)
+    artifact = result.to_persisted_artifact()
+    assert result.trialId == "request-1"  # internal evaluator key
+    assert artifact["responseId"] == "request-1"
+    assert artifact["requestId"] == "request-1"
+    assert artifact["executionId"] == "execution-1"
+    assert "trialId" not in artifact
+
+
 def test_evaluation_item_serializers_use_trial_and_task_ids():
     item = EvaluationItemResult(
         metadata=make_metadata(),
@@ -288,6 +301,35 @@ def test_evaluation_item_serializers_use_trial_and_task_ids():
     assert votes[0]["taskId"] == "q_year"
     assert "runId" not in votes[0]
     assert "questionId" not in votes[0]
+
+
+def test_adaptive_evaluation_artifacts_use_request_response_identity():
+    item = EvaluationItemResult(
+        metadata=make_metadata(),
+        experimentId="exp-1",
+        trialId="request-1",
+        responseId="request-1",
+        requestId="request-1",
+        executionId="execution-1",
+        dataset=DatasetProvenance(
+            id="ctxbench/fake", version="0.1.0", origin="/tmp/dataset", materialized_path="/tmp/dataset",
+        ),
+        taskId="q_year",
+        taskStatement="Question",
+        evaluationMode="judge",
+        executionStrategy="inline",
+        details={"judges": [{"judgeId": "judge-1", "correctness": {}, "completeness": {}}]},
+    )
+    artifact = item.to_persisted_artifact()
+    vote = item.to_judge_votes()[0]
+    assert artifact["responseId"] == "request-1"
+    assert artifact["requestId"] == "request-1"
+    assert artifact["executionId"] == "execution-1"
+    assert artifact["evaluationSchemaVersion"] == 2
+    assert "trialId" not in artifact
+    assert vote["requestId"] == "request-1"
+    assert vote["judgeVoteSchemaVersion"] == 2
+    assert "trialId" not in vote
 
 
 def test_evaluation_run_result_model_validate_rejects_legacy_public_fields():

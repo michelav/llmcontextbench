@@ -9,6 +9,8 @@ from ctxbench.metrics.io import load_inputs
 from ctxbench.metrics.trial_rows import apply_selectors, build_trial_rows, parse_group_by
 from ctxbench.metrics.writers import prepare_output_dir, write_outputs
 from ctxbench.util.logging import PhaseLogger
+from ctxbench.util.fs import load_json, write_json
+from ctxbench.metrics.adaptive import build_adaptive_metrics, write_adaptive_metrics
 
 
 def metrics_command(
@@ -28,6 +30,41 @@ def metrics_command(
         if len(inputs) > 1 and output is None:
             raise ValueError("Multiple input directories require --output for merged metrics.")
         output_dir = Path(output).expanduser() if output else Path(inputs[0]).expanduser() / "metrics"
+        if len(inputs) == 1:
+            manifest_path = Path(inputs[0]).expanduser() / "manifest.json"
+            if manifest_path.exists():
+                manifest = load_json(manifest_path)
+                if isinstance(manifest, dict) and manifest.get("workflowKind", manifest.get("experimentKind")) == "adaptive":
+                    if selector and (selector.configuration or selector.strategy or selector.representation or selector.surface or selector.repetition):
+                        raise ValueError("Adaptive metrics selectors support task, instance, status, and request ID only.")
+                    requests, attempts = build_adaptive_metrics(inputs[0])
+                    if selector:
+                        requests = [row for row in requests if
+                                    (not selector.task or row.get("taskId") in selector.task) and
+                                    (not selector.instance or row.get("instanceId") in selector.instance) and
+                                    (not selector.status or ("delivered" if row.get("delivered") else row.get("state")) in selector.status) and
+                                    (not selector.trial_id or row.get("requestId") in selector.trial_id)]
+                        selected = {row["requestId"] for row in requests}
+                        attempts = [row for row in attempts if row.get("requestId") in selected]
+                    if output_dir.exists() and any(output_dir.iterdir()):
+                        if not force:
+                            raise ValueError(f"Output directory exists and is non-empty: {output_dir}. Use --force to replace it.")
+                        import shutil
+                        shutil.rmtree(output_dir)
+                    write_adaptive_metrics(output_dir, requests, attempts)
+                    request_states = {state: sum(row.get("state") == state for row in requests)
+                                      for state in ("delivered", "failed", "rejected", "started")}
+                    write_json(output_dir / "metrics-manifest.json", {
+                        "schemaVersion": "3.0-adaptive",
+                        "workflowKind": "adaptive",
+                        "inputDirectory": str(Path(inputs[0]).expanduser()),
+                        "requestCount": len(requests),
+                        "attemptCount": len(attempts),
+                        "requestStates": request_states,
+                        "outputs": ["adaptive_request_metrics.csv", "adaptive_attempt_metrics.csv"],
+                    })
+                    print(f"Wrote adaptive metrics to {output_dir}")
+                    return 0
         group_fields = parse_group_by(group_by)
         logger.info("METRICS", "metrics.inputs.discover", "Loading metrics input artifacts", inputs=len(inputs))
         artifacts = load_inputs(inputs, logger)

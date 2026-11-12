@@ -352,7 +352,7 @@ def _run_adaptive_workflow_locked(
             write_json(_record_path(records_root, request.request_id), record)
             tried.add(candidate_id)
             if decision_row["analysis"]["accepted"]:
-                _restore_delivery(record, decision_row, service, result=outcome.result)
+                _restore_delivery(record, decision_row, service)
                 write_json(_record_path(records_root, request.request_id), record)
                 break
             ordinal += 1
@@ -376,6 +376,8 @@ def _run_adaptive_workflow_locked(
                                   "replayedExecutions": replayed_executions,
                                   "sessionReusedAcrossRequests": provider_invocations > 1})
     write_json(lifecycle_path, lifecycle)
+    from .projections import rebuild_adaptive_responses
+    rebuild_adaptive_responses(artifact_root, service=service)
     return AdaptiveWorkflowOutcome(tuple(results), delivered, rejected, failed)
 
 
@@ -803,18 +805,21 @@ def _spent_tokens_records(records: list[dict[str, Any]]) -> tuple[int, bool]:
     return total, unknown
 
 
-def _restore_delivery(record, attempt, service, *, result=None):
+def _restore_delivery(record, attempt, service):
     candidate_id = attempt["decision"].get("candidateId")
     execution_id = attempt.get("executionId")
     outcomes = service.attempts(execution_id) if execution_id else []
-    persisted = outcomes[-1].get("result") if outcomes else None
-    result = result or persisted or {}
+    if not outcomes:
+        raise ValueError(f"missing execution outcome for delivered request {record['requestId']}")
+    attempt_id = (attempt.get("execution") or {}).get("attemptId")
+    execution = next((row for row in outcomes if row.get("attemptId") == attempt_id), None)
+    if execution is None or execution.get("state") != "succeeded":
+        raise ValueError(f"delivery does not reference a successful execution for {record['requestId']}")
     record["state"] = "delivered"
     record["delivery"] = {
         "candidateId": candidate_id,
         "executionId": execution_id,
-        "attemptId": (attempt.get("execution") or {}).get("attemptId"),
-        "response": result.get("response", ""),
+        "attemptId": attempt_id,
     }
     record["terminalReason"] = "all_declared_acceptance_and_quality_slos_met"
 

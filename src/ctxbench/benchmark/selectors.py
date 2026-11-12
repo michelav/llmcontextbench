@@ -93,9 +93,13 @@ def _matches_common(item: Any, selector: RunSelector) -> bool:
 
 def _field(item: Any, name: str) -> Any:
     if isinstance(item, dict):
+        if name == "trialId":
+            return item.get("trialId") or item.get("responseId") or item.get("requestId")
         if name == "modelName" and "modelName" not in item:
             return item.get("model")
         return item.get(name)
+    if name == "trialId":
+        return getattr(item, "trialId", None) or getattr(item, "responseId", None) or getattr(item, "requestId", None)
     return getattr(item, name, None)
 
 

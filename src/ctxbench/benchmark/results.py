@@ -128,8 +128,12 @@ def serialize_evaluation_result(
         result, artifact_root=artifact_root, write_trace=write_trace
     )
     if item is None:
+        identity = ({"responseId": result.responseId or result.trialId,
+                     "requestId": result.requestId, "executionId": result.executionId}
+                    if result.requestId else {"trialId": result.trialId})
         return {
-            "trialId": result.trialId,
+            **identity,
+            **({"evaluationSchemaVersion": 2} if result.requestId else {}),
             "experimentId": result.experimentId,
             "dataset": result.dataset.model_dump(mode="json"),
             "instanceId": result.metadata.instanceId or None,

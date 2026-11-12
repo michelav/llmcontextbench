@@ -28,6 +28,7 @@ from ctxbench.adaptive.workflow import (
     QualitySLO,
     run_adaptive_workflow,
 )
+from ctxbench.adaptive.projections import rebuild_adaptive_responses
 from ctxbench.dataset.capabilities import (
     FeatureCapability,
     RequestFeatureSchema,
@@ -36,6 +37,9 @@ from ctxbench.dataset.capabilities import (
 )
 from ctxbench.execution.service import ExecutionRequest, ExecutionSession, TrialExecutionService
 from ctxbench.util.fs import load_json, write_json
+from ctxbench.util.jsonl import read_jsonl
+from ctxbench.metrics.adaptive import build_adaptive_metrics
+from ctxbench.commands.metrics import metrics_command
 
 
 def _capability() -> SignalCapability:
@@ -139,6 +143,7 @@ def _result(request, *, status="success", response="answer", duration=10, tokens
         "status": status,
         "response": response,
         "timing": {"durationMs": duration},
+        "usage": {"inputTokens": 10, "outputTokens": 5, "totalTokens": 15},
         "metricsSummary": {
             "totalTokens": tokens,
             "totalTokensProvenance": "reported" if tokens is not None else "unavailable",
@@ -193,6 +198,27 @@ def test_quality_slo_fallback_records_each_decision_and_repeated_occurrences(tmp
     assert service.attempts("request-1-candidate-a")[0]["result"]["_adaptiveSignals"]["quality"][0]["value"] == 0.2
     assert first["attempts"][0]["quality"][0]["cost"]["duration_ms"] == 1
     assert first["knowledgeAfter"]["estimatorId"] == "rolling_window_mean"
+    projected = read_jsonl(tmp_path / "responses.jsonl")
+    assert [row["requestId"] for row in projected] == ["request-1", "request-2"]
+    assert all("trialId" not in row and "_adaptiveSignals" not in row for row in projected)
+    assert all(row["responseId"] == row["requestId"] for row in projected)
+    request_metrics, attempt_metrics = build_adaptive_metrics(tmp_path)
+    first_metrics = request_metrics[0]
+    assert first_metrics["attemptCount"] == 2
+    assert first_metrics["generationTotalTokens"] == 30
+    assert first_metrics["deliveredTotalTokens"] == 15
+    assert first_metrics["nonDeliveredAttemptCount"] == 1
+    assert first_metrics["knownNonDeliveredTotalTokens"] == 15
+    assert first_metrics["nonDeliveredUsageCompleteness"] == "complete"
+    assert first_metrics["attemptsNotAccepted"] == 1
+    assert first_metrics["unmetConditions"]
+    assert first_metrics["terminalReason"] == "all_declared_acceptance_and_quality_slos_met"
+    assert first_metrics["requestDurationProvenance"] == "measured"
+    (tmp_path / "responses.jsonl").unlink()
+    rebuilt = rebuild_adaptive_responses(tmp_path, service=service)
+    assert rebuilt == projected
+    assert len(attempt_metrics) == 3
+    assert sum(row["delivered"] for row in attempt_metrics) == 2
 
 
 def test_latency_token_and_error_policies_route_to_the_next_candidate(tmp_path):
@@ -224,6 +250,12 @@ def test_unavailable_quality_is_explicit_and_never_satisfies_slo(tmp_path):
     assert "quality_unavailable:quality" in attempt["analysis"]["unmet"]
     assert attempt["quality"][0]["value"] is None
     assert attempt["quality"][0]["provenance"] == "unavailable"
+    request_metrics, attempt_metrics = build_adaptive_metrics(tmp_path)
+    assert request_metrics[0]["state"] == "failed"
+    assert request_metrics[0]["delivered"] is False
+    assert request_metrics[0]["terminalReason"] == "candidate_catalog_exhausted"
+    assert request_metrics[0]["nonDeliveredAttemptCount"] == 1
+    assert len(attempt_metrics) == 1
 
 
 def test_quality_slo_requires_declared_assessor_before_any_execution(tmp_path):
@@ -232,6 +264,20 @@ def test_quality_slo_requires_declared_assessor_before_any_execution(tmp_path):
     with pytest.raises(ValueError, match="require a declared online quality assessor"):
         _run(plan, tmp_path, lambda *args: calls.append(args))
     assert calls == []
+
+
+def test_adaptive_metrics_command_writes_request_and_attempt_artifacts(tmp_path):
+    plan = _plan()
+    _run(plan, tmp_path, lambda request, _session: _result(request))
+    write_json(tmp_path / "manifest.json", {"workflowKind": "adaptive"})
+
+    output = tmp_path / "metrics"
+    assert metrics_command([str(tmp_path)], output=str(output)) == 0
+    assert (output / "adaptive_request_metrics.csv").exists()
+    assert (output / "adaptive_attempt_metrics.csv").exists()
+    request_csv = (output / "adaptive_request_metrics.csv").read_text(encoding="utf-8")
+    assert "requestId" in request_csv.splitlines()[0]
+    assert "generationTotalTokens" in request_csv.splitlines()[0]
 
 
 def test_quota_admission_is_persisted_and_does_not_invoke_provider(tmp_path):
@@ -303,7 +349,10 @@ def test_future_request_observations_cannot_change_an_earlier_decision(tmp_path)
         "taskId": "task-repeat",
         "instanceId": "instance-repeat",
         "state": "delivered",
-        "delivery": {"candidateId": "candidate-b", "executionId": "request-2-candidate-b"},
+        "delivery": {
+            "candidateId": "candidate-b", "executionId": "request-2-candidate-b",
+            "attemptId": future_outcome.attempt_id,
+        },
         "attempts": [{
             "decision": {
                 "decisionId": "request-2:decision:0001", "requestId": "request-2",

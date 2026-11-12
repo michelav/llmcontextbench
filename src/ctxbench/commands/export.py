@@ -21,7 +21,7 @@ _SUPPORTED_FORMATS = ("csv",)
 # ---------------------------------------------------------------------------
 
 def _trial_id(row: dict[str, Any]) -> str:
-    return str(row.get("trialId", ""))
+    return str(row.get("responseId") or row.get("trialId") or "")
 
 
 def _ans(row: dict[str, Any], key: str, default: Any = None) -> Any:
@@ -67,6 +67,9 @@ def _merge_row(
         # ── from responses ──────────────────────────────────────────────────
         "experimentId": _ans(ans, "experimentId"),
         "trialId": _ans(ans, "trialId"),
+        "responseId": _ans(ans, "responseId"),
+        "requestId": _ans(ans, "requestId"),
+        "executionId": _ans(ans, "executionId"),
         "dataset_id": (ans.get("dataset") or {}).get("id"),
         "dataset_version": (ans.get("dataset") or {}).get("version"),
         "instanceId": _ans(ans, "instanceId"),
@@ -144,6 +147,11 @@ _CSV_FIELDS = [
     "evaluationDurationMs", "evaluationInputTokens", "evaluationOutputTokens",
     "evaluationMethod", "judgeCount", "evaluationStatus", "contextBlocks",
 ]
+_ADAPTIVE_CSV_FIELDS = [
+    field for index, field in enumerate(_CSV_FIELDS)
+    if index != 1
+]
+_ADAPTIVE_CSV_FIELDS[1:1] = ["responseId", "requestId", "executionId"]
 
 
 # ---------------------------------------------------------------------------
@@ -283,10 +291,10 @@ def _print_run_detail(
 # CSV export
 # ---------------------------------------------------------------------------
 
-def _write_csv(rows: list[dict[str, Any]], path: Path) -> None:
+def _write_csv(rows: list[dict[str, Any]], path: Path, fields: list[str] = _CSV_FIELDS) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=_CSV_FIELDS, extrasaction="ignore")
+        writer = csv.DictWriter(handle, fieldnames=fields, extrasaction="ignore")
         writer.writeheader()
         for row in rows:
             writer.writerow({f: row.get(f) for f in _CSV_FIELDS})
@@ -318,9 +326,14 @@ def export_command(
     source = Path(evals).resolve() if evals else Path("evals.jsonl").resolve()
     source_root = source.parent
     manifest = validate_manifest(source_root)
-    if manifest.get("provisioningArtifactVersion") == 4:
+    adaptive = manifest.get("workflowKind", manifest.get("experimentKind")) == "adaptive"
+    if adaptive:
+        from ctxbench.adaptive.projections import rebuild_adaptive_responses
+        rebuild_adaptive_responses(source_root)
+    elif manifest.get("provisioningArtifactVersion") == 4:
         rebuild_responses(source_root, execution_fingerprint=str(manifest["executionFingerprint"]))
-    validate_artifact_directory(source_root)
+    if not adaptive:
+        validate_artifact_directory(source_root)
     logger = PhaseLogger(verbose=verbose)
 
     responses_path = source_root / "responses.jsonl"
@@ -367,7 +380,15 @@ def export_command(
 
     if format == "csv":
         out_path = Path(output).resolve() if output else source_root / "results.csv"
-        _write_csv(merged, out_path)
+        adaptive_export = any(response.get("requestId") for response in responses)
+        _write_csv(merged, out_path, _ADAPTIVE_CSV_FIELDS if adaptive_export else _CSV_FIELDS)
+        if adaptive_export:
+            from ctxbench.util.fs import write_json
+            write_json(out_path.with_suffix(out_path.suffix + ".manifest.json"), {
+                "schemaVersion": "2.0",
+                "workflowKind": "adaptive",
+                "columns": _ADAPTIVE_CSV_FIELDS,
+            })
         logger.info("EXPORT", "export.completed", "Export completed", path=str(out_path), rows=len(merged), format=format)
         print(f"Exported {len(merged)} row(s) → {out_path}")
 
