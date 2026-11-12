@@ -15,6 +15,16 @@ from .types import (
     PerformanceEstimate, PolicyState, Provenance, RequestFeatures, SizeBin,
     TokenUsage, estimate_from_observations,
 )
+from .workflow import (
+    ADAPTIVE_PLAN_VERSION,
+    AdaptiveCandidateInvocation,
+    AdaptivePlan,
+    AdaptiveWorkflowOutcome,
+    AdaptiveWorkflowPolicy,
+    AdaptiveWorkloadRequest,
+    QualitySLO,
+    run_adaptive_workflow,
+)
 
 __all__ = [
     "AdaptivePolicy", "FixedPolicy", "PolicyConfig", "RouterPolicy",
@@ -27,4 +37,7 @@ __all__ = [
     "Candidate", "ContextFit", "Decision", "Estimate", "EstimateKey", "Observation",
     "PerformanceEstimate", "PolicyState", "Provenance", "RequestFeatures", "SizeBin",
     "TokenUsage", "estimate_from_observations",
+    "ADAPTIVE_PLAN_VERSION", "AdaptiveCandidateInvocation", "AdaptivePlan",
+    "AdaptiveWorkflowOutcome", "AdaptiveWorkflowPolicy", "AdaptiveWorkloadRequest",
+    "QualitySLO", "run_adaptive_workflow",
 ]

@@ -80,15 +80,18 @@ def execute_command(
             verify_snapshot(source.parent, manifest, execution=True)
             rebuild_responses(source.parent, execution_fingerprint=str(manifest["executionFingerprint"]))
             validate_artifact_directory(source.parent)
-            runspecs = _load_runspecs(source)
             if manifest.get("experimentKind") == "adaptive":
-                from ctxbench.adaptive.v1 import execute_adaptive
                 adaptive_plan = load_json(source.parent / "adaptive-plan.json")
-                knowledge_path = source.parent / "knowledge.json"
-                knowledge = load_json(knowledge_path) if knowledge_path.exists() else None
-                return execute_adaptive(adaptive_plan, knowledge, runspecs, root=source.parent,
-                                        manifest=manifest, force=force, retry_uncertain=retry_uncertain,
-                                        logger=logger, progress=progress)
+                if adaptive_plan.get("schemaVersion") == 1:
+                    raise ValueError(
+                        "Adaptive plan schemaVersion 1 is not supported by the MAPE-K workflow. "
+                        "It is not migrated or executed; create a fresh adaptive plan with the current definition contract."
+                    )
+                raise ValueError(
+                    f"Unsupported adaptive plan schemaVersion {adaptive_plan.get('schemaVersion')!r}; "
+                    "create a fresh plan using the current definition contract."
+                )
+            runspecs = _load_runspecs(source)
             active_selector = selector or RunSelector()
             runspecs = [r for r in runspecs if matches_runspec(r, active_selector)]
             if not runspecs:
