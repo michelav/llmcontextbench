@@ -35,6 +35,9 @@ def load_packets(root):
 class MeasuredToolDelay(DelayedRuntime):
     def __init__(self, runtime, delay_ms, *, sleeper, monotonic):
         super().__init__(runtime, delay_ms, sleeper=sleeper)
+        self.runtime = runtime
+        self.delay_ms = delay_ms
+        self.sleeper = sleeper
         self.monotonic = monotonic
         self.calls = 0
         self.actual_ms = 0.0
