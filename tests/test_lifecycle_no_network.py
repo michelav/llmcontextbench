@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from ctxbench.benchmark import evaluation as evaluation_module
-from ctxbench.benchmark.checkpoints import load_completed_run_ids, write_completed_run_ids
 from ctxbench.commands.eval import eval_command
 from ctxbench.commands.execute import execute_command
 from ctxbench.commands.export import export_command
@@ -15,9 +14,11 @@ from ctxbench.commands.plan import plan_command
 from ctxbench.commands.status import status_command
 from ctxbench.dataset.errors import AdapterUnavailableError
 from ctxbench.dataset import acquisition as acquisition_module
+from tests.benchmark_artifacts import persist_response, seal_benchmark_directory
 
 
 ARTIFACT_ONLY_FIXTURE = Path(__file__).parent / "fixtures" / "artifact_only_unavailable_dataset"
+pytestmark = pytest.mark.workflow
 
 
 def _forbid_dataset_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -82,13 +83,16 @@ def _write_experiment(path: Path, dataset_ref: object) -> Path:
     path.write_text(
         json.dumps(
             {
+                "schemaVersion": 3,
+                "kind": "benchmark",
                 "id": "exp-no-network",
                 "output": "outputs",
                 "dataset": dataset_ref,
                 "scope": {"instances": [], "tasks": []},
-                "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['inline-json']},
+                "models": {"mock": {"provider": "mock", "name": "mock"}},
                 "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'}},
                 "surfaces": {"full": {"type": "full_context"}},
+                "candidates": [["mock", "inline-json"]],
                 "evaluation": {
                     "enabled": True,
                     "judges": [{"id": "judge-a", "provider": "mock", "model": "judge-a", "temperature": 0}],
@@ -99,32 +103,6 @@ def _write_experiment(path: Path, dataset_ref: object) -> Path:
         encoding="utf-8",
     )
     return path
-
-
-def test_trial_checkpoint_kind_accepts_canonical_and_legacy(tmp_path: Path) -> None:
-    checkpoint = tmp_path / "runs.checkpoint.json"
-
-    write_completed_run_ids(
-        checkpoint,
-        experiment_id="exp-1",
-        kind="trials",
-        completed_run_ids={"trial-1"},
-    )
-
-    assert load_completed_run_ids(checkpoint, experiment_id="exp-1", kind="trials") == {"trial-1"}
-
-    checkpoint.write_text(
-        json.dumps(
-            {
-                "experimentId": "exp-1",
-                "kind": "runs",
-                "completedTrialIds": ["legacy-trial"],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    assert load_completed_run_ids(checkpoint, experiment_id="exp-1", kind="trials") == {"legacy-trial"}
 
 
 def _write_missing_trials(root: Path) -> Path:
@@ -184,32 +162,18 @@ def _write_missing_trials(root: Path) -> Path:
         + "\n",
         encoding="utf-8",
     )
-    (root / "manifest.json").write_text(json.dumps({"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}}, "configurations": {"inline-json": {"strategy": "inline", "representation": "json", "surface": "full"}}}))
+    seal_benchmark_directory(
+        root,
+        experiment_id="exp-no-network",
+        configurations={"inline-json": {"strategy": "inline", "representation": "json", "surface": "full"}},
+        surfaces={"full": {"type": "full_context"}},
+        dataset={"id": "ctxbench/local-fixture", "version": "0.1.0", "origin": str(root / "missing-dataset"),
+                 "resolvedRevision": None, "contentHash": "sha256:missing-fixture"},
+    )
     return trials_path
 
 
 def _write_missing_responses(root: Path) -> Path:
-    manifest_path = root / "manifest.json"
-    manifest_path.write_text(
-        json.dumps(
-            {"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}}, "configurations": {"inline-json": {"strategy": "inline", "representation": "json", "surface": "full"}},
-                "experimentId": "exp-no-network",
-                "dataset": {
-                    "id": "ctxbench/local-fixture",
-                    "version": "0.1.0",
-                    "origin": str(root / "missing-dataset"),
-                    "resolvedRevision": None,
-                    "contentHash": None,
-                    "materializedPath": str(root / "missing-dataset"),
-                },
-                "evaluation": {
-                    "judges": [{"id": "judge-a", "provider": "mock", "model": "judge-a", "temperature": 0}]
-                },
-                "trace": {"writeFiles": False},
-            }
-        ),
-        encoding="utf-8",
-    )
     responses_path = root / "responses.jsonl"
     responses_path.write_text(
         json.dumps(
@@ -274,11 +238,37 @@ def _write_missing_responses(root: Path) -> Path:
         + "\n",
         encoding="utf-8",
     )
+    response = json.loads(responses_path.read_text(encoding="utf-8"))
+    trial = dict(response)
+    trial["taskStatement"] = response["taskStatement"]
+    (root / "trials.jsonl").write_text(json.dumps(trial) + "\n", encoding="utf-8")
+    fingerprint = seal_benchmark_directory(
+        root,
+        experiment_id="exp-no-network",
+        configurations={"inline-json": {"strategy": "inline", "representation": "json", "surface": "full"}},
+        surfaces={"full": {"type": "full_context"}},
+        dataset=response["dataset"],
+        evaluation={"enabled": True, "judges": [{"id": "judge-a", "provider": "mock", "model": "judge-a", "temperature": 0}]},
+        trace={"enabled": False, "writeFiles": False},
+    )
+    persist_response(root, trial, response, fingerprint)
     return responses_path
 
 
 def _copy_artifact_only_fixture(root: Path) -> Path:
     shutil.copytree(ARTIFACT_ONLY_FIXTURE, root, dirs_exist_ok=True)
+    trial = json.loads((root / "trials.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    response = json.loads((root / "responses.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    fingerprint = seal_benchmark_directory(
+        root,
+        experiment_id="exp-artifact-only",
+        configurations={"inline-json": {"strategy": "inline", "representation": "json", "surface": "full"}},
+        surfaces={"full": {"type": "full_context"}},
+        dataset=response["dataset"],
+        evaluation={"enabled": True, "judges": [{"id": "judge-a", "provider": "mock", "model": "judge-a", "temperature": 0}]},
+        trace={"enabled": False, "writeFiles": False},
+    )
+    persist_response(root, trial, response, fingerprint)
     return root / "evals.jsonl"
 
 

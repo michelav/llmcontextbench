@@ -8,7 +8,7 @@ from ctxbench.benchmark.provisioning import validate_artifact_directory
 from ctxbench.benchmark.execution_records import rebuild_responses
 from typing import Any
 
-from ctxbench.benchmark.selectors import RunSelector, matches_run_result
+from ctxbench.benchmark.selectors import TrialSelector, matches_trial_result
 from ctxbench.util.jsonl import read_jsonl
 from ctxbench.util.logging import PhaseLogger
 
@@ -309,7 +309,7 @@ def export_command(
     format: str = "csv",
     output: str | None = None,
     verbose: bool = False,
-    selector: RunSelector | None = None,
+    selector: TrialSelector | None = None,
     by: list[str] | None = None,
     run_id: str | None = None,
 ) -> int:
@@ -326,11 +326,11 @@ def export_command(
     source_root = source.parent
     from ctxbench.adaptive.artifacts import validate_workflow_manifest
     manifest = validate_workflow_manifest(source_root)
-    adaptive = manifest.get("workflowKind", manifest.get("experimentKind")) == "adaptive"
+    adaptive = manifest.get("workflowKind") == "adaptive"
     if adaptive:
         from ctxbench.adaptive.projections import rebuild_adaptive_responses
         rebuild_adaptive_responses(source_root)
-    elif manifest.get("provisioningArtifactVersion") == 4:
+    else:
         rebuild_responses(source_root, execution_fingerprint=str(manifest["executionFingerprint"]))
     if not adaptive:
         validate_artifact_directory(source_root)
@@ -363,8 +363,8 @@ def export_command(
     if run_id is not None:
         return _print_run_detail(run_id, responses, evals_index, votes_index)
 
-    active_selector = selector or RunSelector()
-    responses = [r for r in responses if matches_run_result(r, active_selector)]
+    active_selector = selector or TrialSelector()
+    responses = [r for r in responses if matches_trial_result(r, active_selector)]
 
     try:
         responses = _apply_by_filters(responses, by or [])

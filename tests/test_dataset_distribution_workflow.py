@@ -11,6 +11,8 @@ from ctxbench.dataset.cache import DatasetCache
 from ctxbench.dataset.materialization import MaterializationManifest
 from ctxbench.util.jsonl import read_jsonl
 
+pytestmark = pytest.mark.workflow
+
 
 def _write_local_dataset(root: Path) -> Path:
     instance_dir = root / "context" / "cv-demo"
@@ -57,13 +59,16 @@ def _write_experiment(path: Path, dataset_ref: object) -> Path:
     path.write_text(
         json.dumps(
             {
+                "schemaVersion": 3,
+                "kind": "benchmark",
                 "id": "exp-dataset-plan",
                 "output": "outputs",
                 "dataset": dataset_ref,
                 "scope": {"instances": [], "tasks": []},
-                "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['inline-json']},
+                "models": {"mock": {"provider": "mock", "name": "mock"}},
                 "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'}},
                 "surfaces": {"full": {"type": "full_context"}},
+                "candidates": [["mock", "inline-json"]],
                 "evaluation": {"enabled": False, "judges": []},
             }
         ),

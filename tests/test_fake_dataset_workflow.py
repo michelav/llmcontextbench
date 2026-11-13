@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from ctxbench.ai.engine import Engine
 from ctxbench.benchmark import evaluation as evaluation_module
 from ctxbench.benchmark.evaluation import EvaluationTrace
@@ -20,6 +22,7 @@ from ctxbench.util.jsonl import read_jsonl
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+pytestmark = [pytest.mark.workflow, pytest.mark.e2e]
 FIXTURE_ROOT = REPO_ROOT / "tests" / "fixtures" / "fake_dataset"
 EXPERIMENT_PATH = FIXTURE_ROOT / "experiment.json"
 DATASET_ROOT = FIXTURE_ROOT / "dataset"
@@ -102,13 +105,16 @@ def test_fake_dataset_plan_workflow_uses_env_cache_root_for_cached_dataset(
     experiment_path.write_text(
         json.dumps(
             {
+                "schemaVersion": 3,
+                "kind": "benchmark",
                 "id": "exp-fake-cached",
                 "output": "outputs",
                 "dataset": {"id": "ctxbench/fake-dataset", "version": "0.1.0"},
                 "scope": {"instances": [], "tasks": []},
-                "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['inline-json']},
+                "models": {"mock": {"provider": "mock", "name": "mock"}},
                 "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'}},
                 "surfaces": {"full": {"type": "full_context"}},
+                "candidates": [["mock", "inline-json"]],
                 "evaluation": {"enabled": False, "judges": []},
             }
         ),
@@ -131,7 +137,7 @@ def test_fake_dataset_static_benchmark_lifecycle_preserves_assignments(
     monkeypatch.chdir(REPO_ROOT)
     output_root = tmp_path / "benchmark"
     experiment = json.loads(EXPERIMENT_PATH.read_text(encoding="utf-8"))
-    experiment["definitionVersion"] = 3
+    experiment["dataset"]["root"] = str(DATASET_ROOT.resolve())
     experiment["evaluation"] = {
         "enabled": True,
         "judges": [{"provider": "mock", "model": "mock-judge"}],

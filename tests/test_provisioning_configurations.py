@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from ctxbench.benchmark.models import Experiment, ProvisioningConfiguration, TrialSpec
+from tests.benchmark_artifacts import seal_benchmark_directory
 from ctxbench.benchmark.runspec_generator import generate_runspecs
 from ctxbench.benchmark.models import DatasetProvenance
 from ctxbench.util.artifacts import canonical_trial_identity
@@ -23,11 +24,24 @@ def experiment_payload():
     }
 
 
+def versioned_definition(payload: dict) -> dict:
+    definition = dict(payload)
+    definition["schemaVersion"] = 3
+    definition["kind"] = "benchmark"
+    definition["candidates"] = [
+        [model_id, configuration_id]
+        for model_id in payload["factors"]["model"]
+        for configuration_id in payload["factors"]["configuration"]
+    ]
+    definition.pop("factors")
+    return definition
+
+
 def test_configuration_expansion_and_snapshot(tmp_path):
     payload = experiment_payload()
     exp = Experiment.model_validate(payload)
-    from ctxbench.dataset.provider import DatasetProvider
-    adapter = DatasetProvider.from_dataset(exp.dataset)
+    from ctxbench.dataset.provider import LocalDatasetPackage
+    adapter = LocalDatasetPackage.from_dataset(exp.dataset)
     trials = generate_runspecs(exp, tmp_path, adapter, DatasetProvenance(id='fake', version='1'))
     assert len(trials) == 3
     assert {t.configurationId for t in trials} == set(payload['configurations'])
@@ -74,7 +88,7 @@ def test_planned_lifecycle_uses_configuration_snapshot(tmp_path):
     payload['dataset']['root'] = str(Path(payload['dataset']['root']).resolve())
     payload['factors']['configuration'] = ['i-json']
     experiment = tmp_path / 'experiment.json'
-    experiment.write_text(json.dumps(payload))
+    experiment.write_text(json.dumps(versioned_definition(payload)))
     output = tmp_path / 'planned'
     assert plan_command(str(experiment), str(output), cache_dir=tmp_path / 'cache') == 0
     payload['configurations']['i-json']['representation'] = 'missing'
@@ -97,7 +111,7 @@ def test_legacy_directories_rejected_at_lifecycle_boundaries(tmp_path):
     from ctxbench.commands.status import status_command
     (tmp_path / 'manifest.json').write_text('{}')
     for command, arg in [(execute_command, tmp_path / 'trials.jsonl'), (eval_command, tmp_path / 'responses.jsonl'), (export_command, tmp_path / 'evals.jsonl'), (status_command, tmp_path)]:
-        with pytest.raises(ValueError, match='previous benchmark version'):
+        with pytest.raises(ValueError, match='Unsupported benchmark artifact contract'):
             command(str(arg))
 
 
@@ -113,7 +127,8 @@ def test_reporting_preserves_distinct_ids_and_rejects_conflicts(tmp_path, capsys
     p['configurations'] = {key: {'strategy': 'inline', 'representation': 'json', 'surface': 'full'} for key in ['first', 'second']}
     p['factors']['configuration'] = ['first', 'second']
     path = tmp_path / 'experiment.json'
-    path.write_text(json.dumps(p))
+    definition = versioned_definition(p)
+    path.write_text(json.dumps(definition))
     out = tmp_path / 'planned'
     plan_command(str(path), str(out), cache_dir=tmp_path / 'cache')
     execute_command(str(out / 'trials.jsonl'))
@@ -134,9 +149,9 @@ def test_reporting_preserves_distinct_ids_and_rejects_conflicts(tmp_path, capsys
     assert pooled['pooledConfigurations'] == [{'group': {'strategy': 'inline'}, 'configurationIds': ['first', 'second']}]
     assert main(['metrics', str(out), '--configuration', 'first', '--not-representation', 'html', '--output', str(tmp_path / 'selected')]) == 0
     assert len(list(csv.DictReader((tmp_path / 'selected/trial_metrics.csv').open()))) == 1
-    p['id'] = 'different-experiment'
-    p['configurations']['first']['representation'] = 'html'
-    path.write_text(json.dumps(p))
+    definition['id'] = 'different-experiment'
+    definition['configurations']['first']['representation'] = 'html'
+    path.write_text(json.dumps(definition))
     other = tmp_path / 'other'
     plan_command(str(path), str(other), cache_dir=tmp_path / 'cache')
     with pytest.raises(ValueError, match='Conflicting definitions'):
@@ -147,10 +162,15 @@ def test_reporting_preserves_distinct_ids_and_rejects_conflicts(tmp_path, capsys
 def test_artifact_definition_disagreement_rejected(tmp_path, artifact):
     from ctxbench.benchmark.provisioning import validate_artifact_directory
     definition = {"strategy": "inline", "representation": "json", "surface": "full"}
-    (tmp_path / "manifest.json").write_text(json.dumps({"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}}, "configurations": {"a": definition}}))
     row = {"trialId": "t", "configurationId": "a", **definition, "metadata": {"configurationId": "a", **definition}}
     row["representation"] = "html"
     (tmp_path / f"{artifact}.jsonl").write_text(json.dumps(row) + "\n")
+    seal_benchmark_directory(
+        tmp_path,
+        experiment_id="exp-provisioning-contract",
+        configurations={"a": definition},
+        surfaces={"full": {"type": "full_context"}},
+    )
     with pytest.raises(ValueError, match="Inconsistent provisioning field representation"):
         validate_artifact_directory(tmp_path)
 

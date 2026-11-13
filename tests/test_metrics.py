@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from ctxbench.cli import main
+from tests.benchmark_artifacts import persist_response, seal_benchmark_directory
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -170,6 +171,16 @@ def test_metrics_accepts_artifact_only_unavailable_dataset_fixture(tmp_path):
     source = REPO_ROOT / "tests" / "fixtures" / "artifact_only_unavailable_dataset"
     root = tmp_path / "artifact_only"
     shutil.copytree(source, root)
+    manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
+    trial_rows = [json.loads(line) for line in (root / "trials.jsonl").read_text().splitlines() if line]
+    response_rows = [json.loads(line) for line in (root / "responses.jsonl").read_text().splitlines() if line]
+    fingerprint = seal_benchmark_directory(
+        root, experiment_id=manifest["experimentId"], configurations=manifest["configurations"],
+        surfaces=manifest["surfaces"], dataset=manifest["dataset"],
+        evaluation=manifest.get("evaluation"), trace=manifest.get("trace"),
+    )
+    for trial, response in zip(trial_rows, response_rows):
+        persist_response(root, trial, response, fingerprint)
 
     assert main(["metrics", str(root)]) == 0
 
@@ -220,10 +231,16 @@ def _experiment(
         _write_jsonl(root / "evals.jsonl", evals)
     if votes:
         _write_jsonl(root / "judge_votes.jsonl", votes)
-    (root / "manifest.json").write_text(
-        json.dumps({"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}, "ops": {"type": "operations", "operations": ["get_evidence"]}}, "configurations": {t["configurationId"]: {k: t[k] for k in ("strategy", "representation", "surface")} for t in trial_rows}, "experimentId": "exp", "dataset": {"contentHash": "sha256:test"}}),
-        encoding="utf-8",
+    fingerprint = seal_benchmark_directory(
+        root, experiment_id="exp",
+        configurations={t["configurationId"]: {k: t[k] for k in ("strategy", "representation", "surface")} for t in trial_rows},
+        surfaces={"full": {"type": "full_context"}, "ops": {"type": "operations", "operations": ["get_evidence"]}},
+        dataset={"id": "ctxbench/test", "version": "1", "contentHash": "sha256:test"},
     )
+    response_by_id = {row["trialId"]: row for row in responses}
+    for trial in trial_rows:
+        if trial["trialId"] in response_by_id:
+            persist_response(root, trial, response_by_id[trial["trialId"]], fingerprint)
     return root
 
 
@@ -272,6 +289,7 @@ def _response(
 ) -> dict[str, object]:
     return {
         "trialId": trial_id,
+        "experimentId": "exp",
         "status": status,
         "response": "answer",
         "errorMessage": None if status == "success" else "failed",

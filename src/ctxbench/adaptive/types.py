@@ -1,21 +1,9 @@
 from __future__ import annotations
 
-from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 from math import isfinite
 from typing import Mapping
-
-INLINE_CONFIGURATION = "inline-code-full"
-LOCAL_MCP_CONFIGURATION = "local-mcp-repoqa-ops"
-POLICY_VERSION = "2"
-
-
-class SizeBin(StrEnum):
-    SMALL = "small"
-    MEDIUM = "medium"
-    LARGE = "large"
-
 
 class Provenance(StrEnum):
     REPORTED = "reported"
@@ -34,17 +22,14 @@ def validate_metric(value: float | None, provenance: Provenance) -> None:
 
 @dataclass(frozen=True)
 class RequestFeatures:
-    """Permitted features; identities and nominal variants belong to workload preparation."""
+    """Request features used by the current workflow; identities stay on the request."""
     sequence_index: int
     context_bytes: int
-    size_bin: SizeBin | None = None
 
     def __post_init__(self) -> None:
         if (type(self.sequence_index) is not int or type(self.context_bytes) is not int
                 or self.sequence_index < 1 or self.context_bytes < 0):
             raise ValueError("invalid request features")
-        if self.size_bin is not None and not isinstance(self.size_bin, SizeBin):
-            raise ValueError("size_bin must be a declared SizeBin or None")
 
 
 @dataclass(frozen=True)
@@ -103,12 +88,6 @@ class Estimate:
 
 
 @dataclass(frozen=True)
-class EstimateKey:
-    configuration_id: str
-    size_bin: SizeBin | None
-
-
-@dataclass(frozen=True)
 class PerformanceEstimate:
     latency_ms: Estimate
     total_tokens: Estimate
@@ -126,15 +105,14 @@ class TokenUsage:
 @dataclass(frozen=True)
 class Observation:
     configuration_id: str
-    size_bin: SizeBin | None
     status: str
     end_to_end_duration_ms: float | None
     tokens: TokenUsage
     duration_provenance: Provenance = Provenance.MEASURED
 
     def __post_init__(self) -> None:
-        if not self.configuration_id or (self.size_bin is not None and not isinstance(self.size_bin, SizeBin)):
-            raise ValueError("observation requires a configuration and optional legacy SizeBin")
+        if not self.configuration_id:
+            raise ValueError("observation requires a configuration")
         validate_metric(self.end_to_end_duration_ms, self.duration_provenance)
 
     @property
@@ -145,50 +123,6 @@ class Observation:
 def unavailable_estimate() -> PerformanceEstimate:
     missing = Estimate(None, Provenance.UNAVAILABLE, 0)
     return PerformanceEstimate(missing, missing)
-
-
-def _mean(values: list[tuple[float, Provenance]]) -> Estimate:
-    if not values:
-        return unavailable_estimate().latency_ms
-    sources = tuple(p for _, p in values)
-    provenance = Provenance.ESTIMATED if Provenance.ESTIMATED in sources else Provenance.DERIVED
-    return Estimate(sum(v for v, _ in values) / len(values), provenance, len(values), sources)
-
-
-def estimate_from_observations(observations: list[Observation]) -> PerformanceEstimate:
-    if len({EstimateKey(o.configuration_id, o.size_bin) for o in observations}) > 1:
-        raise ValueError("observations must belong to one configuration/bin")
-    valid = [o for o in observations if o.valid][-5:]
-    return PerformanceEstimate(
-        _mean([(o.end_to_end_duration_ms, o.duration_provenance) for o in valid
-               if o.end_to_end_duration_ms is not None]),
-        _mean([(o.tokens.value, o.tokens.provenance) for o in valid if o.tokens.value is not None]))
-
-
-@dataclass
-class PolicyState:
-    arm: str
-    version: str = POLICY_VERSION
-    calibration: dict[EstimateKey, PerformanceEstimate] = field(default_factory=dict)
-    estimates: dict[EstimateKey, PerformanceEstimate] = field(default_factory=dict, init=False)
-    recent_observations: dict[EstimateKey, list[Observation]] = field(default_factory=dict, init=False)
-    incumbent: str | None = field(default=None, init=False)
-    last_switch_sequence: int | None = field(default=None, init=False)
-    probe_count: int = field(default=0, init=False)
-
-    def __post_init__(self) -> None:
-        self.calibration = deepcopy(self.calibration)
-
-    def record(self, observation: Observation) -> None:
-        key = EstimateKey(observation.configuration_id, observation.size_bin)
-        self.recent_observations.setdefault(key, []).append(observation)
-
-    def update(self, key: EstimateKey) -> None:
-        runtime = estimate_from_observations(self.recent_observations[key])
-        fallback = self.calibration.get(key, unavailable_estimate())
-        self.estimates[key] = PerformanceEstimate(
-            runtime.latency_ms if runtime.latency_ms.observation_count >= 3 else fallback.latency_ms,
-            runtime.total_tokens if runtime.total_tokens.observation_count >= 3 else fallback.total_tokens)
 
 
 @dataclass(frozen=True)

@@ -9,7 +9,7 @@ from ctxbench.cli import build_parser, main
 
 
 @pytest.mark.legacy_rejection
-@pytest.mark.parametrize("command", ["query", "exec"])
+@pytest.mark.parametrize("command", ["query", "exec", "study", "adaptation", "experiment", "run"])
 def test_legacy_query_and_exec_commands_are_rejected(command: str, capsys: pytest.CaptureFixture[str]) -> None:
     parser = build_parser()
 
@@ -45,12 +45,14 @@ def test_experiment_config_with_legacy_mcp_strategy_is_rejected(
     experiment_path.write_text(
         json.dumps(
             {
+                "schemaVersion": 3,
+                "kind": "benchmark",
                 "id": "exp_bad_mcp",
-                "dataset": str(tmp_path / "dataset"),
-                "scope": {"instances": ["cv_demo"], "tasks": ["q_year"]},
-                "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['mcp-json']},
+                "dataset": {"root": str(tmp_path / "dataset")},
+                "models": {"mock": {"provider": "mock", "name": "mock"}},
                 "surfaces": {"full": {"type": "full_context"}},
                 "configurations": {'mcp-json': {'strategy': 'mcp', 'representation': 'json', 'surface': 'full'}},
+                "candidates": [['mock', 'mcp-json']],
                 "execution": {"repeats": 1},
             }
         ),

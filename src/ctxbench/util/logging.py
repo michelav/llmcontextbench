@@ -200,11 +200,6 @@ class PhaseLogger:
     def error(self, phase: str, eventName: str, message: str, **fields: object) -> None:
         self.event("ERROR", phase, eventName, message, **fields)
 
-    def phase(self, label: str, message: str, **fields: object) -> None:
-        # Compatibility for legacy internal commands. Public commands should use event().
-        phase = label.upper() if label.upper() in CANONICAL_PHASES else "STATUS"
-        self.info(phase, label.lower(), message, **fields)
-
     def _emit(self, level: str, phase: str, eventName: str, message: str, fields: dict[str, object]) -> None:
         if self.progress is not None:
             self.progress.clear()

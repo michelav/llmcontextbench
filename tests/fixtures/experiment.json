@@ -4,23 +4,11 @@
   "dataset": {
     "id": "ctxbench/lattes",
     "version": "2026-04-28",
-    "root": "tests/fixtures/lattes_provider_free/dataset"
+    "root": "lattes_provider_free/dataset"
   },
   "scope": {
     "instances": [],
     "tasks": []
-  },
-  "factors": {
-    "model": [
-      {
-        "provider": "mock",
-        "name": "mock-model"
-      }
-    ],
-    "configuration": [
-      "inline-html",
-      "inline-json"
-    ]
   },
   "evaluation": {
     "enabled": false,
@@ -39,6 +27,26 @@
     }
   },
   "surfaces": {
-    "full": {"type": "full_context"}
-  }
+    "full": {
+      "type": "full_context"
+    }
+  },
+  "schemaVersion": 3,
+  "kind": "benchmark",
+  "models": {
+    "mock-model": {
+      "provider": "mock",
+      "name": "mock-model"
+    }
+  },
+  "candidates": [
+    [
+      "mock-model",
+      "inline-html"
+    ],
+    [
+      "mock-model",
+      "inline-json"
+    ]
+  ]
 }

@@ -7,7 +7,7 @@ from typing import Any
 
 
 @dataclass(frozen=True)
-class RunSelector:
+class TrialSelector:
     provider: tuple[str, ...] = ()
     model: tuple[str, ...] = ()
     instance: tuple[str, ...] = ()
@@ -31,11 +31,11 @@ class RunSelector:
     not_status: tuple[str, ...] = ()
 
 
-def matches_runspec(item: Any, selector: RunSelector) -> bool:
+def matches_trial_spec(item: Any, selector: TrialSelector) -> bool:
     return _matches_common(item, selector)
 
 
-def matches_run_result(item: Any, selector: RunSelector) -> bool:
+def matches_trial_result(item: Any, selector: TrialSelector) -> bool:
     if selector.status and _field(item, "status") not in selector.status:
         return False
     if selector.not_status and _field(item, "status") in selector.not_status:
@@ -43,7 +43,7 @@ def matches_run_result(item: Any, selector: RunSelector) -> bool:
     return _matches_common(item, selector)
 
 
-def _matches_common(item: Any, selector: RunSelector) -> bool:
+def _matches_common(item: Any, selector: TrialSelector) -> bool:
     if selector.trial_id and _field(item, "trialId") not in selector.trial_id:
         return False
     if selector.provider and _field(item, "provider") not in selector.provider:

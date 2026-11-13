@@ -4,6 +4,8 @@ import csv
 import json
 from pathlib import Path
 
+import pytest
+
 pytest_plugins = ("tests.fixtures.lattes_provider_free.conftest",)
 
 from ctxbench.commands.dataset import fetch_command, inspect_command
@@ -20,6 +22,7 @@ DATASET_ROOT = FIXTURE_ROOT / "dataset"
 EXPERIMENT_PATH = FIXTURE_ROOT / "experiment.json"
 DATASET_ID = "ctxbench/lattes"
 DATASET_VERSION = "2026-04-28"
+pytestmark = [pytest.mark.workflow, pytest.mark.e2e]
 
 
 def test_lattes_provider_free_conformance(

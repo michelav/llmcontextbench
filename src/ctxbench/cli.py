@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ctxbench.benchmark.selectors import RunSelector, load_ids_from_file, load_ids_from_stdin
+from ctxbench.benchmark.selectors import TrialSelector, load_ids_from_file, load_ids_from_stdin
 from ctxbench.commands.dataset import fetch_command_from_args, inspect_command_from_args
 from ctxbench.commands.eval import eval_command
 from ctxbench.commands.execute import execute_command
@@ -128,8 +128,8 @@ def _resolve_trial_ids(args: argparse.Namespace) -> tuple[str, ...]:
     return tuple(ids)
 
 
-def _selector_from_args(args: argparse.Namespace, *, include_status: bool = False) -> RunSelector:
-    return RunSelector(
+def _selector_from_args(args: argparse.Namespace, *, include_status: bool = False) -> TrialSelector:
+    return TrialSelector(
         model=_parse_multi_str(getattr(args, "model", []) or []),
         provider=_parse_multi_str(getattr(args, "provider", []) or []),
         instance=_parse_multi_str(getattr(args, "instance", []) or []),
@@ -154,11 +154,11 @@ def _selector_from_args(args: argparse.Namespace, *, include_status: bool = Fals
     )
 
 
-def _metrics_selector_from_args(args: argparse.Namespace) -> RunSelector:
+def _metrics_selector_from_args(args: argparse.Namespace) -> TrialSelector:
     selector = _selector_from_args(args, include_status=True)
     execution_status = _parse_multi_str(getattr(args, "execution_status", []) or [])
     not_execution_status = _parse_multi_str(getattr(args, "not_execution_status", []) or [])
-    return RunSelector(
+    return TrialSelector(
         model=selector.model,
         provider=selector.provider,
         instance=selector.instance,
@@ -188,23 +188,8 @@ def _metrics_selector_from_args(args: argparse.Namespace) -> RunSelector:
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="llmctxbench", description="LLMContextBench benchmark CLI")
+    parser = argparse.ArgumentParser(prog="llmctxbench", description="LLMContextBench benchmark and adaptive workflows")
     subparsers = parser.add_subparsers(dest="command", required=True)
-    from ctxbench.commands.study import register_study_commands
-    register_study_commands(subparsers.add_parser("study", help="Reusable baselines and adaptation studies"))
-
-    # Experimental study orchestration
-    from ctxbench.commands.adaptation import register_repoqa_commands
-    adaptation_parser = subparsers.add_parser(
-        "adaptation", help="Experimental adaptation studies",
-        description="Experimental study orchestration; commands run one stage at a time.",
-    )
-    adaptation_sub = adaptation_parser.add_subparsers(dest="adaptation_command", required=True)
-    repoqa_parser = adaptation_sub.add_parser(
-        "repoqa", help="RepoQA adaptation study",
-        description="Experimental RepoQA workflow. Calibration and episodes may spend provider tokens.",
-    )
-    register_repoqa_commands(repoqa_parser)
 
     # ── ctxbench dataset ───────────────────────────────────────────────────
     dataset_parser = subparsers.add_parser(
@@ -238,9 +223,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ── ctxbench plan ──────────────────────────────────────────────────────
     plan_parser = subparsers.add_parser(
-        "plan", help="Freeze a benchmark trial plan or versioned adaptive workflow plan"
+        "plan", help="Freeze a benchmark trial plan or adaptive workflow plan"
     )
-    plan_parser.add_argument("path", help="Benchmark definition or workflowKind=adaptive plan definition JSON")
+    plan_parser.add_argument("path", help="Versioned benchmark definition or workflowKind=adaptive definition JSON")
     plan_parser.add_argument(
         "--output", metavar="DIR",
         help="Override output directory (default: experiment.output/<id>/)",

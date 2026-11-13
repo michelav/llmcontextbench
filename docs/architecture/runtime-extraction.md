@@ -1,19 +1,18 @@
-# Runtime Extraction Baseline
+# Historical Runtime Extraction Baseline
 
-> Transition note: this page describes the existing implementation. The accepted
-> [v1 target architecture and contracts](v1-contracts.md) describe the refactor;
-> [slice tracking](../../specs/009-llmctxbench-v1/tasks.md) identifies what is implemented.
+> Current architecture and workflow contracts are documented in [workflow-contracts](workflow-contracts.md).
 
-This note records the first implementation boundary for the staged evolution in
+This historical note records the first implementation boundary for the staged evolution in
 [`../llmcontextbench-evolution-plan.md`](../llmcontextbench-evolution-plan.md).
 It covers Phases 0–3: establish the current execution path, introduce
 trial-independent contracts, add a benchmark adapter, and migrate `inline` only.
-It does not introduce policy selection, runtime telemetry redesign, adaptive
-behavior, naming changes, or persisted-artifact changes.
+It describes an earlier implementation snapshot and is not the current runtime API
+or workflow contract. See [workflow contracts](workflow-contracts.md) for the current
+benchmark/adaptive architecture.
 
-## Implementation status
+## Status in this historical snapshot
 
-The inline extraction is implemented. `ctxbench.runtime` and
+At the time of this snapshot, the inline extraction was implemented. `ctxbench.runtime` and
 `ctxbench.core.provisioning` provide the trial-independent contracts;
 `TrialRuntimeAdapter` translates benchmark records; and `execute_runspec()`
 delegates inline trials through `ProvisioningRuntime`. Tool strategies remain on
@@ -36,7 +35,7 @@ CLI, and metric regression tests
 - Use provider-free tests. `local_function` remains on its current path until
   inline equivalence is demonstrated.
 
-## Current execution path
+## Execution path in the original extraction snapshot
 
 ```text
 planning
@@ -135,10 +134,10 @@ derivation from retained trace data, the unevaluated evaluation default, and all
 trial/artifact fields. It performs no registry resolution, context access,
 strategy dispatch, timing, model invocation, or tool handling.
 
-## Future adaptation boundary
+## Adaptive boundary from the original extraction plan (superseded)
 
-This extraction supplies stable execution results; it does not treat metrics as
-selection knowledge. Later phases must add this explicit sequence:
+The original extraction plan left adaptive selection for later phases. That work is
+implemented in the current adaptive workflow; the sequence is now represented by:
 
 ```text
 ExecutionResult -> RuntimeEvent/RuntimeObservation -> OperationalState
@@ -149,14 +148,16 @@ ExecutionResult -> RuntimeEvent/RuntimeObservation -> OperationalState
 Events describe lifecycle facts. Observations attach configuration, measured or
 reported latency/tokens, outcome, timestamp, and provenance. Operational state
 keeps rolling, configuration-scoped history; policies select only among eligible
-configurations. Before implementing this, specify state partitioning (provider,
+configurations. The current workflow contract defines feature partitions, calibration,
+quality assessment, and causal history; use that contract instead of this proposal.
+The original proposal had called for specifying state partitioning (provider,
 model, dataset/task class and context size), windows/minimum samples, missing and
 stale evidence, cold-start behavior, recovery probing, quality/cost/privacy
 constraints, and reproducible records of requested, selected and fallback
 configurations. Persisted benchmark metrics cannot automatically become policy
 inputs because their availability currently depends partly on trace retention.
 
-## Compatibility risks and acceptance gate
+## Compatibility risks and acceptance gate in the original extraction snapshot
 
 Preserve model-name precedence, JSON context serialization, timing boundaries,
 error distinction, trace/usage retention, inline zero-valued tool metrics,

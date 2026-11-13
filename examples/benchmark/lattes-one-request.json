@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 3,
+  "kind": "benchmark",
+  "id": "lattes-one-request-real",
+  "name": "One real Lattes remote-MCP request",
+  "output": "outputs",
+  "dataset": {
+    "id": "ctxbench/lattes",
+    "version": "2026-04-28",
+    "root": "../../datasets/lattes"
+  },
+  "models": {
+    "answer": {
+      "provider": "openai",
+      "name": "gpt-5.4-nano",
+      "modelParams": {
+        "max_output_tokens": 500
+      }
+    }
+  },
+  "scope": {
+    "instances": ["5123602572479168"],
+    "tasks": ["q_phd"]
+  },
+  "candidates": [["answer", "remote-lattes"]],
+  "taskParams": {},
+  "configurations": {
+    "remote-lattes": {
+      "strategy": "remote_mcp",
+      "representation": "json",
+      "surface": "education"
+    }
+  },
+  "surfaces": {
+    "education": {
+      "type": "operations",
+      "operations": ["get_education"]
+    }
+  },
+  "evaluation": {
+    "enabled": false
+  },
+  "trace": {
+    "enabled": true,
+    "writeFiles": true,
+    "save_raw_response": true,
+    "save_tool_calls": true,
+    "save_usage": true,
+    "save_errors": true
+  },
+  "execution": {
+    "repeats": 1,
+    "options": {
+      "mcp_server": {
+        "server_url": "https://secure-harlequin-mollusk.fastmcp.app/mcp",
+        "server_label": "ctxbench_lattes",
+        "server_description": "CTXBench Lattes MCP server",
+        "auth_token": "${LATTES_MCP_TOKEN}"
+      }
+    }
+  }
+}

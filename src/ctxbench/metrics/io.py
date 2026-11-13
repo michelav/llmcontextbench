@@ -33,8 +33,7 @@ def load_inputs(inputs: list[str], logger: PhaseLogger) -> list[ExperimentArtifa
             logger.warn("METRICS", "metrics.input.skipped", message, experimentDir=str(root))
             continue
         manifest = validate_manifest(root)
-        if manifest.get("provisioningArtifactVersion") == 4:
-            rebuild_responses(root, execution_fingerprint=str(manifest["executionFingerprint"]))
+        rebuild_responses(root, execution_fingerprint=str(manifest["executionFingerprint"]))
         manifest = validate_artifact_directory(root)
         valid.append(
             ExperimentArtifacts(

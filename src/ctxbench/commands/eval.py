@@ -21,7 +21,7 @@ from ctxbench.benchmark.evaluation_batch import (
     submit_evaluation_batch,
 )
 from ctxbench.benchmark.models import EvaluationModelConfig, ExperimentTrace, TrialResult
-from ctxbench.benchmark.selectors import RunSelector, matches_run_result
+from ctxbench.benchmark.selectors import TrialSelector, matches_trial_result
 from ctxbench.benchmark.results import (
     _resolve_eval_trace_ref,
     serialize_evaluation_result,
@@ -125,7 +125,7 @@ def _judge_identifiers(config: EvaluationModelConfig) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
-# Eval status tracking (replaces checkpoint)
+# Evaluation status tracking is derived from canonical evaluation records.
 # ---------------------------------------------------------------------------
 
 def _load_skipped_run_ids(path: Path) -> set[str]:
@@ -239,7 +239,7 @@ def eval_command(
     continue_on_error: bool = False,
     verbose: bool = False,
     progress: bool = False,
-    selector: RunSelector | None = None,
+    selector: TrialSelector | None = None,
 ) -> int:
     # --batch-id implies --batch
     if batch_id:
@@ -262,11 +262,11 @@ def eval_command(
     source_root = source.parent
     from ctxbench.adaptive.artifacts import validate_workflow_manifest
     manifest = validate_workflow_manifest(source_root)
-    adaptive = manifest.get("workflowKind", manifest.get("experimentKind")) == "adaptive"
+    adaptive = manifest.get("workflowKind") == "adaptive"
     if adaptive:
         from ctxbench.adaptive.projections import rebuild_adaptive_responses
         rebuild_adaptive_responses(source_root)
-    elif manifest.get("provisioningArtifactVersion") == 4:
+    else:
         rebuild_responses(source_root, execution_fingerprint=str(manifest["executionFingerprint"]))
     if not adaptive:
         validate_artifact_directory(source_root)
@@ -274,8 +274,8 @@ def eval_command(
     logger.info("EVAL", "responses.loading", "Loading responses", path=str(source))
     results = _load_responses(source)
 
-    active_selector = selector or RunSelector()
-    results = [r for r in results if matches_run_result(r, active_selector)]
+    active_selector = selector or TrialSelector()
+    results = [r for r in results if matches_trial_result(r, active_selector)]
     if not results:
         print("No responses matched the selector.")
         return 0

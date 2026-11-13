@@ -66,11 +66,6 @@ def plan_command(
         return 0
     logger.info("PLAN", "experiment.loaded", "Loading experiment", path=path)
     experiment = load_experiment(path)
-    if experiment.experimentKind == "adaptive":
-        raise ValueError(
-            "Legacy kind=adaptive definitions are not planned. Provide a fresh workflowKind=adaptive "
-            "definition with adaptive plan schemaVersion 2."
-        )
     base_dir = Path(path).resolve().parent
     cache = DatasetCache(cache_dir=cache_dir)
     resolver = DatasetResolver()
@@ -143,7 +138,9 @@ def plan_command(
     logger.info("PLAN", "trials.written", "Trials written", path=str(trials_path), total=len(payloads))
 
     manifest = {
-        "provisioningArtifactVersion": 2,
+        "schemaVersion": 3,
+        "provisioningArtifactVersion": PROVISIONING_ARTIFACT_VERSION,
+        "executionRecordVersion": 1,
         "configurations": {key: experiment.configurations[key].model_dump(mode="json") for key in experiment.factors["configuration"]},
         "surfaces": {key: value.model_dump(mode="json") for key, value in experiment.surfaces.items()},
         "experimentId": experiment.id,
@@ -156,19 +153,15 @@ def plan_command(
         "trace": experiment.trace.model_dump(mode="json"),
         "artifacts": experiment.artifacts.model_dump(mode="json"),
     }
-    if experiment.definitionVersion == 3:
-        manifest["schemaVersion"] = 3
-        manifest["provisioningArtifactVersion"] = PROVISIONING_ARTIFACT_VERSION
-        manifest["executionRecordVersion"] = 1
-        write_json(output_root / "resolved.json", experiment.resolvedDefinition)
-        dataset_root = dataset_provenance.materialized_path
-        inputs = {
-            "artifacts": {name: file_digest(output_root / name) for name in ("resolved.json", "trials.jsonl")},
-            "implementation": implementation_digest(),
-            "dataset": tree_digest(Path(dataset_root)) if dataset_root else dataset_provenance.content_hash,
-        }
-        manifest["fingerprintInputs"] = inputs
-        manifest["executionFingerprint"] = digest(inputs)
+    write_json(output_root / "resolved.json", experiment.resolvedDefinition)
+    dataset_root = dataset_provenance.materialized_path
+    inputs = {
+        "artifacts": {name: file_digest(output_root / name) for name in ("resolved.json", "trials.jsonl")},
+        "implementation": implementation_digest(),
+        "dataset": tree_digest(Path(dataset_root)) if dataset_root else dataset_provenance.content_hash,
+    }
+    manifest["fingerprintInputs"] = inputs
+    manifest["executionFingerprint"] = digest(inputs)
     write_json(manifest_path, manifest)
     logger.info("PLAN", "manifest.written", "Manifest written", path=str(manifest_path))
 

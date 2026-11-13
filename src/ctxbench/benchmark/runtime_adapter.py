@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ctxbench.benchmark.models import EvaluationResult, RunTiming, TrialResult, TrialSpec, TrialTrace
+from ctxbench.benchmark.models import EvaluationResult, TrialTiming, TrialResult, TrialSpec, TrialTrace
 from ctxbench.core.provisioning import ProvisioningConfiguration
 from ctxbench.runtime.models import ExecutionResult, RuntimeRequest
 from ctxbench.util.logging import trial_log_context
@@ -78,7 +78,7 @@ class TrialRuntimeAdapter:
             response=ai_result.answer,
             status=status,
             errorMessage=error_message,
-            timing=RunTiming(
+            timing=TrialTiming(
                 startedAt=execution.started_at,
                 finishedAt=execution.finished_at,
                 durationMs=execution.duration_ms,
@@ -126,7 +126,6 @@ def build_metrics_summary(*, ai_trace: dict[str, object], strategy: str) -> dict
     metrics = ai_trace.get("metrics", {}) if isinstance(ai_trace, dict) else {}
     if not isinstance(metrics, dict):
         metrics = {}
-    legacy_task_statement_chars_key = "question" + "Chars"
     summary: dict[str, Any] = {
         "totalDurationMs": _as_int(metrics.get("totalDurationMs")),
         "totalDurationProvenance": "measured" if metrics.get("totalDurationMs") is not None else "unavailable",
@@ -155,15 +154,13 @@ def build_metrics_summary(*, ai_trace: dict[str, object], strategy: str) -> dict
         "cachedInputTokens": _as_int(metrics.get("cachedInputTokens")),
         "cacheReadInputTokens": _as_int(metrics.get("cacheReadInputTokens")),
         "cacheCreationInputTokens": _as_int(metrics.get("cacheCreationInputTokens")),
-        "taskStatementTokensEstimated": _as_int(metrics.get("taskStatementTokensEstimated", metrics.get("questionTokensEstimated"))),
+        "taskStatementTokensEstimated": _as_int(metrics.get("taskStatementTokensEstimated")),
         "estimatedInputTokens": _as_int(metrics.get("estimatedInputTokens")),
         "estimatedOutputTokens": _as_int(metrics.get("estimatedOutputTokens")),
         "reservedTokens": _as_int(metrics.get("reservedTokens")),
         "contextChars": _as_int(metrics.get("contextChars")),
         "contextBytes": _as_int(metrics.get("contextBytes")),
-        "taskStatementChars": _as_int(
-            metrics.get("taskStatementChars", metrics.get(legacy_task_statement_chars_key))
-        ),
+        "taskStatementChars": _as_int(metrics.get("taskStatementChars")),
         "promptChars": _as_int(metrics.get("promptChars")),
         "rateLimitWaitMs": _as_int(metrics.get("rateLimitWaitMs")),
         "retrySleepMs": _as_int(metrics.get("retrySleepMs")),

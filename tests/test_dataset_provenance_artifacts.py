@@ -11,16 +11,14 @@ from ctxbench.benchmark.models import (
     DatasetProvenance,
     EvaluationJudgeInfo,
     EvaluationTrace,
-    EvaluationResult,
-    TrialResult,
-    RunTiming,
-    TrialTrace,
 )
+from ctxbench.ai.models.base import AIResult
 from ctxbench.commands.eval import eval_command
 from ctxbench.commands.execute import execute_command
 from ctxbench.commands.export import export_command
 from ctxbench.commands.plan import plan_command
 from ctxbench.util.jsonl import read_jsonl
+from ctxbench.runtime.models import ExecutionResult
 
 
 def _write_local_dataset(root: Path) -> Path:
@@ -68,13 +66,17 @@ def _write_experiment(path: Path, dataset_root: Path) -> Path:
     path.write_text(
         json.dumps(
             {
+                "schemaVersion": 3,
+                "kind": "benchmark",
                 "id": "exp-dataset-provenance",
                 "output": "outputs",
                 "dataset": {"root": str(dataset_root)},
                 "scope": {"instances": [], "tasks": []},
-                "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['inline-json']},
+                "models": {"mock": {"provider": "mock", "name": "mock"}},
                 "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'}},
                 "surfaces": {"full": {"type": "full_context"}},
+                "candidates": [["mock", "inline-json"]],
+                "execution": {"repeats": 1},
                 "evaluation": {
                     "enabled": True,
                     "judges": [{"id": "judge-a", "provider": "mock", "model": "judge-a", "temperature": 0}],
@@ -87,44 +89,12 @@ def _write_experiment(path: Path, dataset_root: Path) -> Path:
     return path
 
 
-def _fake_execute_runspec(runspec, engine) -> TrialResult:
-    del engine
-    return TrialResult(
-        trialId=runspec.trialId,
-        experimentId=runspec.experimentId,
-        dataset=runspec.dataset,
-        taskId=runspec.taskId,
-        taskStatement=runspec.taskStatement,
-        taskTemplate=runspec.taskTemplate,
-        taskTags=list(runspec.taskTags),
-        validationType=runspec.validationType,
-        contextBlocks=list(runspec.contextBlocks),
-        parameters=dict(runspec.parameters),
-        instanceId=runspec.instanceId,
-        provider=runspec.provider,
-        modelId=runspec.modelId,
-        modelName=runspec.modelName,
-        strategy=runspec.strategy,
-        representation=runspec.representation,
-        surface=runspec.surface,
-        surfaceSpec=dict(runspec.surfaceSpec),
-        configurationId=runspec.configurationId,
-        repeatIndex=runspec.repeatIndex,
-        outputRoot=runspec.outputRoot,
-        response="2020",
-        status="success",
-        errorMessage=None,
-        timing=RunTiming(
-            startedAt="2026-05-12T00:00:00Z",
-            finishedAt="2026-05-12T00:00:01Z",
-            durationMs=1,
-        ),
-        usage={},
-        metricsSummary={},
-        trace=TrialTrace(),
-        traceRef=None,
-        evaluation=EvaluationResult(),
-        metadata=runspec.metadata,
+def _fake_execute_runtime_request(*_args, **_kwargs) -> ExecutionResult:
+    return ExecutionResult(
+        ai_result=AIResult(answer="2020"),
+        started_at="2026-05-12T00:00:00Z",
+        finished_at="2026-05-12T00:00:01Z",
+        duration_ms=1,
     )
 
 
@@ -163,7 +133,7 @@ def test_dataset_provenance_is_preserved_across_artifacts(
     assert planned_dataset["id"] == "ctxbench/local-fixture"
     assert planned_dataset["version"] == "0.1.0"
 
-    monkeypatch.setattr("ctxbench.commands.execute.execute_runspec", _fake_execute_runspec)
+    monkeypatch.setattr("ctxbench.benchmark.workflow.execute_runtime_request", _fake_execute_runtime_request)
     assert execute_command(str(output_root / "trials.jsonl")) == 0
 
     original_judge_request = evaluation_module._judge_request
@@ -193,7 +163,7 @@ def test_dataset_provenance_is_preserved_across_artifacts(
     assert rows[0]["dataset_version"] == expected["version"]
 
 
-def test_execute_and_eval_do_not_recompute_dataset_provenance_from_another_source(
+def test_execute_rejects_modified_frozen_dataset_provenance(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -215,20 +185,5 @@ def test_execute_and_eval_do_not_recompute_dataset_provenance_from_another_sourc
         encoding="utf-8",
     )
 
-    monkeypatch.setattr("ctxbench.commands.execute.execute_runspec", _fake_execute_runspec)
-    assert execute_command(str(output_root / "trials.jsonl")) == 0
-
-    original_judge_request = evaluation_module._judge_request
-    evaluation_module._judge_request = _fake_judge_request
-    try:
-        assert eval_command(str(output_root / "responses.jsonl")) == 0
-    finally:
-        evaluation_module._judge_request = original_judge_request
-
-    responses = read_jsonl(output_root / "responses.jsonl")
-    evals = read_jsonl(output_root / "evals.jsonl")
-    votes = read_jsonl(output_root / "judge_votes.jsonl")
-
-    assert responses[0]["dataset"] == forged
-    assert evals[0]["dataset"] == forged
-    assert votes[0]["dataset"] == forged
+    with pytest.raises(ValueError, match="Frozen plan changed: trials.jsonl"):
+        execute_command(str(output_root / "trials.jsonl"))

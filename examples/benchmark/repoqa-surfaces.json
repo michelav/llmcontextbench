@@ -1,0 +1,111 @@
+{
+  "id": "repoqa-five-configurations",
+  "name": "RepoQA five-configuration baseline",
+  "output": "outputs",
+  "dataset": {
+    "id": "ctxbench/repoqa",
+    "version": "2026-05-23",
+    "root": "../../datasets/repoqa"
+  },
+  "models": {
+    "answer": {
+      "provider": "openai",
+      "name": "gpt-5.4-nano"
+    }
+  },
+  "scope": {
+    "instances": [],
+    "tasks": [
+      "snf_retrieve_function"
+    ]
+  },
+  "evaluation": {
+    "enabled": true
+  },
+  "trace": {
+    "enabled": true,
+    "writeFiles": true,
+    "save_raw_response": true,
+    "save_tool_calls": true,
+    "save_usage": true,
+    "save_errors": true
+  },
+  "execution": {
+    "repeats": 1
+  },
+  "configurations": {
+    "inline-code-full": {
+      "strategy": "inline",
+      "representation": "code",
+      "surface": "full"
+    },
+    "local-mcp-default": {
+      "strategy": "local_mcp",
+      "representation": "json",
+      "surface": "repoqa-default"
+    },
+    "local-mcp-lean": {
+      "strategy": "local_mcp",
+      "representation": "json",
+      "surface": "repoqa-lean"
+    },
+    "local-function-default": {
+      "strategy": "local_function",
+      "representation": "json",
+      "surface": "repoqa-default"
+    },
+    "local-function-lean": {
+      "strategy": "local_function",
+      "representation": "json",
+      "surface": "repoqa-lean"
+    }
+  },
+  "surfaces": {
+    "full": {
+      "type": "full_context"
+    },
+    "repoqa-default": {
+      "type": "operations",
+      "operations": [
+        "list_files",
+        "list_symbols",
+        "get_symbol",
+        "read_file"
+      ]
+    },
+    "repoqa-lean": {
+      "type": "operations",
+      "operations": [
+        "list_files_lean",
+        "list_symbols_lean",
+        "get_symbol_lean",
+        "read_file_lean"
+      ]
+    }
+  },
+  "modelParams": {},
+  "schemaVersion": 3,
+  "kind": "benchmark",
+  "candidates": [
+    [
+      "answer",
+      "inline-code-full"
+    ],
+    [
+      "answer",
+      "local-mcp-default"
+    ],
+    [
+      "answer",
+      "local-mcp-lean"
+    ],
+    [
+      "answer",
+      "local-function-default"
+    ],
+    [
+      "answer",
+      "local-function-lean"
+    ]
+  ]
+}

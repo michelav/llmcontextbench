@@ -16,10 +16,10 @@ SURFACE_EXPERIMENTS = (
 
 
 def test_fixture_experiment_configurations_use_explicit_surfaces() -> None:
-    from ctxbench.benchmark.models import Experiment
+    from ctxbench.benchmark.experiment_loader import load_experiment
 
     for path in SURFACE_EXPERIMENTS:
-        experiment = Experiment.model_validate(json.loads(path.read_text(encoding="utf-8")))
+        experiment = load_experiment(path)
 
         assert experiment.surfaces
         for configuration_id, configuration in experiment.configurations.items():
@@ -38,6 +38,7 @@ def test_lattes_adapter_experiment_fixture_uses_registered_dataset_reference() -
     dataset = payload["dataset"]
     assert isinstance(dataset.get("id"), str)
     assert dataset["id"] == "ctxbench/lattes"
+    dataset["root"] = str((FIXTURE_PATH.parent / dataset["root"]).resolve())
 
     try:
         get_default_registry().resolve(ExperimentDataset.model_validate(dataset))

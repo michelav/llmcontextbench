@@ -4,10 +4,15 @@ import json
 import csv
 from pathlib import Path
 
+import pytest
+
 from ctxbench.benchmark import evaluation as evaluation_module
 from ctxbench.commands.eval import eval_command
 from ctxbench.commands.export import export_command
 from ctxbench.commands.status import status_command
+from tests.benchmark_artifacts import persist_response, seal_benchmark_directory
+
+pytestmark = pytest.mark.workflow
 
 
 def _write_eval_fixture(root: Path) -> Path:
@@ -55,24 +60,6 @@ def _write_eval_fixture(root: Path) -> Path:
                         "summary": "Some context for the task.",
                     }
                 }
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    (root / "manifest.json").write_text(
-        json.dumps(
-            {"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}}, "configurations": {"inline-json": {"strategy": "inline", "representation": "json", "surface": "full"}},
-                "experimentId": "exp_mock",
-                "trialId": "run-1",
-                "taskId": "q_one",
-                "evaluation": {
-                    "judges": [
-                        {"id": "judge-a", "provider": "mock", "model": "judge-a", "temperature": 0},
-                        {"id": "judge-b", "provider": "mock", "model": "judge-b", "temperature": 0},
-                    ]
-                },
-                "trace": {"writeFiles": False},
             }
         ),
         encoding="utf-8",
@@ -179,6 +166,22 @@ def _write_eval_fixture(root: Path) -> Path:
         + "\n",
         encoding="utf-8",
     )
+    trial = json.loads((root / "trials.jsonl").read_text(encoding="utf-8"))
+    response = json.loads((root / "responses.jsonl").read_text(encoding="utf-8"))
+    fingerprint = seal_benchmark_directory(
+        root,
+        experiment_id="exp_mock",
+        configurations={"inline-json": {"strategy": "inline", "representation": "json", "surface": "full"}},
+        surfaces={"full": {"type": "full_context"}},
+        dataset={"id": "ctxbench/mock-v1", "version": "local", "origin": str(dataset_root),
+                 "contentHash": "sha256:eval-status-fixture", "materializedPath": str(dataset_root)},
+        evaluation={"enabled": True, "judges": [
+            {"id": "judge-a", "provider": "mock", "model": "judge-a", "temperature": 0},
+            {"id": "judge-b", "provider": "mock", "model": "judge-b", "temperature": 0},
+        ]},
+        trace={"enabled": False, "writeFiles": False},
+    )
+    persist_response(root, trial, response, fingerprint)
     return root
 
 

@@ -11,9 +11,44 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from ctxbench.cli import _metrics_command_string, _selector_from_args, build_parser, main
+from tests.benchmark_artifacts import persist_response, seal_benchmark_directory
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+pytestmark = pytest.mark.workflow
+
+
+def _seal_response_fixture(root: Path, response: dict) -> None:
+    trial = dict(response)
+    (root / "trials.jsonl").write_text(json.dumps(trial) + "\n", encoding="utf-8")
+    configuration_id = response["configurationId"]
+    configuration = {
+        "strategy": response["strategy"],
+        "representation": response["representation"],
+        "surface": response["surface"],
+    }
+    fingerprint = seal_benchmark_directory(
+        root,
+        experiment_id=response["experimentId"],
+        configurations={configuration_id: configuration},
+        surfaces={configuration["surface"]: {"type": "full_context"}},
+        dataset=response["dataset"],
+        evaluation={"enabled": True, "judges": []},
+        trace={"enabled": False, "writeFiles": False},
+    )
+    persist_response(root, trial, response, fingerprint)
+
+
+def _set_model_candidates(payload: dict, models: list[dict]) -> None:
+    payload["models"] = {
+        model["id"]: {"provider": model["provider"], "name": model["name"]}
+        for model in models
+    }
+    payload["candidates"] = [
+        [model["id"], configuration]
+        for model in models
+        for configuration in payload["configurations"]
+    ]
 
 
 def test_public_cli_parser_uses_llmctxbench_prog_name():
@@ -22,7 +57,7 @@ def test_public_cli_parser_uses_llmctxbench_prog_name():
     assert parser.prog == "llmctxbench"
     help_output = parser.format_help()
     assert "usage: llmctxbench" in help_output
-    assert "LLMContextBench benchmark CLI" in help_output
+    assert "LLMContextBench benchmark and adaptive workflows" in help_output
 
 
 def test_public_cli_exposes_execute_command_in_help():
@@ -45,7 +80,7 @@ def test_public_cli_registers_only_target_subcommands():
         action for action in parser._actions if isinstance(action, argparse._SubParsersAction)
     )
 
-    assert set(subparser_action.choices) == {"adaptation", "study", "dataset", "plan", "execute", "eval", "export", "metrics", "status"}
+    assert set(subparser_action.choices) == {"dataset", "plan", "execute", "eval", "export", "metrics", "status"}
 
 
 def test_metrics_help_exposes_artifact_options(capsys):
@@ -200,7 +235,6 @@ def test_execute_verbose_emits_trial_context_to_stderr(tmp_path, capsys):
 
     captured = capsys.readouterr()
     assert "Processed 1 trial(s)" in captured.out
-    assert "phase=EXECUTE eventName=trial.response.started" in captured.err
     assert "phase=EXECUTE eventName=trial.response.completed" in captured.err
     assert "trialId=" in captured.err
     assert "taskId=q_year" in captured.err
@@ -334,14 +368,17 @@ def write_mock_experiment(path: Path, *, evaluation_enabled: bool = True) -> Pat
     path.write_text(
         json.dumps(
             {
+                "schemaVersion": 3,
+                "kind": "benchmark",
                 "id": "exp_mock_v2",
                 "output": "outputs",
                 "dataset": str(dataset_root.resolve()),
                 "scope": {"instances": ["cv_demo"], "tasks": ["q_year", "q_summary"]},
-                "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['inline-json']},
+                "models": {"mock": {"provider": "mock", "name": "mock"}},
                 "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'}},
                 "surfaces": {"full": {"type": "full_context"}},
-                "params": {"common": {"temperature": 0}},
+                "candidates": [["mock", "inline-json"]],
+                "modelParams": {"temperature": 0},
                 "evaluation": {
                     "enabled": evaluation_enabled,
                     "judges": [{"provider": "mock", "model": "mock", "temperature": 0}],
@@ -438,13 +475,10 @@ def test_plan_writes_trials_with_scope_and_target_fields(tmp_path):
     assert summary["parameters"] == {"researcher_name": "CV Demo"}
 
 
-def test_plan_rejects_duplicate_model_ids(tmp_path):
+def test_plan_rejects_duplicate_candidate_pairs(tmp_path):
     experiment_path = write_mock_experiment(tmp_path / "experiment.json")
     payload = json.loads(experiment_path.read_text(encoding="utf-8"))
-    payload["factors"]["model"] = [
-        {"id": "same", "provider": "mock", "name": "mock-a"},
-        {"id": "same", "provider": "mock", "name": "mock-b"},
-    ]
+    payload["candidates"] = [["mock", "inline-json"], ["mock", "inline-json"]]
     experiment_path.write_text(json.dumps(payload), encoding="utf-8")
 
     assert main(["plan", str(experiment_path)]) == 1
@@ -519,13 +553,16 @@ def test_plan_warns_and_uses_empty_string_for_missing_template_parameter(tmp_pat
     experiment_path.write_text(
         json.dumps(
             {
+                "schemaVersion": 3,
+                "kind": "benchmark",
                 "id": "exp_missing_template",
                 "output": "outputs",
                 "dataset": str(dataset_root.resolve()),
                 "scope": {"instances": ["cv_demo"], "tasks": ["q_missing"]},
-                "factors": {"model": [{"provider": "mock", "name": "mock"}], "configuration": ['inline-json']},
+                "models": {"mock": {"provider": "mock", "name": "mock"}},
                 "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'}},
                 "surfaces": {"full": {"type": "full_context"}},
+                "candidates": [["mock", "inline-json"]],
                 "evaluation": {"enabled": False},
                 "trace": {"enabled": False, "writeFiles": True},
                 "artifacts": {
@@ -560,7 +597,7 @@ def test_plan_expands_explicit_configurations_for_all_strategies(tmp_path, monke
             **{name: {"strategy": name, "representation": "json", "surface": "ops"} for name in ("local_function", "local_mcp", "remote_mcp")},
     }
     payload["surfaces"] = {"full": {"type": "full_context"}, "ops": {"type": "operations", "operations": ["get_evidence"]}}
-    payload["factors"]["configuration"] = list(payload["configurations"])
+    payload["candidates"] = [["mock", configuration] for configuration in payload["configurations"]]
     experiment_path.write_text(json.dumps(payload), encoding="utf-8")
 
     trials_path = _plan_to_root(experiment_path, tmp_path / "planned")
@@ -584,14 +621,17 @@ def test_execute_force_reexecutes_and_overwrites_responses(tmp_path):
     first_payload = next(row for row in _jsonl_rows(responses_path) if row["taskId"] == "q_year")
     assert first_payload["response"] == "2018"
 
-    parsed_path = tmp_path / "dataset" / "context" / "cv_demo" / "parsed.json"
-    parsed_payload = json.loads(parsed_path.read_text(encoding="utf-8"))
-    parsed_payload["answers"]["q_year"] = 2020
-    parsed_path.write_text(json.dumps(parsed_payload), encoding="utf-8")
+    rows = _jsonl_rows(responses_path)
+    for row in rows:
+        if row["taskId"] == "q_year":
+            row["response"] = "stale projection"
+    responses_path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
 
     _execute_trials(trials_path, "--force")
     second_payload = next(row for row in _jsonl_rows(responses_path) if row["taskId"] == "q_year")
-    assert second_payload["response"] == "2020"
+    assert second_payload["response"] == "2018"
+    from ctxbench.benchmark.execution_records import attempts_for_trial
+    assert len(attempts_for_trial(responses_path.parent, str(first_payload["trialId"]))) == 2
 
 
 def test_execute_writes_responses_inside_plan_output_root(tmp_path):
@@ -608,10 +648,10 @@ def test_execute_selector_filters_by_model_id(tmp_path):
     experiment_path = write_mock_experiment(tmp_path / "experiment.json", evaluation_enabled=False)
     payload = json.loads(experiment_path.read_text(encoding="utf-8"))
     payload["scope"]["instances"] = ["cv_demo", "cv_alt"]
-    payload["factors"]["model"] = [
+    _set_model_candidates(payload, [
         {"id": "m1", "provider": "mock", "name": "mock-a"},
         {"id": "m2", "provider": "mock", "name": "mock-b"},
-    ]
+    ])
     experiment_path.write_text(json.dumps(payload), encoding="utf-8")
     add_mock_instance(Path(payload["dataset"]), "cv_alt", researcher_name="CV Alt")
 
@@ -628,10 +668,10 @@ def test_execute_selector_filters_by_model_name(tmp_path):
     experiment_path = write_mock_experiment(tmp_path / "experiment.json", evaluation_enabled=False)
     payload = json.loads(experiment_path.read_text(encoding="utf-8"))
     payload["scope"]["instances"] = ["cv_demo", "cv_alt"]
-    payload["factors"]["model"] = [
+    _set_model_candidates(payload, [
         {"id": "m1", "provider": "mock", "name": "mock-a"},
         {"id": "m2", "provider": "mock", "name": "mock-b"},
-    ]
+    ])
     experiment_path.write_text(json.dumps(payload), encoding="utf-8")
     add_mock_instance(Path(payload["dataset"]), "cv_alt", researcher_name="CV Alt")
 
@@ -648,10 +688,10 @@ def test_execute_selector_excludes_instance_for_selected_model(tmp_path):
     experiment_path = write_mock_experiment(tmp_path / "experiment.json", evaluation_enabled=False)
     payload = json.loads(experiment_path.read_text(encoding="utf-8"))
     payload["scope"]["instances"] = ["cv_demo", "cv_alt"]
-    payload["factors"]["model"] = [
+    _set_model_candidates(payload, [
         {"id": "m1", "provider": "mock", "name": "mock-a"},
         {"id": "m2", "provider": "mock", "name": "mock-b"},
-    ]
+    ])
     experiment_path.write_text(json.dumps(payload), encoding="utf-8")
     add_mock_instance(Path(payload["dataset"]), "cv_alt", researcher_name="CV Alt")
 
@@ -669,36 +709,40 @@ def test_execute_force_selector_reexecutes_only_selected_model(tmp_path):
     experiment_path = write_mock_experiment(tmp_path / "experiment.json", evaluation_enabled=False)
     payload = json.loads(experiment_path.read_text(encoding="utf-8"))
     payload["scope"]["instances"] = ["cv_demo", "cv_alt"]
-    payload["factors"]["model"] = [
+    _set_model_candidates(payload, [
         {"id": "m1", "provider": "mock", "name": "mock-a"},
         {"id": "m2", "provider": "mock", "name": "mock-b"},
-    ]
+    ])
     experiment_path.write_text(json.dumps(payload), encoding="utf-8")
     add_mock_instance(Path(payload["dataset"]), "cv_alt", researcher_name="CV Alt")
 
     trials_path = _plan_to_root(experiment_path, tmp_path / "expanded")
     responses_path = _execute_trials(trials_path)
 
-    parsed_path = tmp_path / "dataset" / "context" / "cv_demo" / "parsed.json"
-    parsed_payload = json.loads(parsed_path.read_text(encoding="utf-8"))
-    parsed_payload["answers"]["q_year"] = 2020
-    parsed_path.write_text(json.dumps(parsed_payload), encoding="utf-8")
+    from ctxbench.benchmark.execution_records import attempts_for_trial
+    before = {str(row["trialId"]): len(attempts_for_trial(responses_path.parent, str(row["trialId"])))
+              for row in _jsonl_rows(trials_path)}
 
     _execute_trials(trials_path, "--model", "m1", "--force")
     rows = _jsonl_rows(responses_path)
     year_rows = [row for row in rows if row["taskId"] == "q_year" and row["instanceId"] == "cv_demo"]
-    assert next(row for row in year_rows if row["modelId"] == "m1")["response"] == "2020"
+    assert next(row for row in year_rows if row["modelId"] == "m1")["response"] == "2018"
     assert next(row for row in year_rows if row["modelId"] == "m2")["response"] == "2018"
+    after = {str(row["trialId"]): len(attempts_for_trial(responses_path.parent, str(row["trialId"])))
+             for row in _jsonl_rows(trials_path)}
+    selected_ids = {str(row["trialId"]) for row in _jsonl_rows(trials_path) if row["modelId"] == "m1"}
+    assert all(after[trial_id] == before[trial_id] + 1 for trial_id in selected_ids)
+    assert all(after[trial_id] == before[trial_id] for trial_id in set(before) - selected_ids)
 
 
 def test_eval_selector_excludes_instance_for_selected_model(tmp_path, monkeypatch):
     experiment_path = write_mock_experiment(tmp_path / "experiment.json", evaluation_enabled=False)
     payload = json.loads(experiment_path.read_text(encoding="utf-8"))
     payload["scope"]["instances"] = ["cv_demo", "cv_alt"]
-    payload["factors"]["model"] = [
+    _set_model_candidates(payload, [
         {"id": "m1", "provider": "mock", "name": "mock-a"},
         {"id": "m2", "provider": "mock", "name": "mock-b"},
-    ]
+    ])
     experiment_path.write_text(json.dumps(payload), encoding="utf-8")
     add_mock_instance(Path(payload["dataset"]), "cv_alt", researcher_name="CV Alt")
 
@@ -813,10 +857,10 @@ def test_eval_writes_qualitative_outputs_and_summary(tmp_path, monkeypatch):
 def test_eval_selector_filters_by_model_id(tmp_path, monkeypatch):
     experiment_path = write_mock_experiment(tmp_path / "experiment.json", evaluation_enabled=False)
     payload = json.loads(experiment_path.read_text(encoding="utf-8"))
-    payload["factors"]["model"] = [
+    _set_model_candidates(payload, [
         {"id": "m1", "provider": "mock", "name": "mock-a"},
         {"id": "m2", "provider": "mock", "name": "mock-b"},
-    ]
+    ])
     experiment_path.write_text(json.dumps(payload), encoding="utf-8")
 
     trials_path = _plan_to_root(experiment_path, tmp_path / "expanded")
@@ -1130,10 +1174,6 @@ def test_submit_evaluation_batch_writes_target_manifest_fields(tmp_path):
 def test_eval_repoqa_scorer_does_not_require_judges(tmp_path):
     root = tmp_path / "run"
     root.mkdir()
-    (root / "manifest.json").write_text(
-            json.dumps({"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}}, "configurations": {"inline-code": {"strategy": "inline", "representation": "code", "surface": "full"}}, "trace": {"writeFiles": False}, "evaluation": {"enabled": True}}),
-        encoding="utf-8",
-    )
     response = {
         "trialId": "repoqa-1",
         "experimentId": "exp-repoqa",
@@ -1182,6 +1222,7 @@ def test_eval_repoqa_scorer_does_not_require_judges(tmp_path):
         },
     }
     (root / "responses.jsonl").write_text(json.dumps(response) + "\n", encoding="utf-8")
+    _seal_response_fixture(root, response)
 
     assert main(["eval", str(root / "responses.jsonl")]) == 0
 
@@ -1203,10 +1244,6 @@ def test_eval_repoqa_scorer_scores_non_empty_response_without_judges(tmp_path, m
     root.mkdir()
     instance_dir.mkdir(parents=True)
     raw_dir.mkdir()
-    (root / "manifest.json").write_text(
-            json.dumps({"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}}, "configurations": {"inline-code": {"strategy": "inline", "representation": "code", "surface": "full"}}, "trace": {"writeFiles": False}, "evaluation": {"enabled": True}}),
-        encoding="utf-8",
-    )
     (instance_dir / "native_task.json").write_text(
         json.dumps({"language": "python", "repo": "owner/repo", "name": "target_func"}),
         encoding="utf-8",
@@ -1268,6 +1305,7 @@ def test_eval_repoqa_scorer_scores_non_empty_response_without_judges(tmp_path, m
         },
     }
     (root / "responses.jsonl").write_text(json.dumps(response) + "\n", encoding="utf-8")
+    _seal_response_fixture(root, response)
 
     def fake_run(args, *, input, text, capture_output, check):
         request = json.loads(input)
@@ -1304,7 +1342,6 @@ def test_eval_repoqa_scorer_scores_non_empty_response_without_judges(tmp_path, m
 def test_eval_rejects_batch_for_repoqa_scorer(tmp_path):
     root = tmp_path / "run"
     root.mkdir()
-    (root / "manifest.json").write_text(json.dumps({"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}}, "configurations": {"inline-code": {"strategy": "inline", "representation": "code", "surface": "full"}}, "evaluation": {"enabled": True}}), encoding="utf-8")
     response = {
         "trialId": "repoqa-1",
         "experimentId": "exp-repoqa",
@@ -1342,6 +1379,7 @@ def test_eval_rejects_batch_for_repoqa_scorer(tmp_path):
         },
     }
     (root / "responses.jsonl").write_text(json.dumps(response) + "\n", encoding="utf-8")
+    _seal_response_fixture(root, response)
 
     assert main(["eval", str(root / "responses.jsonl"), "--batch"]) == 1
 

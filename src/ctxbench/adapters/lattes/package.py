@@ -33,10 +33,6 @@ REPRESENTATION_ARTIFACTS = {
 
 
 class LattesDatasetAdapter(LocalDatasetPackage):
-    def prepare_execution_params(self, params: dict) -> dict:
-        from ctxbench.adapters.lattes.environment import apply_lattes_mcp_env_overrides
-        return apply_lattes_mcp_env_overrides(params)
-
     REPRESENTATION_ARTIFACTS = REPRESENTATION_ARTIFACTS
 
     def __init__(self, dataset_root: str | Path) -> None:

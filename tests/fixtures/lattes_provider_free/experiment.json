@@ -9,17 +9,6 @@
     "instances": [],
     "tasks": []
   },
-  "factors": {
-    "model": [
-      {
-        "provider": "mock",
-        "name": "mock-model"
-      }
-    ],
-    "configuration": [
-      "inline-json"
-    ]
-  },
   "evaluation": {
     "enabled": true,
     "judges": [
@@ -41,6 +30,22 @@
     }
   },
   "surfaces": {
-    "full": {"type": "full_context"}
-  }
+    "full": {
+      "type": "full_context"
+    }
+  },
+  "schemaVersion": 3,
+  "kind": "benchmark",
+  "models": {
+    "mock-model": {
+      "provider": "mock",
+      "name": "mock-model"
+    }
+  },
+  "candidates": [
+    [
+      "mock-model",
+      "inline-json"
+    ]
+  ]
 }

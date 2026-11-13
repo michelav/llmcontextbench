@@ -56,7 +56,7 @@ Models and provisioning configurations are separate; a candidate is their pair.
 
 ## Artifact authority and migration
 
-See [the target contracts](../architecture/v1-contracts.md). Existing artifact contracts remain the
+See [the target contracts](../architecture/workflow-contracts.md). Existing artifact contracts remain the
 implemented baseline until the corresponding slice migrates readers and writers together.
 Breaking changes use explicit versions and reject historical artifacts; historical readers live at
 the old tag. No automatic in-place artifact migration or compatibility-reader framework is planned.

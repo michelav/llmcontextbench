@@ -25,5 +25,5 @@ def test_repoqa_export_selectors_and_legacy_rejection(exporter, tmp_path, monkey
     args = exporter['parse_args']()
     assert args.configuration == ['a']
     assert args.representation == ['json']
-    with pytest.raises(ValueError, match='previous benchmark version'):
+    with pytest.raises(ValueError, match='Unsupported benchmark artifact contract'):
         exporter['main']()

@@ -29,6 +29,8 @@ from ctxbench.adaptive.workflow import (
     QualitySLO,
     run_adaptive_workflow,
 )
+
+pytestmark = [pytest.mark.workflow, pytest.mark.e2e]
 from ctxbench.adaptive.projections import rebuild_adaptive_responses
 from ctxbench.dataset.capabilities import (
     FeatureCapability,
@@ -316,7 +318,7 @@ def test_adaptive_plan_cli_contract_and_status_cover_all_request_states(tmp_path
 
     assert plan_command(str(definition_path), str(output_root)) == 0
     manifest = validate_workflow_manifest(output_root)
-    assert manifest["adaptivePlanVersion"] == 2
+    assert manifest["adaptivePlanVersion"] == 3
     with pytest.raises(ValueError, match="schemaVersion 1.*not supported"):
         from ctxbench.adaptive.artifacts import adaptive_plan_from_payload
         adaptive_plan_from_payload({"schemaVersion": 1})
@@ -367,7 +369,7 @@ def test_adaptive_plan_schema_rejects_unknown_fields():
 
 
 def test_execute_cli_dispatches_fresh_adaptive_plan_without_trial_specs(tmp_path):
-    from ctxbench.benchmark.selectors import RunSelector
+    from ctxbench.benchmark.selectors import TrialSelector
     from ctxbench.adaptive.artifacts import write_adaptive_artifacts
     from ctxbench.commands.execute import execute_command
     from ctxbench.commands.export import export_command
@@ -422,7 +424,7 @@ def test_execute_cli_dispatches_fresh_adaptive_plan_without_trial_specs(tmp_path
     with pytest.raises(ValueError, match="--force is not supported for adaptive"):
         execute_command(str(tmp_path / "adaptive-plan.json"), force=True)
     with pytest.raises(ValueError, match="Selectors cannot filter an adaptive workload"):
-        execute_command(str(tmp_path / "adaptive-plan.json"), selector=RunSelector(task=("task_role",)))
+        execute_command(str(tmp_path / "adaptive-plan.json"), selector=TrialSelector(task=("task_role",)))
     assert execute_command(str(tmp_path / "adaptive-plan.json")) == 0
     responses = read_jsonl(tmp_path / "responses.jsonl")
     assert len(responses) == 1
@@ -482,7 +484,7 @@ def test_future_request_observations_cannot_change_an_earlier_decision(tmp_path)
     session = ExecutionSession(object())
     future_execution = plan.requests[1].candidates["candidate-b"].execution
     future_observation = {
-        "configuration_id": "candidate-b", "size_bin": None,
+        "configuration_id": "candidate-b",
         "status": "success", "end_to_end_duration_ms": 0.1,
         "duration_provenance": "measured",
         "tokens": {"value": 1, "provenance": "reported"},

@@ -1,24 +1,22 @@
 {
+  "schemaVersion": 3,
+  "kind": "benchmark",
   "id": "exp-fake-dataset-plan",
   "output": "outputs",
   "dataset": {
-    "root": "tests/fixtures/fake_dataset/dataset"
+    "root": "dataset"
   },
   "scope": {
     "instances": [],
     "tasks": []
   },
-  "factors": {
-    "model": [
-      {
-        "provider": "mock",
-        "name": "mock-model"
-      }
-    ],
-    "configuration": [
-      "inline-json"
-    ]
+  "models": {
+    "mock": {
+      "provider": "mock",
+      "name": "mock-model"
+    }
   },
+  "candidates": [["mock", "inline-json"]],
   "evaluation": {
     "enabled": false,
     "judges": []

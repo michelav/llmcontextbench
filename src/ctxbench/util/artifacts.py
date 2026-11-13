@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import re
 from typing import Protocol
@@ -70,21 +69,6 @@ def canonical_identity_from_trial(trial: TrialIdentity) -> str:
     )
 
 
-def build_short_ids(identities: list[str], min_length: int = 10) -> list[str]:
-    if not identities:
-        return []
-    digests = [hashlib.sha256(identity.encode("utf-8")).hexdigest() for identity in identities]
-    for length in range(min_length, len(digests[0]) + 1):
-        short_ids = [digest[:length] for digest in digests]
-        if len(short_ids) == len(set(short_ids)):
-            return short_ids
-    return digests
-
-
-def run_id_from_identity(identity: str, min_length: int = 10) -> str:
-    return build_short_ids([identity], min_length=min_length)[0]
-
-
 def artifact_filename(prefix: str, experiment_id: str, trial_id: str) -> str:
     return f"{prefix}_{sanitize_experiment_id(experiment_id)}_{trial_id}.json"
 
@@ -99,12 +83,3 @@ def response_filename(experiment_id: str, trial_id: str) -> str:
 
 def evaluation_filename(experiment_id: str, trial_id: str) -> str:
     return artifact_filename("re", experiment_id, trial_id)
-
-
-# Backward-compatible aliases for remaining internal legacy callers.
-RunIdentity = TrialIdentity
-canonical_run_identity = canonical_trial_identity
-canonical_identity_from_run = canonical_identity_from_trial
-runspec_filename = trialspec_filename
-runresult_filename = response_filename
-evalresult_filename = evaluation_filename

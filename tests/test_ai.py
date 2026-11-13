@@ -19,7 +19,7 @@ from ctxbench.ai.runtime import MCPRuntime
 from ctxbench.ai.trace import TraceCollector
 from ctxbench.benchmark import executor as executor_module
 from ctxbench.benchmark.evaluation import _evaluate_judge, build_evaluation_jobs, evaluate_run_result
-from ctxbench.benchmark.executor import execute_runspec
+from ctxbench.benchmark.executor import resolve_trial_dataset
 from ctxbench.benchmark.models import (
     EvaluationJudgeInfo,
     EvaluationTrace,
@@ -28,12 +28,22 @@ from ctxbench.benchmark.models import (
     TrialResult,
     TrialSpec,
 )
+from ctxbench.benchmark.runtime_adapter import TrialRuntimeAdapter
 from ctxbench.dataset.errors import CapabilityUnavailableError, UnsupportedRepresentationError
 from ctxbench.dataset.package import DatasetMetadata
 from ctxbench.dataset.payloads import ORACLE_UNAVAILABLE, ContextPayload, EvidencePayload, TaskPayload
-from ctxbench.dataset.provider import DatasetProvider
+from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.util.logging import PhaseLogger
 import json
+
+
+def _execute_trial_runtime(runspec, engine):
+    bridge = TrialRuntimeAdapter()
+    dataset = resolve_trial_dataset(runspec)
+    execution = executor_module.execute_runtime_request(
+        bridge.to_runtime_request(runspec), engine, dataset,
+    )
+    return bridge.to_trial_result(runspec, execution)
 
 
 def make_request(**overrides: object) -> AIRequest:
@@ -130,7 +140,7 @@ def test_dataset_provider_context_blocks_falls_back_to_instance_blocks_file(tmp_
     payload["instances"][0].pop("contextBlocks", None)
     (Path(dataset.root) / "tasks.instance.json").write_text(json.dumps(payload), encoding="utf-8")
 
-    provider = DatasetProvider.from_dataset(dataset)
+    provider = LocalDatasetPackage.from_dataset(dataset)
 
     assert provider.get_context_blocks("cv-demo") == {
         "summary": "Researcher in software engineering.",
@@ -415,7 +425,7 @@ def _run_result_for_evaluation(dataset: ExperimentDataset) -> TrialResult:
     )
 
 
-def test_execute_runspec_resolves_adapter_and_uses_get_context_for_inline(monkeypatch, tmp_path):
+def test__execute_trial_runtime_resolves_adapter_and_uses_get_context_for_inline(monkeypatch, tmp_path):
     dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
     adapter = FakeDatasetAdapter(context_content={"answers": {"q_year": 2020}})
     registry = FakeRegistry(adapter)
@@ -424,7 +434,7 @@ def test_execute_runspec_resolves_adapter_and_uses_get_context_for_inline(monkey
     model = RecordingModel()
     engine._models["recording"] = model
 
-    result = execute_runspec(_runspec_for_executor(dataset), engine)
+    result = _execute_trial_runtime(_runspec_for_executor(dataset), engine)
 
     assert result.response == "3"
     assert registry.resolved == [result.dataset]
@@ -433,7 +443,7 @@ def test_execute_runspec_resolves_adapter_and_uses_get_context_for_inline(monkey
     assert model.last_request.context == '{"answers": {"q_year": 2020}}'
 
 
-def test_execute_runspec_inline_metadata_uses_adapter_boundary_keys(monkeypatch, tmp_path):
+def test__execute_trial_runtime_inline_metadata_uses_adapter_boundary_keys(monkeypatch, tmp_path):
     dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
     adapter = FakeDatasetAdapter()
     monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
@@ -441,7 +451,7 @@ def test_execute_runspec_inline_metadata_uses_adapter_boundary_keys(monkeypatch,
     model = RecordingModel()
     engine._models["recording"] = model
 
-    execute_runspec(_runspec_for_executor(dataset), engine)
+    _execute_trial_runtime(_runspec_for_executor(dataset), engine)
 
     assert model.last_request is not None
     metadata = model.last_request.metadata
@@ -452,16 +462,16 @@ def test_execute_runspec_inline_metadata_uses_adapter_boundary_keys(monkeypatch,
     assert "instance_dir" not in metadata
 
 
-def test_execute_runspec_inline_unsupported_representation_propagates(monkeypatch, tmp_path):
+def test__execute_trial_runtime_inline_unsupported_representation_propagates(monkeypatch, tmp_path):
     dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
     adapter = FakeDatasetAdapter(unsupported_context=True)
     monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
 
     with pytest.raises(UnsupportedRepresentationError):
-        execute_runspec(_runspec_for_executor(dataset), Engine())
+        _execute_trial_runtime(_runspec_for_executor(dataset), Engine())
 
 
-def test_execute_runspec_local_function_uses_tool_provider_runtime(monkeypatch, tmp_path):
+def test__execute_trial_runtime_local_function_uses_tool_provider_runtime(monkeypatch, tmp_path):
     dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
     service = FakeLattesRuntime()
     adapter = FakeDatasetAdapter(tool_provider=service)
@@ -478,7 +488,7 @@ def test_execute_runspec_local_function_uses_tool_provider_runtime(monkeypatch, 
     model = RecordingModel()
     engine._models["recording"] = model
 
-    result = execute_runspec(_runspec_for_executor(dataset, strategy="local_function"), engine)
+    result = _execute_trial_runtime(_runspec_for_executor(dataset, strategy="local_function"), engine)
 
     assert result.status == "success"
     assert adapter.context_calls == []
@@ -489,7 +499,7 @@ def test_execute_runspec_local_function_uses_tool_provider_runtime(monkeypatch, 
     assert model.last_request.metadata["context_obtained"] is False
 
 
-def test_execute_runspec_local_mcp_uses_dataset_mcp_server(monkeypatch, tmp_path):
+def test__execute_trial_runtime_local_mcp_uses_dataset_mcp_server(monkeypatch, tmp_path):
     dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
 
     class FakeMCPServer:
@@ -509,7 +519,7 @@ def test_execute_runspec_local_mcp_uses_dataset_mcp_server(monkeypatch, tmp_path
     model = RecordingModel()
     engine._models["recording"] = model
 
-    result = execute_runspec(_runspec_for_executor(dataset, strategy="local_mcp"), engine)
+    result = _execute_trial_runtime(_runspec_for_executor(dataset, strategy="local_mcp"), engine)
 
     assert result.status == "success"
     assert adapter.context_calls == []
@@ -523,7 +533,7 @@ def test_execute_runspec_local_mcp_uses_dataset_mcp_server(monkeypatch, tmp_path
     assert not any(event["name"] == "strategy.local_function.execute" for event in events)
 
 
-def test_execute_runspec_remote_mcp_does_not_call_tool_provider(monkeypatch, tmp_path):
+def test__execute_trial_runtime_remote_mcp_does_not_call_tool_provider(monkeypatch, tmp_path):
     dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
     adapter = FakeDatasetAdapter(tool_provider=FakeLattesRuntime())
     monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
@@ -532,7 +542,7 @@ def test_execute_runspec_remote_mcp_does_not_call_tool_provider(monkeypatch, tmp
     model = RecordingModel()
     engine._models["recording"] = model
 
-    result = execute_runspec(
+    result = _execute_trial_runtime(
         _runspec_for_executor(
             dataset,
             strategy="remote_mcp",
@@ -553,34 +563,34 @@ def test_execute_runspec_remote_mcp_does_not_call_tool_provider(monkeypatch, tmp
     assert not any(event["name"] == "strategy.local_mcp.execute" for event in events)
 
 
-def test_execute_runspec_local_function_missing_provider_raises(monkeypatch, tmp_path):
+def test__execute_trial_runtime_local_function_missing_provider_raises(monkeypatch, tmp_path):
     dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
     adapter = FakeDatasetAdapter(tool_provider=None)
     monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
 
     with pytest.raises(CapabilityUnavailableError):
-        execute_runspec(_runspec_for_executor(dataset, strategy="local_function"), Engine())
+        _execute_trial_runtime(_runspec_for_executor(dataset, strategy="local_function"), Engine())
 
 
-def test_execute_runspec_local_mcp_missing_server_raises(monkeypatch, tmp_path):
+def test__execute_trial_runtime_local_mcp_missing_server_raises(monkeypatch, tmp_path):
     dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
     adapter = FakeDatasetAdapter(tool_provider=FakeLattesRuntime(), mcp_server=None)
     monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
 
     with pytest.raises(CapabilityUnavailableError, match="mcp_server capability"):
-        execute_runspec(_runspec_for_executor(dataset, strategy="local_mcp"), Engine())
+        _execute_trial_runtime(_runspec_for_executor(dataset, strategy="local_mcp"), Engine())
 
     assert adapter.tool_provider_calls == 0
     assert adapter.mcp_server_calls == 1
 
 
-def test_execute_runspec_remote_mcp_missing_config_raises_without_tool_provider(monkeypatch, tmp_path):
+def test__execute_trial_runtime_remote_mcp_missing_config_raises_without_tool_provider(monkeypatch, tmp_path):
     dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
     adapter = FakeDatasetAdapter(tool_provider=FakeLattesRuntime())
     monkeypatch.setattr(executor_module, "get_default_registry", lambda: FakeRegistry(adapter))
 
     with pytest.raises(CapabilityUnavailableError, match="execution MCP server settings"):
-        execute_runspec(_runspec_for_executor(dataset, strategy="remote_mcp"), Engine())
+        _execute_trial_runtime(_runspec_for_executor(dataset, strategy="remote_mcp"), Engine())
 
     assert adapter.tool_provider_calls == 0
     assert adapter.mcp_server_calls == 0
@@ -975,7 +985,7 @@ def test_judge_request_injects_structured_output_schema():
     assert model.last_request.params["top_p"] == 0.4
 
 
-def test_execute_runspec_persists_metrics_summary_for_client_remote_mcp(monkeypatch, tmp_path):
+def test__execute_trial_runtime_persists_metrics_summary_for_client_remote_mcp(monkeypatch, tmp_path):
     dataset = write_mock_dataset(tmp_path / "dataset")
     runspec = TrialSpec.model_validate(
         {
@@ -1013,7 +1023,7 @@ def test_execute_runspec_persists_metrics_summary_for_client_remote_mcp(monkeypa
     monkeypatch.setattr("ctxbench.runtime.runtime.MCPRuntime.from_config", classmethod(lambda cls, config: FakeLattesRuntime()))
     engine = Engine(tool_runtime_factories={"remote_mcp": lambda: FakeLattesRuntime()})
     engine._models["recording"] = RecordingModel()
-    result = execute_runspec(runspec, engine)
+    result = _execute_trial_runtime(runspec, engine)
 
     assert isinstance(result.response, str)
     assert result.metricsSummary["toolCalls"] == 0
@@ -1029,7 +1039,7 @@ def test_execute_runspec_persists_metrics_summary_for_client_remote_mcp(monkeypa
 
     no_trace_runspec = runspec.model_copy(deep=True)
     no_trace_runspec.trace.enabled = False
-    no_trace_result = execute_runspec(no_trace_runspec, engine)
+    no_trace_result = _execute_trial_runtime(no_trace_runspec, engine)
     assert no_trace_result.trace.aiTrace == {}
     assert no_trace_result.metricsSummary["modelAttempts"] == 1
     assert no_trace_result.metricsSummary["totalDurationMs"] == no_trace_result.timing.durationMs
@@ -1041,14 +1051,14 @@ def test_execute_runspec_persists_metrics_summary_for_client_remote_mcp(monkeypa
     failing_engine = Engine()
     failing_engine._models["broken"] = FailingModel()
     failed_spec = no_trace_runspec.model_copy(update={"provider": "broken"})
-    failed_result = execute_runspec(failed_spec, failing_engine)
+    failed_result = _execute_trial_runtime(failed_spec, failing_engine)
     assert failed_result.status == "error"
     assert failed_result.metricsSummary["failedModelAttempts"] == 1
     assert failed_result.metricsSummary["totalTokens"] is None
     assert failed_result.metricsSummary["usageCompleteness"] == "unavailable"
 
 
-def test_execute_runspec_injects_openai_inline_prompt_cache_key(tmp_path):
+def test__execute_trial_runtime_injects_openai_inline_prompt_cache_key(tmp_path):
     dataset = write_mock_dataset(tmp_path / "dataset")
     runspec = TrialSpec.model_validate(
         {
@@ -1087,7 +1097,7 @@ def test_execute_runspec_injects_openai_inline_prompt_cache_key(tmp_path):
     model = RecordingModel()
     engine._models["openai"] = model
 
-    execute_runspec(runspec, engine)
+    _execute_trial_runtime(runspec, engine)
 
     assert model.last_request is not None
     cache_key = model.last_request.params["prompt_cache_key"]
@@ -1516,7 +1526,7 @@ def test_evaluate_run_result_skips_when_context_block_missing(tmp_path):
     instances["instances"][0]["tasks"].append({"id": "q_missing"})
     instances_path.write_text(json.dumps(instances), encoding="utf-8")
 
-    provider = DatasetProvider.from_dataset(dataset)
+    provider = LocalDatasetPackage.from_dataset(dataset)
     events: list[tuple[str, str, dict[str, object]]] = []
     result = TrialResult.model_validate(
         {
@@ -1671,7 +1681,7 @@ class EchoMcpConfigModel(RecordingModel):
                              input_tokens=11, output_tokens=1, total_tokens=12)
 
 
-def test_execute_runspec_resolves_mcp_credentials_only_in_the_request_and_redacts_echoes(monkeypatch, tmp_path):
+def test__execute_trial_runtime_resolves_mcp_credentials_only_in_the_request_and_redacts_echoes(monkeypatch, tmp_path):
     secret = "s3cr3t-token-value-0123456789"
     monkeypatch.setenv("CTXBENCH_TEST_MCP_TOKEN", secret)
     dataset = ExperimentDataset(root=str((tmp_path / "dataset").resolve()), id="ctxbench/fake", version="0.1.0")
@@ -1685,7 +1695,7 @@ def test_execute_runspec_resolves_mcp_credentials_only_in_the_request_and_redact
     runspec = _runspec_for_executor(dataset, strategy="remote_mcp", params={"mcp_server": config})
     runspec.trace.save_raw_response = True
 
-    result = execute_runspec(runspec, engine)
+    result = _execute_trial_runtime(runspec, engine)
 
     assert model.last_request.params["mcp_server"]["auth_token"] == secret
     assert model.last_request.params["mcp_server"]["headers"]["X-Api-Key"] == f"Bearer {secret}"
@@ -1698,7 +1708,6 @@ def test_execute_runspec_resolves_mcp_credentials_only_in_the_request_and_redact
 
 def test_plan_params_keep_mcp_credential_placeholders_and_check_them(monkeypatch):
     from ctxbench.util.env import resolve_plan_params
-    from ctxbench.adapters.lattes.environment import apply_lattes_mcp_env_overrides
 
     monkeypatch.setenv("CTXBENCH_TEST_MCP_URL", "https://example.test/mcp")
     monkeypatch.setenv("CTXBENCH_TEST_MCP_TOKEN", "s3cr3t")
@@ -1710,6 +1719,3 @@ def test_plan_params_keep_mcp_credential_placeholders_and_check_them(monkeypatch
     monkeypatch.delenv("CTXBENCH_TEST_MCP_TOKEN")
     with pytest.raises(ValueError, match="CTXBENCH_TEST_MCP_TOKEN"):
         resolve_plan_params(params)
-    monkeypatch.setenv("LATTES_MCP_TOKEN", "s3cr3t")
-    overridden = apply_lattes_mcp_env_overrides({"mcp_server": {"server_url": "https://example.test/mcp"}})
-    assert overridden["mcp_server"]["auth_token"] == "${LATTES_MCP_TOKEN}"

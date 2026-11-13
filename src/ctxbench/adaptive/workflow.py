@@ -32,12 +32,11 @@ from .types import (
     PerformanceEstimate,
     Provenance,
     RequestFeatures,
-    SizeBin,
     TokenUsage,
     validate_candidates,
 )
 
-ADAPTIVE_PLAN_VERSION = 2
+ADAPTIVE_PLAN_VERSION = 3
 ADAPTIVE_RECORD_VERSION = 2
 
 
@@ -500,7 +499,6 @@ def _monitor(request, candidate_id, result, policy, assessor):
         token_provenance = Provenance.UNAVAILABLE
     observation = Observation(
         candidate_id,
-        request.features.size_bin,
         str(result.get("status", "error")),
         float(duration) if duration_available else None,
         TokenUsage(total_tokens if token_available else None, token_provenance),
@@ -660,7 +658,6 @@ def _observation_from_payload(payload: dict[str, Any]) -> Observation:
     token = payload["tokens"]
     return Observation(
         configuration_id=payload["configuration_id"],
-        size_bin=SizeBin(payload["size_bin"]) if payload.get("size_bin") is not None else None,
         status=payload["status"], end_to_end_duration_ms=payload.get("end_to_end_duration_ms"),
         tokens=TokenUsage(token.get("value"), Provenance(token["provenance"])),
         duration_provenance=Provenance(payload["duration_provenance"]),

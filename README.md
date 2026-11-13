@@ -41,9 +41,8 @@ package/import path remains `ctxbench` (`src/ctxbench/`, `import ctxbench...`).
 │   ├── lattes/
 │   └── repoqa/
 ├── examples/
-│   ├── adaptive-minimal/
-│   ├── benchmark/
-│   └── v1/
+│   ├── adaptive/
+│   └── benchmark/
 ├── docs/
 │   ├── architecture/
 │   ├── datasets/
@@ -59,7 +58,9 @@ Important areas:
 - `src/ctxbench/commands/` contains command handlers for `dataset`, `plan`,
   `execute`, `eval`, `export`, `metrics`, and `status`.
 - `src/ctxbench/benchmark/` owns experiment loading, trial planning, execution,
-  evaluation, selectors, checkpoints, and result construction.
+  evaluation, trial selection, and result construction.
+- `src/ctxbench/adaptive/` owns the versioned MAPE-K request workflow, estimator,
+  sensors, and adaptive artifact contracts.
 - `src/ctxbench/dataset/` contains generic dataset contracts, resolution,
   caching, package validation, acquisition, payloads, and inspection.
 - `src/ctxbench/adapters/` contains first-party dataset adapters. Current
@@ -68,9 +69,9 @@ Important areas:
   runtime/tool-loop code, cache support, rate control, and trace collection.
 - `datasets/` contains local dataset material used during development and
   experiments.
-- `examples/` contains a small curated set of benchmark and adaptive
-  configurations. The examples under `examples/benchmark/` use real model
-  providers and may incur cost if executed.
+- `examples/` contains versioned benchmark and adaptive definitions. The
+  minimal examples use mock providers; benchmark definitions using real model
+  providers may incur cost if executed.
 - `tests/fixtures/` contains provider-free fixtures used by tests.
 - `tools/repoqa/` is an isolated RepoQA dataset-generation environment; it is
   not the main LLMContextBench runtime.
@@ -98,11 +99,16 @@ experiment config
   -> metrics/ (trial_metrics.csv, aggregate_metrics.csv, dimensions/*.csv, summary.json)
 ```
 
+Adaptive plans follow a separate request-level path: `adaptive-plan.json` freezes ordered requests
+and candidates, `execute` persists decisions and execution attempts, and `responses.jsonl` is
+projected from delivered requests. Failed and rejected requests and all attempts remain visible in
+the adaptive ledger and request/attempt metrics.
+
 The main commands are:
 
 - `llmctxbench dataset fetch`: materialize a dataset into a local cache.
 - `llmctxbench dataset inspect`: inspect a local or cached dataset package.
-- `llmctxbench plan`: expand an experiment configuration into planned trials.
+- `llmctxbench plan`: freeze a versioned benchmark trial plan or adaptive request plan.
 - `llmctxbench execute`: execute trials and collect model responses.
 - `llmctxbench eval`: evaluate responses using configured judge models.
 - `llmctxbench export`: export evaluation artifacts to CSV.
@@ -184,8 +190,7 @@ is intentional.
 
 ## Getting Started
 
-This sequence gives a new user the shape of the workflow without requiring real
-provider calls.
+These examples show the two supported workflows without requiring real provider calls.
 
 ### 1. Inspect a Local Dataset
 
@@ -213,80 +218,34 @@ llmctxbench dataset fetch \
 Archive fetches require trusted checksums so the materialized dataset is
 reproducible and safe to extract.
 
-### 2. Create or Choose an Experiment Config
+### 2. Choose a Workflow Definition
 
-An experiment selects the dataset, scope, model factors, named provisioning configurations,
-and evaluation settings.
+Benchmark definitions use `schemaVersion: 3` and `kind: "benchmark"`; they freeze
+the trial assignments before execution. Adaptive definitions use `schemaVersion: 3`
+and `workflowKind: "adaptive"`; they declare eligible candidates and let the
+controller choose for each request at runtime.
 
-Minimal local-dataset shape:
-
-```json
-{
-  "id": "repoqa_inline_local_001",
-  "output": "outputs",
-  "dataset": {
-    "root": "datasets/repoqa"
-  },
-  "scope": {
-    "instances": [],
-    "tasks": []
-  },
-  "factors": {
-    "model": [
-      {
-        "provider": "mock",
-        "name": "mock-model"
-      }
-    ],
-    "configuration": ["i-json"]
-  },
-  "configurations": {
-    "i-json": {"strategy": "inline", "representation": "json", "surface": "full"}
-  },
-  "surfaces": {
-    "full": {"type": "full_context"}
-  },
-  "evaluation": {
-    "enabled": false,
-    "judges": []
-  }
-}
-```
-
-Empty `scope.instances` and `scope.tasks` mean all available instances and
-tasks. Use small scopes for exploratory runs.
-
-A configuration ID is an experiment-defined lowercase identifier. Its definition has
-`strategy`, `representation`, and an explicit `surface` reference; its spelling does not select behavior.
-Select IDs through `factors.configuration`. Tools require `json`; inline supports
-representations supplied by the dataset adapter. Planning expands instances × tasks ×
-models × configurations × repeats and snapshots selected definitions in the manifest.
-
-This is a clean artifact-contract break: historical executions require the previous
-benchmark version. Replace `factors.strategy` / `factors.format` with explicit
-configurations and plan into a fresh directory. Trial IDs change when either the ID
-or its definition changes. See [artifact contracts](docs/architecture/artifact-contracts.md).
-
-For a provider-free smoke-check configuration, see
-`tests/fixtures/fake_dataset/experiment.json`.
-For concrete dataset examples, see
-[`examples/benchmark/lattes-minimal.json`](examples/benchmark/lattes-minimal.json)
-and [`examples/benchmark/repoqa-surfaces.json`](examples/benchmark/repoqa-surfaces.json).
-Those examples use configured model providers; execution and evaluation can incur cost.
+For provider-free examples, start with
+[`examples/benchmark/static-minimal.json`](examples/benchmark/static-minimal.json)
+or [`examples/adaptive/minimal.json`](examples/adaptive/minimal.json). The concrete
+Lattes and RepoQA benchmark examples use configured providers and may incur cost if
+executed. See [workflow contracts](docs/architecture/workflow-contracts.md) for
+artifact versions, recovery, and unsupported historical formats.
 
 ### 3. Plan the Experiment
 
-Planning expands the experiment into immutable trial artifacts:
+Planning writes a frozen workflow plan:
 
 ```bash
-llmctxbench plan tests/fixtures/fake_dataset/experiment.json \
+llmctxbench plan examples/benchmark/static-minimal.json \
   --output outputs/getting-started
 ```
 
 Planning writes:
 
 - `outputs/getting-started/manifest.json`
-- `outputs/getting-started/trials.jsonl`
+- `outputs/getting-started/trials.jsonl` for benchmark definitions, or
+- `adaptive-plan.json` for adaptive definitions.
 
 Planning does not call model providers.
 
@@ -503,24 +462,17 @@ notes, and local clone overrides.
 
 ## Adaptive execution
 
-Adaptive policy and runtime code lives in `src/ctxbench/adaptive/`. The
-provider-free validation guide covers a small end-to-end lifecycle, and
-[`docs/development/adaptive-research-utilities.md`](docs/development/adaptive-research-utilities.md)
-documents reusable analysis helpers.
+The adaptive workflow uses the shared execution service and records decisions and
+deliveries per request. See the [provider-free validation guide](docs/development/validation-guide.md)
+for both lifecycles and [the adaptive plan contract](docs/architecture/adaptive-plan-v3.md).
 
 ## Compatibility Notes
 
-The repository has migrated public terminology to `ctxbench`, `execute`,
-`trials.jsonl`, `responses.jsonl`, `trialId`, `taskId`, and `response`. The
-installed CLI command itself was later renamed from `ctxbench` to
-`llmctxbench`; the underlying Python package/import path (`ctxbench`) and
-dataset-namespace identifiers (`ctxbench/lattes`, `ctxbench/repoqa`) were
-intentionally left unchanged.
-
-Legacy names such as `copa`, `query`, `queries.jsonl`, `answers.jsonl`,
-`runId`, `questionId`, and `answer` may still appear in historical specs,
-generated metadata, or migration notes. New documentation, examples, and public
-interfaces should use the current terminology.
+The public CLI is `llmctxbench`; the Python import path and dataset namespace remain
+`ctxbench`. Current public records use `execute`, `trials.jsonl`, `responses.jsonl`,
+`trialId`, `requestId`, `taskId`, and `response`. Historical Study, RepoQA adaptation,
+adaptive v1, and previous artifact versions are not supported by the current CLI. Keep
+an earlier checkout if those artifacts still need analysis; no migration is provided.
 
 ## Citing
 

@@ -1,8 +1,4 @@
-"""Resolve v1 definition files before adapting them to the existing trial planner.
-
-The adapter is deliberately at the definition boundary: provider/runtime code does
-not need to understand inheritance or the historical factorial input format.
-"""
+"""Resolve versioned benchmark definitions before trial planning."""
 from __future__ import annotations
 
 from copy import deepcopy
@@ -47,11 +43,6 @@ def resolve_definition(path: str | Path, *, _parents: tuple[Path, ...] = ()) -> 
         dataset["root"] = str((source.parent / root).resolve())
     if (data.get("schemaVersion") is not None or parent) and isinstance(dataset, str):
         data["dataset"] = str((source.parent / Path(dataset).expanduser()).resolve())
-    adaptation = data.get("adaptation")
-    if (data.get("schemaVersion") is not None or parent) and isinstance(adaptation, dict):
-        calibration = adaptation.get("calibration")
-        if isinstance(calibration, str):
-            adaptation["calibration"] = str((source.parent / Path(calibration).expanduser()).resolve())
     if parent:
         base = resolve_definition(source.parent / parent, _parents=(*_parents, source))
         return _merge(base, data)
@@ -59,27 +50,19 @@ def resolve_definition(path: str | Path, *, _parents: tuple[Path, ...] = ()) -> 
 
 
 def planner_payload(definition: dict[str, Any]) -> dict[str, Any]:
-    """Validate the v1 public contract and translate to the shared planner model.
-
-Unversioned definitions are passed through for the separately maintained reusable
-study protocols. Versioned benchmark definitions accept only the current schema;
-no persisted-artifact compatibility reading is introduced here.
-"""
+    """Validate the current benchmark contract and translate it to planner models."""
     version = definition.get("schemaVersion")
     if version is None:
-        return deepcopy(definition)
+        raise ValueError("Unversioned definitions are unsupported; create a fresh benchmark definition.")
     if type(version) is not int or version != DEFINITION_VERSION:
         raise ValueError(f"Unsupported experiment schemaVersion; expected {DEFINITION_VERSION}")
     from jsonschema import Draft202012Validator
     Draft202012Validator(definition_schema()).validate(definition)
     result = deepcopy(definition)
-    experiment_kind = result.pop("kind", "benchmark")
-    if experiment_kind not in {"benchmark", "adaptive"}:
-        raise ValueError(f"Unsupported experiment kind: {experiment_kind}")
-    result["experimentKind"] = experiment_kind
-    result["adaptation"] = result.pop("adaptation", {})
+    kind = result.pop("kind", "benchmark")
+    if kind != "benchmark":
+        raise ValueError("Benchmark definitions require kind='benchmark'; use workflowKind='adaptive' for adaptive plans.")
     result.pop("schemaVersion")
-    result["definitionVersion"] = DEFINITION_VERSION
     result["resolvedDefinition"] = deepcopy(definition)
     models = result["models"]
     reserved = {"max_steps", "mcp_server", "timeout", "retry"}
@@ -109,7 +92,6 @@ no persisted-artifact compatibility reading is introduced here.
     # Generation and orchestration controls have distinct public ownership.
     execution = result.get("execution", {})
     result["executionOptions"] = execution.pop("options", {})
-    result["descriptiveFactors"] = result.pop("factorsMetadata", {})
     return result
 
 
@@ -121,7 +103,7 @@ def definition_schema() -> dict[str, Any]:
         "required": ["schemaVersion", "id", "dataset", "models", "configurations", "surfaces", "candidates"],
         "properties": {
             "schemaVersion": {"const": DEFINITION_VERSION},
-            "kind": {"enum": ["benchmark", "adaptive"]},
+            "kind": {"const": "benchmark"},
             "id": {"type": "string", "minLength": 1},
             "name": {"type": "string"}, "output": {"type": "string"},
             "dataset": {"oneOf": [{"type": "string"}, {"type": "object"}]},
@@ -135,89 +117,8 @@ def definition_schema() -> dict[str, Any]:
             "candidates": {"type": "array", "minItems": 1, "items": {
                 "type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "string", "minLength": 1}}},
             "taskParams": {"type": "object"}, "modelParams": {"type": "object"},
-            "factorsMetadata": {"type": "object"},
-            "adaptation": {
-                "type": "object", "additionalProperties": False,
-                "required": ["policy", "workload"],
-                "properties": {
-                    "policy": {"oneOf": [
-                        {"type": "object", "additionalProperties": False,
-                         "required": ["type", "candidate"],
-                         "properties": {"type": {"const": "static"},
-                                        "candidate": {"type": "array", "minItems": 2, "maxItems": 2,
-                                                      "items": {"type": "string", "minLength": 1}}}},
-                        {"type": "object", "additionalProperties": False,
-                         "required": ["type", "latencyTargetMs"],
-                         "properties": {"type": {"const": "threshold"},
-                                        "latencyTargetMs": {"type": "number", "minimum": 0},
-                                        }},
-                        {"type": "object", "additionalProperties": False,
-                         "required": ["type", "candidate"],
-                         "properties": {"type": {"const": "cascade"},
-                                        "candidate": {"type": "array", "minItems": 2, "maxItems": 2,
-                                                      "items": {"type": "string", "minLength": 1}},
-                                        "fallbacks": {"type": "array", "maxItems": 1, "items": {
-                                            "type": "array", "minItems": 2, "maxItems": 2,
-                                            "items": {"type": "string", "minLength": 1}}},
-                                        "minimumResponseLength": {"type": "integer", "minimum": 0}}},
-                        {"type": "object", "additionalProperties": False,
-                         "required": ["type", "candidate", "fallbacks"],
-                         "properties": {"type": {"const": "circuit_breaker"},
-                                        "candidate": {"type": "array", "minItems": 2, "maxItems": 2,
-                                                      "items": {"type": "string", "minLength": 1}},
-                                        "fallbacks": {"type": "array", "minItems": 1, "maxItems": 1,
-                                            "items": {"type": "array", "minItems": 2, "maxItems": 2,
-                                                      "items": {"type": "string", "minLength": 1}}},
-                                        "window": {"type": "integer", "minimum": 1},
-                                        "minimumObservations": {"type": "integer", "minimum": 1},
-                                        "failureRateThreshold": {"type": "number", "minimum": 0, "maximum": 1}}},
-                        {"type": "object", "additionalProperties": False,
-                         "required": ["type", "latencyWeight", "tokenWeight"],
-                         "properties": {"type": {"const": "utility"},
-                                        "latencyWeight": {"type": "number", "minimum": 0},
-                                        "tokenWeight": {"type": "number", "minimum": 0}}},
-                        {"type": "object", "additionalProperties": False,
-                         "required": ["type", "tokenBudget"],
-                         "properties": {"type": {"const": "budget"},
-                                        "tokenBudget": {"type": "integer", "minimum": 0},
-                                        "bestEffort": {"type": "boolean"}}},
-                        {"type": "object", "additionalProperties": False,
-                         "required": ["type", "seed", "explorationProbability", "latencyWeight", "tokenWeight"],
-                         "properties": {"type": {"const": "explore"},
-                                        "seed": {"type": "integer"},
-                                        "explorationProbability": {"type": "number", "minimum": 0, "maximum": 1},
-                                        "latencyWeight": {"type": "number", "minimum": 0},
-                                        "tokenWeight": {"type": "number", "minimum": 0}}}
-                    ]},
-                    "tokenQuota": {"type": "object", "additionalProperties": False,
-                                   "required": ["tokens", "windowSeconds"],
-                                   "properties": {"tokens": {"type": "integer", "minimum": 1},
-                                                  "windowSeconds": {"type": "integer", "minimum": 1},
-                                                  "bestEffort": {"type": "boolean"}}},
-                    "calibration": {"type": "string", "minLength": 1},
-                    "workload": {"type": "array", "minItems": 1, "items": {
-                        "type": "object", "additionalProperties": False,
-                        "required": ["taskId", "instanceId"],
-                        "properties": {"taskId": {"type": "string", "minLength": 1},
-                                       "instanceId": {"type": "string", "minLength": 1},
-                                       "sizeBin": {"enum": ["small", "medium", "large"]},
-                                       "eligibleCandidates": {"type": "array", "items": {
-                                           "type": "array", "minItems": 2, "maxItems": 2,
-                                           "items": {"type": "string", "minLength": 1}}}}}},
-                    "phases": {"type": "array", "items": {
-                        "type": "object", "additionalProperties": False,
-                        "required": ["name", "firstRequest", "lastRequest"],
-                        "properties": {"name": {"type": "string", "minLength": 1},
-                                       "firstRequest": {"type": "integer", "minimum": 1},
-                                       "lastRequest": {"type": "integer", "minimum": 1},
-                                       "toolDelayMs": {"type": "integer", "minimum": 0},
-                                       "toolFailureRate": {"type": "number", "minimum": 0, "maximum": 1},
-                                       "failureSeed": {"type": "integer"}}}}
-                }
-            },
             "execution": {"type": "object", "additionalProperties": False, "properties": {
-                "repeats": {"type": "integer", "minimum": 1}, "output": {"type": "string"},
-                "jsonl": {"type": "string"}, "options": {"type": "object"}}},
+                "repeats": {"type": "integer", "minimum": 1}, "options": {"type": "object"}}},
             "evaluation": {"type": "object"}, "trace": {"type": "object"}, "artifacts": {"type": "object"},
         },
     }

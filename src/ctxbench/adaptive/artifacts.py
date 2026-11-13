@@ -32,7 +32,6 @@ from .types import (
     PerformanceEstimate,
     Provenance,
     RequestFeatures,
-    SizeBin,
 )
 from .workflow import (
     ADAPTIVE_PLAN_VERSION,
@@ -44,11 +43,11 @@ from .workflow import (
 )
 
 
-ADAPTIVE_ARTIFACT_VERSION = 1
+ADAPTIVE_ARTIFACT_VERSION = 2
 
 
 def adaptive_plan_payload(plan: AdaptivePlan) -> dict[str, Any]:
-    """Return the canonical JSON-compatible v2 plan representation."""
+    """Return the canonical JSON-compatible adaptive v3 plan representation."""
     return {
         "schemaVersion": ADAPTIVE_PLAN_VERSION,
         "workflowId": plan.workflow_id,
@@ -182,7 +181,7 @@ def write_adaptive_artifacts(
     plan_path = artifact_root / "adaptive-plan.json"
     write_json(plan_path, payload)
     manifest = {
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "workflowKind": "adaptive",
         "adaptiveArtifactVersion": ADAPTIVE_ARTIFACT_VERSION,
         "adaptivePlanVersion": ADAPTIVE_PLAN_VERSION,
@@ -212,7 +211,7 @@ def validate_workflow_manifest(root: str | Path) -> dict[str, Any]:
     if manifest.get("workflowKind") != "adaptive":
         from ctxbench.benchmark.provisioning import validate_manifest
         return validate_manifest(artifact_root)
-    if (type(manifest.get("schemaVersion")) is not int or manifest.get("schemaVersion") != 1
+    if (type(manifest.get("schemaVersion")) is not int or manifest.get("schemaVersion") != 2
             or type(manifest.get("adaptiveArtifactVersion")) is not int
             or manifest.get("adaptiveArtifactVersion") != ADAPTIVE_ARTIFACT_VERSION
             or type(manifest.get("adaptivePlanVersion")) is not int
@@ -250,11 +249,10 @@ def _request_from_payload(payload: dict[str, Any]) -> AdaptiveWorkloadRequest:
                    "featureValues", "candidateOrder", "candidates"}, "request")
     feature_payload = payload["features"]
     _require_keys(feature_payload, {"sequence_index", "context_bytes"},
-                  {"sequence_index", "context_bytes", "size_bin"}, "request.features")
+                  {"sequence_index", "context_bytes"}, "request.features")
     features = RequestFeatures(
         sequence_index=feature_payload["sequence_index"],
         context_bytes=feature_payload["context_bytes"],
-        size_bin=SizeBin(feature_payload["size_bin"]) if feature_payload.get("size_bin") else None,
     )
     invocations = {}
     for candidate_id, item in payload["candidates"].items():
@@ -380,7 +378,7 @@ def _require_keys(payload: Any, required: set[str], allowed: set[str], label: st
 
 
 def adaptive_plan_schema() -> dict[str, Any]:
-    """JSON Schema for the persisted adaptive plan contract (schemaVersion 2)."""
+    """JSON Schema for the persisted adaptive plan contract (schemaVersion 3)."""
     scalar = {"type": ["string", "number", "integer", "boolean", "null"]}
     execution = {
         "type": "object", "additionalProperties": False,
@@ -465,8 +463,7 @@ def adaptive_plan_schema() -> dict[str, Any]:
                     "features": {"type": "object", "additionalProperties": False,
                                  "required": ["sequence_index", "context_bytes"],
                                  "properties": {"sequence_index": {"type": "integer", "minimum": 1},
-                                                "context_bytes": {"type": "integer", "minimum": 0},
-                                                "size_bin": {"enum": ["small", "medium", "large", None]}}},
+                                                "context_bytes": {"type": "integer", "minimum": 0}}},
                     "featureValues": {"type": "object", "additionalProperties": scalar},
                     "candidateOrder": {"type": "array", "items": {"type": "string"}},
                     "candidates": {"type": "object", "minProperties": 1, "additionalProperties": {

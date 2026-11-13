@@ -14,7 +14,7 @@ from ctxbench.dataset.conflicts import AmbiguousDatasetError, DatasetConflictDet
 from ctxbench.dataset.inspect import build_inspect_result
 from ctxbench.dataset.materialization import MaterializationManifest
 from ctxbench.dataset.package import DatasetMetadata, DatasetPackage, StrategyDescriptor
-from ctxbench.dataset.provider import DatasetProvider, LocalDatasetPackage
+from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.dataset.resolver import DatasetNotFoundError, DatasetResolver, MultiDatasetError
 from ctxbench.dataset.validation import validate_package
 
@@ -29,7 +29,6 @@ __all__ = [
     "DatasetMetadata",
     "DatasetNotFoundError",
     "DatasetPackage",
-    "DatasetProvider",
     "DatasetProvenance",
     "DatasetResolver",
     "LocalDatasetPackage",

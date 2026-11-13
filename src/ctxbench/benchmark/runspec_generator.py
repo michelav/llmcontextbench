@@ -5,9 +5,9 @@ import re
 from typing import Any, Callable
 
 from ctxbench.benchmark.fingerprint import digest
-from ctxbench.benchmark.models import DatasetProvenance, Experiment, MODEL_ID_PATTERN, TrialMetadata, TrialSpec
+from ctxbench.benchmark.models import DatasetProvenance, Experiment, TrialMetadata, TrialSpec
 from ctxbench.dataset.package import DatasetPackage
-from ctxbench.util.artifacts import build_short_ids, canonical_trial_identity
+from ctxbench.util.artifacts import canonical_trial_identity
 from ctxbench.util.env import resolve_plan_params
 
 TASK_TEMPLATE_PATTERN = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
@@ -24,40 +24,17 @@ def resolve_params(experiment: Experiment, model_name: str, model_id: str | None
 
 
 def resolve_models(experiment: Experiment) -> list[dict[str, str]]:
-    if experiment.models:
-        # New format: factors.model is a list of string IDs referencing experiment.models
-        models: list[dict[str, str]] = []
-        seen_ids: set[str] = set()
-        for model_id in experiment.factors.get("model", []):
-            if not isinstance(model_id, str):
-                continue
-            if model_id in seen_ids:
-                raise ValueError(f"Duplicate model id in experiment factors.model: {model_id}")
-            seen_ids.add(model_id)
-            entry = experiment.models[model_id]
-            models.append({"id": model_id, "provider": entry.provider, "name": entry.name})
-        return models
-
-    # Old format: factors.model is a list of objects with provider/name
-    old_models: list[dict[str, str]] = []
-    seen_ids_old: set[str] = set()
+    models: list[dict[str, str]] = []
+    seen_ids: set[str] = set()
     for item in experiment.factors.get("model", []):
-        if not isinstance(item, dict):
-            continue
-        provider = item.get("provider")
-        name = item.get("name")
-        if isinstance(provider, str) and isinstance(name, str):
-            raw_model_id = item.get("id")
-            model_id = raw_model_id if raw_model_id is not None else name
-            if not isinstance(model_id, str) or not model_id.strip():
-                raise ValueError("Experiment factors.model[].id must be a non-empty string when provided.")
-            if raw_model_id is not None and not MODEL_ID_PATTERN.match(model_id):
-                raise ValueError("Experiment factors.model[].id must contain only letters, numbers, underscore, dot, or hyphen.")
-            if model_id in seen_ids_old:
-                raise ValueError(f"Duplicate model id in experiment factors.model: {model_id}")
-            seen_ids_old.add(model_id)
-            old_models.append({"id": model_id, "provider": provider, "name": name})
-    return old_models
+        if not isinstance(item, str) or item not in experiment.models:
+            raise ValueError(f"Unknown benchmark model ID in factors.model: {item!r}")
+        if item in seen_ids:
+            raise ValueError(f"Duplicate model id in experiment factors.model: {item}")
+        seen_ids.add(item)
+        entry = experiment.models[item]
+        models.append({"id": item, "provider": entry.provider, "name": entry.name})
+    return models
 
 
 def generate_runspecs(
@@ -109,9 +86,6 @@ def generate_runspecs(
                     strategy_name = configuration.strategy
                     representation = configuration.representation
                     params = {**experiment.executionOptions, **resolve_params(experiment, model_name, model_id=model_id)}
-                    prepare = getattr(dataset_package, "prepare_execution_params", None)
-                    if prepare is not None and experiment.definitionVersion < 3:
-                        params = prepare(params)
                     for repeat_index in range(1, experiment.execution.repeats + 1):
                         canonical_id = canonical_trial_identity(
                             experiment.id,
@@ -160,12 +134,9 @@ def generate_runspecs(
                             }
                         )
 
-    if experiment.definitionVersion == 3:
-        run_ids = [digest([experiment.id, item["instanceId"], item["taskId"],
-                          item["modelId"], item["configurationId"], item["repeatIndex"]])
-                   for item in draft_specs]
-    else:
-        run_ids = build_short_ids([item["canonical_id"] for item in draft_specs])
+    run_ids = [digest([experiment.id, item["instanceId"], item["taskId"],
+                       item["modelId"], item["configurationId"], item["repeatIndex"]])
+               for item in draft_specs]
     runspecs: list[TrialSpec] = []
     for item, run_id in zip(draft_specs, run_ids):
         runspecs.append(

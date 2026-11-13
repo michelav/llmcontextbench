@@ -7,7 +7,8 @@ from ctxbench.adapters.repoqa.mcp_server import RepoQAMCPServer
 from ctxbench.adapters.repoqa.package import RepoQADatasetAdapter
 from ctxbench.adapters.repoqa.provider import RepoQAProvider
 from ctxbench.adapters.repoqa.tools import REPOQA_OPERATIONS, RepoQAToolService
-from ctxbench.benchmark.models import DatasetProvenance, Experiment
+from ctxbench.benchmark.models import DatasetProvenance
+from ctxbench.benchmark.experiment_loader import load_experiment
 from ctxbench.benchmark.runspec_generator import generate_runspecs
 from ctxbench.benchmark.surfaces import FullContextSurface, OperationSurface
 from ctxbench.runtime.runtime import ProvisioningRuntime
@@ -16,6 +17,7 @@ from ctxbench.ai.engine import Engine
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "repoqa_tools_dataset"
 EXPERIMENT_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "repoqa_surface_experiment.json"
+pytestmark = pytest.mark.workflow
 
 
 def test_repoqa_resolves_full_context_and_operation_surfaces() -> None:
@@ -111,7 +113,7 @@ def test_invalid_allow_lists_fail_at_construction(allowed_operations: list[str])
 
 
 def test_repoqa_planning_and_executor_preserve_operation_allow_list(tmp_path: Path) -> None:
-    experiment = Experiment.model_validate_json(EXPERIMENT_FIXTURE.read_text(encoding="utf-8"))
+    experiment = load_experiment(EXPERIMENT_FIXTURE)
     adapter = RepoQADatasetAdapter(FIXTURE)
     trials = generate_runspecs(
         experiment,
@@ -138,8 +140,10 @@ def test_planning_rejects_invalid_operations(tmp_path, operations):
     import json
     data = json.loads(EXPERIMENT_FIXTURE.read_text())
     data["surfaces"]["repoqa-ops"]["operations"] = operations
+    path = tmp_path / "experiment.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
     with pytest.raises(ValueError):
-        experiment = Experiment.model_validate(data)
+        experiment = load_experiment(path)
         generate_runspecs(experiment, tmp_path, RepoQADatasetAdapter(FIXTURE),
             DatasetProvenance(id="ctxbench/repoqa", version="fixture", materialized_path=str(FIXTURE)))
 

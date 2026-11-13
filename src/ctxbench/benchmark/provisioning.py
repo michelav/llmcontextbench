@@ -9,34 +9,32 @@ from ctxbench.benchmark.models import CONFIGURATION_ID_PATTERN, ProvisioningConf
 from ctxbench.benchmark.surfaces import parse_surface
 
 PROVISIONING_ARTIFACT_VERSION = 4
-LEGACY_MESSAGE = (
-    "Unsupported provisioning artifact contract. Historical artifacts require the previous "
-    "benchmark version; define configurations and run 'llmctxbench plan' in a fresh directory."
+UNSUPPORTED_ARTIFACT_MESSAGE = (
+    "Unsupported benchmark artifact contract. Create a current benchmark definition and run "
+    "'llmctxbench plan' in a fresh directory."
 )
 
 
 def validate_manifest(root: Path) -> dict[str, Any]:
     path = root / "manifest.json"
     if not path.exists():
-        raise ValueError(f"{LEGACY_MESSAGE} Missing {path}.")
+        raise ValueError(f"{UNSUPPORTED_ARTIFACT_MESSAGE} Missing {path}.")
     manifest = json.loads(path.read_text(encoding="utf-8"))
     version = manifest.get("provisioningArtifactVersion") if isinstance(manifest, dict) else None
-    if type(version) is not int or version not in {2, 3, PROVISIONING_ARTIFACT_VERSION}:
-        raise ValueError(LEGACY_MESSAGE)
-    if version >= 3:
-        if manifest.get("schemaVersion") != 3 or not manifest.get("executionFingerprint"):
-            raise ValueError(f"Version {version} artifacts require a frozen execution fingerprint")
-    if version == 4 and manifest.get("executionRecordVersion") != 1:
-        raise ValueError("Version 4 artifacts require executionRecordVersion 1")
-    if version >= 3:
-        from ctxbench.benchmark.fingerprint import verify_snapshot
-        verify_snapshot(root, manifest)
+    if type(version) is not int or version != PROVISIONING_ARTIFACT_VERSION:
+        raise ValueError(UNSUPPORTED_ARTIFACT_MESSAGE)
+    if manifest.get("schemaVersion") != 3 or not manifest.get("executionFingerprint"):
+        raise ValueError(f"Version {version} artifacts require a frozen execution fingerprint")
+    if manifest.get("executionRecordVersion") != 1:
+        raise ValueError(f"Version {version} artifacts require executionRecordVersion 1")
+    from ctxbench.benchmark.fingerprint import verify_snapshot
+    verify_snapshot(root, manifest)
     configurations = manifest.get("configurations")
     if not isinstance(configurations, dict) or not configurations:
         raise ValueError("Manifest requires selected configuration definitions.")
     surfaces = manifest.get("surfaces")
     if not isinstance(surfaces, dict) or not surfaces:
-        raise ValueError(LEGACY_MESSAGE)
+        raise ValueError(UNSUPPORTED_ARTIFACT_MESSAGE)
     parsed_surfaces = {key: parse_surface(value) for key, value in surfaces.items()}
     for key, value in configurations.items():
         if not CONFIGURATION_ID_PATTERN.fullmatch(key):
@@ -68,7 +66,7 @@ def validate_artifact_directory(root: Path) -> dict[str, Any]:
                 row = json.loads(line)
                 key = row.get("configurationId")
                 if key not in definitions or "format" in row:
-                    raise ValueError(f"{LEGACY_MESSAGE} Invalid treatment in {path}.")
+                    raise ValueError(f"{UNSUPPORTED_ARTIFACT_MESSAGE} Invalid treatment in {path}.")
                 definition = definitions[key]
                 metadata = row.get("metadata")
                 if not isinstance(metadata, dict):

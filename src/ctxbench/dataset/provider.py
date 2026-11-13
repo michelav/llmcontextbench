@@ -321,8 +321,3 @@ class LocalDatasetPackage:
         if not isinstance(raw, dict):
             raise ValueError("Task instances dataset must be a JSON object.")
         return TaskInstanceDataset.model_validate(raw)
-
-
-class DatasetProvider(LocalDatasetPackage):
-    # deprecated: no longer called by lifecycle phases
-    pass

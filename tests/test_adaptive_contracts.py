@@ -151,19 +151,19 @@ def test_rolling_estimator_uses_bounded_window_warmup_and_calibration_fallback()
     for index in range(1, 3):
         estimator.observe(
             "candidate-a", partition,
-            Observation("candidate-a", None, "success", index * 10,
+            Observation("candidate-a", "success", index * 10,
                         TokenUsage(index * 100, Provenance.REPORTED)),
         )
     assert estimator.estimate("candidate-a", partition, calibration) == calibration
     estimator.observe(
         "candidate-a", partition,
-        Observation("candidate-a", None, "success", 30, TokenUsage(300, Provenance.REPORTED)),
+        Observation("candidate-a", "success", 30, TokenUsage(300, Provenance.REPORTED)),
     )
     assert estimator.estimate("candidate-a", partition, calibration).latency_ms.value == 20
     for index in range(4, 8):
         estimator.observe(
             "candidate-a", partition,
-            Observation("candidate-a", None, "success", index * 10,
+            Observation("candidate-a", "success", index * 10,
                         TokenUsage(index * 100, Provenance.REPORTED)),
         )
     estimate = estimator.estimate("candidate-a", partition, calibration)

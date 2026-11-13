@@ -245,8 +245,6 @@ class ExperimentParams(BaseModel):
 
 class ExperimentExecution(BaseModel):
     repeats: int = 1
-    output: str | None = None
-    jsonl: str | None = None
 
 
 class ExperimentScope(BaseModel):
@@ -268,11 +266,6 @@ class ExperimentScope(BaseModel):
             instances=[str(item) for item in data.get("instances", []) if isinstance(item, str)],
             tasks=[str(item) for item in task_items if isinstance(item, str)],
         )
-
-
-class ExperimentExpansion(BaseModel):
-    output: str | None = None
-    jsonl: str | None = None
 
 
 class EvaluationModelConfig(BaseModel):
@@ -305,8 +298,6 @@ class EvaluationModelConfig(BaseModel):
 
 class ExperimentEvaluation(BaseModel):
     enabled: bool = False
-    output: str | None = None
-    jsonl: str | None = None
     judges: list[EvaluationModelConfig] = Field(default_factory=list)
     config: dict[str, Any] = Field(default_factory=dict)
 
@@ -319,12 +310,10 @@ class ExperimentEvaluation(BaseModel):
         config = {
             key: value
             for key, value in data.items()
-            if key not in {"enabled", "output", "jsonl", "judges"}
+            if key not in {"enabled", "judges"}
         }
         return cls(
             enabled=bool(data.get("enabled", False)),
-            output=data.get("output"),
-            jsonl=data.get("jsonl"),
             judges=[
                 EvaluationModelConfig.model_validate(item)
                 for item in data.get("judges", [])
@@ -356,7 +345,7 @@ class ProvisioningTreatment(ProvisioningConfiguration):
 
     def __init__(self, **data: Any) -> None:
         if "format" in data:
-            raise ValueError("Legacy provisioning artifact: use the previous benchmark version or re-plan in a fresh directory.")
+            raise ValueError("Unsupported provisioning artifact. Create a fresh benchmark plan.")
         super().__init__(**data)
         if not CONFIGURATION_ID_PATTERN.fullmatch(self.configurationId):
             raise ValueError("Configuration IDs must be lowercase identifiers.")
@@ -368,14 +357,10 @@ class ProvisioningTreatment(ProvisioningConfiguration):
 
 
 class Experiment(BaseModel):
-    definitionVersion: int = 2
-    experimentKind: str = "benchmark"
-    adaptation: dict[str, Any] = Field(default_factory=dict)
     resolvedDefinition: dict[str, Any] = Field(default_factory=dict)
     selectedCandidates: list[tuple[str, str]] = Field(default_factory=list)
     taskParams: dict[str, Any] = Field(default_factory=dict)
     executionOptions: dict[str, Any] = Field(default_factory=dict)
-    descriptiveFactors: dict[str, Any] = Field(default_factory=dict)
     id: str
     name: str | None = None
     output: str = "outputs"
@@ -386,7 +371,6 @@ class Experiment(BaseModel):
     surfaces: dict[str, SurfaceSpec]
     models: dict[str, ModelEntry] = Field(default_factory=dict)
     params: ExperimentParams = Field(default_factory=ExperimentParams)
-    expansion: ExperimentExpansion = Field(default_factory=ExperimentExpansion)
     evaluation: ExperimentEvaluation = Field(default_factory=ExperimentEvaluation)
     trace: ExperimentTrace = Field(default_factory=ExperimentTrace)
     execution: ExperimentExecution = Field(default_factory=ExperimentExecution)
@@ -453,8 +437,6 @@ class Experiment(BaseModel):
 
         if "params" in payload:
             payload["params"] = ExperimentParams.model_validate(payload["params"])
-        if "expansion" in payload and isinstance(payload["expansion"], dict):
-            payload["expansion"] = ExperimentExpansion.model_validate(payload["expansion"])
         if "evaluation" in payload and isinstance(payload["evaluation"], dict):
             payload["evaluation"] = ExperimentEvaluation.model_validate(payload["evaluation"])
         if "trace" in payload and isinstance(payload["trace"], dict):
@@ -463,10 +445,6 @@ class Experiment(BaseModel):
             payload["execution"] = ExperimentExecution.model_validate(payload["execution"])
         if "artifacts" in payload and isinstance(payload["artifacts"], dict):
             payload["artifacts"] = ExperimentArtifacts.model_validate(payload["artifacts"])
-        execution = payload.get("execution")
-        execution_output = execution.output if isinstance(execution, ExperimentExecution) else execution.get("output") if isinstance(execution, dict) else None
-        if not payload.get("output") and execution_output:
-            payload["output"] = execution_output
         experiment = super().model_validate(payload)
         experiment._validate_model()
         return experiment
@@ -563,9 +541,6 @@ class TrialMetadata(ProvisioningTreatment):
         if "questionId" in payload:
             raise ValueError("Public TrialMetadata input must use 'taskId', not 'questionId'.")
         return super().model_validate(payload)
-
-
-RunMetadata = TrialMetadata
 
 
 class TrialSpec(ProvisioningTreatment):
@@ -695,10 +670,7 @@ class TrialSpec(ProvisioningTreatment):
         }
 
 
-RunSpec = TrialSpec
-
-
-class RunTiming(BaseModel):
+class TrialTiming(BaseModel):
     startedAt: str
     finishedAt: str
     durationMs: int
@@ -711,9 +683,6 @@ class TrialTrace(BaseModel):
     serverMcp: list[dict[str, Any]] = Field(default_factory=list)
     rawResponse: Any | None = None
     error: str | None = None
-
-
-RunTrace = TrialTrace
 
 
 class EvaluationResult(BaseModel):
@@ -748,7 +717,7 @@ class TrialResult(ProvisioningTreatment):
     response: str
     status: str
     errorMessage: str | None = None
-    timing: RunTiming
+    timing: TrialTiming
     usage: dict[str, Any] = Field(default_factory=dict)
     metricsSummary: dict[str, Any] = Field(default_factory=dict)
     trace: TrialTrace = Field(default_factory=TrialTrace)
@@ -865,9 +834,6 @@ class TrialResult(ProvisioningTreatment):
                 "surfaceSpec": dict(self.metadata.surfaceSpec),
             },
         }
-
-
-RunResult = TrialResult
 
 
 class EvaluationTrace(BaseModel):
@@ -1071,9 +1037,6 @@ class EvaluationTrialResult(BaseModel):
         payload["metadata"] = TrialMetadata.model_validate(payload["metadata"])
         payload = _coerce_dataset_provenance(payload)
         return super().model_validate(payload)
-
-
-EvaluationRunResult = EvaluationTrialResult
 
 
 class EvaluationBatchSummary(BaseModel):

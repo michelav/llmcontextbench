@@ -1,20 +1,25 @@
-<!-- Provisioning update: schemas 2.0, required provisioning manifest v1. Historical artifacts require the preceding version. -->
+<!-- Current benchmark provisioning artifacts use version 4; adaptive artifacts follow their separate versioned contract. -->
 
-> Transition note: this page describes the existing implementation. The accepted
-> [v1 target architecture and contracts](v1-contracts.md) describe the refactor;
-> [slice tracking](../../specs/009-llmctxbench-v1/tasks.md) identifies what is implemented.
-# Specification: `llmctxbench metrics`
+> Current architecture and workflow contracts are documented in [workflow-contracts](workflow-contracts.md).
+# Benchmark metrics design: `llmctxbench metrics`
 
 > Design reference for the already-shipped `llmctxbench metrics` command. Relocated
 > from a root-level, untracked `ctxbench_metrics_spec.md` into `docs/architecture/`
 > for consistency with the rest of the architecture documentation; not re-run through
 > the `specs/` spec-driven-development workflow.
 
+> Scope: this is the design reference for the benchmark metric dimensions and their CSV
+> projections. The command also dispatches adaptive artifacts to request-level and
+> attempt-level metrics (`adaptive_request_metrics.csv` and
+> `adaptive_attempt_metrics.csv`); those records have separate units and do not use the
+> benchmark trial dimensions below. See [workflow contracts](workflow-contracts.md) for
+> the current artifact authority and [the adaptive metrics implementation](../../src/ctxbench/metrics/adaptive.py).
+
 ## 1. Feature Summary
 
-Implement a new `llmctxbench metrics` command that computes reproducible benchmark metrics from existing LLMContextBench experiment artifacts.
+The benchmark branch of `llmctxbench metrics` computes reproducible trial metrics from existing benchmark artifacts.
 
-The command must be deterministic, artifact-only, and must not call model providers, MCP servers, external APIs, deterministic scorers, or any other external service. It must only read artifacts already produced by the benchmark lifecycle and materialize canonical metric artifacts.
+Metric computation must be deterministic and must not call model providers, MCP servers, external APIs, deterministic scorers, or any other external service. The benchmark branch reads benchmark lifecycle artifacts and materializes benchmark metric artifacts. The adaptive branch reads adaptive request and execution records and materializes request and attempt metrics; it may rebuild the derived adaptive response projection as specified by the current artifact contract.
 
 The metrics model must be organized around five core dimensions inspired by HELM's multi-metric evaluation philosophy and adapted to LLMContextBench:
 
@@ -58,6 +63,9 @@ benchmark lifecycle artifacts
   -> canonical metric artifacts
   -> notebooks/scripts generate paper tables and figures
 ```
+
+For adaptive runs, the command instead emits request-level delivery metrics and attempt-level
+diagnostics. It does not combine those different units into the trial dimension files.
 
 The command must not generate plot-specific data. Notebooks and external scripts are responsible for transforming metric artifacts into paper-specific tables and figures.
 
@@ -257,11 +265,11 @@ The shorter aliases `--status` / `--not-status` must be accepted as synonyms for
 
 Implementation rule:
 
-- Use the existing `RunSelector` for shared fields (`model`, `provider`, `instance`, `task`, `strategy`, `representation`, `repetition`, `trial`, and their negations).
+- Use the existing `TrialSelector` for shared fields (`model`, `provider`, `instance`, `task`, `strategy`, `representation`, `repetition`, `trial`, and their negations).
 - Represent `--execution-status`, `--not-execution-status`, `--evaluation-status`, and `--not-evaluation-status` in a small metrics-specific selector wrapper.
-- Apply `RunSelector` to the joined trial-row representation, with `status` populated from `execution_status`.
+- Apply `TrialSelector` to the joined trial-row representation, with `status` populated from `execution_status`.
 - Apply evaluation status filters explicitly against `evaluation_status`.
-- Do not extend `RunSelector` with evaluation-specific fields unless a separate accepted spec changes the shared selector contract.
+- Do not extend `TrialSelector` with evaluation-specific fields unless a separate accepted spec changes the shared selector contract.
 
 ### 4.6 Other options
 
@@ -316,7 +324,10 @@ Without `trials.jsonl`, the command cannot determine the planned trial universe.
 manifest.json
 ```
 
-The manifest must declare `provisioningArtifactVersion: 1` and selected `configurations`. Missing, legacy or inconsistent provisioning contracts fail with instructions to use the previous benchmark version or re-plan into a fresh directory.
+The benchmark manifest must declare `schemaVersion: 3`,
+`provisioningArtifactVersion: 4`, `executionRecordVersion: 1`, the execution fingerprint,
+and selected `configurations`. Older or inconsistent artifacts are rejected; create a
+fresh current plan. `responses.jsonl` is rebuilt from durable execution-attempt records.
 
 ### 5.3 Optional artifacts
 
@@ -1572,7 +1583,7 @@ Add a `metrics` subcommand that calls `metrics_command`. Wire it using the same 
 The metrics command must reuse, not reimplement, the following existing utilities. Reinventing any of these without justification is out of scope:
 
 - **JSONL I/O** — `src/ctxbench/util/jsonl.py::read_jsonl`. Stream lifecycle artifacts through this helper rather than custom open/loads loops.
-- **Selector model** — `src/ctxbench/benchmark/selectors.py::RunSelector`, `matches_run_result`. Apply shared selectors to the joined trial-row representation with `status` populated from `execution_status`; apply metrics-specific evaluation status filters separately.
+- **Selector model** — `src/ctxbench/benchmark/selectors.py::TrialSelector`, `matches_trial_result`. Apply shared selectors to the joined trial-row representation with `status` populated from `execution_status`; apply metrics-specific evaluation status filters separately.
 - **TrialId indexing** — pattern from `src/ctxbench/commands/export.py::_build_eval_index` and `_build_votes_index`. The metrics command must index responses, evals, and votes by `trialId` for O(1) joins.
 - **CSV writer** — pattern from `src/ctxbench/commands/export.py::_write_csv`.
 - **Phase logging** — `src/ctxbench/util/logging.py::PhaseLogger`, with phases such as `discover_inputs`, `load_artifacts`, `apply_selectors`, `build_trial_rows`, `compute_dimensions`, `write_outputs`.

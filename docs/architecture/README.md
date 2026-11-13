@@ -1,8 +1,6 @@
 # LLMContextBench Architecture
 
-> Transition note: this page describes the existing implementation. The accepted
-> [v1 target architecture and contracts](v1-contracts.md) describe the refactor;
-> [slice tracking](../../specs/009-llmctxbench-v1/tasks.md) identifies what is implemented.
+> Current architecture and workflow contracts are documented in [workflow-contracts](workflow-contracts.md).
 
 This document is the entry point for the LLMContextBench architecture documentation. It's loosely organized into [C4 Model](https://c4model.com/) style but with a few other structures added when necessary.
 
@@ -10,7 +8,7 @@ LLMContextBench is a Python-based command-line benchmark framework for evaluatin
 
 ## Architectural scope
 
-LLMContextBench supports experiments where a stable set of dataset instances and tasks is executed across different models, context formats, and context provisioning strategies.
+LLMContextBench supports two peer workflows over shared dataset, runtime, execution, evaluation, and analysis services. Benchmark planning freezes trial assignments; adaptive planning declares candidates and selects one at runtime for each request.
 
 The canonical workflow is:
 
@@ -33,6 +31,11 @@ llmctxbench export
    ↓
 results.csv
 ```
+
+Adaptive plans use `adaptive-plan.json` rather than `trials.jsonl`. Each request persists
+its decisions and delivery; every invocation has a durable execution record. The adaptive
+`responses.jsonl` projection contains delivered responses, while attempt records retain
+failures, rejection, retries, and cost. See [workflow contracts](workflow-contracts.md).
 
 ## Technology baseline
 

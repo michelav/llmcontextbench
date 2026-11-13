@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ctxbench.benchmark.selectors import RunSelector, matches_run_result
+from ctxbench.benchmark.selectors import TrialSelector, matches_trial_result
 from ctxbench.metrics.io import ExperimentArtifacts, index_latest, index_votes, load_trace
 from ctxbench.metrics.primary import normalize_primary
 from ctxbench.util.logging import PhaseLogger
@@ -47,7 +47,7 @@ def build_trial_rows(inputs: list[ExperimentArtifacts], logger: PhaseLogger) -> 
 
 def apply_selectors(
     rows: list[dict[str, Any]],
-    selector: RunSelector,
+    selector: TrialSelector,
     *,
     evaluation_status: tuple[str, ...] = (),
     not_evaluation_status: tuple[str, ...] = (),
@@ -56,7 +56,7 @@ def apply_selectors(
     for row in rows:
         selector_row = dict(row)
         selector_row["status"] = row.get("execution_status")
-        if not matches_run_result(selector_row, selector):
+        if not matches_trial_result(selector_row, selector):
             continue
         ev_status = row.get("evaluation_status")
         if evaluation_status and ev_status not in evaluation_status:

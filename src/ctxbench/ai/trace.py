@@ -42,7 +42,7 @@ class AIMetrics(BaseModel):
     cacheReadInputTokens: int | None = None
     cacheCreationInputTokens: int | None = None
     reasoningTokens: int | None = None
-    questionTokensEstimated: int | None = None
+    taskStatementTokensEstimated: int | None = None
     estimatedInputTokens: int | None = None
     estimatedOutputTokens: int | None = None
     reservedTokens: int | None = None

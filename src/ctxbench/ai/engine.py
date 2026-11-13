@@ -39,7 +39,7 @@ class Engine:
         trace.metrics.contextChars = len(request.context)
         trace.metrics.contextBytes = len(request.context.encode("utf-8"))
         trace.metrics.taskStatementChars = len(request.question)
-        trace.metrics.questionTokensEstimated = len(request.question.split()) or None
+        trace.metrics.taskStatementTokensEstimated = len(request.question.split()) or None
         owned_runtime: ToolRuntime | None = None
         try:
             with trace.span("engine.execute", "engine.execute"):
@@ -70,7 +70,7 @@ class Engine:
         trace.metrics.contextChars = len(request.context)
         trace.metrics.contextBytes = len(request.context.encode("utf-8"))
         trace.metrics.taskStatementChars = len(request.question)
-        trace.metrics.questionTokensEstimated = len(request.question.split()) or None
+        trace.metrics.taskStatementTokensEstimated = len(request.question.split()) or None
         trace.metrics.promptChars = len(model_input.prompt)
         try:
             with trace.span("engine.execute_model_input", "engine.execute_model_input"):

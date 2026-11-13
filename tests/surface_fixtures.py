@@ -1,4 +1,4 @@
-"""Shared explicit provisioning-surface fixtures for contract-v2 tests."""
+"""Shared explicit provisioning-surface fixtures for current contract tests."""
 
 FULL_SURFACE = {"full": {"type": "full_context"}}
 

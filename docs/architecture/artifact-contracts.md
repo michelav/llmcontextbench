@@ -1,198 +1,65 @@
-# Artifact Contracts
+# Workflow artifact contracts
 
-> Transition note: this page describes the existing implementation. The accepted
-> [v1 target architecture and contracts](v1-contracts.md) describe the refactor;
-> [slice tracking](../../specs/009-llmctxbench-v1/tasks.md) identifies what is implemented.
+LLMCtxBench supports two workflows: static benchmark execution and adaptive request
+execution. Both use the shared durable execution service. A workflow owns its plan and
+decision records; generated projections can be rebuilt from canonical records.
 
-This document is the authoritative reference for the LLMContextBench artifact set, artifact classification, legacy no-alias policy, and metric provenance taxonomy.
+## Current versions
 
-## Provisioning contract v2 (clean break)
+| Contract | Current version | Owner |
+|---|---:|---|
+| Benchmark definition | `schemaVersion: 3`, `kind: "benchmark"` | `plan` |
+| Benchmark manifest | `schemaVersion: 3`, `provisioningArtifactVersion: 4`, `executionRecordVersion: 1` | `plan` |
+| Adaptive plan | `schemaVersion: 3`, `workflowKind: "adaptive"` | adaptive `plan` |
+| Adaptive manifest | `schemaVersion: 2`, `adaptiveArtifactVersion: 2` | adaptive `plan` |
+| Adaptive request/decision records | `adaptiveRecordVersion: 2` | adaptive execution |
 
-Every lifecycle input requires `manifest.json` with `provisioningArtifactVersion: 2`
-and nonempty `surfaces` and `configurations` maps. Each configuration is
-`{strategy, representation, surface}` and references a typed surface declaration.
-Trials and responses persist `configurationId`, `strategy`, `representation`, and `surface`
-both at the root and in shared trial metadata. Evaluations inherit that metadata
-and expose the same fields. Readers reject disagreement with the planned manifest.
-Judge votes continue to link through `trialId`; their voting and cost semantics are unchanged.
+Older definitions and artifact versions are unsupported. The CLI rejects them; it does
+not migrate, upgrade, or partially interpret them. Keep an older checkout to inspect
+historical outputs. No conversion tool is provided.
 
-IDs match `^[a-z][a-z0-9_.-]*$`. Configuration definitions accept exactly three required fields;
-surface declarations are typed by their `type` discriminator and reject unexpected fields.
-Tool strategies require `json`; inline availability is the dataset adapter's
-responsibility. Legacy factor axes and legacy artifacts are rejected, never inferred
-or upgraded in place. Historical files require the previous benchmark version.
-Plan a new experiment with explicit configurations in a fresh directory; planning
-refuses to overwrite an existing execution snapshot.
+## Authority and projections
 
-Canonical trial identity is sorted, compact JSON containing `identityVersion: 2`,
-`experimentId`, `taskId`, `instanceId`, `provider`, `modelName`, `repeatIndex`,
-`configurationId` and the resolved `configuration` definition. SHA-256 short IDs
-retain collision handling. Changing an ID or definition changes identity; key order
-does not. Later edits to the experiment do not affect planned trials.
-
-CSV export includes the three treatment fields. Metrics summary and manifest schema
-versions are `2.0`; default grouping is `dataset_id,configurationId`. Their manifest
-snapshots input definitions. Equal definitions with distinct IDs remain distinct;
-unequal definitions with the same ID cannot be combined. Robustness uses the
-`representation` axis and `primary_success_rate_range_by_representation` column.
-Strategy aggregation discloses when it pools multiple configurations.
-
-Operation lists are explicit and adapter-owned; resolved handlers and schemas are not artifact identity fields.
-
-## Artifact lifecycle
-
-| Artifact | Producing phase | Class | Role |
-|---|---|---|---|
-| `manifest.json` | `plan` | `canonical` | Execution artifacts |
-| `trials.jsonl` | `plan` | `canonical` | Execution artifacts |
-| `responses.jsonl` | `execute` | `canonical` | Execution artifacts |
-| `evals.jsonl` | `eval` | `canonical` | Evaluation artifacts |
-| `judge_votes.jsonl` | `eval` | `canonical` | Evaluation artifacts |
-| `evals-summary.json` | `eval` | `derived` | Analysis-ready exports |
-| `results.csv` | `export` | `derived` | Analysis-ready exports |
-| `metrics/trial_metrics.csv` | `metrics` | `derived` | Analysis-ready exports |
-| `metrics/aggregate_metrics.csv` | `metrics` | `derived` | Analysis-ready exports |
-| `metrics/dimension_summary.csv` | `metrics` | `derived` | Analysis-ready exports |
-| `metrics/summary.json` | `metrics` | `derived` | Analysis-ready exports |
-| `metrics/failure_cases.csv` | `metrics` | `derived` | Analysis-ready exports |
-| `metrics/dimensions/{effectiveness,efficiency,robustness,evaluation_reliability,observability}.csv` | `metrics` | `derived` | Analysis-ready exports |
-| `metrics/metrics-manifest.json` | `metrics` | `derived` | Analysis-ready exports |
-| `traces/executions/<trialId>.json` | `execute` | `canonical` | Traces |
-| `traces/evals/<trialId>.json` | `eval` | `canonical` | Traces |
-
-## Classification rules
-
-Canonical artifacts are the authoritative record of a benchmark phase.
-
-Derived artifacts are reproducible from canonical artifacts without re-invoking providers. Regenerating `evals-summary.json` or `results.csv` must not require re-running `llmctxbench execute` or `llmctxbench eval`.
-
-## Execution Artifacts
-
-Execution artifacts are the records needed to define and carry out planned benchmark trials.
-
-- `manifest.json` is the plan-phase canonical artifact that records the inputs needed to reproduce subsequent phases.
-- `trials.jsonl` is the plan-phase canonical artifact that enumerates the benchmark trials scheduled for execution.
-- `responses.jsonl` is the execute-phase canonical artifact that records benchmark responses for completed trials.
-
-### Dataset provenance
-
-Dataset provenance is a nested `dataset` object carried by canonical planning, execution, and evaluation artifacts.
-
-Carrier artifacts:
-
-- `manifest.json`
-- `trials.jsonl`
-- `responses.jsonl`
-- `evals.jsonl`
-- `judge_votes.jsonl`
-
-The canonical dataset provenance fields are:
-
-- `dataset.id` required
-- `dataset.version` required
-- `dataset.origin` optional
-- `dataset.resolvedRevision` optional
-- `dataset.contentHash` optional
-- `dataset.materializedPath` optional operational metadata
-
-Rules:
-
-- `dataset.id` and `dataset.version` identify the dataset package selected during planning.
-- `dataset.materializedPath` is additive operational metadata and must not be treated as authoritative identity.
-- `plan` is the schema owner for the nested `dataset` object. Later lifecycle phases preserve it; they do not recompute or replace it from another source.
-- `results.csv` is the flat export owner for `dataset_id` and `dataset_version`, derived from the canonical nested `dataset` object.
-
-## Evaluation Artifacts
-
-Evaluation artifacts are the canonical records produced by the evaluation phase.
-
-- `evals.jsonl` is the eval-phase canonical artifact containing trial-level evaluation records.
-- `judge_votes.jsonl` is the eval-phase canonical artifact containing judge-level voting records used to support evaluation outcomes and agreement analysis.
-
-## Analysis-Ready Exports
-
-Analysis-ready exports are reproducible summaries or tabular outputs intended for downstream analysis.
-
-- `evals-summary.json` is an eval-phase derived artifact reproducible from evaluation-phase canonical artifacts without provider re-runs.
-- `results.csv` is an export-phase derived artifact reproducible from canonical artifacts without provider re-runs.
-- `metrics/*` are metrics-phase derived artifacts, computed by `llmctxbench metrics` from one or more
-  run directories' canonical execution/evaluation artifacts, without provider re-runs. They cover
-  five metric dimensions (effectiveness, efficiency, robustness, evaluation reliability,
-  observability); see the metric provenance taxonomy below for how individual metric values within
-  them are classified.
-
-## Traces
-
-Trace artifacts preserve per-trial execution and evaluation observability.
-
-- `traces/executions/<trialId>.json` is the execute-phase canonical trace for one `trialId`.
-- `traces/evals/<trialId>.json` is the eval-phase canonical trace for one `trialId`.
-
-### Execution trace metadata
-
-Execution traces record dataset-context metadata using the adapter-boundary vocabulary:
-
-- `instance_id`: canonical instance identifier.
-- `context_representation`: the requested logical context representation, derived from the
-  trial `representation` value and passed to `DatasetPackage.get_context(..., representation)`.
-- `context_obtained`: `true` when the execute phase obtained model-facing context through
-  `get_context`; `false` for tool-mediated strategies.
-
-Removed execution metadata:
-
-- `context_path`
-- `instance_dir`
-
-The legacy `lattes_id` metadata name was renamed to `instance_id`. Strategy internals may retain a
-temporary fallback while migration completes, but the artifact contract is `instance_id`.
-
-### Evaluation trace metadata
-
-Evaluation traces record evidence and oracle metadata without exposing oracle values to LLM judge
-prompts:
-
-- `evidence_obtained`: `true` when evaluator-facing evidence was obtained from
-  `DatasetPackage.get_evidence`.
-- `oracle_available`: `true` when `DatasetPackage.get_oracle` returned a value other than the
-  `ORACLE_UNAVAILABLE` sentinel.
-- `oracle_used`: `false` for judge-based evaluation; oracle values are not included in judge prompt
-  construction.
-
-## Metric provenance taxonomy
-
-Every metric in a canonical or derived artifact must be representable under exactly one provenance class per record.
-
-| Class | Definition |
-|---|---|
-| `reported` | Returned by a provider API, SDK, or another authoritative runtime. |
-| `measured` | Measured directly by benchmark-controlled instrumentation. |
-| `derived` | Computed deterministically from reported or measured values. |
-| `estimated` | Approximated from heuristics, tokenizers, assumptions, or incomplete information. |
-| `unavailable` | Not available and not responsibly estimated for that record. |
-
-Rules:
-
-- `estimated` must not be presented as `reported` or `measured`.
-- `unavailable` must not be recorded as zero unless zero is the observed value.
-- This taxonomy is closed in this specification. It defines exactly five classes and does not permit sub-classes, confidence scores, or other extensions.
-
-## Legacy migration
-
-The following mappings are migration guidance only. Each legacy name has no alias, and migration is the researcher's responsibility.
-
-| Legacy name | Target name | Policy |
+| Artifact | Authority | Rebuild behavior |
 |---|---|---|
-| `queries.jsonl` | `trials.jsonl` | No alias. Writers and readers use the target name only. |
-| `answers.jsonl` | `responses.jsonl` | No alias. Writers and readers use the target name only. |
-| `traces/queries/<runId>.json` | `traces/executions/<trialId>.json` | No alias. Writers and readers use the target name only. |
-| `trials.jsonl.contextBlock` | `trials.jsonl.contextBlocks` | Breaking key rename. Writers use the target plural key; readers may keep documented migration fallbacks only where needed for old artifacts. |
-| `responses.jsonl.contextBlock` | `responses.jsonl.contextBlocks` | Breaking key rename. Writers use the target plural key; readers may keep documented migration fallbacks only where needed for old artifacts. |
+| `manifest.json`, `resolved.json`, `trials.jsonl` | Frozen benchmark plan | Created by benchmark `plan` |
+| Benchmark execution records | One record per execution attempt | Durable authority for outcome, usage, and timing |
+| `responses.jsonl` | Derived benchmark response view | Rebuilt from all benchmark attempt records |
+| `evals.jsonl`, `judge_votes.jsonl` | Evaluation results and individual judge votes | Rebuilt/extended by evaluation phase |
+| `adaptive-plan.json`, adaptive manifest | Frozen adaptive plan and policy | Created by adaptive `plan` |
+| Adaptive request ledger | Per request decision, attempts, and delivery | Durable authority for adaptive routing and delivery |
+| Adaptive execution records | One record per invocation | Durable authority for each attempt |
+| Adaptive `responses.jsonl` | Delivered response view, one per served request | Rebuilt from request and execution records |
+| Exports, metrics, and summaries | Derived analysis | Rebuilt from canonical artifacts without model calls |
 
-No automated migration tooling is committed to by this specification.
+An execution attempt is not the same unit as an adaptive request. Failed and rejected
+attempts remain in execution records and contribute to attempt diagnostics and cost.
+Request-level outcomes report whether a request was accepted and delivered. Offline
+evaluation is separate from online acceptance and does not feed the active controller.
 
-## Reader and writer policy
+## Identity, provenance, and costs
 
-- Writers must produce only target artifact names. No phase writes legacy names.
-- Readers do not consume legacy artifact names. If legacy files are present in an input directory, they are silently ignored rather than treated as an error.
-- `export` and `status` are artifact-only readers. They must not resolve, inspect, fetch, or
-  materialize datasets.
+Repeated task/instance occurrences receive distinct request IDs; each invocation has a
+distinct execution ID. Benchmark trials use `trialId`; adaptive requests use `requestId`.
+Responses identify the request or trial they represent. Evaluation rows refer to the
+delivered response identity.
+
+Every metric value uses one provenance class: `reported`, `measured`, `derived`,
+`estimated`, or `unavailable`. An unavailable value is never written as zero unless zero
+was observed. Generation, execution-attempt, request, online-assessor, and offline
+evaluation costs remain separate.
+
+## Dataset provenance
+
+Dataset declarations remain part of the frozen workflow input. Benchmark manifests and
+trial records retain dataset ID, version, origin, resolved revision, content hash, and
+materialized path where available. The materialized path is operational metadata and is
+not dataset identity. Dataset-specific preparation and evaluation stay in dataset
+adapters.
+
+## Historical artifact names
+
+The current reader and writer contract uses `trials.jsonl`, `responses.jsonl`,
+`evals.jsonl`, and `judge_votes.jsonl`. It does not alias `queries.jsonl`, `answers.jsonl`,
+old run identifiers, legacy study packets, or retired adaptive sidecars. Historical data
+remains user-owned and requires the earlier application version for analysis.

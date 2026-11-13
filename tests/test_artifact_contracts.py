@@ -7,15 +7,14 @@ from pathlib import Path
 from ctxbench.benchmark import evaluation as evaluation_module
 from ctxbench.benchmark.models import Experiment
 from ctxbench.benchmark.paths import (
-    resolve_evals_path,
     resolve_output_root,
-    resolve_responses_path,
     resolve_trials_path,
 )
 from ctxbench.commands.eval import eval_command
 from ctxbench.commands.export import export_command
 from ctxbench.commands.plan import plan_command
 from ctxbench.commands.status import status_command
+from tests.benchmark_artifacts import persist_response, seal_benchmark_directory
 
 
 def _write_plan_fixture(root: Path) -> Path:
@@ -72,12 +71,15 @@ def _write_plan_fixture(root: Path) -> Path:
     experiment_path.write_text(
         json.dumps(
             {
+                "schemaVersion": 3,
+                "kind": "benchmark",
                 "id": "exp_artifacts",
-                "dataset": str(dataset_root.resolve()),
+                "dataset": {"root": str(dataset_root.resolve())},
                 "scope": {"instances": ["cv_demo"], "tasks": ["q_one"]},
-                "factors": {"model": [{"provider": "mock", "name": "mock-model"}], "configuration": ['inline-json']},
+                "models": {"mock-model": {"provider": "mock", "name": "mock-model"}},
                 "configurations": {'inline-json': {'strategy': 'inline', 'representation': 'json', 'surface': 'full'}},
                 "surfaces": {"full": {"type": "full_context"}},
+                "candidates": [["mock-model", "inline-json"]],
                 "execution": {"repeats": 1},
                 "trace": {"writeFiles": False},
             }
@@ -137,22 +139,6 @@ def _write_eval_fixture(root: Path) -> Path:
         encoding="utf-8",
     )
 
-    (root / "manifest.json").write_text(
-        json.dumps(
-            {"provisioningArtifactVersion": 2, "surfaces": {"full": {"type": "full_context"}}, "configurations": {"inline-json": {"strategy": "inline", "representation": "json", "surface": "full"}},
-                "experimentId": "exp_mock",
-                "trialId": "run-1",
-                "taskId": "q_one",
-                "evaluation": {
-                    "judges": [
-                        {"id": "judge-a", "provider": "mock", "model": "judge-a", "temperature": 0}
-                    ]
-                },
-                "trace": {"writeFiles": False},
-            }
-        ),
-        encoding="utf-8",
-    )
 
     (root / "trials.jsonl").write_text(
         json.dumps(
@@ -245,6 +231,19 @@ def _write_eval_fixture(root: Path) -> Path:
         + "\n",
         encoding="utf-8",
     )
+    trial = json.loads((root / "trials.jsonl").read_text(encoding="utf-8"))
+    response = json.loads((root / "responses.jsonl").read_text(encoding="utf-8"))
+    fingerprint = seal_benchmark_directory(
+        root,
+        experiment_id="exp_mock",
+        configurations={"inline-json": {"strategy": "inline", "representation": "json", "surface": "full"}},
+        surfaces={"full": {"type": "full_context"}},
+        dataset={"id": "ctxbench/mock-v1", "version": "local", "origin": str(dataset_root),
+                 "contentHash": "sha256:artifact-contract-fixture", "materializedPath": str(dataset_root)},
+        evaluation={"enabled": True, "judges": [{"id": "judge-a", "provider": "mock", "model": "judge-a", "temperature": 0}]},
+        trace={"enabled": False, "writeFiles": False},
+    )
+    persist_response(root, trial, response, fingerprint)
     return root
 
 
@@ -262,8 +261,6 @@ def test_artifact_path_resolution_uses_target_names() -> None:
 
     output_root = resolve_output_root(experiment, base_dir)
     assert resolve_trials_path(experiment, base_dir) == output_root / "trials.jsonl"
-    assert resolve_responses_path(experiment, base_dir) == output_root / "responses.jsonl"
-    assert resolve_evals_path(experiment, base_dir) == output_root / "evals.jsonl"
 
 
 def test_plan_command_writes_target_artifacts_only(tmp_path: Path) -> None:

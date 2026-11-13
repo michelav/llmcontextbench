@@ -1,0 +1,255 @@
+{
+  "id": "minimal",
+  "name": "Minimal execution of trials",
+  "output": "outputs",
+  "dataset": {
+    "id": "ctxbench/lattes",
+    "version": "2026-04-28",
+    "root": "../../datasets/lattes"
+  },
+  "models": {
+    "gpt1": {
+      "provider": "openai",
+      "name": "gpt-5.4-nano",
+      "modelParams": {
+        "reasoning": {
+          "effort": "low"
+        },
+        "max_output_tokens": 8000,
+        "rate_limit": {
+          "tpm": 200000,
+          "rpm": 500,
+          "min_interval_ms": 200,
+          "max_concurrency": 1,
+          "max_attempts": 5,
+          "base_delay_ms": 1000,
+          "max_delay_ms": 20000,
+          "estimated_output_tokens": 6000
+        }
+      }
+    },
+    "gpt2": {
+      "provider": "openai",
+      "name": "gpt-5.4-mini",
+      "modelParams": {
+        "reasoning": {
+          "effort": "medium"
+        },
+        "max_output_tokens": 8000,
+        "rate_limit": {
+          "tpm": 500000,
+          "rpm": 500,
+          "min_interval_ms": 200,
+          "max_concurrency": 1,
+          "max_attempts": 5,
+          "base_delay_ms": 1000,
+          "max_delay_ms": 20000,
+          "estimated_output_tokens": 6000
+        }
+      }
+    },
+    "gemini1": {
+      "provider": "google",
+      "name": "gemini-2.5-flash-lite",
+      "modelParams": {
+        "max_output_tokens": 8000,
+        "rate_limit": {
+          "tpm": 600000,
+          "rpm": 1000,
+          "min_interval_ms": 200,
+          "max_concurrency": 1,
+          "max_attempts": 5,
+          "base_delay_ms": 1000,
+          "max_delay_ms": 20000,
+          "estimated_output_tokens": 6000
+        }
+      }
+    },
+    "gemini2": {
+      "provider": "google",
+      "name": "gemini-2.5-flash",
+      "modelParams": {
+        "config": {
+          "thinkingConfig": {
+            "thinkingBudget": -1
+          }
+        },
+        "max_output_tokens": 8000,
+        "rate_limit": {
+          "tpm": 600000,
+          "rpm": 1000,
+          "min_interval_ms": 200,
+          "max_concurrency": 1,
+          "max_attempts": 5,
+          "base_delay_ms": 1000,
+          "max_delay_ms": 20000,
+          "estimated_output_tokens": 6000
+        }
+      }
+    },
+    "juiz-gpt": {
+      "provider": "openai",
+      "name": "gpt-5.4",
+      "modelParams": {
+        "reasoning": {
+          "effort": "medium"
+        },
+        "max_output_tokens": 8000,
+        "rate_limit": {
+          "tpm": 500000,
+          "rpm": 500,
+          "min_interval_ms": 200,
+          "max_concurrency": 1,
+          "max_attempts": 5,
+          "base_delay_ms": 1000,
+          "max_delay_ms": 20000,
+          "estimated_output_tokens": 6000
+        }
+      }
+    },
+    "juiz-claude": {
+      "provider": "anthropic",
+      "name": "claude-sonnet-4-6",
+      "modelParams": {
+        "temperature": 0,
+        "max_output_tokens": 8000,
+        "rate_limit": {
+          "tpm": 600000,
+          "rpm": 1000,
+          "min_interval_ms": 200,
+          "max_concurrency": 1,
+          "max_attempts": 5,
+          "base_delay_ms": 1000,
+          "max_delay_ms": 20000,
+          "estimated_output_tokens": 6000
+        }
+      }
+    },
+    "juiz-gemini": {
+      "provider": "google",
+      "name": "gemini-3.1-flash-lite-preview",
+      "modelParams": {
+        "config": {
+          "thinkingConfig": {
+            "thinkingBudget": -1
+          }
+        },
+        "max_output_tokens": 8000,
+        "rate_limit": {
+          "tpm": 600000,
+          "rpm": 1000,
+          "min_interval_ms": 200,
+          "max_concurrency": 1,
+          "max_attempts": 5,
+          "base_delay_ms": 1000,
+          "max_delay_ms": 20000,
+          "estimated_output_tokens": 6000
+        }
+      }
+    }
+  },
+  "scope": {
+    "instances": [
+      "5123602572479168"
+    ],
+    "tasks": [
+      "q_phd",
+      "q_en"
+    ]
+  },
+  "evaluation": {
+    "enabled": true,
+    "judges": [
+      "juiz-claude"
+    ]
+  },
+  "trace": {
+    "enabled": true,
+    "writeFiles": true,
+    "save_raw_response": true,
+    "save_tool_calls": true,
+    "save_usage": true,
+    "save_errors": true
+  },
+  "execution": {
+    "repeats": 1,
+    "options": {
+      "mcp_server": {
+        "server_url": "${LATTES_MCP_URL:-https://secure-harlequin-mollusk.fastmcp.app/mcp}",
+        "server_label": "ctxbench_lattes",
+        "server_description": "CTXBench Lattes MCP server",
+        "auth_token": "${LATTES_MCP_TOKEN}"
+      }
+    }
+  },
+  "configurations": {
+    "i-json": {
+      "strategy": "inline",
+      "representation": "json",
+      "surface": "full"
+    },
+    "f-json": {
+      "strategy": "local_function",
+      "representation": "json",
+      "surface": "lattes-default"
+    },
+    "lm-json": {
+      "strategy": "local_mcp",
+      "representation": "json",
+      "surface": "lattes-default"
+    },
+    "rm-json": {
+      "strategy": "remote_mcp",
+      "representation": "json",
+      "surface": "lattes-default"
+    }
+  },
+  "surfaces": {
+    "full": {
+      "type": "full_context"
+    },
+    "lattes-default": {
+      "type": "operations",
+      "operations": [
+        "get_profile",
+        "get_expertise",
+        "get_education",
+        "get_projects",
+        "get_supervisions",
+        "get_experience",
+        "get_academic_activities",
+        "get_publications",
+        "get_technical_output",
+        "get_artistic_output"
+      ]
+    }
+  },
+  "schemaVersion": 3,
+  "kind": "benchmark",
+  "candidates": [
+    [
+      "gpt1",
+      "i-json"
+    ],
+    [
+      "gpt1",
+      "f-json"
+    ],
+    [
+      "gpt1",
+      "lm-json"
+    ],
+    [
+      "gemini1",
+      "i-json"
+    ],
+    [
+      "gemini1",
+      "f-json"
+    ],
+    [
+      "gemini1",
+      "lm-json"
+    ]
+  ]
+}

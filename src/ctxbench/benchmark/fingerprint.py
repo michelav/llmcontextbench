@@ -1,4 +1,4 @@
-"""Content fingerprints for frozen v1 plans; no Git subprocess or environment secrets."""
+"""Content fingerprints for current frozen benchmark plans."""
 from __future__ import annotations
 
 import hashlib
@@ -42,7 +42,7 @@ def implementation_digest() -> str:
 def verify_snapshot(root: Path, manifest: dict, *, execution: bool = False) -> None:
     fingerprint = manifest.get('executionFingerprint')
     if fingerprint is None:
-        return  # Existing study stack; removed with the legacy definition path.
+        raise ValueError('Execution fingerprint is required; create a fresh benchmark plan')
     inputs = manifest.get('fingerprintInputs')
     if not isinstance(inputs, dict) or digest(inputs) != fingerprint:
         raise ValueError('Execution fingerprint is corrupt')

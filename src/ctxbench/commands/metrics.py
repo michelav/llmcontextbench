@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from ctxbench.benchmark.selectors import RunSelector
+from ctxbench.benchmark.selectors import TrialSelector
 from ctxbench.metrics.aggregate import compute_all, failure_cases
 from ctxbench.metrics.io import load_inputs
 from ctxbench.metrics.trial_rows import apply_selectors, build_trial_rows, parse_group_by
@@ -20,7 +20,7 @@ def metrics_command(
     group_by: str | None = None,
     force: bool = False,
     verbose: bool = False,
-    selector: RunSelector | None = None,
+    selector: TrialSelector | None = None,
     evaluation_status: tuple[str, ...] = (),
     not_evaluation_status: tuple[str, ...] = (),
     command: str | None = None,
@@ -34,7 +34,7 @@ def metrics_command(
             manifest_path = Path(inputs[0]).expanduser() / "manifest.json"
             if manifest_path.exists():
                 manifest = load_json(manifest_path)
-                if isinstance(manifest, dict) and manifest.get("workflowKind", manifest.get("experimentKind")) == "adaptive":
+                if isinstance(manifest, dict) and manifest.get("workflowKind") == "adaptive":
                     from ctxbench.adaptive.artifacts import validate_workflow_manifest
                     manifest = validate_workflow_manifest(inputs[0])
                     if selector and (selector.configuration or selector.strategy or selector.representation or selector.surface or selector.repetition):
@@ -71,7 +71,7 @@ def metrics_command(
         logger.info("METRICS", "metrics.inputs.discover", "Loading metrics input artifacts", inputs=len(inputs))
         artifacts = load_inputs(inputs, logger)
         rows = build_trial_rows(artifacts, logger)
-        active_selector = selector or RunSelector()
+        active_selector = selector or TrialSelector()
         selected_rows = apply_selectors(
             rows,
             active_selector,
@@ -113,7 +113,7 @@ def metrics_command(
 
 
 def _selectors_manifest(
-    selector: RunSelector,
+    selector: TrialSelector,
     evaluation_status: tuple[str, ...],
     not_evaluation_status: tuple[str, ...],
 ) -> dict[str, Any]:
