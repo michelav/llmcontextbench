@@ -29,7 +29,7 @@ class InlineStrategy(StrategyAdapter):
                 system_instruction=request.system_instruction or DEFAULT_SYSTEM_INSTRUCTION,
                 prompt=prompt,
             )
-            with provider_call(request.provider_name):
+            with provider_call(request.provider_name, model):
                 model_response = model.generate(model_input, request, trace=trace)
             trace.record_model_call(
                 duration_ms=model_response.duration_ms,

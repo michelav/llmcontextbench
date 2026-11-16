@@ -73,6 +73,9 @@ class MinSignalPolicy:
                         f"{self.signal}.{self.statistic}={reading.value:g} "
                         f"objective={self.objective}{suffix}")
 
+    def signal_readings(self) -> tuple[tuple[str, str], ...]:
+        return ((self.signal, "count"), (self.signal, self.statistic))
+
 
 def _is_percentile(statistic: str) -> bool:
     return statistic.startswith("p") and statistic[1:].replace(".", "", 1).isdigit()

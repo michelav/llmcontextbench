@@ -9,6 +9,10 @@ from ctxbench.ai.models.base import AIRequest, ModelAdapter, ModelInput, ModelRe
 
 class ClaudeModel(ModelAdapter):
     supports_tool_calling = True
+    context_overflow_markers = (
+        "prompt is too long", "input is too long", "too many input tokens",
+        "context length exceeded", "maximum context length", "context window exceeded",
+    )
     def generate(self, model_input: ModelInput, request: AIRequest, trace: Any | None = None) -> ModelResponse:
         client = self._create_client()
         payload = self._build_payload(model_input, request)

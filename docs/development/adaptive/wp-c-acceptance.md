@@ -22,9 +22,9 @@
 
 ## Acceptance checks
 
-- Focused checks: `107 passed` (`pytest -q tests/test_adaptive_signals_state.py
+- Focused checks: `115 passed` (`pytest -q tests/test_adaptive_signals_state.py
   tests/test_adaptive_workflow.py tests/test_ai.py tests/test_import_boundaries.py`).
-- Full provider-free suite: `481 passed` (`pytest -q`).
+- Full provider-free suite: `489 passed` (`pytest -q`).
 - Tests cover every statistic, missing and partial values, provenance, capacity, scopes, fixed
   windows, tier boundaries, `min_signal` exploration and ties, context-overflow classification,
   prefix-causal resume, and replay of persisted readings.
@@ -45,11 +45,16 @@
 - The failure category is assigned where the failure happens (`ai/failures.py`) and carried in the
   adaptive attempt result as `failureCategory`; nothing is inferred from error text.
 
-## Known deviations from the design (open)
+## Design deviations resolved
 
-- Each `readings` entry nests a `reading` object; `knownSubtotal` is stored inside each signal.
-- Context-overflow markers are one table in `ai/rate_control.py`, not code inside each adapter.
-- `_validate_signal_policy` validates signal and statistic by built-in policy name.
+- Decision `readings` entries are flat, as in §8.4 of the design; `remaining` and `utilisation`
+  are not stored because they follow from `value` and `capacity`.
+- Known partial subtotals are stored in the observation's `knownSubtotals` map, apart from the
+  signal values, and in the `_adaptiveSignals` payload of the execution record.
+- Each model adapter declares its own context-overflow markers; the classifier asks the adapter
+  that made the call. The provider-name table is gone.
+- Policies report the `(signal, statistic)` pairs they read. `plan` checks them with the same
+  function `state.window()` uses, so planning and run time cannot disagree.
 
 ## Scope boundary
 

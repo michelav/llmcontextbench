@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 from ctxbench._compat import BaseModel, Field
 from ctxbench.ai.trace import TraceCollector
@@ -93,8 +93,19 @@ class AIResult(BaseModel):
 
 
 class ModelAdapter:
+    # Lower-case fragments of this provider's "prompt exceeds the context window" errors.
+    # Each adapter declares its own; an adapter without any reports no context overflow.
+    context_overflow_markers: ClassVar[tuple[str, ...]] = ()
+
     def __init__(self, params: dict[str, Any] | None = None) -> None:
         self.params = params or {}
+
+    def failure_category(self, exc: Exception) -> str | None:
+        """Recognise a failure specific to this provider. None means "not recognised"."""
+        text = f"{exc} {_error_code(exc)}".lower()
+        if any(marker in text for marker in self.context_overflow_markers):
+            return "context_overflow"
+        return None
 
     def generate(
         self,
@@ -103,3 +114,14 @@ class ModelAdapter:
         trace: TraceCollector | None = None,
     ) -> ModelResponse:
         raise NotImplementedError
+
+
+def _error_code(exc: Exception) -> str:
+    """Structured error code of an SDK exception, when it carries one."""
+    code = getattr(exc, "code", None) or getattr(exc, "type", None)
+    if not code:
+        nested = getattr(getattr(exc, "body", None), "error", None)
+        if nested is None and isinstance(getattr(exc, "body", None), dict):
+            nested = exc.body.get("error")
+        code = nested.get("code") if isinstance(nested, dict) else getattr(nested, "code", None)
+    return str(code or "")

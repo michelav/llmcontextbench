@@ -10,6 +10,10 @@ from ctxbench.ai.models.base import AIRequest, ModelAdapter, ModelInput, ModelRe
 
 class GeminiModel(ModelAdapter):
     supports_tool_calling = True
+    context_overflow_markers = (
+        "maximum number of tokens", "input token count exceeds", "too many input tokens",
+        "context length exceeded", "maximum context length", "token limit exceeded",
+    )
     def generate(self, model_input: ModelInput, request: AIRequest, trace: Any | None = None) -> ModelResponse:
         if request.strategy_name == "mcp":
             raise ValueError("unknown strategy: mcp")

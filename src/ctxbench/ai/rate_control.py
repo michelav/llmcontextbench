@@ -228,12 +228,19 @@ class RateControlRegistry:
             return controller
 
 
-def classify_provider_error(provider_name: str, exc: Exception) -> ProviderErrorInfo:
+def classify_provider_error(provider_name: str, exc: Exception, *,
+                            adapter: ModelAdapter | None = None) -> ProviderErrorInfo:
+    """Classify a failed provider call.
+
+    `adapter` is the model adapter that made the call. It recognises its own provider's
+    failures (context overflow); without it only rate limiting is told apart.
+    """
     message = str(exc)
     status_code = getattr(exc, "status_code", None) or getattr(exc, "status", None)
     retry_after = _extract_retry_after_ms(exc)
     lowered = message.lower()
-    category = _provider_failure_category(provider_name, exc, lowered)
+    recognise = getattr(adapter, "failure_category", None)
+    category = (recognise(exc) if callable(recognise) else None) or "provider_error"
     # Order matters. An HTTP 429 status is authoritative. A recognised context overflow comes
     # next and is never retried. Only then is the message text searched for rate-limit wording;
     # "429" must stand alone, because token counts in overflow messages can contain those digits.
@@ -258,34 +265,6 @@ def classify_provider_error(provider_name: str, exc: Exception) -> ProviderError
                                  category=category)
     return ProviderErrorInfo(kind="fatal", message=message, retry_after_ms=retry_after,
                              category=category)
-
-
-def _provider_failure_category(provider_name: str, exc: Exception, lowered: str) -> str:
-    provider = provider_name.lower()
-    code = getattr(exc, "code", None) or getattr(exc, "type", None)
-    body = getattr(exc, "body", None)
-    nested = getattr(body, "error", None) if body is not None else None
-    code = code or (nested.get("code") if isinstance(nested, dict) else getattr(nested, "code", None))
-    markers = [lowered, str(code or "").lower()]
-    text = " ".join(markers)
-    shared_context_markers = (
-        "context_length_exceeded", "context length exceeded", "maximum context length",
-        "token limit exceeded", "context window exceeded",
-    )
-    provider_context_markers = {
-        "openai": ("maximum context length", "prompt is too long"),
-        "anthropic": ("prompt is too long", "input is too long", "too many input tokens"),
-        "claude": ("prompt is too long", "input is too long", "too many input tokens"),
-        "google": ("maximum number of tokens", "input token count exceeds", "too many input tokens"),
-        "gemini": ("maximum number of tokens", "input token count exceeds", "too many input tokens"),
-        "mock": ("context limit exceeded", "context token limit"),
-    }
-    if any(marker in text for marker in (*shared_context_markers, *provider_context_markers.get(provider, ()))):
-        return "context_overflow"
-    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
-    if status == 429 or "rate limit" in text or "too many requests" in text:
-        return "rate_limited"
-    return "provider_error"
 
 
 def _extract_retry_after_ms(exc: Exception) -> int | None:
@@ -345,6 +324,9 @@ class RateLimitedModelAdapter(ModelAdapter):
         self.provider_name = provider_name
         self.model_name = model_name
         self.event_logger = event_logger
+
+    def failure_category(self, exc: Exception) -> str | None:
+        return self.delegate.failure_category(exc)
 
     def generate(
         self,
@@ -485,7 +467,7 @@ class RateLimitedModelAdapter(ModelAdapter):
                             actual_tokens=None,
                             error=exc,
                         )
-                    error_info = classify_provider_error(self.provider_name, exc)
+                    error_info = classify_provider_error(self.provider_name, exc, adapter=self.delegate)
                     if error_info.kind == "fatal" or attempt >= retry_policy.max_attempts:
                         if trace is not None and error_info.kind != "fatal":
                             trace.record_retry_give_up(

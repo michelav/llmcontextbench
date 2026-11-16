@@ -24,8 +24,8 @@ from ctxbench.adaptive.policy import (
     CandidateRef, Decision, PolicyContractError, resolve_policy,
     validate_decision, verify_policy,
 )
-from ctxbench.adaptive.signals import BUILTIN_SIGNAL_UNITS, FAILURE_CATEGORIES, extract_signals
-from ctxbench.adaptive.state import Observation, WindowSystemState
+from ctxbench.adaptive.signals import extract_signals
+from ctxbench.adaptive.state import Observation, WindowSystemState, validate_reading_request
 from ctxbench.core.errors import CapabilityUnavailableError, InvalidDefinitionError
 from ctxbench.core.fingerprint import digest
 from ctxbench.core.surfaces import parse_surface
@@ -126,7 +126,7 @@ class AdaptiveWorkflow:
             plugin_paths=plugin_paths, sources=tuple(policy_decl.get("sources") or ()),
         )
         _validate_policy_targets(policy, candidate_ids)
-        _validate_signal_policy(policy_ref.ref, policy_ref.params, definition.signals)
+        _validate_policy_readings(policy, definition.signals)
 
         requests: list[PlannedRequest] = []
         request_ids: set[str] = set()
@@ -396,9 +396,10 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
                 response_text = response if isinstance(response, str) else str(response or "")
                 accepted = result.get("status") == "success" and len(response_text.strip()) >= int(
                     plan.acceptance.get("minimumResponseLength", 0))
-                signal_values, failure_category = extract_signals(result, accepted=accepted)
+                signal_values, known_subtotals, failure_category = extract_signals(result, accepted=accepted)
                 adaptive_signals = {
                     "signals": {name: value.to_dict() for name, value in signal_values.items()},
+                    "knownSubtotals": known_subtotals,
                     "failureCategory": failure_category,
                     "accepted": accepted,
                 }
@@ -429,6 +430,7 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
                                     "resumed": outcome.resumed}
             attempt["observation"] = {"status": status,
                                       "signals": dict(recorded_signals),
+                                      "knownSubtotals": dict(runtime_signals.get("knownSubtotals") or {}),
                                       "failureCategory": failure_category, "accepted": accepted}
             record["state"] = "delivered" if accepted else "failed"
             record["terminalReason"] = terminal_reason
@@ -517,27 +519,14 @@ def _validate_policy_targets(policy, candidate_ids: set[str]) -> None:
         raise ValueError(f"Policy references unknown candidates: {', '.join(sorted(unknown))}")
 
 
-def _validate_signal_policy(ref: str, params: Mapping[str, Any], declared_signals) -> None:
-    if ref not in {"window_threshold", "min_signal"}:
-        return
-    signal = params.get("signal")
-    declared = {str(row.get("id")) for row in declared_signals if isinstance(row, Mapping)}
-    known = signal in BUILTIN_SIGNAL_UNITS or signal in declared or (
-        isinstance(signal, str) and signal.startswith("failed.")
-        and signal.partition(".")[2] in FAILURE_CATEGORIES
-    )
-    if not known:
-        raise ValueError(f"Policy references unknown signal {signal!r}")
-    statistic = params.get("statistic")
-    valid = statistic in {"sum", "mean", "median", "min", "max", "last", "rate", "count"}
-    if isinstance(statistic, str) and statistic.startswith("p"):
+def _validate_policy_readings(policy, declared_signals) -> None:
+    """Check at planning every (signal, statistic) pair the policy says it will read."""
+    reader = getattr(policy, "signal_readings", None)
+    for signal, statistic in (reader() if callable(reader) else ()):
         try:
-            percentile = float(statistic[1:])
-            valid = 0 < percentile < 100
-        except ValueError:
-            valid = False
-    if not valid:
-        raise ValueError(f"Policy uses invalid statistic {statistic!r}")
+            validate_reading_request(signal, statistic, declared_signals)
+        except ValueError as exc:
+            raise ValueError(f"Policy reading is invalid: {exc}") from exc
 
 
 def _check_strategy_capability(package, candidate_id: str, strategy: str, surface, params: Mapping[str, Any]) -> None:

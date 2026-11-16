@@ -9,6 +9,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import Iterator
 
+from ctxbench.ai.models.base import ModelAdapter
 from ctxbench.ai.rate_control import classify_provider_error
 
 
@@ -32,12 +33,12 @@ def failure_category(exc: BaseException) -> str:
 
 
 @contextmanager
-def provider_call(provider_name: str) -> Iterator[None]:
-    """Tag an exception raised by a model adapter call with its provider category."""
+def provider_call(provider_name: str, model: ModelAdapter) -> Iterator[None]:
+    """Tag an exception raised by a call to `model` with its provider category."""
     try:
         yield
     except Exception as exc:
-        tag_failure(exc, classify_provider_error(provider_name, exc).category)
+        tag_failure(exc, classify_provider_error(provider_name, exc, adapter=model).category)
         raise
 
 

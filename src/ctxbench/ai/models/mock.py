@@ -9,6 +9,7 @@ from ctxbench.ai.models.base import AIRequest, ModelAdapter, ModelInput, ModelRe
 class MockModel(ModelAdapter):
     name = "mock"
     supports_tool_calling = False
+    context_overflow_markers = ("context limit exceeded", "context token limit")
 
     def generate(self, model_input: ModelInput, request: AIRequest, trace: object | None = None) -> ModelResponse:
         context_limit = request.params.get("context_limit_tokens")

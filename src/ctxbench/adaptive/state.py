@@ -1,7 +1,7 @@
 """Prefix-causal adaptive observations, windows, readings, and policy state."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from copy import deepcopy
 import hashlib
 import math
@@ -58,6 +58,7 @@ class Observation:
     status: str
     failure_category: str | None
     signals: Mapping[str, SignalValue]
+    known_subtotals: Mapping[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if type(self.sequence_index) is not int or self.sequence_index < 1:
@@ -85,6 +86,7 @@ class Observation:
             sequence_index=int(record["sequenceIndex"]),
             candidate_id=str(decision["candidateId"]), status=str(raw.get("status", "error")),
             failure_category=raw.get("failureCategory"), signals=signals,
+            known_subtotals=_saved_subtotals(raw.get("knownSubtotals")),
         )
 
 
@@ -144,12 +146,12 @@ class Reading:
         return self.value / self.capacity if self.capacity is not None and self.value is not None else None
 
     def to_dict(self) -> dict[str, Any]:
+        """The audit entry of a decision record. `remaining` and `utilisation` follow from it."""
         return {
             "signal": self.signal, "statistic": self.statistic, "scope": self.scope,
-            "window": _window_dict(self.window), "value": self.value,
+            "window": _window_dict(self.window), "capacity": self.capacity, "value": self.value,
             "provenance": self.provenance.value, "sampleCount": self.sample_count,
             "missingCount": self.missing_count, "knownSubtotal": self.known_subtotal,
-            "capacity": self.capacity, "remaining": self.remaining, "utilisation": self.utilisation,
         }
 
 
@@ -188,8 +190,10 @@ class WindowSystemState:
     def window(self, signal: str, statistic: str, *, scope: str = "system",
                window: WindowSpec | Mapping[str, Any] | None = None,
                capacity: float | None = None) -> Reading:
-        if not _known_signal(signal, self._declared_signals):
-            raise PolicyContractError(f"Unknown signal {signal!r}")
+        try:
+            validate_reading_request(signal, statistic, self._declared_signals)
+        except ValueError as exc:
+            raise PolicyContractError(str(exc)) from exc
         selected_window = _parse_window(window, self.default_window)
         if scope != "system":
             match = re.fullmatch(r"candidate:(.+)", scope)
@@ -212,8 +216,8 @@ class WindowSystemState:
             value = _observation_signal(row, signal)
             if value is None or value.value is None:
                 missing_count += 1
-                if value is not None and value.known_subtotal is not None:
-                    known_values.append(value.known_subtotal)
+                if signal in row.known_subtotals:
+                    known_values.append(row.known_subtotals[signal])
             else:
                 samples.append(float(value.value))
                 provenances.append(value.provenance)
@@ -222,11 +226,7 @@ class WindowSystemState:
         )
         reading = Reading(signal, statistic, scope, selected_window, value, provenance,
                           sample_count, missing_count, known_subtotal, float(capacity) if capacity is not None else None)
-        self._audit.append({
-            "signal": signal, "statistic": statistic, "scope": scope,
-            "window": _window_dict(selected_window), "capacity": reading.capacity,
-            "reading": reading.to_dict(),
-        })
+        self._audit.append(reading.to_dict())
         return reading
 
     @property
@@ -237,10 +237,48 @@ class WindowSystemState:
 PrefixSystemState = WindowSystemState
 
 
-def _known_signal(signal: str, declared: set[str]) -> bool:
-    return signal in BUILTIN_SIGNAL_UNITS or signal in declared or (
-        signal.startswith("failed.") and signal.partition(".")[2] in FAILURE_CATEGORIES
-    )
+def validate_reading_request(signal: Any, statistic: Any, declared_signals: Any = ()) -> None:
+    """Check a (signal, statistic) pair. Used by `plan` and by every `window()` call.
+
+    `declared_signals` is a collection of signal IDs or of declaration rows with an `id`.
+    """
+    declared = {str(row.get("id")) if isinstance(row, Mapping) else str(row) for row in declared_signals}
+    unit = _signal_unit(signal)
+    if unit is None and signal not in declared:
+        raise ValueError(f"Unknown signal {signal!r}")
+    if not isinstance(statistic, str) or (statistic not in _STATISTICS and _percentile_q(statistic) is None):
+        raise ValueError(f"Unknown statistic {statistic!r}; percentiles are p<q> with 0 < q < 100")
+    if statistic == "rate" and unit is not None and unit != "bool":
+        raise ValueError(f"rate statistic requires a 0/1 signal; {signal!r} is measured in {unit}")
+
+
+_STATISTICS = frozenset({"sum", "mean", "median", "min", "max", "last", "rate", "count"})
+
+
+def _signal_unit(signal: Any) -> str | None:
+    """Unit of a built-in signal, or None when the signal is not built in."""
+    if not isinstance(signal, str):
+        return None
+    if signal.startswith("failed.") and signal.partition(".")[2] in FAILURE_CATEGORIES:
+        return "bool"
+    return BUILTIN_SIGNAL_UNITS.get(signal)
+
+
+def _percentile_q(statistic: str) -> float | None:
+    match = re.fullmatch(r"p(\d+(?:\.\d+)?)", statistic)
+    if match is None:
+        return None
+    q = float(match.group(1))
+    return q if 0 < q < 100 else None
+
+
+def _saved_subtotals(value: Any) -> dict[str, float]:
+    if not isinstance(value, Mapping):
+        return {}
+    for name, subtotal in value.items():
+        if isinstance(subtotal, bool) or not isinstance(subtotal, (int, float)) or not math.isfinite(subtotal):
+            raise ValueError(f"saved knownSubtotals[{name!r}] must be a finite number")
+    return {str(name): float(subtotal) for name, subtotal in value.items()}
 
 
 def _observation_signal(observation: Observation, signal: str) -> SignalValue | None:
@@ -284,13 +322,8 @@ def _select_window(rows: Sequence[Observation], decision_index: int,
 
 def _aggregate(statistic: str, values: list[float], missing: int, observations: int,
                known_values: list[float], provenances: list[Provenance]):
-    percentile_stat = statistic.startswith("p") and statistic[1:].replace(".", "", 1).isdigit()
-    if statistic not in {"sum", "mean", "median", "min", "max", "last", "rate", "count"} and not percentile_stat:
-        raise PolicyContractError(f"Unknown statistic {statistic!r}")
-    if percentile_stat:
-        q = float(statistic[1:])
-        if not 0 < q < 100:
-            raise PolicyContractError("percentile statistic must be p<q> with 0 < q < 100")
+    q = _percentile_q(statistic)
+    percentile_stat = q is not None
     if statistic == "count":
         return float(observations), Provenance.DERIVED, None, observations
     if statistic == "sum":
@@ -330,4 +363,4 @@ def _window_dict(window: WindowSpec | None) -> dict[str, Any]:
 
 
 __all__ = ["CandidateState", "Observation", "ObservationLog", "PrefixSystemState", "Reading",
-           "SystemState", "WindowSpec", "WindowSystemState"]
+           "SystemState", "WindowSpec", "WindowSystemState", "validate_reading_request"]

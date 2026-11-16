@@ -13,6 +13,10 @@ from ctxbench.adaptive.policy import CandidateRef, PolicyContractError
 from ctxbench.adaptive.signals import SignalValue, classify_failure, extract_signals
 from ctxbench.adaptive.state import Observation, ObservationLog, WindowSystemState
 from ctxbench.api import DefinitionError, plan
+from ctxbench.ai.models.claude import ClaudeModel
+from ctxbench.ai.models.gemini import GeminiModel
+from ctxbench.ai.models.mock import MockModel
+from ctxbench.ai.models.openai import OpenAIModel
 from ctxbench.ai.rate_control import classify_provider_error
 from ctxbench.core.provenance import Provenance
 from ctxbench.util.fs import load_json
@@ -54,33 +58,51 @@ def test_signal_extraction_preserves_values_provenance_and_missing_usage():
         "trace": {"events": [{"type": "error", "name": "error",
                                "metadata": {"category": "context_overflow"}}]},
     }
-    signals, category = extract_signals(result, accepted=False)
+    signals, known_subtotals, category = extract_signals(result, accepted=False)
     assert category == "context_overflow"
     assert signals["latency_ms"].value == 12
     assert signals["latency_ms"].provenance == Provenance.MEASURED
     assert signals["input_tokens"].value == 7
     assert signals["input_tokens"].provenance == Provenance.REPORTED
     assert signals["total_tokens"].value is None
-    assert signals["total_tokens"].known_subtotal == 9
+    assert known_subtotals == {"total_tokens": 9}
+    assert set(signals["total_tokens"].to_dict()) == {"value", "provenance", "unit"}
     assert signals["total_tokens"].provenance == Provenance.UNAVAILABLE
     assert signals["reasoning_tokens"].value is None
     assert signals["failed"].value == 1
     assert signals["accepted"].value == 0
-    estimated, _ = extract_signals({
+    estimated, no_subtotals, _ = extract_signals({
         "status": "success", "usage": {"inputTokens": 4, "outputTokens": 2},
         "metricsSummary": {"totalTokens": 6, "totalTokensProvenance": "estimated"},
     }, accepted=True)
     assert estimated["input_tokens"].provenance == Provenance.ESTIMATED
+    assert no_subtotals == {}
 
 
-@pytest.mark.parametrize("provider,error", [
-    ("openai", "context_length_exceeded: request too large"),
-    ("anthropic", "prompt is too long for this model"),
-    ("google", "input token count exceeds the maximum number of tokens"),
-    ("mock", "Mock context token limit exceeded"),
+@pytest.mark.parametrize("adapter_class,error", [
+    (OpenAIModel, "context_length_exceeded: request too large"),
+    (ClaudeModel, "prompt is too long for this model"),
+    (GeminiModel, "input token count exceeds the maximum number of tokens"),
+    (MockModel, "Mock context token limit exceeded"),
 ])
-def test_provider_errors_normalize_context_overflow(provider: str, error: str):
-    assert classify_provider_error(provider, RuntimeError(error)).category == "context_overflow"
+def test_each_adapter_recognises_its_own_context_overflow(adapter_class, error: str):
+    adapter = adapter_class()
+    assert adapter.failure_category(RuntimeError(error)) == "context_overflow"
+    assert adapter.failure_category(RuntimeError("opaque failure")) is None
+    info = classify_provider_error("any", RuntimeError(error), adapter=adapter)
+    assert (info.kind, info.category) == ("fatal", "context_overflow")
+
+
+def test_context_overflow_is_recognised_only_by_the_adapter_that_owns_the_wording():
+    gemini_wording = RuntimeError("input token count exceeds the maximum number of tokens")
+    assert MockModel().failure_category(gemini_wording) is None
+    # Without the adapter the classifier cannot tell an overflow from any provider error.
+    assert classify_provider_error("google", gemini_wording).category == "provider_error"
+
+    class CodedError(RuntimeError):
+        code = "context_length_exceeded"
+
+    assert OpenAIModel().failure_category(CodedError("request rejected")) == "context_overflow"
 
 
 def test_provider_errors_normalize_rate_limit_and_fallback_categories():
@@ -273,7 +295,11 @@ def test_context_overflow_failure_becomes_a_policy_signal_without_fallback(tmp_p
     assert first["attempts"][0]["decision"]["candidateId"] == "A"
     second_decision = second["attempts"][0]["decision"]
     assert second_decision["candidateId"] == "B"
-    assert second_decision["readings"][0]["reading"]["value"] == 1
+    reading = second_decision["readings"][0]
+    assert reading["value"] == 1
+    assert set(reading) == {"signal", "statistic", "scope", "window", "capacity", "value",
+                            "provenance", "sampleCount", "missingCount", "knownSubtotal"}
+    assert first["attempts"][0]["observation"]["knownSubtotals"] == {}
     assert len(first["attempts"]) == len(second["attempts"]) == 1
 
 
@@ -381,13 +407,13 @@ def test_resume_copies_signals_from_completed_execution_record(tmp_path: Path, m
     assert invoke_calls == ["r-0001"]
 
 
-@pytest.mark.parametrize("provider,message", [
-    ("openai", "This model's maximum context length is 128000 tokens. "
-               "However, your messages resulted in 142933 tokens."),
-    ("mock", "Mock context token limit exceeded: 1429 > 5"),
+@pytest.mark.parametrize("adapter_class,message", [
+    (OpenAIModel, "This model's maximum context length is 128000 tokens. "
+                  "However, your messages resulted in 142933 tokens."),
+    (MockModel, "Mock context token limit exceeded: 1429 > 5"),
 ])
-def test_context_overflow_with_429_digits_in_a_token_count_is_not_a_rate_limit(provider: str, message: str):
-    info = classify_provider_error(provider, RuntimeError(message))
+def test_context_overflow_with_429_digits_in_a_token_count_is_not_a_rate_limit(adapter_class, message: str):
+    info = classify_provider_error("any", RuntimeError(message), adapter=adapter_class())
     assert info.category == "context_overflow"
     assert info.kind == "fatal"  # never retried
 
@@ -401,19 +427,20 @@ def test_rate_limit_detection_needs_a_standalone_429_or_a_429_status():
     class StatusError(RuntimeError):
         status_code = 429
 
-    by_status = classify_provider_error("openai", StatusError("maximum context length reached for quota"))
+    by_status = classify_provider_error("openai", StatusError("maximum context length reached for quota"),
+                                        adapter=OpenAIModel())
     assert (by_status.kind, by_status.category) == ("rate_limit", "rate_limited")
 
 
 def test_signal_extraction_without_metrics_summary_leaves_call_counts_unavailable():
-    signals, category = extract_signals({"status": "error", "response": "", "errorMessage": "boom"},
-                                        accepted=False)
+    signals, _, category = extract_signals({"status": "error", "response": "", "errorMessage": "boom"},
+                                           accepted=False)
     assert category == "unknown"
     for name in ("model_calls", "tool_calls", "latency_ms", "total_tokens", "input_tokens"):
         assert signals[name].value is None
         assert signals[name].provenance == Provenance.UNAVAILABLE
-    observed, _ = extract_signals({"status": "success", "metricsSummary": {"modelCalls": 0, "toolCalls": 0}},
-                                  accepted=True)
+    observed, _, _ = extract_signals({"status": "success", "metricsSummary": {"modelCalls": 0, "toolCalls": 0}},
+                                     accepted=True)
     assert observed["model_calls"].value == 0
     assert observed["model_calls"].provenance == Provenance.MEASURED
 
@@ -502,3 +529,51 @@ def test_system_state_holds_no_request_identifier_in_any_attribute():
     assert "A" in found  # the walk reaches private attributes (the observation log)
     assert not any(request_id in value for value in found)
     assert not hasattr(state, "_decision_id") and not hasattr(state, "_seed")
+
+
+def test_known_subtotal_is_kept_apart_from_the_signal_and_feeds_window_sums():
+    partial = Observation(2, "A", "success", None, {"total_tokens": _signal(None)},
+                          known_subtotals={"total_tokens": 4})
+    state = _state([_observation(1, "A", 10), partial], window=WindowSpec(5))
+    total = state.window("total_tokens", "sum")
+    assert total.value is None and total.provenance == Provenance.UNAVAILABLE
+    assert total.known_subtotal == 14
+    assert state.window("total_tokens", "mean").value == 10  # a subtotal is never a sample
+
+    record = {"sequenceIndex": 2, "attempts": [{
+        "decision": {"candidateId": "A"},
+        "observation": {"status": "success", "failureCategory": None,
+                        "signals": {"total_tokens": _signal(None).to_dict()},
+                        "knownSubtotals": {"total_tokens": 4}},
+    }]}
+    assert Observation.from_record(record) == partial
+
+
+@pytest.mark.parametrize("params,message", [
+    ({"signal": "request_context_size", "statistic": "mean"}, "Unknown signal"),
+    ({"signal": "failed.not_a_category", "statistic": "rate"}, "Unknown signal"),
+    ({"signal": "total_tokens", "statistic": "p1e1"}, "Unknown statistic"),
+    ({"signal": "total_tokens", "statistic": "p100"}, "Unknown statistic"),
+    ({"signal": "total_tokens", "statistic": "rate"}, "requires a 0/1 signal"),
+])
+def test_invalid_policy_reading_is_refused_at_planning_with_the_runtime_rule(tmp_path: Path, params, message):
+    policy = {"ref": "window_threshold", "params": {
+        **params, "tiers": [{"upTo": 1, "select": "A"}], "otherwise": "B", "when_unavailable": "A"}}
+    with pytest.raises(DefinitionError, match=message):
+        plan(_definition(request_count=1, policy=policy), output=tmp_path / "invalid-reading")
+    # The same pair is refused when read at run time: one rule, one parser.
+    with pytest.raises(PolicyContractError, match=message):
+        _state().window(params["signal"], params["statistic"])
+
+
+def test_planning_checks_readings_reported_by_any_policy_not_only_named_built_ins():
+    from ctxbench.adaptive.workflow import _validate_policy_readings
+
+    class ExternalPolicy:
+        def signal_readings(self):
+            return (("quality.accuracy", "mean"), ("latency_ms", "p95"))
+
+    _validate_policy_readings(ExternalPolicy(), [{"id": "quality.accuracy"}])
+    with pytest.raises(ValueError, match="Unknown signal 'quality.accuracy'"):
+        _validate_policy_readings(ExternalPolicy(), [])
+    _validate_policy_readings(object(), [])  # a policy that reports nothing is not checked

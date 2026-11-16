@@ -58,7 +58,7 @@ class ClientToolStrategy(StrategyAdapter):
                     tool_results=tool_results,
                     continuation_state=continuation_state,
                 )
-                with provider_call(request.provider_name):
+                with provider_call(request.provider_name, model):
                     model_response = model.generate(model_input, request, trace=trace)
                 raw_responses.append(model_response.raw_response)
                 continuation_state = dict(model_response.continuation_state)

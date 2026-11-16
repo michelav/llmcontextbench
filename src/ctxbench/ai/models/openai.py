@@ -9,6 +9,10 @@ from ctxbench.ai.models.base import AIRequest, ModelAdapter, ModelInput, ModelRe
 
 class OpenAIModel(ModelAdapter):
     supports_tool_calling = True
+    context_overflow_markers = (
+        "context_length_exceeded", "context length exceeded", "maximum context length",
+        "context window exceeded", "token limit exceeded", "prompt is too long",
+    )
     def generate(self, model_input: ModelInput, request: AIRequest, trace: Any | None = None) -> ModelResponse:
         client = self._create_client()
         payload = self._build_payload(model_input, request)

@@ -483,8 +483,12 @@ In `classify_provider_error`, an HTTP 429 status is authoritative, a recognised 
 overflow comes next and is never retried, and only then is the message searched for rate-limit
 wording; "429" must stand alone, because token counts in overflow messages can contain it.
 
-- **Context-overflow detection is best effort.** It is implemented per model adapter. An
-  adapter without it reports `provider_error`; the raw provider message stays in the trace.
+- **Context-overflow detection is best effort.** It is implemented per model adapter: each
+  adapter declares `context_overflow_markers` (fragments of its provider's error wording and
+  error codes) and `ModelAdapter.failure_category(exc)` matches them.
+  `classify_provider_error(provider_name, exc, adapter=...)` asks the adapter that made the
+  call; there is no table keyed by provider name. An adapter without markers reports
+  `provider_error`; the raw provider message stays in the trace.
   WP-C implements it for all four adapters in the tree: `ai/models/mock.py`, `openai.py`,
   `claude.py` and `gemini.py`. Only the mock path is exercised end to end; the three provider
   paths are tested against synthetic error objects and are unverified against live providers
@@ -1541,6 +1545,12 @@ flowchart LR
      for `window_threshold` that is each `tiers[].select`, `otherwise` and `when_unavailable`.
      Each built-in policy reports the candidate IDs its parameters name, replacing the
      per-policy-name branches in `adaptive/workflow.py::_validate_policy_targets`.
+     In the same way a policy reports the `(signal, statistic)` pairs it reads through
+     `signal_readings()`, and `plan` checks each pair with
+     `adaptive/state.py::validate_reading_request`, the function `state.window()` itself uses.
+     Planning and run time therefore apply one rule: known signal, known statistic, and `rate`
+     only on a 0/1 signal. An external policy may implement both methods to get the same
+     early checks; one that does not is checked at its first `window()` call.
      Policies receive no goal statuses; goals remain a WP-H reporting concern.
   6. Integrate signal extraction, observation reconstruction, state creation, and policy reads
      into the workflow while preserving durable decision-before-execution ordering, resume

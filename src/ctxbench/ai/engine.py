@@ -78,7 +78,7 @@ class Engine:
             with trace.span("engine.execute_model_input", "engine.execute_model_input"):
                 model = self._resolve_model(request.provider_name, request.model_name, request.params)
                 self._validate_capabilities(model, request.strategy_name)
-                with provider_call(request.provider_name):
+                with provider_call(request.provider_name, model):
                     model_response = model.generate(model_input, request, trace=trace)
                 trace.record_model_call(
                     duration_ms=model_response.duration_ms,

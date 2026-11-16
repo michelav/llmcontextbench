@@ -19,22 +19,17 @@ class SignalValue:
     value: float | None
     provenance: Provenance
     unit: str
-    known_subtotal: float | None = None
 
     def __post_init__(self) -> None:
         if not self.unit:
             raise ValueError("signal unit must be non-empty")
         if (self.value is None) != (self.provenance == Provenance.UNAVAILABLE):
             raise ValueError("missing signal values require unavailable provenance")
-        for name, value in (("value", self.value), ("known subtotal", self.known_subtotal)):
-            if value is not None and (isinstance(value, bool) or not isfinite(float(value))):
-                raise ValueError(f"signal {name} must be finite")
+        if self.value is not None and (isinstance(self.value, bool) or not isfinite(float(self.value))):
+            raise ValueError("signal value must be finite")
 
     def to_dict(self) -> dict[str, Any]:
-        value = {"value": self.value, "provenance": self.provenance.value, "unit": self.unit}
-        if self.known_subtotal is not None:
-            value["knownSubtotal"] = self.known_subtotal
-        return value
+        return {"value": self.value, "provenance": self.provenance.value, "unit": self.unit}
 
 
 BUILTIN_SIGNAL_UNITS = {
@@ -44,8 +39,13 @@ BUILTIN_SIGNAL_UNITS = {
 }
 
 
-def extract_signals(result: Mapping[str, Any], *, accepted: bool) -> tuple[dict[str, SignalValue], str | None]:
-    """Extract named execution signals without treating unavailable usage as zero."""
+def extract_signals(result: Mapping[str, Any], *, accepted: bool,
+                    ) -> tuple[dict[str, SignalValue], dict[str, float], str | None]:
+    """Extract named execution signals without treating unavailable usage as zero.
+
+    Returns the signal map, the known partial subtotals of signals whose value is unavailable
+    (kept apart: a subtotal is not a signal value), and the failure category.
+    """
     metrics = _mapping(result.get("metricsSummary"))
     usage = _mapping(result.get("usage"))
     status = str(result.get("status") or "error")
@@ -63,7 +63,6 @@ def extract_signals(result: Mapping[str, Any], *, accepted: bool) -> tuple[dict[
         "total_tokens": _signal(
             metrics.get("totalTokens"), "tokens",
             _provenance(metrics.get("totalTokensProvenance")),
-            known_subtotal=metrics.get("knownTotalTokens"),
         ),
         "input_tokens": _signal(usage.get("inputTokens"), "tokens", token_field_provenance),
         "output_tokens": _signal(usage.get("outputTokens"), "tokens", token_field_provenance),
@@ -74,7 +73,13 @@ def extract_signals(result: Mapping[str, Any], *, accepted: bool) -> tuple[dict[
         "failed": SignalValue(float(failed), Provenance.DERIVED, "bool"),
         "accepted": SignalValue(float(bool(accepted)), Provenance.DERIVED, "bool"),
     }
-    return signals, category
+    known_subtotals: dict[str, float] = {}
+    if signals["total_tokens"].value is None:
+        for partial in (metrics.get("knownTotalTokens"), metrics.get("totalTokens")):
+            if _number(partial):
+                known_subtotals["total_tokens"] = float(partial)
+                break
+    return signals, known_subtotals, category
 
 
 def classify_failure(result: Mapping[str, Any]) -> str:
@@ -114,23 +119,14 @@ def signal_from_dict(value: Any, *, default_unit: str = "count") -> SignalValue:
     provenance = _provenance(value.get("provenance"))
     if raw is not None and not _number(raw):
         raise ValueError("saved signal value must be numeric or null")
-    subtotal = value.get("knownSubtotal")
-    if subtotal is not None and not _number(subtotal):
-        raise ValueError("saved knownSubtotal must be numeric or null")
     return SignalValue(float(raw) if raw is not None else None, provenance,
-                       str(value.get("unit") or default_unit),
-                       float(subtotal) if subtotal is not None else None)
+                       str(value.get("unit") or default_unit))
 
 
-def _signal(value: Any, unit: str, provenance: Provenance, *, known_subtotal: Any = None) -> SignalValue:
-    if not _number(value):
-        return SignalValue(None, Provenance.UNAVAILABLE, unit,
-                           float(known_subtotal) if _number(known_subtotal) else None)
-    if provenance == Provenance.UNAVAILABLE:
-        return SignalValue(None, provenance, unit,
-                           float(known_subtotal) if _number(known_subtotal) else float(value))
-    return SignalValue(float(value), provenance, unit,
-                       float(known_subtotal) if _number(known_subtotal) else None)
+def _signal(value: Any, unit: str, provenance: Provenance) -> SignalValue:
+    if not _number(value) or provenance == Provenance.UNAVAILABLE:
+        return SignalValue(None, Provenance.UNAVAILABLE, unit)
+    return SignalValue(float(value), provenance, unit)
 
 
 def _provenance(value: Any) -> Provenance:

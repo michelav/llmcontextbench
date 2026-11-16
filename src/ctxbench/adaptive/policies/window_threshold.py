@@ -74,6 +74,9 @@ class WindowThresholdPolicy:
                 return Decision(candidate_id, _reason(self, reading, measure, f"tier={tier_index}"))
         return Decision(self.otherwise, _reason(self, reading, measure, "tier=otherwise"))
 
+    def signal_readings(self) -> tuple[tuple[str, str], ...]:
+        return ((self.signal, self.statistic),)
+
     def candidate_targets(self) -> tuple[str, ...]:
         targets = [self.otherwise, self.when_unavailable]
         targets.extend(candidate_id for _, candidate_id in self.tiers)
