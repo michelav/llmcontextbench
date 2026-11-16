@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
-from ctxbench.adaptive.definition import AdaptiveExperiment
 from ctxbench.api.errors import (
     ArtifactError, CapabilityError, CtxbenchError, DefinitionError, ExecutionStateError, RunNotFoundError,
 )
@@ -45,6 +44,7 @@ def _silent_logger() -> PhaseLogger:
 @contextmanager
 def _errors(default: type[CtxbenchError]):
     """Translate internal exceptions into the public hierarchy, keeping the cause."""
+    from ctxbench.core.errors import CapabilityUnavailableError, InvalidDefinitionError
     from ctxbench.dataset.conflicts import AmbiguousDatasetError
     from ctxbench.dataset.errors import AdapterUnavailableError
     from ctxbench.dataset.resolver import DatasetNotFoundError, MultiDatasetError
@@ -52,8 +52,11 @@ def _errors(default: type[CtxbenchError]):
         yield
     except CtxbenchError:
         raise
-    except (DatasetNotFoundError, AmbiguousDatasetError, MultiDatasetError, AdapterUnavailableError) as exc:
+    except (DatasetNotFoundError, AmbiguousDatasetError, MultiDatasetError, AdapterUnavailableError,
+            CapabilityUnavailableError) as exc:
         raise CapabilityError(str(exc)) from exc
+    except InvalidDefinitionError as exc:
+        raise DefinitionError(str(exc)) from exc
     except FileNotFoundError as exc:
         raise ArtifactError(str(exc)) from exc
     except ValueError as exc:
@@ -65,29 +68,26 @@ def _errors(default: type[CtxbenchError]):
         raise
 
 
-def plan(source: str | Path | Mapping[str, Any] | AdaptiveExperiment, *, output: str | Path | None = None,
+def plan(source: Any, *, output: str | Path | None = None,
          cache_dir: str | Path | None = None, plugin_paths: Sequence[str | Path] = (),
          logger: PhaseLogger | None = None, progress: bool = False) -> "Run":
     """Plan a benchmark or adaptive definition and return its run handle.
 
-    ``source`` is a definition path or an in-memory definition. Relative paths inside an
+    ``source`` is a definition path, an in-memory definition mapping, or a definition object
+    (for example ``AdaptiveExperiment``). Relative paths inside an
     in-memory definition resolve against the current working directory. No provider is called.
     """
     logger = logger or _silent_logger()
     with _errors(DefinitionError):
-        if isinstance(source, AdaptiveExperiment):
-            header = source.resolved_definition
-            definition_source = source
-        elif isinstance(source, Mapping):
-            header: Any = source
-            definition_source: Any = source
-        else:
+        definition_source: Any = source
+        if isinstance(source, Mapping):
+            workflow = registry.for_definition(source)
+        elif isinstance(source, (str, Path)):
             definition_source = str(source)
-            header = load_json(Path(source).expanduser().resolve())
-        workflow = registry.for_definition(header)
-        definition = definition_source if isinstance(source, AdaptiveExperiment) else workflow.load_definition(
-            definition_source, logger=logger
-        )
+            workflow = registry.for_definition(load_json(Path(source).expanduser().resolve()))
+        else:
+            workflow = registry.for_object(source)
+        definition = workflow.load_definition(definition_source, logger=logger)
     with _errors(ExecutionStateError):
         outcome = workflow.plan(
             definition,

@@ -6,10 +6,10 @@ from pathlib import Path
 import pytest
 
 from ctxbench.adaptive.artifacts import adaptive_plan_from_payload, adaptive_plan_payload
-from ctxbench.adaptive.definition import AdaptiveExperiment, load_adaptive_experiment
+from ctxbench.adaptive.definition import AdaptiveExperiment, WorkloadRequest, load_adaptive_experiment
 from ctxbench.adaptive.policy import CandidateRef, PrefixSystemState
 from ctxbench.adaptive.testing import verify_replay
-from ctxbench.api import ExecutionStateError, plan
+from ctxbench.api import ArtifactError, CapabilityError, DefinitionError, ExecutionStateError, open_run, plan
 from ctxbench.execution.service import TrialExecutionService
 from ctxbench.util.fs import load_json
 
@@ -203,3 +203,138 @@ def test_invalid_policy_decision_stops_before_attempt_creation(tmp_path: Path) -
     record = load_json(run.root / "adaptive-records" / "r-0001.json")
     assert record["state"] == "started" and record["attempts"] == []
     assert not list((run.root / "execution-records").glob("**/*.json"))
+
+
+def test_experiment_object_built_in_a_script_plans_and_executes(tmp_path: Path) -> None:
+    payload = _definition(request_count=2)
+    experiment = AdaptiveExperiment(
+        id="scripted", dataset=payload["dataset"], models=payload["models"], surfaces=payload["surfaces"],
+        configurations=payload["configurations"], candidates=payload["candidates"],
+        workload=(WorkloadRequest("task_role", "person-001"), WorkloadRequest("task_role", "person-001")),
+        policy={"ref": "round_robin"}, window={"requests": 5},
+    )
+    run = plan(experiment, output=tmp_path / "scripted")
+
+    assert run.kind == "adaptive"
+    resolved = load_json(run.root / "resolved.json")
+    assert resolved["id"] == "scripted" and resolved["policy"] == {"ref": "round_robin"}
+    assert run.execute().counts["delivered"] == 2
+    assert [row["candidateId"] for row in _decision_rows(run.root)] == ["A", "B"]
+
+
+def test_definition_problems_found_while_planning_are_definition_errors(tmp_path: Path) -> None:
+    mixed = _definition()
+    mixed["models"]["other"] = {"provider": "mock", "name": "other"}
+    mixed["candidates"]["B"]["model"] = "other"
+    unknown_target = _definition(policy={"ref": "static", "params": {"candidate": "missing"}})
+    unknown_policy = _definition(policy={"ref": "no_such_policy"})
+
+    for index, (definition, message) in enumerate([
+        (mixed, "one model"), (unknown_target, "unknown candidates"), (unknown_policy, "Unknown built-in policy"),
+    ]):
+        with pytest.raises(DefinitionError, match=message):
+            plan(definition, output=tmp_path / f"invalid-{index}")
+        assert not (tmp_path / f"invalid-{index}").exists()
+
+
+def test_candidate_strategy_the_dataset_cannot_serve_is_refused_at_plan(tmp_path: Path) -> None:
+    for strategy, message in (("local_function", "tool_provider"), ("remote_mcp", "MCP server settings")):
+        definition = _definition()
+        definition["configurations"]["other"] = {"strategy": strategy, "representation": "json", "surface": "full"}
+        definition["candidates"]["B"]["configuration"] = "other"
+        with pytest.raises(CapabilityError, match=message):
+            plan(definition, output=tmp_path / strategy)
+        assert not (tmp_path / strategy).exists()
+
+
+def test_run_with_external_policy_survives_moving_run_and_plugin_directories(tmp_path: Path) -> None:
+    import sys
+
+    plugin_dir = tmp_path / "plugins"
+    plugin_dir.mkdir()
+    (plugin_dir / "movable_policy.py").write_text(
+        "from ctxbench.api import Decision\n"
+        "class ChooseB:\n"
+        "    id = 'choose_b'\n"
+        "    version = '1'\n"
+        "    def __init__(self): pass\n"
+        "    def decide(self, candidates, state):\n"
+        "        return Decision('B', 'choose B')\n",
+        encoding="utf-8",
+    )
+    (plugin_dir / "table.json").write_text("{}", encoding="utf-8")
+    definition = _definition(policy={"ref": "movable_policy:ChooseB", "params": {},
+                                     "sources": [str(plugin_dir / "table.json")]})
+    run = plan(definition, output=tmp_path / "run", plugin_paths=[plugin_dir])
+    recorded = load_json(run.root / "adaptive-plan.json")["policy"]
+    assert recorded["sources"] == ["table.json"]
+    assert str(tmp_path) not in json.dumps(recorded)
+
+    (tmp_path / "run").rename(tmp_path / "run-moved")
+    plugin_dir.rename(tmp_path / "plugins-moved")
+    sys.modules.pop("movable_policy", None)   # a new process would import from the new location
+    moved = open_run(tmp_path / "run-moved")
+    assert moved.execute(plugin_paths=[tmp_path / "plugins-moved"]).counts["delivered"] == 1
+
+    (tmp_path / "plugins-moved" / "table.json").write_text('{"changed": true}', encoding="utf-8")
+    sys.modules.pop("movable_policy", None)
+    with pytest.raises(ExecutionStateError, match="Policy source changed"):
+        moved.execute(plugin_paths=[tmp_path / "plugins-moved"])
+
+
+def test_status_groups_requests_by_decided_candidate(tmp_path: Path) -> None:
+    run = plan(_definition(request_count=3, policy={"ref": "round_robin"}), output=tmp_path / "status")
+    run.execute()
+
+    report = "\n".join(run.status(by="candidate").report)
+    rows = {line.split()[0]: line.split()[1:] for line in report.splitlines() if line[:1] in {"A", "B"}}
+    assert rows == {"A": ["2", "2", "0", "0"], "B": ["1", "1", "0", "0"]}
+    assert "task_role" in "\n".join(run.status(by="task").report)
+    with pytest.raises(ArtifactError, match="supports task, instance, or candidate"):
+        run.status(by="strategy")
+
+
+def test_lifecycle_sessions_count_provider_calls_made_in_that_session(tmp_path: Path) -> None:
+    run = plan(_definition(request_count=3), output=tmp_path / "lifecycle")
+    run.execute()
+    run.execute()
+
+    sessions = load_json(run.root / "adaptive-lifecycle.json")["sessions"]
+    assert [(row["providerInvocations"], row["replayedExecutions"]) for row in sessions] == [(3, 0), (0, 0)]
+
+
+def test_interrupted_run_resumes_to_the_same_records_as_an_uninterrupted_run(tmp_path: Path, monkeypatch) -> None:
+    definition = _definition(request_count=4, policy={"ref": "round_robin"})
+    uninterrupted = plan(definition, output=tmp_path / "straight")
+    uninterrupted.execute()
+
+    resumed = plan(definition, output=tmp_path / "resumed")
+    real_execute = TrialExecutionService.execute
+    calls = {"count": 0}
+
+    def interrupt_on_third_request(self, request, session, invoke, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 3:
+            raise RuntimeError("simulated interruption after decision persistence")
+        return real_execute(self, request, session, invoke, **kwargs)
+
+    monkeypatch.setattr(TrialExecutionService, "execute", interrupt_on_third_request)
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        resumed.execute()
+    monkeypatch.setattr(TrialExecutionService, "execute", real_execute)
+    assert [row["state"] for row in resumed.requests()] == ["delivered", "delivered", "started", "pending"]
+    assert resumed.execute().counts == {"delivered": 4, "failed": 0, "started": 0}
+
+    def comparable(run) -> list[dict]:
+        rows = []
+        for record in run.requests():
+            row = json.loads(json.dumps(record))
+            for key in ("requestDurationMs", "interrupted"):
+                row.pop(key)
+            row["attempts"][0]["decision"].pop("createdAt")
+            rows.append(row)
+        return rows
+
+    assert comparable(resumed) == comparable(uninterrupted)
+    assert [row["interrupted"] for row in resumed.requests()] == [False, False, True, False]
+    assert verify_replay(resumed.root) == []

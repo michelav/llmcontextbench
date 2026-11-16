@@ -7,6 +7,7 @@ import hashlib
 import importlib
 import inspect
 import json
+import os
 from pathlib import Path
 import random
 import sys
@@ -122,9 +123,17 @@ def _builtin_classes() -> dict[str, type]:
 BUILTIN = _builtin_classes
 
 
-def resolve_policy(ref: str, params: Mapping[str, JSON], *, base_dir: Path,
+def resolve_policy(ref: str, params: Mapping[str, JSON], *, base_dir: Path | None = None,
                    plugin_paths: Sequence[str | Path] = (),
                    sources: Sequence[str] = ()) -> tuple[PolicyReference, Policy]:
+    """Import a policy and digest its source.
+
+    ``sources`` are extra files covered by the digest. With ``base_dir`` (planning) relative
+    entries resolve against the definition directory; without it (execution, replay) they are
+    the entries recorded in the plan, relative to the policy module's directory. The returned
+    reference records them in that second form, so a run stays valid when the plug-in directory
+    and the run directory move.
+    """
     with plugin_import_paths(plugin_paths):
         if ":" not in ref:
             cls = _builtin_classes().get(ref)
@@ -143,15 +152,16 @@ def resolve_policy(ref: str, params: Mapping[str, JSON], *, base_dir: Path,
             if not source_file:
                 raise PolicyContractError(f"Could not locate source for policy {ref}")
             source_files = [Path(source_file).resolve()]
+        module_dir = source_files[0].parent
         for source in sources:
             source_path = Path(source).expanduser()
             if not source_path.is_absolute():
-                source_path = base_dir / source_path
+                source_path = (base_dir if base_dir is not None else module_dir) / source_path
             source_files.append(source_path.resolve())
-        if len(source_files) != len(set(source_files)):
-            source_files = list(dict.fromkeys(source_files))
-        if any(not path.is_file() for path in source_files):
-            raise PolicyContractError("Policy source file does not exist")
+        source_files = list(dict.fromkeys(source_files))
+        missing = [path for path in source_files if not path.is_file()]
+        if missing:
+            raise PolicyContractError(f"Policy source file does not exist: {missing[0]}")
         if not getattr(cls, "id", None) or not getattr(cls, "version", None) or not callable(getattr(cls, "decide", None)):
             raise PolicyContractError(f"Policy {ref!r} must define id, version, and decide")
         source_digest = digest([(path.name, file_digest(path)) for path in source_files])
@@ -159,14 +169,15 @@ def resolve_policy(ref: str, params: Mapping[str, JSON], *, base_dir: Path,
             instance = cls(**dict(params))
         except Exception as exc:
             raise PolicyContractError(f"Invalid parameters for policy {ref!r}: {exc}") from exc
+        recorded = tuple(Path(os.path.relpath(path, module_dir)).as_posix() for path in source_files[1:])
         return PolicyReference(ref, dict(params), str(cls.id), str(cls.version), source_digest,
-                               tuple(str(path) for path in source_files)), instance
+                               recorded), instance
 
 
-def verify_policy(reference: PolicyReference, *, base_dir: Path,
+def verify_policy(reference: PolicyReference, *,
                   plugin_paths: Sequence[str | Path] = ()) -> Policy:
-    resolved, policy = resolve_policy(reference.ref, reference.params, base_dir=base_dir,
-                                      plugin_paths=plugin_paths, sources=reference.sources[1:])
+    resolved, policy = resolve_policy(reference.ref, reference.params,
+                                      plugin_paths=plugin_paths, sources=reference.sources)
     if (resolved.policy_id, resolved.version, resolved.source_digest) != (
             reference.policy_id, reference.version, reference.source_digest):
         raise PolicyContractError("Policy source changed since planning; create a fresh adaptive plan.")

@@ -24,8 +24,20 @@
 - Policy blindness, invalid decisions, deterministic built-ins, one-attempt failure, persisted
   decision resume, replay, and external policy fingerprint refusal are covered.
 - Focused checks: `30 passed` across API, adaptive workflow/contracts, and import boundaries.
-- Full provider-free suite: `443 passed` (`pytest -q`).
+- Full provider-free suite: `450 passed` (`pytest -q`).
 - `git diff --check` is clean. No real provider execution or evaluation was run.
+
+## Review fixes
+
+- An `AdaptiveExperiment` built in a script plans like a file; its fields are validated through
+  the v4 schema and written to `resolved.json`.
+- The plan records extra policy sources relative to the policy module and no absolute paths, so
+  a run and its plug-in directory can move.
+- Planning refuses a candidate whose strategy the dataset cannot serve (`CapabilityError`).
+- Definition problems found while planning raise `DefinitionError`.
+- `status --by task|instance|candidate` prints the grouped table again.
+- Lifecycle sessions record their own start time, provider invocations and replayed executions.
+- A multi-request interrupt-and-resume test compares the resumed records with an uninterrupted run.
 
 ## Known scope boundary
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 import fcntl
+from inspect import signature
 import json
 from pathlib import Path
 import re
@@ -23,6 +24,7 @@ from ctxbench.adaptive.policy import (
     CandidateRef, Decision, PolicyContractError, PrefixSystemState, resolve_policy,
     validate_decision, verify_policy,
 )
+from ctxbench.core.errors import CapabilityUnavailableError, InvalidDefinitionError
 from ctxbench.core.fingerprint import digest
 from ctxbench.core.surfaces import parse_surface
 from ctxbench.core.workflow import (
@@ -48,10 +50,11 @@ class AdaptiveWorkflow:
     """Adaptive run implementation behind the shared workflow contract."""
 
     kind = "adaptive"
+    definition_types = (AdaptiveExperiment,)
 
     def load_definition(self, source, *, logger=None) -> AdaptiveExperiment:
         del logger
-        return load_adaptive_experiment(source)
+        return load_adaptive_experiment(source)   # accepts a path, a mapping, or an experiment object
 
     def plan(self, definition: AdaptiveExperiment, *, output: Path | None, cache_dir: Path | None = None,
              plugin_paths: Sequence[Path] = (), logger=None, progress: bool = False) -> PlanOutcome:
@@ -73,7 +76,21 @@ class AdaptiveWorkflow:
             resolved_revision=report.resolved_revision, content_hash=report.content_hash,
             materialized_path=report.materialized_path,
         )
+        try:
+            plan = self._build_plan(definition, package, provenance, plugin_paths=plugin_paths, logger=logger)
+        except (CapabilityUnavailableError, InvalidDefinitionError):
+            raise
+        except ValueError as exc:
+            raise InvalidDefinitionError(str(exc)) from exc
+        target = Path(output).expanduser().resolve() if output else definition.base_dir / definition.output
+        if target.exists() and any(target.iterdir()):
+            raise ValueError("Adaptive planning requires a fresh output directory; create a fresh plan.")
+        write_adaptive_artifacts(target, plan)
+        return PlanOutcome(plan.workflow_id, self.kind, target, target / "adaptive-plan.json", len(plan.requests),
+                           f"Planned {len(plan.requests)} adaptive request(s) → {target / 'adaptive-plan.json'}")
 
+    def _build_plan(self, definition: AdaptiveExperiment, package, provenance: DatasetProvenance, *,
+                    plugin_paths: Sequence[Path], logger) -> AdaptivePlan:
         candidate_specs: list[CandidateSpec] = []
         for candidate_id, declaration in definition.candidates.items():
             model_id = declaration["model"]
@@ -90,6 +107,7 @@ class AdaptiveWorkflow:
             surface = parse_surface(dict(definition.surfaces[surface_id]))
             package.resolve_surface(surface)
             params = resolve_plan_params({**definition.execution_options, **dict(model.get("modelParams") or {})})
+            _check_strategy_capability(package, candidate_id, config["strategy"], surface, params)
             candidate_specs.append(CandidateSpec(
                 candidate_id=candidate_id, model_id=model_id, provider=model["provider"],
                 model_name=model["name"], model_params=params, configuration_id=config_id,
@@ -138,8 +156,7 @@ class AdaptiveWorkflow:
                 validation_config=dict(task.validation_config), context_blocks=tuple(task.context_blocks),
                 labels=dict(workload_item.labels),
             ))
-        mixed = definition.allow_mixed_models
-        plan = AdaptivePlan(
+        return AdaptivePlan(
             workflow_id=definition.id, seed=definition.seed, labels=dict(definition.labels),
             candidates=tuple(candidate_specs), requests=tuple(requests),
             workload_source={"kind": "explicit", "spec": {"requests": [
@@ -150,14 +167,9 @@ class AdaptiveWorkflow:
             acceptance={"minimumResponseLength": definition.acceptance.get("minimumResponseLength", 0)},
             signals=definition.signals, goals=definition.goals, disturbances=definition.disturbances,
             evaluation=definition.evaluation or {"enabled": False, "judges": []}, trace=definition.trace,
-            allow_mixed_models=mixed, dataset=provenance, resolved_definition=definition.resolved_definition,
+            allow_mixed_models=definition.allow_mixed_models, dataset=provenance,
+            resolved_definition=definition.resolved_definition,
         )
-        target = Path(output).expanduser().resolve() if output else definition.base_dir / definition.output
-        if target.exists() and any(target.iterdir()):
-            raise ValueError("Adaptive planning requires a fresh output directory; create a fresh plan.")
-        manifest = write_adaptive_artifacts(target, plan)
-        return PlanOutcome(plan.workflow_id, self.kind, target, target / "adaptive-plan.json", len(requests),
-                           f"Planned {len(requests)} adaptive request(s) → {target / 'adaptive-plan.json'}")
 
     def execute(self, root: Path, *, options: ExecuteOptions, logger=None) -> ExecuteOutcome:
         from ctxbench.ai.engine import Engine
@@ -232,10 +244,29 @@ class AdaptiveWorkflow:
                   for state in ("delivered", "failed", "started")}
         counts.update({"planned": len(plan.requests), "pending": len(plan.requests) - len(records)})
         counts["attempts"] = sum(len(row.get("attempts", [])) for row in records.values())
-        if by is not None and by not in {"task", "instance", "candidate"}:
-            raise StatusGroupingError("Adaptive status --by supports task, instance, or candidate.")
         lines = [f"Experiment : {manifest['experimentId']}", f"Directory  : {root}", "Workflow   : adaptive", "",
                  "Requests: " + ", ".join(f"{key}={value}" for key, value in counts.items())]
+        if by in {"task", "instance", "candidate"}:
+            groups: dict[str, dict[str, int]] = {}
+            for request in plan.requests:
+                record = records.get(request.request_id, {})
+                if by == "candidate":   # the candidate chosen by the request's decision, if any
+                    attempts = record.get("attempts") or [{}]
+                    value = (attempts[0].get("decision") or {}).get("candidateId")
+                else:
+                    value = getattr(request, f"{by}_id")
+                bucket = groups.setdefault(str(value or "<undecided>"),
+                                           {"total": 0, "delivered": 0, "failed": 0, "pending": 0})
+                state = record.get("state")
+                bucket["total"] += 1
+                bucket["delivered"] += state == "delivered"
+                bucket["failed"] += state == "failed"
+                bucket["pending"] += state not in _TERMINAL
+            lines.append(f"\n{by:<24} {'Total':>8} {'Delivered':>10} {'Failed':>8} {'Pending':>8}")
+            for label, row in sorted(groups.items()):
+                lines.append(f"{label:<24} {row['total']:>8} {row['delivered']:>10} {row['failed']:>8} {row['pending']:>8}")
+        elif by is not None:
+            raise StatusGroupingError("Adaptive status --by supports task, instance, or candidate.", lines)
         return RunStatus(plan.workflow_id, self.kind, root, counts, tuple(lines))
 
     def metric_tables(self, root: Path):
@@ -293,6 +324,8 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
         observations: list[dict[str, Any]] = []
         memo: Mapping[str, Any] | None = None
         counts = {"delivered": 0, "failed": 0, "started": 0}
+        session_started_at = utc_now_iso()
+        provider_invocations = replayed_executions = 0
         for request in plan.requests:
             record = records.get(request.request_id)
             interrupted = record is not None and record.get("state") == "started"
@@ -312,7 +345,7 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
             started = perf_counter()
             if attempt is None:
                 current_reference, policy = resolve_policy(
-                    plan.policy.ref, plan.policy.params, base_dir=root,
+                    plan.policy.ref, plan.policy.params,
                     plugin_paths=plugin_paths, sources=plan.policy.sources,
                 )
                 if current_reference.source_digest != plan.policy.source_digest:
@@ -361,6 +394,10 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
 
             outcome = service.execute(execution_request, session, invoke_with_acceptance,
                                       retry_uncertain=retry_uncertain)
+            if outcome.resumed:
+                replayed_executions += 1
+            else:
+                provider_invocations += 1
             result = outcome.result
             signals = result.get("_adaptiveSignals") or {}
             response = result.get("response")
@@ -387,9 +424,9 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
             counts[record["state"]] += 1
         lifecycle_path = root / "adaptive-lifecycle.json"
         lifecycle = load_json(lifecycle_path) if lifecycle_path.exists() else {"schemaVersion": 1, "sessions": []}
-        lifecycle["sessions"].append({"startedAt": utc_now_iso(), "finishedAt": utc_now_iso(),
-                                      "providerInvocations": counts["delivered"] + counts["failed"],
-                                      "replayedExecutions": 0})
+        lifecycle["sessions"].append({"startedAt": session_started_at, "finishedAt": utc_now_iso(),
+                                      "providerInvocations": provider_invocations,
+                                      "replayedExecutions": replayed_executions})
         write_json(lifecycle_path, lifecycle)
         from ctxbench.adaptive.projections import rebuild_adaptive_responses
         rebuild_adaptive_responses(root, service=service)
@@ -468,6 +505,28 @@ def _validate_policy_targets(ref: str, params: Mapping[str, Any], candidate_ids:
     unknown = set(named) - candidate_ids
     if unknown:
         raise ValueError(f"Policy references unknown candidates: {', '.join(sorted(unknown))}")
+
+
+def _check_strategy_capability(package, candidate_id: str, strategy: str, surface, params: Mapping[str, Any]) -> None:
+    """Fail at planning when the dataset cannot serve a candidate's strategy.
+
+    This mirrors what the provisioning runtime requires at execution, so an unsupported
+    candidate is refused before any request is attempted.
+    """
+    needs = {"local_function": "tool_provider", "local_mcp": "mcp_server"}.get(strategy)
+    if needs is not None:
+        method = getattr(package, needs, None)
+        value = None
+        if method is not None:
+            operations = surface.model_dump(mode="json").get("operations")
+            kwargs = {"allowed_operations": operations} if "allowed_operations" in signature(method).parameters else {}
+            value = method(**kwargs)
+        if value is None:
+            raise CapabilityUnavailableError(
+                f"Candidate {candidate_id} uses {strategy}, but the dataset provides no {needs} capability")
+    elif strategy == "remote_mcp" and not isinstance(params.get("mcp_server"), dict):
+        raise CapabilityUnavailableError(
+            f"Candidate {candidate_id} uses remote_mcp, which requires execution MCP server settings")
 
 
 @contextmanager

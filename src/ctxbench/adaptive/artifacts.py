@@ -178,7 +178,7 @@ def validate_workflow_manifest(root: str | Path, *, execution: bool = False,
     verify_snapshot(artifact_root, manifest, execution=execution)
     if execution:
         from ctxbench.adaptive.policy import verify_policy
-        verify_policy(plan.policy, base_dir=artifact_root, plugin_paths=plugin_paths)
+        verify_policy(plan.policy, plugin_paths=plugin_paths)
     return manifest
 
 

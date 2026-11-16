@@ -129,6 +129,13 @@ class WorkflowRegistry:
             raise ValueError(f"{KIND_FIELD} must be a string")
         return self.get(kind)
 
+    def for_object(self, definition: Any) -> Workflow:
+        """Workflow of a definition object, matched against each workflow's ``definition_types``."""
+        for workflow in self._workflows.values():
+            if isinstance(definition, tuple(getattr(workflow, "definition_types", ()))):
+                return workflow
+        raise ValueError(f"unsupported definition object: {type(definition).__name__}")
+
     def for_run(self, root: str | Path) -> Workflow:
         """Workflow of a run directory. A missing manifest is reported by the default workflow."""
         manifest_path = Path(root) / "manifest.json"

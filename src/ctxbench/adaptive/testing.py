@@ -32,7 +32,7 @@ def verify_replay(root: str | Path, *, plugin_paths: Sequence[str | Path] = ()) 
                                 "actual": "missing decision"})
             continue
         reference, policy = resolve_policy(
-            plan.policy.ref, plan.policy.params, base_dir=artifact_root,
+            plan.policy.ref, plan.policy.params,
             plugin_paths=plugin_paths, sources=plan.policy.sources,
         )
         if (reference.policy_id, reference.version, reference.source_digest) != (

@@ -45,7 +45,7 @@ class AdaptiveExperiment:
     evaluation: Mapping[str, Any] = field(default_factory=dict)
     trace: Mapping[str, Any] = field(default_factory=dict)
     allow_mixed_models: bool = False
-    base_dir: Path = Path.cwd()
+    base_dir: Path = field(default_factory=Path.cwd)
     resolved_definition: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -153,7 +153,48 @@ def adaptive_definition_schema() -> dict[str, Any]:
     }
 
 
-def load_adaptive_experiment(source: str | Path | Mapping[str, Any], *, base_dir: str | Path | None = None) -> AdaptiveExperiment:
+def experiment_definition(experiment: AdaptiveExperiment) -> dict[str, Any]:
+    """Return the v4 definition mapping that describes an experiment object."""
+    def plain(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return {str(key): plain(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [plain(item) for item in value]
+        return value
+
+    requests = []
+    for row in experiment.workload:
+        item: dict[str, Any] = {"taskId": row.task_id, "instanceId": row.instance_id}
+        if row.request_id is not None:
+            item["requestId"] = row.request_id
+        if row.labels:
+            item["labels"] = plain(row.labels)
+        requests.append(item)
+    return {
+        "workflowKind": "adaptive", "schemaVersion": ADAPTIVE_DEFINITION_VERSION,
+        "id": experiment.id, "output": experiment.output, "seed": experiment.seed,
+        "labels": plain(experiment.labels), "allowMixedModels": experiment.allow_mixed_models,
+        "dataset": plain(experiment.dataset), "models": plain(experiment.models),
+        "surfaces": plain(experiment.surfaces), "configurations": plain(experiment.configurations),
+        "candidates": plain(experiment.candidates), "taskParams": plain(experiment.task_params),
+        "execution": {"options": plain(experiment.execution_options)},
+        "workload": {"requests": requests}, "policy": plain(experiment.policy),
+        "window": plain(experiment.window), "signals": plain(experiment.signals),
+        "acceptance": plain(experiment.acceptance), "goals": plain(experiment.goals),
+        "disturbances": plain(experiment.disturbances), "evaluation": plain(experiment.evaluation),
+        "trace": plain(experiment.trace),
+    }
+
+
+def load_adaptive_experiment(source: str | Path | Mapping[str, Any] | AdaptiveExperiment, *,
+                             base_dir: str | Path | None = None) -> AdaptiveExperiment:
+    """Parse and validate a definition file, mapping, or experiment object.
+
+    An experiment object is validated through the same schema as a file: its fields are the
+    authority, so one built or modified in a script is planned exactly as written.
+    """
+    if isinstance(source, AdaptiveExperiment):
+        return load_adaptive_experiment(experiment_definition(source), base_dir=base_dir or source.base_dir)
     if isinstance(source, Mapping):
         actual_base = Path(base_dir or Path.cwd()).resolve()
         resolved = resolve_definition_data(dict(source), base_dir=actual_base)
@@ -190,4 +231,4 @@ def load_adaptive_experiment(source: str | Path | Mapping[str, Any], *, base_dir
 
 
 __all__ = ["ADAPTIVE_DEFINITION_VERSION", "AdaptiveExperiment", "WorkloadRequest",
-           "adaptive_definition_schema", "load_adaptive_experiment"]
+           "adaptive_definition_schema", "experiment_definition", "load_adaptive_experiment"]
