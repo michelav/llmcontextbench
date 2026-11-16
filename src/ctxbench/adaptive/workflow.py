@@ -8,12 +8,16 @@ from math import isfinite
 from pathlib import Path
 import re
 from time import perf_counter
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from ctxbench.dataset.capabilities import RequestFeatureSchema, SignalCapability
 from ctxbench.execution.service import ExecutionRequest, ExecutionSession, TrialExecutionService
 from ctxbench.util.clock import utc_now_iso
 from ctxbench.util.fs import load_json, write_json
+from ctxbench.core.workflow import (
+    ExecuteOptions, ExecuteOutcome, MetricsOptions, MetricsOutcome, PlanOutcome, RunStatus,
+    StatusGroupingError,
+)
 
 from .calibration_contract import CalibrationArtifact
 from .estimator import Estimator, EstimatorDefinition, FeaturePartitionKey, RollingWindowEstimator
@@ -38,6 +42,289 @@ from .types import (
 
 ADAPTIVE_PLAN_VERSION = 3
 ADAPTIVE_RECORD_VERSION = 2
+
+
+@dataclass(frozen=True, slots=True)
+class AdaptiveDefinition:
+    """A validated adaptive definition plus the location that relative paths resolve against."""
+    header: Mapping[str, Any]
+    plan: "AdaptivePlan"
+    base_dir: Path
+
+
+_REQUEST_STATES = ("delivered", "failed", "rejected", "started")
+_TERMINAL_STATES = {"delivered", "failed", "rejected"}
+
+
+class AdaptiveWorkflow:
+    """Adaptive workflow: freeze a request workload, run the decision loop, report on it."""
+
+    kind = "adaptive"
+
+    # ---- definition and planning -------------------------------------------------------
+
+    def load_definition(self, source, *, logger=None) -> AdaptiveDefinition:
+        from ctxbench.adaptive.artifacts import validate_adaptive_definition
+        if isinstance(source, Mapping):
+            header, base_dir = dict(source), Path.cwd().resolve()
+        else:
+            path = Path(source).resolve()
+            header, base_dir = load_json(path), path.parent
+        return AdaptiveDefinition(header, validate_adaptive_definition(header), base_dir)
+
+    def plan(self, definition: AdaptiveDefinition, *, output: Path | None, cache_dir: Path | None = None,
+             plugin_paths: Sequence[Path] = (), logger=None, progress: bool = False) -> PlanOutcome:
+        from ctxbench.adaptive.artifacts import write_adaptive_artifacts
+        header, plan = definition.header, definition.plan
+        target = Path(output).resolve() if output else definition.base_dir / str(header.get("output", "outputs"))
+        dataset_metadata = header.get("dataset")
+        evaluation = header.get("evaluation")
+        trace = header.get("trace")
+        if target.exists() and any(target.iterdir()):
+            raise ValueError("Adaptive planning requires a fresh output directory; existing plans are never migrated.")
+        dataset = dataset_metadata if isinstance(dataset_metadata, dict) else {
+            "id": plan.dataset_id or "unknown", "version": plan.dataset_version or "unknown",
+            "origin": None, "materializedPath": None,
+        }
+        if ((plan.dataset_id and dataset.get("id") != plan.dataset_id)
+                or (plan.dataset_version and dataset.get("version") != plan.dataset_version)):
+            raise ValueError("Adaptive definition dataset differs from its frozen plan provenance.")
+        write_adaptive_artifacts(target, plan, dataset=dataset, evaluation=evaluation, trace=trace)
+        plan_path = target / "adaptive-plan.json"
+        return PlanOutcome(plan.workflow_id, self.kind, target, plan_path, len(plan.requests),
+                           f"Planned {len(plan.requests)} adaptive request(s) → {plan_path}")
+
+    # ---- execution ---------------------------------------------------------------------
+
+    def execute(self, root: Path, *, options: ExecuteOptions, logger=None) -> ExecuteOutcome:
+        from dataclasses import replace
+
+        from ctxbench.adaptive.artifacts import adaptive_plan_from_payload, validate_workflow_manifest
+        from ctxbench.adaptive.runtime_adapter import invoke_adaptive_execution, resolve_adaptive_dataset
+        from ctxbench.ai.engine import Engine
+        from ctxbench.util.logging import PhaseLogger
+
+        root = Path(root)
+        manifest = validate_workflow_manifest(root)
+        if options.force:
+            raise ValueError("--force is not supported for adaptive workflows; create a fresh plan and output directory.")
+        selector = options.selector
+        if selector is not None and any(getattr(selector, name) for name in selector.__dataclass_fields__):
+            raise ValueError("Selectors cannot filter an adaptive workload because decisions require its frozen order.")
+        plan = adaptive_plan_from_payload(load_json(root / "adaptive-plan.json"))
+        dataset_metadata = manifest.get("dataset")
+        if not isinstance(dataset_metadata, dict):
+            raise ValueError("Adaptive manifest requires dataset provenance.")
+        dataset = resolve_adaptive_dataset(dataset_metadata)
+        logger = logger or PhaseLogger()
+        service = TrialExecutionService(root)
+        engine = Engine(event_logger=lambda event, message, fields: logger.event(
+            str(fields.pop("level", "INFO")), str(fields.pop("phase", "EXECUTE")), event, message, **fields
+        ))
+
+        def invoke(request, session):
+            payload = request.payload
+            if not isinstance(payload, dict):
+                raise ValueError("adaptive execution payload must be an object")
+            metadata = dict(payload.get("resultMetadata") or {})
+            metadata.setdefault("dataset", dataset_metadata)
+            metadata.setdefault("experimentId", manifest.get("experimentId", plan.workflow_id))
+            metadata.setdefault("configurationId", request.candidate_id)
+            invocation = replace(request, payload={**payload, "resultMetadata": metadata})
+            return invoke_adaptive_execution(
+                invocation, session, dataset=dataset,
+                trace_options=dict(payload.get("traceOptions") or manifest.get("trace") or {}),
+            )
+
+        with ExecutionSession(engine) as session:
+            outcome = run_adaptive_workflow(
+                plan, root=root, service=service, session=session, invoke=invoke,
+                retry_uncertain=options.retry_uncertain,
+            )
+        return ExecuteOutcome(
+            str(manifest.get("experimentId", plan.workflow_id)), self.kind,
+            {"delivered": outcome.delivered, "rejected": outcome.rejected, "failed": outcome.failed},
+            f"Adaptive requests: {outcome.delivered} delivered, "
+            f"{outcome.rejected} rejected, {outcome.failed} failed.",
+        )
+
+    # ---- responses, status, metrics ----------------------------------------------------
+
+    def prepare_responses(self, root: Path) -> Mapping[str, Any]:
+        """Validate the run and refresh its delivered-response projection; returns the manifest."""
+        from ctxbench.adaptive.artifacts import validate_workflow_manifest
+        from ctxbench.adaptive.projections import rebuild_adaptive_responses
+        manifest = validate_workflow_manifest(root)
+        rebuild_adaptive_responses(root)
+        return manifest
+
+    def responses(self, root: Path):
+        from ctxbench.util.jsonl import read_jsonl
+        yield from read_jsonl(Path(root) / "responses.jsonl")
+
+    def requests(self, root: Path):
+        """Request records in planned order; a request not started yet has state ``pending``."""
+        records = _request_records(Path(root))
+        for request in self._plan(root).requests:
+            yield records.get(request.request_id) or {
+                "requestId": request.request_id, "sequenceIndex": request.sequence_index,
+                "taskId": request.task_id, "instanceId": request.instance_id, "state": "pending",
+            }
+
+    def attempts(self, root: Path):
+        service = TrialExecutionService(Path(root))
+        for request in self._plan(root).requests:
+            for invocation in request.candidates.values():
+                yield from service.attempts(invocation.execution.execution_id)
+
+    def status(self, root: Path, *, by: str | None = None) -> RunStatus:
+        from ctxbench.adaptive.artifacts import validate_workflow_manifest
+        from ctxbench.adaptive.projections import rebuild_adaptive_responses
+        from ctxbench.util.status_tables import judge_breakdown_lines, last_status_map, tally
+
+        root = Path(root)
+        manifest = validate_workflow_manifest(root)
+        plan = self._plan(root)
+        rebuild_adaptive_responses(root)
+        records_path = root / "adaptive-records"
+        records = [load_json(path) for path in sorted(records_path.glob("*.json"))] if records_path.exists() else []
+        by_request = {str(row["requestId"]): row for row in records}
+        if len(by_request) != len(records):
+            raise ValueError("Adaptive request ledger contains duplicate request IDs.")
+        planned_requests = {request.request_id: request for request in plan.requests}
+        unknown_requests = set(by_request) - set(planned_requests)
+        if unknown_requests:
+            raise ValueError(f"Adaptive ledger contains request IDs outside its plan: {', '.join(sorted(unknown_requests))}")
+        if any(row.get("state") not in _TERMINAL_STATES | {"started"} for row in records):
+            raise ValueError("Adaptive request ledger contains an unsupported state.")
+        for request_id, record in by_request.items():
+            request = planned_requests[request_id]
+            if (record.get("sequenceIndex") != request.sequence_index
+                    or record.get("taskId") != request.task_id
+                    or record.get("instanceId") != request.instance_id):
+                raise ValueError(f"Adaptive ledger identity differs from frozen request {request_id}.")
+        state_counts = {state: sum(row.get("state") == state for row in records) for state in _REQUEST_STATES}
+        response_count = state_counts["delivered"]
+        eval_tally = tally(last_status_map(root / "evals.jsonl"))
+        eval_done = eval_tally.get("evaluated", 0)
+        eval_error = eval_tally.get("error", 0)
+        service = TrialExecutionService(root)
+        execution_ids = {
+            invocation.execution.execution_id
+            for request in plan.requests
+            for invocation in request.candidates.values()
+        }
+        attempts_by_execution = {execution_id: service.attempts(execution_id) for execution_id in execution_ids}
+        attempt_records = [row for rows in attempts_by_execution.values() for row in rows]
+        uncertain = sum(bool(rows) and rows[-1].get("state") == "started" for rows in attempts_by_execution.values())
+        planned = len(plan.requests)
+        pending = max(0, planned - len(records))
+        experiment_id = str(manifest.get("experimentId", plan.workflow_id))
+
+        col = (12, 8, 10, 8, 10, 8, 8)
+        header = (f"{'Phase':<{col[0]}} {'Total':>{col[1]}} {'Delivered':>{col[2]}} "
+                  f"{'Failed':>{col[3]}} {'Rejected':>{col[4]}} {'Started':>{col[5]}} {'Pending':>{col[6]}}")
+        delivered_attempts = sum(
+            row.get("attemptId") == ((by_request.get(str(row.get("correlationId")), {}).get("delivery") or {}).get("attemptId"))
+            for row in attempt_records
+        )
+        lines = [
+            f"Experiment : {experiment_id}",
+            f"Directory  : {root}",
+            "Workflow   : adaptive",
+            "",
+            header,
+            "─" * len(header),
+            f"{'requests':<{col[0]}} {planned:>{col[1]}} {state_counts['delivered']:>{col[2]}} "
+            f"{state_counts['failed']:>{col[3]}} {state_counts['rejected']:>{col[4]}} "
+            f"{state_counts['started']:>{col[5]}} {pending:>{col[6]}}",
+            f"{'attempts':<{col[0]}} {len(attempt_records):>{col[1]}} {delivered_attempts:>{col[2]}} "
+            f"{sum(row.get('state') == 'failed' for row in attempt_records):>{col[3]}} {0:>{col[4]}} "
+            f"{uncertain:>{col[5]}} {0:>{col[6]}}",
+            f"{'eval':<{col[0]}} {response_count:>{col[1]}} {eval_done:>{col[2]}} "
+            f"{eval_error:>{col[3]}} {0:>{col[4]}} {0:>{col[5]}} "
+            f"{max(0, response_count - eval_done - eval_error):>{col[6]}}",
+        ]
+        if by == "judge":
+            lines.extend(judge_breakdown_lines(root, response_count))
+        elif by in {"task", "instance", "candidate"}:
+            counts: dict[str, dict[str, int]] = {}
+            for request in plan.requests:
+                record = by_request.get(request.request_id, {})
+                value = (record.get("delivery") or {}).get("candidateId") if by == "candidate" else getattr(request, f"{by}_id")
+                label = str(value or "<unassigned>")
+                bucket = counts.setdefault(label, {"total": 0, "delivered": 0, "failed": 0, "pending": 0})
+                bucket["total"] += 1
+                state = record.get("state")
+                bucket["delivered"] += state == "delivered"
+                bucket["failed"] += state in {"failed", "rejected"}
+                bucket["pending"] += state not in _TERMINAL_STATES
+            lines.append(f"\n{by:<24} {'Total':>8} {'Delivered':>10} {'Failed':>8} {'Pending':>8}")
+            for label, row in sorted(counts.items()):
+                lines.append(f"{label:<24} {row['total']:>8} {row['delivered']:>10} {row['failed']:>8} {row['pending']:>8}")
+        elif by is not None:
+            raise StatusGroupingError("Adaptive status --by supports task, instance, candidate, or judge.", lines)
+        result_counts = {"planned": planned, **state_counts, "pending": pending,
+                         "attempts": len(attempt_records), "uncertainAttempts": uncertain,
+                         "evaluated": eval_done, "evaluationFailed": eval_error}
+        return RunStatus(experiment_id, self.kind, root, result_counts, tuple(lines))
+
+    def metric_tables(self, root: Path):
+        from ctxbench.metrics.adaptive import build_adaptive_metrics
+        requests, attempts = build_adaptive_metrics(root)
+        return {"requests": requests, "attempts": attempts}
+
+    def write_metrics(self, roots: Sequence[str], *, options: MetricsOptions, logger=None) -> MetricsOutcome:
+        from ctxbench.adaptive.artifacts import validate_workflow_manifest
+        from ctxbench.metrics.adaptive import build_adaptive_metrics, write_adaptive_metrics
+
+        if len(roots) != 1:
+            raise ValueError("Adaptive metrics accept exactly one run directory.")
+        source = roots[0]
+        output_dir = options.output_dir
+        selector = options.selector
+        validate_workflow_manifest(source)
+        if selector and (selector.configuration or selector.strategy or selector.representation or selector.surface or selector.repetition):
+            raise ValueError("Adaptive metrics selectors support task, instance, status, and request ID only.")
+        requests, attempts = build_adaptive_metrics(source)
+        if selector:
+            requests = [row for row in requests if
+                        (not selector.task or row.get("taskId") in selector.task) and
+                        (not selector.instance or row.get("instanceId") in selector.instance) and
+                        (not selector.status or ("delivered" if row.get("delivered") else row.get("state")) in selector.status) and
+                        (not selector.trial_id or row.get("requestId") in selector.trial_id)]
+            selected = {row["requestId"] for row in requests}
+            attempts = [row for row in attempts if row.get("requestId") in selected]
+        if output_dir.exists() and any(output_dir.iterdir()):
+            if not options.force:
+                raise ValueError(f"Output directory exists and is non-empty: {output_dir}. Use --force to replace it.")
+            import shutil
+            shutil.rmtree(output_dir)
+        write_adaptive_metrics(output_dir, requests, attempts)
+        request_states = {state: sum(row.get("state") == state for row in requests)
+                          for state in ("delivered", "failed", "rejected", "started")}
+        write_json(output_dir / "metrics-manifest.json", {
+            "schemaVersion": "3.0-adaptive",
+            "workflowKind": self.kind,
+            "inputDirectory": str(Path(source).expanduser()),
+            "requestCount": len(requests),
+            "attemptCount": len(attempts),
+            "requestStates": request_states,
+            "outputs": ["adaptive_request_metrics.csv", "adaptive_attempt_metrics.csv"],
+        })
+        return MetricsOutcome(self.kind, output_dir, {"requests": len(requests), "attempts": len(attempts)},
+                              f"Wrote adaptive metrics to {output_dir}")
+
+    def _plan(self, root: Path) -> "AdaptivePlan":
+        from ctxbench.adaptive.artifacts import adaptive_plan_from_payload
+        return adaptive_plan_from_payload(load_json(Path(root) / "adaptive-plan.json"))
+
+
+def _request_records(root: Path) -> dict[str, dict[str, Any]]:
+    records_path = root / "adaptive-records"
+    if not records_path.exists():
+        return {}
+    return {str(row["requestId"]): row for row in (load_json(path) for path in sorted(records_path.glob("*.json")))}
 
 
 @dataclass(frozen=True, slots=True)

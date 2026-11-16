@@ -68,3 +68,46 @@ def test_import_boundary_dataset_provider_does_not_import_lattes_adapter() -> No
         module == "ctxbench.adapters.lattes" or module.startswith("ctxbench.adapters.lattes.")
         for module in imports
     )
+
+
+def _imports_any(package_or_file: str, prefixes: tuple[str, ...]) -> list[str]:
+    target = SRC_ROOT / package_or_file
+    files = [target] if target.is_file() else sorted(target.rglob("*.py"))
+    return [
+        f"{path.relative_to(SRC_ROOT)} imports {prefix}"
+        for path in files
+        for prefix in prefixes
+        if _has_import_with_prefix(path, prefix)
+    ]
+
+
+def test_import_boundary_api_does_not_import_commands_or_cli() -> None:
+    assert _imports_any("api", ("ctxbench.commands", "ctxbench.cli")) == []
+
+
+def test_import_boundary_workflows_do_not_import_commands_or_api() -> None:
+    prefixes = ("ctxbench.commands", "ctxbench.cli", "ctxbench.api")
+    assert _imports_any("adaptive", prefixes) + _imports_any("benchmark", prefixes) == []
+
+
+def test_import_boundary_phases_do_not_import_commands_or_api() -> None:
+    assert _imports_any("phases", ("ctxbench.commands", "ctxbench.cli", "ctxbench.api")) == []
+
+
+def test_import_boundary_core_workflow_does_not_import_workflows_or_api() -> None:
+    prefixes = ("ctxbench.adaptive", "ctxbench.benchmark", "ctxbench.api", "ctxbench.commands",
+                "ctxbench.runtime", "ctxbench.execution", "ctxbench.ai")
+    assert _imports_any("core/workflow.py", prefixes) == []
+
+
+def test_workflow_kind_is_resolved_only_by_the_registry() -> None:
+    """Commands and the public API must not branch on, or name, a workflow kind."""
+    offenders = []
+    files = _python_files("commands")
+    files += _python_files("api")
+    for path in files:
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and node.value in {"workflowKind", "adaptive", "benchmark"}:
+                offenders.append(f"{path.relative_to(SRC_ROOT)}:{node.lineno} {node.value!r}")
+    assert offenders == []

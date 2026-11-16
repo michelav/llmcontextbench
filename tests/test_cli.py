@@ -961,7 +961,7 @@ def test_eval_batch_custom_id_matches_anthropic_constraints(tmp_path, monkeypatc
     trials_path = _plan_to_root(experiment_path, tmp_path / "expanded")
     responses_path = _execute_trials(trials_path)
 
-    from ctxbench.commands import eval as eval_module
+    from ctxbench.phases import evaluation as eval_module
 
     custom_ids: list[str] = []
 
@@ -999,7 +999,7 @@ def test_eval_batch_wait_persists_results(tmp_path, monkeypatch):
 
     from ctxbench.benchmark.evaluation import evaluation_from_judge_payload
     from ctxbench.benchmark.models import EvaluationJudgeInfo, EvaluationTrace
-    from ctxbench.commands import eval as eval_module
+    from ctxbench.phases import evaluation as eval_module
 
     def fake_submit_evaluation_batch(**kwargs):
         return {
