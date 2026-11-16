@@ -22,7 +22,8 @@ def resolve_adaptive_dataset(dataset: dict[str, Any]):
         raise
 
 
-def invoke_adaptive_execution(execution_request, session, *, dataset, trace_options: dict[str, Any]):
+def invoke_adaptive_execution(execution_request, session, *, dataset, trace_options: dict[str, Any],
+                              runtime_interceptors=None):
     payload = execution_request.payload
     if not isinstance(payload, dict):
         raise ValueError("adaptive execution payload must be an object")
@@ -31,7 +32,8 @@ def invoke_adaptive_execution(execution_request, session, *, dataset, trace_opti
     if not isinstance(runtime_payload, dict) or not isinstance(result_metadata, dict):
         raise ValueError("adaptive execution payload requires runtimeRequest and resultMetadata objects")
     runtime_request = _runtime_request(runtime_payload, execution_request, result_metadata)
-    execution = ProvisioningRuntime(session.resource, dataset).execute(runtime_request)
+    execution = ProvisioningRuntime(session.resource, dataset,
+                                   runtime_interceptors=runtime_interceptors).execute(runtime_request)
     ai_result = execution.ai_result
     answer = ai_result.answer or ""
     status = "error" if ai_result.error or not answer.strip() else "success"

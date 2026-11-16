@@ -35,7 +35,7 @@ class Engine:
         self._rate_control_registry = RateControlRegistry()
         self._event_logger = event_logger
 
-    def execute(self, request: AIRequest) -> AIResult:
+    def execute(self, request: AIRequest, *, model_interceptor: Callable | None = None) -> AIResult:
         trace = TraceCollector()
         trace.metrics.contextChars = len(request.context)
         trace.metrics.contextBytes = len(request.context.encode("utf-8"))
@@ -45,6 +45,8 @@ class Engine:
         try:
             with trace.span("engine.execute", "engine.execute"):
                 model = self._resolve_model(request.provider_name, request.model_name, request.params)
+                if model_interceptor is not None:
+                    model = model_interceptor(model)
                 self._validate_capabilities(model, request.strategy_name)
                 strategy, owned_runtime = self._resolve_strategy(request.strategy_name)
                 result = strategy.execute(model, request, trace)
@@ -67,7 +69,8 @@ class Engine:
         result.trace = trace.to_trace().model_dump(mode="json")
         return result
 
-    def execute_model_input(self, request: AIRequest, model_input: ModelInput) -> AIResult:
+    def execute_model_input(self, request: AIRequest, model_input: ModelInput, *,
+                            model_interceptor: Callable | None = None) -> AIResult:
         trace = TraceCollector()
         trace.metrics.contextChars = len(request.context)
         trace.metrics.contextBytes = len(request.context.encode("utf-8"))
@@ -77,6 +80,8 @@ class Engine:
         try:
             with trace.span("engine.execute_model_input", "engine.execute_model_input"):
                 model = self._resolve_model(request.provider_name, request.model_name, request.params)
+                if model_interceptor is not None:
+                    model = model_interceptor(model)
                 self._validate_capabilities(model, request.strategy_name)
                 with provider_call(request.provider_name, model):
                     model_response = model.generate(model_input, request, trace=trace)

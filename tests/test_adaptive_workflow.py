@@ -143,6 +143,42 @@ def test_failed_delivery_keeps_one_attempt_and_does_not_fallback(tmp_path: Path)
     assert list(run.responses()) == []
 
 
+def test_disturbance_failure_is_fingerprinted_and_persisted_on_attempt(tmp_path: Path) -> None:
+    definition = _definition()
+    definition["disturbances"] = [{
+        "name": "model-outage", "version": "1", "component": "model", "kind": "failure",
+        "failureRate": 1, "firstSequence": 1, "seed": 7, "candidates": ["A"],
+    }]
+    run = plan(definition, output=tmp_path / "disturbed")
+    planned = load_json(run.root / "adaptive-plan.json")
+    assert planned["disturbances"] == definition["disturbances"]
+    assert run.execute().counts["failed"] == 1
+    record = load_json(run.root / "adaptive-records" / "r-0001.json")
+    attempt = record["attempts"][0]
+    assert attempt["observation"]["failureCategory"] == "injected_disturbance"
+    assert attempt["disturbances"] == [{
+        "name": "model-outage", "version": "1", "appliedDelayMs": 0, "injectedFailures": 1,
+    }]
+    saved_attempt = TrialExecutionService(run.root).attempts("r-0001")[0]
+    assert saved_attempt["result"]["_adaptiveSignals"]["disturbances"] == attempt["disturbances"]
+
+    changed = json.loads(json.dumps(definition))
+    changed["disturbances"][0]["seed"] = 8
+    other = plan(changed, output=tmp_path / "different-seed")
+    assert load_json(other.root / "manifest.json")["executionFingerprint"] != \
+        load_json(run.root / "manifest.json")["executionFingerprint"]
+
+
+def test_disturbance_rejects_unknown_candidate_at_planning(tmp_path: Path) -> None:
+    definition = _definition()
+    definition["disturbances"] = [{
+        "name": "model-outage", "version": "1", "component": "model", "kind": "failure",
+        "failureRate": 1, "firstSequence": 1, "seed": 7, "candidates": ["missing"],
+    }]
+    with pytest.raises(DefinitionError, match="Unknown candidate.*disturbance"):
+        plan(definition, output=tmp_path / "invalid-disturbance")
+
+
 def test_resume_reuses_persisted_decision_without_calling_policy_again(tmp_path: Path, monkeypatch) -> None:
     import ctxbench.adaptive.workflow as adaptive_workflow
 

@@ -23,7 +23,7 @@ class ProvisioningRuntime:
         self._engine = engine
         self._context_source = context_source
         self._interceptors = dict(runtime_interceptors or {})
-        unknown_components = set(self._interceptors) - {"local_function", "local_mcp", "remote_mcp"}
+        unknown_components = set(self._interceptors) - {"local_function", "local_mcp", "remote_mcp", "model"}
         if unknown_components:
             raise ValueError(f"Unknown runtime interceptor components: {', '.join(sorted(unknown_components))}")
         if any(not callable(interceptor) for interceptor in self._interceptors.values()):
@@ -83,7 +83,11 @@ class ProvisioningRuntime:
                                params=params, metadata=metadata)
         owned = self._engine.copy_with_tool_runtime_factories(factories) if factories else None
         try:
-            result = (owned or self._engine).execute(ai_request)
+            model_interceptor = self._interceptors.get("model")
+            if model_interceptor is None:
+                result = (owned or self._engine).execute(ai_request)
+            else:
+                result = (owned or self._engine).execute(ai_request, model_interceptor=model_interceptor)
         finally:
             if owned is not None:
                 owned.close()

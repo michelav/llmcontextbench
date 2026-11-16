@@ -23,7 +23,8 @@ from ctxbench.dataset.capabilities import (
 )
 from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.runtime.disturbances import (
-    DisturbanceKind, DisturbanceSpec, RuntimeComponent, ToolRuntimeDisturbance,
+    DisturbanceKind, DisturbanceSpec, ModelRuntimeDisturbance, RuntimeComponent,
+    ToolRuntimeDisturbance, build_runtime_disturbances,
 )
 from ctxbench.runtime.models import RuntimeRequest
 from ctxbench.runtime.runtime import ProvisioningRuntime
@@ -214,3 +215,101 @@ def test_runtime_applies_an_interceptor_only_to_its_declared_component(monkeypat
     execute("remote_mcp", {"mcp_server": {"command": "fixture"}})
     execute("inline")
     assert seen == [False, True, False]
+
+
+def test_model_disturbance_runs_per_call_and_reports_applied_effects():
+    from ctxbench.ai.models.base import AIRequest, ModelInput, ModelResponse
+
+    class Model:
+        params = {}
+        supports_tool_calling = False
+        def failure_category(self, _exc): return None
+        def generate(self, model_input, request, trace=None):
+            return ModelResponse(text="ok")
+
+    waits = []
+    spec = DisturbanceSpec("model-delay", "1", RuntimeComponent.MODEL,
+                           DisturbanceKind.DELAY, 1, 1, 9, delay_ms=12)
+    decorator = spec.decorator(component="model", sequence=1, candidate_id="A", sleeper=waits.append)
+    wrapped = decorator(Model())
+    response = wrapped.generate(ModelInput(prompt="prompt"), AIRequest(
+        question="q", context="", provider_name="mock", model_name="mock", strategy_name="inline",
+        context_representation="json"))
+    assert response.text == "ok"
+    assert waits == [0.012]
+    assert wrapped.effect_record("model-delay", "1") == {
+        "name": "model-delay", "version": "1", "appliedDelayMs": 12, "injectedFailures": 0,
+    }
+
+
+def test_model_disturbance_failure_is_tagged_at_injection_site():
+    from ctxbench.ai.failures import failure_category
+    from ctxbench.ai.models.base import AIRequest, ModelInput
+
+    class Model:
+        params = {}
+        supports_tool_calling = False
+        def failure_category(self, _exc): return None
+        def generate(self, *_args, **_kwargs): pytest.fail("injected failure should stop before provider call")
+
+    spec = DisturbanceSpec("model-failure", "1", RuntimeComponent.MODEL,
+                           DisturbanceKind.FAILURE, 1, None, 9, failure_rate=1)
+    wrapped = spec.decorator(component="model", sequence=1, candidate_id="A")(Model())
+    with pytest.raises(RuntimeError) as error:
+        wrapped.generate(ModelInput(prompt="prompt"), AIRequest(
+            question="q", context="", provider_name="mock", model_name="mock", strategy_name="inline",
+            context_representation="json"))
+    assert failure_category(error.value) == "injected_disturbance"
+    assert wrapped.effect_record("model-failure", "1")["injectedFailures"] == 1
+
+
+def test_model_disturbance_delay_is_in_measured_runtime_and_reported_separately():
+    from ctxbench.ai.engine import Engine
+    from ctxbench.runtime.disturbances import build_runtime_disturbances
+
+    clock = [0.0]
+    definition = {"name": "model-slowdown", "version": "1", "component": "model", "kind": "delay",
+                  "delayMs": 25, "firstSequence": 1, "seed": 1}
+    interceptors, effects = build_runtime_disturbances(
+        [definition], component_sequence=1, candidate_id="A",
+        sleeper=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
+    source = type("Source", (), {
+        "get_context": lambda self, *_args: type("Payload", (), {"content": "context"})(),
+        "dataset_instructions": lambda self: None,
+    })()
+    request = RuntimeRequest(
+        task="task", task_id="task-1", instance_id="instance-1", provider="mock", model_name="mock",
+        configuration=ProvisioningConfiguration(strategy="inline", representation="json", surface="full"),
+        surface_spec={}, params={},
+    )
+    execution = ProvisioningRuntime(Engine(), source, runtime_interceptors=interceptors,
+                                   monotonic=lambda: clock[0]).execute(request)
+    assert execution.duration_ms == 25
+    assert effects() == [{"name": "model-slowdown", "version": "1", "appliedDelayMs": 25,
+                          "injectedFailures": 0}]
+
+
+def test_disturbance_interceptors_are_candidate_sequence_scoped_and_reproducible():
+    definition = {"name": "delay", "version": "1", "component": "model", "kind": "delay",
+                  "delayMs": 5, "firstSequence": 2, "lastSequence": 3, "seed": 4,
+                  "candidates": ["A"]}
+    waits = []
+    interceptors, effects = build_runtime_disturbances(
+        [definition], component_sequence=2, candidate_id="A", sleeper=waits.append)
+    assert set(interceptors) == {"model"}
+    wrapped = interceptors["model"](type("Model", (), {"generate": lambda self, *args, **kwargs: None})())
+    assert effects() == [{"name": "delay", "version": "1", "appliedDelayMs": 0, "injectedFailures": 0}]
+    # A second construction with the same seed and scope makes the same seeded failure decision.
+    failure = {**definition, "kind": "failure", "delayMs": 0, "failureRate": 0.5}
+    decisions = []
+    for _ in range(2):
+        factories, _ = build_runtime_disturbances([failure], component_sequence=2, candidate_id="A")
+        wrapper = factories["model"](type("Model", (), {"generate": lambda self, *args, **kwargs: None})())
+        try:
+            wrapper.generate(None, None)
+            decisions.append(False)
+        except RuntimeError:
+            decisions.append(True)
+    assert decisions[0] == decisions[1]
+    assert waits == []

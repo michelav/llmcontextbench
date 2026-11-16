@@ -120,6 +120,13 @@ class AdaptiveWorkflow:
             ))
 
         candidate_ids = {candidate.candidate_id for candidate in candidate_specs}
+        for disturbance in definition.disturbances:
+            unknown_candidates = set(disturbance.get("candidates", ())) - candidate_ids
+            if unknown_candidates:
+                raise ValueError(
+                    f"Unknown candidate(s) in disturbance {disturbance['name']}: "
+                    f"{', '.join(sorted(unknown_candidates))}"
+                )
         policy_decl = definition.policy
         policy_ref, policy = resolve_policy(
             str(policy_decl["ref"]), dict(policy_decl.get("params") or {}), base_dir=definition.base_dir,
@@ -189,6 +196,7 @@ class AdaptiveWorkflow:
         plan = adaptive_plan_from_payload(load_json(root / "adaptive-plan.json"), dataset=manifest["dataset"])
         plan = replace(plan, execution_fingerprint=manifest["executionFingerprint"])
         dataset = resolve_adaptive_dataset(manifest["dataset"])
+        requests_by_id = {row.request_id: row for row in plan.requests}
         active_logger = logger or PhaseLogger()
         service = TrialExecutionService(root)
         engine = Engine(event_logger=lambda event, message, fields: active_logger.event(
@@ -202,8 +210,21 @@ class AdaptiveWorkflow:
                 **request.payload, "resultMetadata": metadata,
                 "traceOptions": dict(plan.trace),
             })
-            return invoke_adaptive_execution(invocation, session, dataset=dataset,
-                                               trace_options=dict(plan.trace))
+            from ctxbench.runtime.disturbances import build_runtime_disturbances
+            planned_request = requests_by_id[invocation.execution_id]
+            interceptors, applied_effects = build_runtime_disturbances(
+                plan.disturbances, component_sequence=planned_request.sequence_index,
+                candidate_id=invocation.candidate_id,
+            )
+            if interceptors:
+                result = invoke_adaptive_execution(
+                    invocation, session, dataset=dataset, trace_options=dict(plan.trace),
+                    runtime_interceptors=interceptors,
+                )
+            else:
+                result = invoke_adaptive_execution(invocation, session, dataset=dataset,
+                                                   trace_options=dict(plan.trace))
+            return {**result, "_runtimeDisturbances": applied_effects()}
 
         with ExecutionSession(engine) as session:
             outcome = run_adaptive_workflow(
@@ -397,11 +418,13 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
                 accepted = result.get("status") == "success" and len(response_text.strip()) >= int(
                     plan.acceptance.get("minimumResponseLength", 0))
                 signal_values, known_subtotals, failure_category = extract_signals(result, accepted=accepted)
+                disturbances = result.pop("_runtimeDisturbances", [])
                 adaptive_signals = {
                     "signals": {name: value.to_dict() for name, value in signal_values.items()},
                     "knownSubtotals": known_subtotals,
                     "failureCategory": failure_category,
                     "accepted": accepted,
+                    "disturbances": disturbances,
                 }
                 return {**result, "_adaptiveSignals": adaptive_signals}
 
@@ -432,6 +455,7 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
                                       "signals": dict(recorded_signals),
                                       "knownSubtotals": dict(runtime_signals.get("knownSubtotals") or {}),
                                       "failureCategory": failure_category, "accepted": accepted}
+            attempt["disturbances"] = list(runtime_signals.get("disturbances") or [])
             record["state"] = "delivered" if accepted else "failed"
             record["terminalReason"] = terminal_reason
             record["requestDurationMs"] = max(0, int((perf_counter() - started) * 1000))

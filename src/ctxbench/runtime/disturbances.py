@@ -8,11 +8,15 @@ from math import isfinite
 from time import sleep
 from typing import Callable
 
+from ctxbench.ai.failures import tag_failure
+from ctxbench.ai.models.base import ModelAdapter, ModelInput, ModelResponse
+
 
 class RuntimeComponent(StrEnum):
     LOCAL_FUNCTION = "local_function"
     LOCAL_MCP = "local_mcp"
     REMOTE_MCP = "remote_mcp"
+    MODEL = "model"
 
 
 class DisturbanceKind(StrEnum):
@@ -68,6 +72,30 @@ class DisturbanceSpec:
             return False
         return not self.candidate_ids or candidate_id in self.candidate_ids
 
+    @classmethod
+    def from_definition(cls, raw):
+        """Parse the public camel-case definition shape into the runtime contract."""
+        spec = cls(
+            name=raw["name"], version=raw["version"], component=raw["component"], kind=raw["kind"],
+            first_sequence=raw.get("firstSequence", 1), last_sequence=raw.get("lastSequence"),
+            seed=raw.get("seed", 0), delay_ms=raw.get("delayMs", 0),
+            failure_rate=raw.get("failureRate", 0), candidate_ids=tuple(raw.get("candidates", ())),
+        )
+        return spec
+
+    def to_definition(self):
+        value = {"name": self.name, "version": self.version, "component": self.component.value,
+                 "kind": self.kind.value, "firstSequence": self.first_sequence, "seed": self.seed}
+        if self.last_sequence is not None:
+            value["lastSequence"] = self.last_sequence
+        if self.delay_ms:
+            value["delayMs"] = self.delay_ms
+        if self.failure_rate:
+            value["failureRate"] = self.failure_rate
+        if self.candidate_ids:
+            value["candidates"] = list(self.candidate_ids)
+        return value
+
     def decorator(
         self,
         *,
@@ -79,18 +107,52 @@ class DisturbanceSpec:
         if not self.applies_to(component, sequence, candidate_id):
             return None
 
+        wrappers = []
+
         def decorate(runtime):
-            return ToolRuntimeDisturbance(
-                runtime,
-                name=self.name,
-                component=self.component,
-                delay_ms=self.delay_ms,
-                failure_rate=self.failure_rate,
-                failure_seed=self.seed + sequence,
-                sleeper=sleeper,
+            wrapper_type = ModelRuntimeDisturbance if self.component == RuntimeComponent.MODEL else ToolRuntimeDisturbance
+            wrapper = wrapper_type(
+                runtime, name=self.name, component=self.component,
+                delay_ms=self.delay_ms, failure_rate=self.failure_rate,
+                failure_seed=self.seed + sequence, sleeper=sleeper,
             )
+            wrappers.append(wrapper)
+            return wrapper
+
+        decorate.effect_records = lambda: [wrapper.effect_record(self.name, self.version) for wrapper in wrappers]
 
         return decorate
+
+
+def build_runtime_disturbances(definitions, *, component_sequence: int, candidate_id: str, sleeper=sleep):
+    """Build candidate-scoped runtime interceptors and a snapshot of their applied effects."""
+    interceptors = {}
+    factories = []
+    for raw in definitions:
+        spec = raw if isinstance(raw, DisturbanceSpec) else DisturbanceSpec.from_definition(raw)
+        factory = spec.decorator(component=spec.component, sequence=component_sequence,
+                                 candidate_id=candidate_id, sleeper=sleeper)
+        if factory is not None:
+            if spec.component.value in interceptors:
+                previous = interceptors[spec.component.value]
+                def combined(runtime, first=previous, second=factory):
+                    return second(first(runtime))
+                # Preserve inner-to-outer application order and collect both wrappers.
+                combined.effect_records = lambda first=previous, second=factory: (
+                    getattr(first, "effect_records", lambda: [])() +
+                    getattr(second, "effect_records", lambda: [])())
+                interceptors[spec.component.value] = combined
+            else:
+                interceptors[spec.component.value] = factory
+            factories.append(factory)
+
+    def effects():
+        rows = []
+        for factory in factories:
+            rows.extend(getattr(factory, "effect_records", lambda: [])())
+        return rows
+
+    return interceptors, effects
 
 
 class ToolRuntimeDisturbance:
@@ -115,6 +177,8 @@ class ToolRuntimeDisturbance:
         self.failure_seed = failure_seed
         self.sleeper = sleeper
         self.call_index = 0
+        self.applied_delay_ms = 0
+        self.injected_failures = 0
 
     def list_tools(self):
         return self.runtime.list_tools()
@@ -122,14 +186,66 @@ class ToolRuntimeDisturbance:
     def call_tool(self, name, arguments):
         if self.delay_ms:
             self.sleeper(self.delay_ms / 1000)
+            self.applied_delay_ms += int(self.delay_ms)
         call_index = self.call_index
         self.call_index += 1
         if self.failure_rate:
             digest = sha256(f"{self.failure_seed}:{call_index}:{name}".encode("utf-8")).digest()
             draw = int.from_bytes(digest[:8], "big") / (2**64)
             if draw < self.failure_rate:
-                raise RuntimeError(f"Injected disturbance {self.name} on {self.component.value}")
+                self.injected_failures += 1
+                error = RuntimeError(f"Injected disturbance {self.name} on {self.component.value}")
+                tag_failure(error, "injected_disturbance")
+                raise error
         return self.runtime.call_tool(name, arguments)
+
+    def effect_record(self, name: str, version: str):
+        return {"name": name, "version": version, "appliedDelayMs": self.applied_delay_ms,
+                "injectedFailures": self.injected_failures}
 
     def close(self):
         self.runtime.close()
+
+
+class ModelRuntimeDisturbance:
+    """Apply deterministic delay/failure effects to per-call model generation."""
+
+    def __init__(self, model: ModelAdapter, *, name: str, component: RuntimeComponent,
+                 delay_ms: int = 0, failure_rate: float = 0.0, failure_seed: int = 0, sleeper=sleep):
+        if component != RuntimeComponent.MODEL:
+            raise ValueError("model runtime disturbance requires the model component")
+        self.model = model
+        self.name = name
+        self.component = component
+        self.delay_ms = delay_ms
+        self.failure_rate = failure_rate
+        self.failure_seed = failure_seed
+        self.sleeper = sleeper
+        self.call_index = 0
+        self.applied_delay_ms = 0
+        self.injected_failures = 0
+
+    def __getattr__(self, name):
+        return getattr(self.model, name)
+
+    def failure_category(self, exc):
+        return self.model.failure_category(exc)
+
+    def generate(self, model_input: ModelInput, request, trace=None) -> ModelResponse:
+        if self.delay_ms:
+            self.sleeper(self.delay_ms / 1000)
+            self.applied_delay_ms += int(self.delay_ms)
+        call_index = self.call_index
+        self.call_index += 1
+        if self.failure_rate:
+            digest = sha256(f"{self.failure_seed}:{call_index}:model".encode("utf-8")).digest()
+            if int.from_bytes(digest[:8], "big") / (2**64) < self.failure_rate:
+                self.injected_failures += 1
+                error = RuntimeError(f"Injected disturbance {self.name} on model")
+                tag_failure(error, "injected_disturbance")
+                raise error
+        return self.model.generate(model_input, request, trace=trace)
+
+    def effect_record(self, name: str, version: str):
+        return {"name": name, "version": version, "appliedDelayMs": self.applied_delay_ms,
+                "injectedFailures": self.injected_failures}

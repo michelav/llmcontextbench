@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ctxbench.core.definitions import resolve_definition, resolve_definition_data
+from ctxbench.runtime.disturbances import DisturbanceSpec
 
 
 ADAPTIVE_DEFINITION_VERSION = 4
@@ -70,13 +71,21 @@ def adaptive_definition_schema() -> dict[str, Any]:
                    "properties": {"name": {"type": "string", "minLength": 1},
                                   "version": {"type": "string", "minLength": 1},
                                   "component": {"enum": ["local_function", "local_mcp", "remote_mcp", "model"]},
-                                  "kind": {"enum": ["delay", "failure"]},
+                                  "kind": {"enum": ["delay", "failure", "delay_and_failure"]},
                                   "delayMs": {"type": "number", "minimum": 0},
                                   "failureRate": {"type": "number", "minimum": 0, "maximum": 1},
                                   "firstSequence": {"type": "integer", "minimum": 1},
                                   "lastSequence": {"type": "integer", "minimum": 1},
                                   "seed": {"type": "integer"},
-                                  "candidates": {"type": "array", "items": {"type": "string", "minLength": 1}}}}
+                                  "candidates": {"type": "array", "items": {"type": "string", "minLength": 1}}},
+                   "allOf": [
+                       {"if": {"properties": {"kind": {"const": "delay"}}, "required": ["kind"]},
+                        "then": {"required": ["delayMs"]}},
+                       {"if": {"properties": {"kind": {"const": "failure"}}, "required": ["kind"]},
+                        "then": {"required": ["failureRate"]}},
+                       {"if": {"properties": {"kind": {"const": "delay_and_failure"}}, "required": ["kind"]},
+                        "then": {"anyOf": [{"required": ["delayMs"]}, {"required": ["failureRate"]}]}}
+                   ]}
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object", "additionalProperties": False,
@@ -209,6 +218,12 @@ def load_adaptive_experiment(source: str | Path | Mapping[str, Any] | AdaptiveEx
         first = errors[0]
         location = ".".join(str(item) for item in first.absolute_path) or "$"
         raise ValueError(f"Invalid adaptive definition at {location}: {first.message}")
+    try:
+        normalized_disturbances = [DisturbanceSpec.from_definition(row).to_definition()
+                                   for row in resolved.get("disturbances", [])]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"Invalid adaptive disturbance definition: {exc}") from exc
+    resolved = {**resolved, "disturbances": normalized_disturbances}
     requests = tuple(WorkloadRequest(
         task_id=row["taskId"], instance_id=row["instanceId"],
         request_id=row.get("requestId"), labels=dict(row.get("labels") or {}),

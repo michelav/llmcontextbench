@@ -1,8 +1,8 @@
 # Self-adaptive provisioning and framework API — design
 
-**Status:** implementation design. WP-A and WP-B have implementation commits; WP-C is the next
-package and has not started. Each work package in [section 11](#11-work-packages) needs its own
-approval before implementation starts.
+**Status:** implementation design. WP-A, WP-B, and WP-C have implementation commits. WP-E is
+implemented and awaiting review; see [`wp-e-acceptance.md`](wp-e-acceptance.md). Each work package
+in [section 11](#11-work-packages) needs its own approval before implementation starts.
 
 **Audience:** an agent or team implementing the refactor without access to the design discussion.
 
