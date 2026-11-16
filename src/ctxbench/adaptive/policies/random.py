@@ -25,3 +25,6 @@ class RandomPolicy:
             raise ValueError("random policy candidate subset does not intersect the catalogue")
         selected = state.rng().choice(options)
         return Decision(selected, "seeded random choice")
+
+    def candidate_targets(self) -> tuple[str, ...]:
+        return self.candidate_ids or ()

@@ -27,3 +27,6 @@ class RoundRobinPolicy:
         position = int((state.memo or {}).get("position", 0))
         selected = ids[position % len(ids)]
         return Decision(selected, "round robin", {"position": position + 1})
+
+    def candidate_targets(self) -> tuple[str, ...]:
+        return self.candidate_ids or ()

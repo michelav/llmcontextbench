@@ -655,6 +655,23 @@ def test_classify_provider_error_treats_taskgroup_as_transient():
     assert info.kind == "transient"
 
 
+def test_engine_error_trace_records_normalized_failure_category():
+    engine = Engine()
+    result = engine.execute(make_request(params={"context_limit_tokens": 1}))
+    error = next(event for event in result.trace["events"] if event["type"] == "error")
+    assert error["metadata"]["category"] == "context_overflow"
+    assert error["metadata"]["exceptionType"] == "RuntimeError"
+
+    class FailingModel(ModelAdapter):
+        def generate(self, model_input, request, trace=None):
+            raise RuntimeError("opaque provider failure")
+
+    engine._models["mock"] = FailingModel()
+    unknown = engine.execute(make_request())
+    unknown_error = next(event for event in unknown.trace["events"] if event["type"] == "error")
+    assert unknown_error["metadata"]["category"] == "provider_error"
+
+
 def test_engine_local_function_uses_resource_tools_and_records_calls():
     runtime = FakeLattesRuntime()
     engine = Engine(tool_runtime_factories={"local_function": lambda: runtime})
@@ -1719,3 +1736,44 @@ def test_plan_params_keep_mcp_credential_placeholders_and_check_them(monkeypatch
     monkeypatch.delenv("CTXBENCH_TEST_MCP_TOKEN")
     with pytest.raises(ValueError, match="CTXBENCH_TEST_MCP_TOKEN"):
         resolve_plan_params(params)
+
+
+def _error_category(result) -> str:
+    return next(event for event in result.trace["events"] if event["type"] == "error")["metadata"]["category"]
+
+
+def test_engine_error_category_comes_from_the_layer_that_failed():
+    tool_request = ModelResponse(
+        requested_tool_calls=[ToolCall(name="get_profile", arguments={"lattes_id": "cv-demo"})],
+        duration_ms=1, input_tokens=1, output_tokens=0, total_tokens=1,
+    )
+
+    class BrokenRuntime(FakeLattesRuntime):
+        def call_tool(self, name, arguments):
+            # Wording that looks like a provider failure must not change the category.
+            raise RuntimeError("429 rate limit: maximum context length exceeded")
+
+    engine = Engine(tool_runtime_factories={"local_function": BrokenRuntime})
+    engine._models["scripted"] = ScriptedToolModel([tool_request])
+    tool_failure = engine.execute(make_request(provider_name="scripted", strategy_name="local_function"))
+    assert _error_category(tool_failure) == "tool_error"
+
+    engine = Engine(tool_runtime_factories={"local_function": FakeLattesRuntime})
+    engine._models["scripted"] = ScriptedToolModel([tool_request, tool_request])
+    step_limit = engine.execute(make_request(provider_name="scripted", strategy_name="local_function",
+                                             params={"max_steps": 2}))
+    assert _error_category(step_limit) == "step_limit"
+
+    unsupported = Engine(tool_runtime_factories={"local_function": FakeLattesRuntime}).execute(
+        make_request(strategy_name="local_function"))
+    assert _error_category(unsupported) == "capability_unavailable"
+
+    not_a_provider_failure = Engine().execute(make_request(provider_name="no-such-provider"))
+    assert _error_category(not_a_provider_failure) == "unknown"
+
+
+def test_engine_classifies_context_overflow_whose_token_count_contains_429():
+    request = make_request(context=" ".join(["word"] * 1420), params={"context_limit_tokens": 5})
+    result = Engine().execute(request)
+    assert "429" in result.error
+    assert _error_category(result) == "context_overflow"

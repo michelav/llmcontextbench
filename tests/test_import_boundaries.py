@@ -94,6 +94,10 @@ def test_import_boundary_adaptive_does_not_import_benchmark() -> None:
     assert _imports_any("adaptive", ("ctxbench.benchmark",)) == []
 
 
+def test_import_boundary_adaptive_state_does_not_import_policy() -> None:
+    assert _imports_any("adaptive/state.py", ("ctxbench.adaptive.policy",)) == []
+
+
 def test_import_boundary_phases_do_not_import_commands_or_api() -> None:
     assert _imports_any("phases", ("ctxbench.commands", "ctxbench.cli", "ctxbench.api")) == []
 

@@ -1,7 +1,8 @@
 # Self-adaptive provisioning and framework API — design
 
-**Status:** proposal, not implemented. Each work package in [section 11](#11-work-packages) needs
-its own approval before it starts.
+**Status:** implementation design. WP-A and WP-B have implementation commits; WP-C is the next
+package and has not started. Each work package in [section 11](#11-work-packages) needs its own
+approval before implementation starts.
 
 **Audience:** an agent or team implementing the refactor without access to the design discussion.
 
@@ -15,7 +16,12 @@ its own approval before it starts.
 - `docs/architecture/adaptive-plan-v3.md` and `workflow-contracts.md` describe the *current*
   artifacts; they are rewritten in the last work package.
 
-All file paths are relative to the repository root. "Today" means the tree at commit `3e0f797`.
+All file paths are relative to the repository root. "Today" means the tree at commit `3e0f797`,
+the baseline **before WP-A**. Section 4 and the "today" remarks elsewhere describe that baseline;
+changes that WP-A and WP-B already made (policy contract, compact plan, one execution per
+request, removal of the estimator and of the fallback loop) are in the tree and are not repeated
+as pending work. Each work package in section 11 states what it adds to the tree as it stands
+when the package starts.
 
 ---
 
@@ -52,7 +58,7 @@ Each requirement has an identifier that the work packages and tests refer to.
 | R5 | The system state exposes windowed aggregates of **signals**: token usage, latency, failures, and any quality signal, system-wide and per candidate. |
 | R6 | Policies are interchangeable. Built in: always the same candidate, seeded random, tiers on a windowed signal (optionally against a capacity), lowest windowed signal per candidate. External policies use the same contract. |
 | R7 | A **scenario** is a workload plus zero or more seeded **disturbances** (delay or failure injected into a runtime component for a range of the sequence). |
-| R8 | **One decision, one attempt.** Each request gets one policy decision, which always selects a candidate. The candidate is executed once; if the attempt fails, the request fails. A policy cannot reject a request: when the system cannot handle a request, the attempt itself reports it. There is no retry and no fallback list (both deferred, section 13). |
+| R8 | **One decision, one attempt.** Each request gets one policy decision, which always selects a candidate. The candidate is executed once; if the attempt fails, the request fails. A policy cannot reject a request: when the system cannot handle a request, the attempt itself reports it. The workflow never retries a request and has no fallback list (both deferred, section 13). Provider-level retries, when an experiment configures them through `rate_limit`, happen inside that one attempt and are off by default (section 6.2). |
 | R9 | **Goals** (bounds on windowed signals) are reported as met, violated or unknown. They are computed by `metrics` from the request records after execution. They are not evaluated in the loop and not enforced by the tool. |
 | R10 | Runs are comparable: for equal workload and seed, every policy sees the identical frozen request order. A run-summary table gives one row per run with its labels, workload digest and delivered and failed counts, so that scripts can pair runs. |
 | R11 | A **headroom** analysis over a benchmark matrix compares the best single candidate with the per-request oracle for any signal. |
@@ -118,6 +124,10 @@ Words the tool must not introduce: study, episode, probe, cascade, size bin, bur
 ---
 
 ## 4. Current state relevant to this design
+
+This table is the pre-WP-A baseline (commit `3e0f797`). The rows on the adaptive definition,
+selection, request knowledge, knowledge, retry, fingerprint, programmatic use and version
+constants were resolved by WP-A and WP-B.
 
 | Area | Today | Consequence |
 |---|---|---|
@@ -420,8 +430,9 @@ Built-in signals, extracted from every attempt result by `adaptive/signals.py`:
 | `input_tokens`, `output_tokens` | tokens | `usage.inputTokens`, `usage.outputTokens` | `reported`, else `unavailable` |
 | `cached_input_tokens`, `reasoning_tokens` | tokens | `metricsSummary.cachedInputTokens`, `metricsSummary.reasoningTokens` | `reported`, else `unavailable` (never zero when the provider does not report them) |
 | `model_calls`, `tool_calls` | count | `metricsSummary.modelCalls`, `metricsSummary.toolCalls` | `measured` |
-| `failed` | 0 or 1 | `status != "success"` | `derived` |
-| `accepted` | 0 or 1 | success and minimum response length (section 6.8) | `derived` |
+| `failed` | bool (0 or 1) | `status != "success"` | `derived` |
+| `failed.<category>` | bool (0 or 1) | the observation's `failureCategory` (see below); computed when read, not stored | `derived` |
+| `accepted` | bool (0 or 1) | success and minimum response length (section 6.8) | `derived` |
 
 Rules:
 
@@ -437,23 +448,52 @@ Rules:
   through declared assessors.
 
 **Failure category** (string, recorded per failed attempt; not passed to policies as request
-information, but available as the windowed signals `failed.<category>`):
+information, but available through one binary windowed signal per category, named
+`failed.<category>`):
 
 `context_overflow`, `rate_limited`, `provider_error`, `tool_error`, `step_limit`,
 `empty_response`, `capability_unavailable`, `injected_disturbance`, `unknown`.
+
+For a terminal observation, `failed.<category>` is `1` when the observation has that failure
+category and `0` otherwise, including successful attempts. It has `derived` provenance. The
+category string itself remains on the observation for audit; policies receive only these signal
+values through `state.window(...)`.
+
+These signals are **not stored**. The observation stores only `failureCategory`; the state
+computes `failed.<category>` from it when a reading asks for it. `observation.signals` therefore
+never contains a `failed.<category>` key, and recomputing a reading from the request records
+needs nothing beyond `failureCategory`. A category outside the list above is an unknown signal
+(section 6.5).
 
 Classification belongs to the layer that knows the cause. `ai/rate_control.py::
 classify_provider_error` today returns kinds `rate_limit`, `transient`, `fatal`. Extend
 `ProviderErrorInfo` with a normalised `category`, let each model adapter recognise its
 provider's context-length error, and record the category in the trace error metadata that
-`Engine.execute` already writes. `adaptive/signals.py::classify_failure(result)` only maps that
-metadata plus known engine conditions (`exceeded max_steps`, empty answer,
-`CapabilityUnavailableError`, injected disturbance) to the list above.
+`Engine.execute` already writes. The call site that knows the cause tags the exception
+(`ai/failures.py`): a model adapter call is tagged with its provider category, a tool runtime
+call with `tool_error`, an unsupported capability with `capability_unavailable`; the step limit
+writes `step_limit` on its own trace error. An exception nobody tagged is `unknown`, never
+`provider_error`. The adaptive invocation copies the category into the attempt result as
+`failureCategory`, so it survives when the trace is not kept.
+`adaptive/signals.py::classify_failure(result)` reads that field (or the trace error metadata)
+plus `CapabilityUnavailableError` and the empty answer. It does not infer a category from
+error text.
+
+In `classify_provider_error`, an HTTP 429 status is authoritative, a recognised context
+overflow comes next and is never retried, and only then is the message searched for rate-limit
+wording; "429" must stand alone, because token counts in overflow messages can contain it.
 
 - **Context-overflow detection is best effort.** It is implemented per model adapter. An
   adapter without it reports `provider_error`; the raw provider message stays in the trace.
-  WP-C implements it for the mock provider and for the adapters in use; each remaining adapter
-  is a separate, small task.
+  WP-C implements it for all four adapters in the tree: `ai/models/mock.py`, `openai.py`,
+  `claude.py` and `gemini.py`. Only the mock path is exercised end to end; the three provider
+  paths are tested against synthetic error objects and are unverified against live providers
+  until the first live run (section 15). An adapter added later reports `provider_error` until
+  it gains its own detection.
+- **The category is also written to benchmark traces.** The trace error metadata is written by
+  `Engine.execute` for every workflow, so failed benchmark trials gain the same `category`
+  field. This is an accepted, additive change to trace content: no existing field changes, no
+  benchmark schema version changes, and no benchmark metric reads the field.
 - **Provider rate control is unchanged and off by default.** `ai/rate_control.py` reads an
   optional `rate_limit` block from the model parameters. Without it there is no client-side
   throttling and no retry (`max_attempts` defaults to 1), so a provider rate-limit error fails
@@ -534,7 +574,7 @@ policy decides on it.
 |---|---|---|
 | `sum` | Sum of values. | `value = None`, `provenance = unavailable`, `known_subtotal` = sum of available values. |
 | `mean`, `median`, `min`, `max`, `last` | Over available values. | Computed over available values; `missing_count` reported. |
-| `p<q>` (for example `p95`) | Nearest-rank percentile over available values, `0 < q < 100`. | Same as `mean`. |
+| `p<q>` (for example `p95`) | Linear-interpolation percentile over available values, `0 < q < 100`, as computed by `metrics/aggregate.py::percentile`. Needs at least two available values; with fewer the reading is unavailable. | Same as `mean`. |
 | `rate` | Mean of a 0/1 signal. | Same as `mean`. |
 | `count` | Number of observations in the window (available or not). | Always available. |
 
@@ -546,8 +586,10 @@ policy decides on it.
 - Provenance of a computed value is `estimated` if any source value is `estimated`, otherwise
   `derived`.
 - Reuse `metrics/aggregate.py::percentile`, `mean` so that online readings and offline metrics
-  agree. If its percentile definition differs from nearest-rank, adopt the existing one and
-  update this table.
+  agree. The percentile is the existing linear-interpolation one, which returns no value for
+  fewer than two inputs. A `p<q>` reading over a single available value is therefore
+  unavailable whatever `min_samples` says, so a `window_threshold` policy on a percentile
+  selects `when_unavailable` until the window holds two values.
 
 ### 6.5 System state
 
@@ -637,10 +679,13 @@ class Decision:
 | `random` | `candidates` (optional subset) | Uniform choice using `state.rng()`. |
 | `round_robin` | `candidates` (optional order) | Next in order; position kept in `memo`. |
 | `window_threshold` | `signal`, `statistic`, `tiers`, `otherwise`, `scope` (default `system`), `window` (optional), `capacity` (optional), `min_samples` (default 1), `when_unavailable` (required) | Take the measure: the reading's `utilisation` if `capacity` is given, else its `value`. Select the target of the first tier whose `upTo` is greater than or equal to the measure; if none, select `otherwise`. If the reading is unavailable or has too few samples, select `when_unavailable`. See below. |
-| `min_signal` | `signal`, `statistic`, `window` (optional), `objective` (`min` default or `max`), `min_samples` (default 1) | Read the signal per candidate over the window. First select any candidate with fewer than `min_samples` available values in the window, in declared order. Otherwise select the best reading; ties break by declared order. |
+| `min_signal` | `signal`, `statistic`, `window` (optional), `objective` (`min` default or `max`), `min_samples` (default 1) | Per candidate over the window. First select any candidate with fewer than `min_samples` **observations** in the window, in declared order. Otherwise select the best available reading; ties break by declared order. A candidate whose reading is unavailable is ranked last. If every reading is unavailable, select the candidate with the fewest observations in the window (declared order on ties). A percentile statistic requires `min_samples >= 2`. |
 
 A blind policy learns about a candidate only by selecting it. `min_signal` therefore re-selects
-any candidate whose observations have left the window. The window size sets the exploration
+any candidate whose observations have left the window. Exploration counts observations, not
+available values: a candidate that was tried but whose signal is unavailable (for example one
+that always fails without reporting token usage) is not explored again until its observations
+leave the window, so the policy cannot lock onto it. The window size sets the exploration
 rate: with `C` candidates, about `C × min_samples` of every `N` requests go to exploration, so
 `N` should be clearly larger than that.
 
@@ -718,7 +763,9 @@ A request has one decision and one attempt (R8).
   cost.
 - There is no signal-based acceptance. A bound on a quality signal is a goal (section 6.10)
   and is reported, not enforced.
-- There is no retry, no ordered fallback list and no per-request candidate filtering. A failed
+- There is no workflow-level retry, no ordered fallback list and no per-request candidate
+  filtering. Provider-level retries configured through `rate_limit` stay inside the one attempt
+  (section 6.2). A failed
   attempt is an observation: it raises the `failed` readings that the next decision sees.
 
 ### 6.9 Online assessors (quality signals)
@@ -1405,7 +1452,7 @@ All default tests are provider-free.
 ```mermaid
 flowchart LR
     A[WP-A API foundation] --> B[WP-B Compact plan and policy contract]
-    B --> C[WP-C Signals, state, built-in policies, goals]
+    B --> C[WP-C Signals, state, built-in policies]
     C --> E[WP-E Disturbances and scenarios]
     C --> F[WP-F Online quality signals]
     B --> G[WP-G Workload builder]
@@ -1459,19 +1506,77 @@ flowchart LR
 ### WP-C — Signals, state, built-in policies
 
 - **Scope:** R4 (failure as signal), R5, R6, R21.
-- **Tasks:** `signals.py` (extraction, including cached and reasoning tokens; failure category
-  mapping), error categories in `ai/` with context-overflow detection for the mock provider
-  and the adapters in use; `state.py` (log, sliding and fixed request windows, statistics,
-  readings with capacity, audit log of readings); policies `window_threshold`, `min_signal`.
-- **Gate:** unit tests for every statistic including empty windows, missing values, `sum` with
-  unknown subtotal, and provenance propagation; scripted-signal workflow tests show
-  `window_threshold` switching at each tier boundary, resetting at a fixed-window block
-  boundary, selecting `otherwise` when the capacity is spent and `when_unavailable` when the
-  sum is unavailable or has fewer than `min_samples` values; `min_signal` re-selecting a candidate whose observations left the window;
-  an infeasible-candidate test (mock provider raising a context-length error) shows the
-  attempt fails, is categorised `context_overflow`, appears in `failed` readings and produces
-  no second attempt; failed attempts keep measured duration and never report zero tokens by
-  assumption; readings in decision records match recomputation.
+- **Tasks, in dependency order:**
+  1. Add `adaptive/signals.py` to extract the built-in signal map, units, provenance, known
+     partial token subtotal, and failure category from one terminal execution result. Keep
+     generation usage separate from assessor and offline evaluation usage. A missing provider
+     value remains unavailable; it is not replaced by zero.
+  2. Extend provider and runtime error metadata with the normalized failure categories in §6.2.
+     Keep classification at the layer that knows the cause, retain raw messages in traces, and
+     implement context-overflow recognition for the four adapters named in §6.2 (`mock`, `openai`, `claude`, `gemini`).
+     Provider-level retries remain inside the single attempt described by R8.
+  3. Run extraction inside the invocation wrapper passed to `TrialExecutionService.execute`
+     (§7.2 step 1), so the signal map, `knownSubtotals` and `failureCategory` are stored
+     atomically with the attempt result under the existing `_adaptiveSignals` key of the
+     execution record. The workflow then copies that payload into the `observation` of the
+     existing request record before advancing to the next request. On resume, rebuild the
+     in-memory `ObservationLog` from the request records. For a request whose execution
+     completed but whose record has no observation yet (interrupted between the two writes),
+     take the observation from the replayed execution's `_adaptiveSignals`; never re-run
+     extraction for a completed attempt. `failed.<category>` signals are not stored (§6.2).
+     Preserve the existing adaptive record version (`3`); §8.6 allows these fields to be added
+     before release without another version bump.
+  4. Add `adaptive/state.py` with the append-only prefix log, system and candidate scopes,
+     sliding/fixed/all request windows, `Reading`, capacity-derived values, statistics, and
+     reading audit. Use the statistic and missing-value rules in §§6.3–6.5. A decision's audit
+     is persisted in its existing `readings` field and can be recomputed from prior records.
+     Move the `SystemState` protocol, `CandidateState` and `PrefixSystemState` from
+     `adaptive/policy.py` to `adaptive/state.py`; `policy.py` imports them and keeps
+     re-exporting the two contract types, so existing imports and `ctxbench.api` do not change.
+     `state.py` does not import `policy.py`.
+  5. Extend the read-only `SystemState` contract with `default_window` and `window(...)`; keep
+     request IDs, tasks, instances, labels, response text, and dataset values outside the policy
+     view. Add `window_threshold` and `min_signal` policies with early parameter validation.
+     At `plan`, every candidate ID a built-in policy names is checked against the catalogue:
+     for `window_threshold` that is each `tiers[].select`, `otherwise` and `when_unavailable`.
+     Each built-in policy reports the candidate IDs its parameters name, replacing the
+     per-policy-name branches in `adaptive/workflow.py::_validate_policy_targets`.
+     Policies receive no goal statuses; goals remain a WP-H reporting concern.
+  6. Integrate signal extraction, observation reconstruction, state creation, and policy reads
+     into the workflow while preserving durable decision-before-execution ordering, resume
+     behavior, and one decision/one attempt per request.
+- **Gate:**
+  - Unit tests cover every statistic, empty windows, missing values, `sum` with unknown subtotal,
+    provenance propagation, capacity-derived values, and system/candidate scopes. A percentile
+    over fewer than two available values is unavailable.
+  - `state.window()` raises `PolicyContractError` for a signal that is neither built in nor
+    declared, including `failed.<category>` with a category outside §6.2.
+  - The blindness test walks the new state members (`default_window`, `window(...)` and the
+    returned `Reading`) and still finds no request data.
+  - A `window_threshold` target (`tiers[].select`, `otherwise`, `when_unavailable`) that is not
+    in the catalogue is refused at `plan`.
+  - Scripted-signal workflow tests cover each `window_threshold` boundary, inclusive tier
+    selection, fixed-window reset, `otherwise` after capacity is spent, and
+    `when_unavailable` for unavailable sums or insufficient samples. `sum` and `count` are
+    exempt from `min_samples`: with an empty window `sum` is a derived zero and a tier is
+    selected, not `when_unavailable`.
+  - `min_signal` tests cover declared-order ties and re-selecting a candidate after its prior
+    observations leave the window.
+  - A mock context-overflow failure is persisted as `context_overflow`, contributes to
+    `failed.context_overflow`, keeps measured duration, leaves unreported tokens unavailable,
+    and creates no second decision or attempt. `observation.signals` holds no
+    `failed.<category>` key.
+  - Context-overflow recognition in the `openai`, `claude` and `gemini` adapters is tested with
+    synthetic provider errors; an unrecognised error is categorised `provider_error`.
+  - A failed benchmark trial's trace carries the error `category`, and existing benchmark trace
+    fields are unchanged.
+  - Resume rebuilds identical readings without re-executing terminal requests; decision reading
+    audits match independent recomputation from the request records.
+  - An interruption after the execution completed and before the request record received its
+    observation resumes with the observation taken from `_adaptiveSignals`: no second
+    execution, no re-extraction, and the same readings as an uninterrupted run.
+  - Run the focused adaptive, error-classification, and provider-adapter tests, then `pytest -q`.
+    All tests use fixtures or mocks; no real-provider execution or evaluation is part of the gate.
 
 ### WP-E — Disturbances and scenarios
 

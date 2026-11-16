@@ -97,8 +97,21 @@ def invoke_adaptive_execution(execution_request, session, *, dataset, trace_opti
         },
         "usage": ai_result.usage,
         "metricsSummary": metrics,
+        # Recorded even when the trace is not kept, so a failure stays classifiable.
+        "failureCategory": _trace_failure_category(ai_result.trace) if status != "success" else None,
         "trace": ai_result.trace if trace_options.get("enabled", False) else {},
     }
+
+
+def _trace_failure_category(trace: Any) -> str | None:
+    """Category the engine or strategy wrote on the last trace error event, if any."""
+    events = trace.get("events") if isinstance(trace, dict) else None
+    for event in reversed(events if isinstance(events, list) else []):
+        if isinstance(event, dict) and event.get("type") == "error":
+            metadata = event.get("metadata")
+            category = metadata.get("category") if isinstance(metadata, dict) else None
+            return category if isinstance(category, str) and category else None
+    return None
 
 
 def _runtime_request(payload: dict[str, Any], execution_request, result_metadata: dict[str, Any]) -> RuntimeRequest:

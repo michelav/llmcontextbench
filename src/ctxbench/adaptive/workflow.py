@@ -21,9 +21,11 @@ from ctxbench.adaptive.plan import (
     ADAPTIVE_PLAN_VERSION, AdaptivePlan, CandidateSpec, PlannedRequest, WindowSpec,
 )
 from ctxbench.adaptive.policy import (
-    CandidateRef, Decision, PolicyContractError, PrefixSystemState, resolve_policy,
+    CandidateRef, Decision, PolicyContractError, resolve_policy,
     validate_decision, verify_policy,
 )
+from ctxbench.adaptive.signals import BUILTIN_SIGNAL_UNITS, FAILURE_CATEGORIES, extract_signals
+from ctxbench.adaptive.state import Observation, WindowSystemState
 from ctxbench.core.errors import CapabilityUnavailableError, InvalidDefinitionError
 from ctxbench.core.fingerprint import digest
 from ctxbench.core.surfaces import parse_surface
@@ -119,11 +121,12 @@ class AdaptiveWorkflow:
 
         candidate_ids = {candidate.candidate_id for candidate in candidate_specs}
         policy_decl = definition.policy
-        policy_ref, _policy = resolve_policy(
+        policy_ref, policy = resolve_policy(
             str(policy_decl["ref"]), dict(policy_decl.get("params") or {}), base_dir=definition.base_dir,
             plugin_paths=plugin_paths, sources=tuple(policy_decl.get("sources") or ()),
         )
-        _validate_policy_targets(policy_ref.ref, policy_ref.params, candidate_ids)
+        _validate_policy_targets(policy, candidate_ids)
+        _validate_signal_policy(policy_ref.ref, policy_ref.params, definition.signals)
 
         requests: list[PlannedRequest] = []
         request_ids: set[str] = set()
@@ -321,7 +324,7 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
         records_root = root / "adaptive-records"
         records_root.mkdir(parents=True, exist_ok=True)
         records = _load_request_records(root)
-        observations: list[dict[str, Any]] = []
+        observations: list[Observation] = []
         memo: Mapping[str, Any] | None = None
         counts = {"delivered": 0, "failed": 0, "started": 0}
         session_started_at = utc_now_iso()
@@ -351,9 +354,12 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
                 if current_reference.source_digest != plan.policy.source_digest:
                     raise PolicyContractError("Policy source changed since planning; create a fresh adaptive plan.")
                 candidates = tuple(CandidateRef(item.candidate_id, item.labels) for item in plan.candidates)
-                state = PrefixSystemState(decision_index=request.sequence_index, observations=observations,
-                                          memo=memo, seed=plan.seed,
-                                          decision_id=f"{request.request_id}:d1")
+                state = WindowSystemState(
+                    decision_index=request.sequence_index, observations=observations, memo=memo,
+                    seed=plan.seed, decision_id=f"{request.request_id}:d1", default_window=plan.window,
+                    candidate_ids=[item.candidate_id for item in plan.candidates],
+                    declared_signals=plan.signals,
+                )
                 try:
                     decision = validate_decision(policy.decide(candidates, state),
                                                  {row.candidate_id for row in plan.candidates})
@@ -369,7 +375,7 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
                         "policy": {"id": plan.policy.policy_id, "version": plan.policy.version},
                         "candidateId": candidate_id, "reason": decision.reason,
                         "memo": dict(decision.memo) if decision.memo is not None else None,
-                        "readings": [], "createdAt": utc_now_iso(),
+                        "readings": [dict(item) for item in state.reading_audit], "createdAt": utc_now_iso(),
                     },
                     "executionId": request.request_id,
                 }
@@ -390,7 +396,13 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
                 response_text = response if isinstance(response, str) else str(response or "")
                 accepted = result.get("status") == "success" and len(response_text.strip()) >= int(
                     plan.acceptance.get("minimumResponseLength", 0))
-                return {**result, "_adaptiveSignals": {"accepted": accepted}}
+                signal_values, failure_category = extract_signals(result, accepted=accepted)
+                adaptive_signals = {
+                    "signals": {name: value.to_dict() for name, value in signal_values.items()},
+                    "failureCategory": failure_category,
+                    "accepted": accepted,
+                }
+                return {**result, "_adaptiveSignals": adaptive_signals}
 
             outcome = service.execute(execution_request, session, invoke_with_acceptance,
                                       retry_uncertain=retry_uncertain)
@@ -399,18 +411,25 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
             else:
                 provider_invocations += 1
             result = outcome.result
-            signals = result.get("_adaptiveSignals") or {}
             response = result.get("response")
             response_text = response if isinstance(response, str) else str(response or "")
-            accepted = bool(signals.get("accepted", result.get("status") == "success" and
-                               len(response_text.strip()) >= int(plan.acceptance.get("minimumResponseLength", 0))))
+            runtime_signals = result.get("_adaptiveSignals")
+            runtime_signals = runtime_signals if isinstance(runtime_signals, Mapping) else {}
+            accepted = bool(runtime_signals.get(
+                "accepted", result.get("status") == "success" and
+                len(response_text.strip()) >= int(plan.acceptance.get("minimumResponseLength", 0))))
             status = "success" if result.get("status") == "success" else "error"
+            recorded_signals = runtime_signals.get("signals")
+            if not isinstance(recorded_signals, Mapping):
+                raise ValueError("Completed adaptive execution is missing its persisted signal observation")
+            failure_category = runtime_signals.get("failureCategory")
             terminal_reason = "delivered" if accepted else (
                 "response_too_short" if status == "success" else "attempt_failed")
             attempt["execution"] = {"attemptId": outcome.attempt_id, "status": outcome.status,
                                     "resumed": outcome.resumed}
-            attempt["observation"] = {"status": status, "failureCategory": None,
-                                      "signals": {}, "accepted": accepted}
+            attempt["observation"] = {"status": status,
+                                      "signals": dict(recorded_signals),
+                                      "failureCategory": failure_category, "accepted": accepted}
             record["state"] = "delivered" if accepted else "failed"
             record["terminalReason"] = terminal_reason
             record["requestDurationMs"] = max(0, int((perf_counter() - started) * 1000))
@@ -451,15 +470,11 @@ def _load_manifest_fingerprint(root: Path) -> str:
     return str(load_json(root / "manifest.json")["executionFingerprint"])
 
 
-def _append_observation(observations: list[dict[str, Any]], record: Mapping[str, Any]) -> None:
+def _append_observation(observations: list[Observation], record: Mapping[str, Any]) -> None:
     attempts = record.get("attempts") or []
     if not attempts:
         return
-    last = attempts[0]
-    decision = last.get("decision") or {}
-    observation = last.get("observation") or {}
-    observations.append({"candidateId": decision.get("candidateId"),
-                         "status": observation.get("status", "error")})
+    observations.append(Observation.from_record(record))
 
 
 def _validate_saved_record(record: Mapping[str, Any], plan: AdaptivePlan, request: PlannedRequest) -> None:
@@ -494,17 +509,35 @@ def _record_path(root: Path, request_id: str) -> Path:
     return root / f"{request_id}.json"
 
 
-def _validate_policy_targets(ref: str, params: Mapping[str, Any], candidate_ids: set[str]) -> None:
-    named: list[str] = []
-    if ref == "static" and isinstance(params.get("candidate"), str):
-        named.append(params["candidate"])
-    if ref in {"random", "round_robin"} and params.get("candidates") is not None:
-        if not isinstance(params["candidates"], list):
-            raise ValueError(f"{ref} policy candidates must be a list")
-        named.extend(params["candidates"])
+def _validate_policy_targets(policy, candidate_ids: set[str]) -> None:
+    target_reader = getattr(policy, "candidate_targets", None)
+    named = tuple(target_reader()) if callable(target_reader) else ()
     unknown = set(named) - candidate_ids
     if unknown:
         raise ValueError(f"Policy references unknown candidates: {', '.join(sorted(unknown))}")
+
+
+def _validate_signal_policy(ref: str, params: Mapping[str, Any], declared_signals) -> None:
+    if ref not in {"window_threshold", "min_signal"}:
+        return
+    signal = params.get("signal")
+    declared = {str(row.get("id")) for row in declared_signals if isinstance(row, Mapping)}
+    known = signal in BUILTIN_SIGNAL_UNITS or signal in declared or (
+        isinstance(signal, str) and signal.startswith("failed.")
+        and signal.partition(".")[2] in FAILURE_CATEGORIES
+    )
+    if not known:
+        raise ValueError(f"Policy references unknown signal {signal!r}")
+    statistic = params.get("statistic")
+    valid = statistic in {"sum", "mean", "median", "min", "max", "last", "rate", "count"}
+    if isinstance(statistic, str) and statistic.startswith("p"):
+        try:
+            percentile = float(statistic[1:])
+            valid = 0 < percentile < 100
+        except ValueError:
+            valid = False
+    if not valid:
+        raise ValueError(f"Policy uses invalid statistic {statistic!r}")
 
 
 def _check_strategy_capability(package, candidate_id: str, strategy: str, surface, params: Mapping[str, Any]) -> None:

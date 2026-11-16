@@ -7,7 +7,9 @@ import pytest
 
 from ctxbench.adaptive.artifacts import adaptive_plan_from_payload, adaptive_plan_payload
 from ctxbench.adaptive.definition import AdaptiveExperiment, WorkloadRequest, load_adaptive_experiment
-from ctxbench.adaptive.policy import CandidateRef, PrefixSystemState
+from ctxbench.adaptive.policy import CandidateRef
+from ctxbench.adaptive.plan import WindowSpec
+from ctxbench.adaptive.state import Observation, WindowSystemState
 from ctxbench.adaptive.testing import verify_replay
 from ctxbench.api import ArtifactError, CapabilityError, DefinitionError, ExecutionStateError, open_run, plan
 from ctxbench.execution.service import TrialExecutionService
@@ -106,18 +108,23 @@ def test_adaptive_cli_plans_and_executes_a_v4_definition(tmp_path: Path, capsys)
 
 def test_policy_inputs_expose_only_candidate_catalogue_and_prior_outcomes() -> None:
     candidate = CandidateRef("A", {"arm": "static-label"})
-    state = PrefixSystemState(
+    state = WindowSystemState(
         decision_index=2,
-        observations=[{"candidateId": "B", "status": "error"}],
-        memo={"position": 1}, seed=5, decision_id="request-2:d1",
+        observations=[Observation(1, "B", "error", "unknown", {})],
+        memo={"position": 1}, seed=5, decision_id="request-2:d1", default_window=WindowSpec(2),
+        candidate_ids=("A", "B"),
     )
     assert {field for field in dir(candidate) if not field.startswith("_")} == {"candidate_id", "labels"}
     assert {field for field in dir(state) if not field.startswith("_")} == {
-        "candidate", "completed_requests", "decision_index", "memo", "rng",
+        "candidate", "completed_requests", "decision_index", "default_window", "memo", "reading_audit",
+        "rng", "window",
     }
     assert state.candidate("B").last_status == "error"
     assert not any(hasattr(state, field) for field in
                    ("request_id", "task_id", "instance_id", "labels", "task_statement", "context_bytes"))
+    reading = state.window("failed.context_overflow", "rate")
+    assert not any(hasattr(reading, field) for field in
+                    ("request_id", "task_id", "instance_id", "labels", "context_bytes"))
 
 
 def test_failed_delivery_keeps_one_attempt_and_does_not_fallback(tmp_path: Path) -> None:

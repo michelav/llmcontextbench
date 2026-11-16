@@ -3,25 +3,20 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
-import hashlib
 import importlib
 import inspect
 import json
 import os
 from pathlib import Path
-import random
 import sys
 from typing import Any, ClassVar, Mapping, Protocol, Sequence
-from hashlib import sha256
 
+from ctxbench.adaptive.state import CandidateState, SystemState
+from ctxbench.core.errors import PolicyContractError
 from ctxbench.core.fingerprint import digest, file_digest
 
 
 JSON = None | bool | int | float | str | list["JSON"] | dict[str, "JSON"]
-
-
-class PolicyContractError(ValueError):
-    """A policy failed validation or violated the request-blind decision contract."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,51 +30,6 @@ class Decision:
     candidate_id: str
     reason: str
     memo: Mapping[str, JSON] | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class CandidateState:
-    candidate_id: str
-    observation_count: int
-    selections: int
-    last_status: str | None
-
-
-class SystemState(Protocol):
-    decision_index: int
-    completed_requests: int
-    memo: Mapping[str, JSON] | None
-
-    def candidate(self, candidate_id: str) -> CandidateState: ...
-    def rng(self) -> random.Random: ...
-
-
-class PrefixSystemState:
-    """Immutable policy view over prior outcomes with no request data attached."""
-
-    __slots__ = ("decision_index", "completed_requests", "memo", "_counts", "_last", "_rng")
-
-    def __init__(self, *, decision_index: int, observations: Sequence[Mapping[str, Any]],
-                 memo: Mapping[str, JSON] | None, seed: int, decision_id: str):
-        self.decision_index = decision_index
-        self.completed_requests = len(observations)
-        self.memo = dict(memo) if memo is not None else None
-        self._counts: dict[str, int] = {}
-        self._last: dict[str, str | None] = {}
-        # Only candidate IDs and terminal status enter the policy view.
-        for observation in observations:
-            candidate_id = str(observation["candidateId"])
-            self._counts[candidate_id] = self._counts.get(candidate_id, 0) + 1
-            self._last[candidate_id] = str(observation["status"])
-        derived_seed = int(sha256(f"{seed}:{decision_id}".encode()).hexdigest()[:16], 16)
-        self._rng = random.Random(derived_seed)
-
-    def candidate(self, candidate_id: str) -> CandidateState:
-        return CandidateState(candidate_id, self._counts.get(candidate_id, 0),
-                              self._counts.get(candidate_id, 0), self._last.get(candidate_id))
-
-    def rng(self) -> random.Random:
-        return self._rng
 
 
 class Policy(Protocol):
@@ -114,10 +64,13 @@ def plugin_import_paths(paths: Sequence[str | Path]):
 
 
 def _builtin_classes() -> dict[str, type]:
+    from ctxbench.adaptive.policies.min_signal import MinSignalPolicy
     from ctxbench.adaptive.policies.random import RandomPolicy
     from ctxbench.adaptive.policies.round_robin import RoundRobinPolicy
     from ctxbench.adaptive.policies.static import StaticPolicy
-    return {policy.id: policy for policy in (StaticPolicy, RandomPolicy, RoundRobinPolicy)}
+    from ctxbench.adaptive.policies.window_threshold import WindowThresholdPolicy
+    return {policy.id: policy for policy in
+            (StaticPolicy, RandomPolicy, RoundRobinPolicy, WindowThresholdPolicy, MinSignalPolicy)}
 
 
 BUILTIN = _builtin_classes

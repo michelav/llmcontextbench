@@ -11,6 +11,13 @@ class MockModel(ModelAdapter):
     supports_tool_calling = False
 
     def generate(self, model_input: ModelInput, request: AIRequest, trace: object | None = None) -> ModelResponse:
+        context_limit = request.params.get("context_limit_tokens")
+        if isinstance(context_limit, int) and not isinstance(context_limit, bool) and context_limit > 0:
+            prompt_tokens = len(model_input.prompt.split())
+            if prompt_tokens > context_limit:
+                raise RuntimeError(
+                    f"Mock context token limit exceeded: {prompt_tokens} > {context_limit}"
+                )
         task_id = request.task_id() or ""
         answer = self._extract_answer(request.context, task_id)
         input_tokens = len(model_input.prompt.split())

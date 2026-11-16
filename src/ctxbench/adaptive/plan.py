@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from ctxbench.adaptive.state import WindowSpec
 from ctxbench.adaptive.policy import PolicyReference
 from ctxbench.dataset.provenance import DatasetProvenance
 
@@ -39,18 +40,6 @@ class PlannedRequest:
     validation_config: Mapping[str, Any] = field(default_factory=dict)
     context_blocks: tuple[str, ...] = ()
     labels: Mapping[str, str] = field(default_factory=dict)
-
-
-@dataclass(frozen=True, slots=True)
-class WindowSpec:
-    requests: int
-    mode: str = "sliding"
-
-    def __post_init__(self) -> None:
-        if type(self.requests) is not int or self.requests < 1:
-            raise ValueError("window.requests must be a positive integer")
-        if self.mode not in {"sliding", "fixed"}:
-            raise ValueError("window.mode must be 'sliding' or 'fixed'")
 
 
 @dataclass(frozen=True, slots=True)

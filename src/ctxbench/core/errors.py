@@ -6,3 +6,7 @@ class CapabilityUnavailableError(ValueError):
 
 class InvalidDefinitionError(ValueError):
     """A definition is well-formed JSON but describes an experiment that cannot be planned."""
+
+
+class PolicyContractError(ValueError):
+    """A policy failed validation or violated the request-blind decision contract."""

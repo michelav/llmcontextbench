@@ -5,9 +5,8 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from ctxbench.adaptive.artifacts import adaptive_plan_from_payload, validate_workflow_manifest
-from ctxbench.adaptive.policy import (
-    CandidateRef, PrefixSystemState, resolve_policy, validate_decision,
-)
+from ctxbench.adaptive.policy import CandidateRef, resolve_policy, validate_decision
+from ctxbench.adaptive.state import Observation, WindowSystemState
 from ctxbench.adaptive.workflow import _load_request_records
 from ctxbench.util.fs import load_json
 
@@ -19,7 +18,7 @@ def verify_replay(root: str | Path, *, plugin_paths: Sequence[str | Path] = ()) 
     plan = adaptive_plan_from_payload(load_json(artifact_root / "adaptive-plan.json"),
                                       dataset=manifest["dataset"])
     records = _load_request_records(artifact_root)
-    observations: list[dict[str, Any]] = []
+    observations: list[Observation] = []
     memo = None
     differences: list[dict[str, Any]] = []
     for request in plan.requests:
@@ -39,9 +38,10 @@ def verify_replay(root: str | Path, *, plugin_paths: Sequence[str | Path] = ()) 
             plan.policy.policy_id, plan.policy.version, plan.policy.source_digest
         ):
             raise ValueError("Policy source changed since planning; replay requires the planned policy source.")
-        state = PrefixSystemState(
+        state = WindowSystemState(
             decision_index=request.sequence_index, observations=observations, memo=memo,
-            seed=plan.seed, decision_id=f"{request.request_id}:d1",
+            seed=plan.seed, decision_id=f"{request.request_id}:d1", default_window=plan.window,
+            candidate_ids=[item.candidate_id for item in plan.candidates], declared_signals=plan.signals,
         )
         candidates = tuple(CandidateRef(row.candidate_id, row.labels) for row in plan.candidates)
         try:
@@ -55,10 +55,14 @@ def verify_replay(root: str | Path, *, plugin_paths: Sequence[str | Path] = ()) 
         if actual_data != expected_data:
             differences.append({"requestId": request.request_id,
                                 "expected": expected_data, "actual": actual_data})
+        expected_readings = saved.get("readings") or []
+        actual_readings = [dict(item) for item in state.reading_audit]
+        if actual_readings != expected_readings:
+            differences.append({"requestId": request.request_id, "field": "readings",
+                                "expected": expected_readings, "actual": actual_readings})
         observation = (record["attempts"][0].get("observation") or {})
         if record.get("state") in {"delivered", "failed"}:
-            observations.append({"candidateId": saved.get("candidateId"),
-                                 "status": observation.get("status", "error")})
+            observations.append(Observation.from_record(record))
             memo = saved.get("memo")
     return differences
 

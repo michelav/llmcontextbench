@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from time import perf_counter
 
+from ctxbench.ai.failures import provider_call, tool_call
 from ctxbench.ai.models.base import AIRequest, AIResult, ModelAdapter, ModelInput, ToolResult
 from ctxbench.ai.runtime import ToolRuntime
 from ctxbench.ai.strategies.base import StrategyAdapter
@@ -57,7 +58,8 @@ class ClientToolStrategy(StrategyAdapter):
                     tool_results=tool_results,
                     continuation_state=continuation_state,
                 )
-                model_response = model.generate(model_input, request, trace=trace)
+                with provider_call(request.provider_name):
+                    model_response = model.generate(model_input, request, trace=trace)
                 raw_responses.append(model_response.raw_response)
                 continuation_state = dict(model_response.continuation_state)
                 trace.record_model_call(
@@ -89,11 +91,12 @@ class ClientToolStrategy(StrategyAdapter):
                     )
 
                 current_results: list[ToolResult] = []
-                for call_index, tool_call in enumerate(model_response.requested_tool_calls, start=1):
-                    tool_call_id = tool_call.id or f"step-{step + 1}-tool-{call_index}"
-                    trace.record_tool_call(name=tool_call.name, arguments=tool_call.arguments)
+                for call_index, requested_call in enumerate(model_response.requested_tool_calls, start=1):
+                    tool_call_id = requested_call.id or f"step-{step + 1}-tool-{call_index}"
+                    trace.record_tool_call(name=requested_call.name, arguments=requested_call.arguments)
                     tool_started_at = perf_counter()
-                    tool_result = self.runtime.call_tool(tool_call.name, tool_call.arguments)
+                    with tool_call():
+                        tool_result = self.runtime.call_tool(requested_call.name, requested_call.arguments)
                     tool_duration_ms = max(0, int((perf_counter() - tool_started_at) * 1000))
                     server_event = tool_result.metadata.get("server_event")
                     if isinstance(server_event, dict):
@@ -103,8 +106,8 @@ class ClientToolStrategy(StrategyAdapter):
                     tool_call_log.append(
                         {
                             "id": tool_call_id,
-                            "name": tool_call.name,
-                            "arguments": dict(tool_call.arguments),
+                            "name": requested_call.name,
+                            "arguments": dict(requested_call.arguments),
                             "result": normalized_result.content,
                             "isError": normalized_result.is_error,
                         }
@@ -121,7 +124,8 @@ class ClientToolStrategy(StrategyAdapter):
 
         error = f"{self.label} strategy exceeded max_steps={max_steps}."
         trace.record_steps(max_steps)
-        trace.record_error(error, metadata={"strategy_name": request.strategy_name, "max_steps": max_steps})
+        trace.record_error(error, metadata={"strategy_name": request.strategy_name, "max_steps": max_steps,
+                                          "category": "step_limit"})
         return AIResult(
             answer="",
             error=error,

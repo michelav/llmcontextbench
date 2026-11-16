@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ctxbench.ai.failures import provider_call
 from ctxbench.ai.models.base import AIRequest, AIResult, ModelAdapter, ModelInput
 from ctxbench.ai.strategies.base import StrategyAdapter
 from ctxbench.ai.trace import TraceCollector
@@ -28,7 +29,8 @@ class InlineStrategy(StrategyAdapter):
                 system_instruction=request.system_instruction or DEFAULT_SYSTEM_INSTRUCTION,
                 prompt=prompt,
             )
-            model_response = model.generate(model_input, request, trace=trace)
+            with provider_call(request.provider_name):
+                model_response = model.generate(model_input, request, trace=trace)
             trace.record_model_call(
                 duration_ms=model_response.duration_ms,
                 input_tokens=model_response.input_tokens,

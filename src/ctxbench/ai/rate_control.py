@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import re
 import threading
 import time
 from contextlib import contextmanager
@@ -37,6 +38,7 @@ class ProviderErrorInfo:
     kind: str
     message: str
     retry_after_ms: int | None = None
+    category: str = "provider_error"
 
 
 def extract_rate_limit_config(request: AIRequest, params: dict[str, Any] | None = None) -> RateLimitConfig:
@@ -231,15 +233,59 @@ def classify_provider_error(provider_name: str, exc: Exception) -> ProviderError
     status_code = getattr(exc, "status_code", None) or getattr(exc, "status", None)
     retry_after = _extract_retry_after_ms(exc)
     lowered = message.lower()
-    if status_code == 429 or "429" in lowered or "rate limit" in lowered or "too many requests" in lowered:
-        return ProviderErrorInfo(kind="rate_limit", message=message, retry_after_ms=retry_after)
+    category = _provider_failure_category(provider_name, exc, lowered)
+    # Order matters. An HTTP 429 status is authoritative. A recognised context overflow comes
+    # next and is never retried. Only then is the message text searched for rate-limit wording;
+    # "429" must stand alone, because token counts in overflow messages can contain those digits.
+    if status_code == 429:
+        return ProviderErrorInfo(kind="rate_limit", message=message, retry_after_ms=retry_after,
+                                 category="rate_limited")
+    if category == "context_overflow":
+        return ProviderErrorInfo(kind="fatal", message=message, retry_after_ms=retry_after,
+                                 category=category)
+    if (re.search(r"(?<!\d)429(?!\d)", lowered) or "rate limit" in lowered
+            or "too many requests" in lowered):
+        return ProviderErrorInfo(kind="rate_limit", message=message, retry_after_ms=retry_after,
+                                 category="rate_limited")
     if isinstance(exc, TimeoutError):
-        return ProviderErrorInfo(kind="transient", message=message, retry_after_ms=retry_after)
+        return ProviderErrorInfo(kind="transient", message=message, retry_after_ms=retry_after,
+                                 category=category)
     if any(token in lowered for token in ("temporar", "timeout", "timed out", "connection reset", "connection aborted")):
-        return ProviderErrorInfo(kind="transient", message=message, retry_after_ms=retry_after)
+        return ProviderErrorInfo(kind="transient", message=message, retry_after_ms=retry_after,
+                                 category=category)
     if "taskgroup" in lowered or "sub-exception" in lowered:
-        return ProviderErrorInfo(kind="transient", message=message, retry_after_ms=retry_after)
-    return ProviderErrorInfo(kind="fatal", message=message, retry_after_ms=retry_after)
+        return ProviderErrorInfo(kind="transient", message=message, retry_after_ms=retry_after,
+                                 category=category)
+    return ProviderErrorInfo(kind="fatal", message=message, retry_after_ms=retry_after,
+                             category=category)
+
+
+def _provider_failure_category(provider_name: str, exc: Exception, lowered: str) -> str:
+    provider = provider_name.lower()
+    code = getattr(exc, "code", None) or getattr(exc, "type", None)
+    body = getattr(exc, "body", None)
+    nested = getattr(body, "error", None) if body is not None else None
+    code = code or (nested.get("code") if isinstance(nested, dict) else getattr(nested, "code", None))
+    markers = [lowered, str(code or "").lower()]
+    text = " ".join(markers)
+    shared_context_markers = (
+        "context_length_exceeded", "context length exceeded", "maximum context length",
+        "token limit exceeded", "context window exceeded",
+    )
+    provider_context_markers = {
+        "openai": ("maximum context length", "prompt is too long"),
+        "anthropic": ("prompt is too long", "input is too long", "too many input tokens"),
+        "claude": ("prompt is too long", "input is too long", "too many input tokens"),
+        "google": ("maximum number of tokens", "input token count exceeds", "too many input tokens"),
+        "gemini": ("maximum number of tokens", "input token count exceeds", "too many input tokens"),
+        "mock": ("context limit exceeded", "context token limit"),
+    }
+    if any(marker in text for marker in (*shared_context_markers, *provider_context_markers.get(provider, ()))):
+        return "context_overflow"
+    status = getattr(exc, "status_code", None) or getattr(exc, "status", None)
+    if status == 429 or "rate limit" in text or "too many requests" in text:
+        return "rate_limited"
+    return "provider_error"
 
 
 def _extract_retry_after_ms(exc: Exception) -> int | None:

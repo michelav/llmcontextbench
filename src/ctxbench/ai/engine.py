@@ -7,6 +7,7 @@ from ctxbench.ai.models.claude import ClaudeModel
 from ctxbench.ai.models.gemini import GeminiModel
 from ctxbench.ai.models.mock import MockModel
 from ctxbench.ai.models.openai import OpenAIModel
+from ctxbench.ai.failures import failure_category, provider_call, tag_failure
 from ctxbench.ai.rate_control import RateControlRegistry, RateLimitedModelAdapter
 from ctxbench.ai.runtime import ToolRuntime
 from ctxbench.ai.strategies.local_function import LocalFunctionStrategy
@@ -56,6 +57,7 @@ class Engine:
                     "strategy_name": request.strategy_name,
                     "exceptionModule": exc.__class__.__module__,
                     "exceptionType": exc.__class__.__name__,
+                    "category": failure_category(exc),
                 },
             )
             result = AIResult(answer="", error=str(exc))
@@ -76,7 +78,8 @@ class Engine:
             with trace.span("engine.execute_model_input", "engine.execute_model_input"):
                 model = self._resolve_model(request.provider_name, request.model_name, request.params)
                 self._validate_capabilities(model, request.strategy_name)
-                model_response = model.generate(model_input, request, trace=trace)
+                with provider_call(request.provider_name):
+                    model_response = model.generate(model_input, request, trace=trace)
                 trace.record_model_call(
                     duration_ms=model_response.duration_ms,
                     input_tokens=model_response.input_tokens,
@@ -106,6 +109,7 @@ class Engine:
                     "execution_mode": "direct-model-input",
                     "exceptionModule": exc.__class__.__module__,
                     "exceptionType": exc.__class__.__name__,
+                    "category": failure_category(exc),
                 },
             )
             result = AIResult(answer="", error=str(exc))
@@ -157,9 +161,11 @@ class Engine:
         if strategy_name in {"local_function", "local_mcp", "remote_mcp"} and not getattr(
             model, "supports_tool_calling", True
         ):
-            raise ValueError(
+            error = ValueError(
                 f"Provider {model.__class__.__name__} does not support tool calling required by {strategy_name}."
             )
+            tag_failure(error, "capability_unavailable")
+            raise error
 
     def _resolve_strategy(self, name: str) -> tuple[StrategyAdapter, ToolRuntime | None]:
         strategy = self._strategies.get(name)

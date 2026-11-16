@@ -17,3 +17,6 @@ class StaticPolicy:
     def decide(self, candidates: Sequence[CandidateRef], state: SystemState) -> Decision:
         del state
         return Decision(self.candidate, "static candidate")
+
+    def candidate_targets(self) -> tuple[str, ...]:
+        return (self.candidate,)
