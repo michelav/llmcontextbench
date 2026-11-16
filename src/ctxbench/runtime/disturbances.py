@@ -114,7 +114,7 @@ class DisturbanceSpec:
             wrapper = wrapper_type(
                 runtime, name=self.name, component=self.component,
                 delay_ms=self.delay_ms, failure_rate=self.failure_rate,
-                failure_seed=self.seed + sequence, sleeper=sleeper,
+                failure_seed=self.seed, sequence=sequence, sleeper=sleeper,
             )
             wrappers.append(wrapper)
             return wrapper
@@ -125,41 +125,48 @@ class DisturbanceSpec:
 
 
 def build_runtime_disturbances(definitions, *, component_sequence: int, candidate_id: str, sleeper=sleep):
-    """Build candidate-scoped runtime interceptors and a snapshot of their applied effects."""
+    """Build candidate-scoped runtime interceptors and a snapshot of their applied effects.
+
+    Several disturbances on one component are stacked in declared order, the first innermost.
+    """
     interceptors = {}
     factories = []
     for raw in definitions:
         spec = raw if isinstance(raw, DisturbanceSpec) else DisturbanceSpec.from_definition(raw)
         factory = spec.decorator(component=spec.component, sequence=component_sequence,
                                  candidate_id=candidate_id, sleeper=sleeper)
-        if factory is not None:
-            if spec.component.value in interceptors:
-                previous = interceptors[spec.component.value]
-                def combined(runtime, first=previous, second=factory):
-                    return second(first(runtime))
-                # Preserve inner-to-outer application order and collect both wrappers.
-                combined.effect_records = lambda first=previous, second=factory: (
-                    getattr(first, "effect_records", lambda: [])() +
-                    getattr(second, "effect_records", lambda: [])())
-                interceptors[spec.component.value] = combined
-            else:
-                interceptors[spec.component.value] = factory
-            factories.append(factory)
+        if factory is None:
+            continue
+        previous = interceptors.get(spec.component.value)
+        if previous is None:
+            interceptors[spec.component.value] = factory
+        else:
+            interceptors[spec.component.value] = (
+                lambda runtime, first=previous, second=factory: second(first(runtime)))
+        factories.append(factory)
 
     def effects():
-        rows = []
-        for factory in factories:
-            rows.extend(getattr(factory, "effect_records", lambda: [])())
-        return rows
+        return [row for factory in factories for row in factory.effect_records()]
 
     return interceptors, effects
+
+
+def _failure_draw(disturbance: str, failure_seed: int, sequence: int, call_index: int,
+                  operation: str) -> float:
+    """Uniform draw in [0, 1) for one call.
+
+    Every input is a separate field of the hashed key, so two disturbances never share a draw
+    sequence because their seeds, sequence positions or names happen to combine alike.
+    """
+    key = "\x1f".join((disturbance, str(failure_seed), str(sequence), str(call_index), operation))
+    return int.from_bytes(sha256(key.encode("utf-8")).digest()[:8], "big") / (2**64)
 
 
 class ToolRuntimeDisturbance:
     """Apply seeded delay/failure effects to tool operations for a specific component."""
 
     def __init__(self, runtime, *, name: str, component: RuntimeComponent, delay_ms: int = 0,
-                 failure_rate: float = 0.0, failure_seed: int = 0, sleeper=sleep) -> None:
+                 failure_rate: float = 0.0, failure_seed: int = 0, sequence: int = 0, sleeper=sleep) -> None:
         if component not in {RuntimeComponent.LOCAL_FUNCTION, RuntimeComponent.LOCAL_MCP, RuntimeComponent.REMOTE_MCP}:
             raise ValueError("tool runtime disturbance requires a tool component")
         if (isinstance(delay_ms, bool) or not isinstance(delay_ms, (int, float))
@@ -175,6 +182,7 @@ class ToolRuntimeDisturbance:
         self.delay_ms = delay_ms
         self.failure_rate = failure_rate
         self.failure_seed = failure_seed
+        self.sequence = sequence
         self.sleeper = sleeper
         self.call_index = 0
         self.applied_delay_ms = 0
@@ -190,9 +198,7 @@ class ToolRuntimeDisturbance:
         call_index = self.call_index
         self.call_index += 1
         if self.failure_rate:
-            digest = sha256(f"{self.failure_seed}:{call_index}:{name}".encode("utf-8")).digest()
-            draw = int.from_bytes(digest[:8], "big") / (2**64)
-            if draw < self.failure_rate:
+            if _failure_draw(self.name, self.failure_seed, self.sequence, call_index, name) < self.failure_rate:
                 self.injected_failures += 1
                 error = RuntimeError(f"Injected disturbance {self.name} on {self.component.value}")
                 tag_failure(error, "injected_disturbance")
@@ -211,7 +217,7 @@ class ModelRuntimeDisturbance:
     """Apply deterministic delay/failure effects to per-call model generation."""
 
     def __init__(self, model: ModelAdapter, *, name: str, component: RuntimeComponent,
-                 delay_ms: int = 0, failure_rate: float = 0.0, failure_seed: int = 0, sleeper=sleep):
+                 delay_ms: int = 0, failure_rate: float = 0.0, failure_seed: int = 0, sequence: int = 0, sleeper=sleep):
         if component != RuntimeComponent.MODEL:
             raise ValueError("model runtime disturbance requires the model component")
         self.model = model
@@ -220,6 +226,7 @@ class ModelRuntimeDisturbance:
         self.delay_ms = delay_ms
         self.failure_rate = failure_rate
         self.failure_seed = failure_seed
+        self.sequence = sequence
         self.sleeper = sleeper
         self.call_index = 0
         self.applied_delay_ms = 0
@@ -238,8 +245,7 @@ class ModelRuntimeDisturbance:
         call_index = self.call_index
         self.call_index += 1
         if self.failure_rate:
-            digest = sha256(f"{self.failure_seed}:{call_index}:model".encode("utf-8")).digest()
-            if int.from_bytes(digest[:8], "big") / (2**64) < self.failure_rate:
+            if _failure_draw(self.name, self.failure_seed, self.sequence, call_index, "model") < self.failure_rate:
                 self.injected_failures += 1
                 error = RuntimeError(f"Injected disturbance {self.name} on model")
                 tag_failure(error, "injected_disturbance")

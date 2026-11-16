@@ -892,6 +892,20 @@ Definition:
 
 - Maps to the existing `DisturbanceSpec`. `component` ∈ `local_function`, `local_mcp`,
   `remote_mcp`, and new `model`. `candidates` empty means every candidate using that component.
+- `kind` ∈ `delay` (requires `delayMs`, an integer number of milliseconds), `failure` (requires
+  `failureRate`) and `delay_and_failure` (at least one of the two).
+- **Effects are per call, not per request.** `delayMs` is added to every model call or tool call
+  of the component, and `failureRate` is the probability that each such call fails. A request
+  that makes five tool calls at `failureRate: 0.2` fails with probability `1 - 0.8^5 ≈ 0.67`.
+- **Seeded draws.** The failure draw of a call is a hash of the disturbance name, its `seed`,
+  the request's sequence index, the call index within the attempt and the operation name, each
+  as a separate field. Disturbances therefore draw independently of one another, and equal
+  definitions give equal draws in every run.
+- **Refused at `plan`:** two disturbances with the same name; an unknown candidate; a tool
+  component that a named candidate does not use, or that no candidate uses when `candidates` is
+  empty; a `firstSequence` after the last request. A disturbance that could never take effect
+  is an error, so a scenario cannot run undisturbed without notice.
+- Several disturbances on one component are stacked in declared order, the first innermost.
 - `model` disturbances are needed because `inline` has no tool runtime. Implementation: `Engine`
   gains an optional per-call `model_interceptor`; `ProvisioningRuntime` accepts it under the
   interceptor key `model`; `ModelRuntimeDisturbance` wraps `ModelAdapter.generate` with the same
@@ -900,9 +914,15 @@ Definition:
   `(component, sequenceIndex, candidateId)` and passes the non-empty ones as
   `runtime_interceptors`.
 - Each disturbance wrapper counts what it applied. The attempt record stores
-  `disturbances: [{name, version, appliedDelayMs, injectedFailures}]`. An injected failure has
-  failure category `injected_disturbance`. Injected delay is inside measured latency by design
-  and is also reported separately.
+  `disturbances: [{name, version, appliedDelayMs, injectedFailures}]`, one entry per disturbance
+  whose component the attempt instantiated; an attempt outside every disturbance's scope stores
+  an empty list. `appliedDelayMs` is `derived`: the configured delay times the number of
+  affected calls, not a measured sleep. `injectedFailures` is `measured` (a count). An injected
+  failure has failure category `injected_disturbance`. Injected delay is inside measured latency
+  by design and is also reported separately.
+- The model interceptor wraps the adapter outside provider rate control. An injected model
+  failure is therefore never retried by a configured `rate_limit` retry and records no model
+  call.
 - Disturbances are part of the plan and the fingerprint. They are not visible to policies.
 
 ### 6.13 Candidates

@@ -252,7 +252,7 @@ def test_window_threshold_workflow_records_readings_and_fixed_window_switches(tm
     }})
     run = plan(definition, output=tmp_path / "fixed-window")
 
-    def scripted(_execution_request, _session, *, dataset, trace_options):
+    def scripted(_execution_request, _session, *, dataset, trace_options, runtime_interceptors=None):
         del dataset, trace_options
         count = int(_execution_request.correlation_id.rsplit("-", 1)[-1])
         tokens = 6 if count % 2 else 1
@@ -314,7 +314,7 @@ def test_resume_rebuilds_window_readings_without_reexecuting_terminal_requests(
         "tiers": [{"upTo": 5, "select": "A"}], "otherwise": "B", "when_unavailable": "B",
     }})
 
-    def scripted(execution_request, _session, *, dataset, trace_options):
+    def scripted(execution_request, _session, *, dataset, trace_options, runtime_interceptors=None):
         del dataset, trace_options
         index = int(execution_request.correlation_id.rsplit("-", 1)[-1])
         tokens = {1: 2, 2: 8, 3: 3, 4: 1}[index]
@@ -373,7 +373,7 @@ def test_resume_copies_signals_from_completed_execution_record(tmp_path: Path, m
                output=tmp_path / "between-writes")
     invoke_calls = []
 
-    def scripted(execution_request, _session, *, dataset, trace_options):
+    def scripted(execution_request, _session, *, dataset, trace_options, runtime_interceptors=None):
         del dataset, trace_options
         invoke_calls.append(execution_request.correlation_id)
         return {"status": "success", "response": "ok", "errorMessage": None,

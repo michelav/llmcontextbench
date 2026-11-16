@@ -27,6 +27,7 @@ from ctxbench.adaptive.policy import (
 from ctxbench.adaptive.signals import extract_signals
 from ctxbench.adaptive.state import Observation, WindowSystemState, validate_reading_request
 from ctxbench.core.errors import CapabilityUnavailableError, InvalidDefinitionError
+from ctxbench.runtime.disturbances import build_runtime_disturbances
 from ctxbench.core.fingerprint import digest
 from ctxbench.core.surfaces import parse_surface
 from ctxbench.core.workflow import (
@@ -120,13 +121,7 @@ class AdaptiveWorkflow:
             ))
 
         candidate_ids = {candidate.candidate_id for candidate in candidate_specs}
-        for disturbance in definition.disturbances:
-            unknown_candidates = set(disturbance.get("candidates", ())) - candidate_ids
-            if unknown_candidates:
-                raise ValueError(
-                    f"Unknown candidate(s) in disturbance {disturbance['name']}: "
-                    f"{', '.join(sorted(unknown_candidates))}"
-                )
+        _validate_disturbances(definition.disturbances, candidate_specs, len(definition.workload))
         policy_decl = definition.policy
         policy_ref, policy = resolve_policy(
             str(policy_decl["ref"]), dict(policy_decl.get("params") or {}), base_dir=definition.base_dir,
@@ -210,20 +205,15 @@ class AdaptiveWorkflow:
                 **request.payload, "resultMetadata": metadata,
                 "traceOptions": dict(plan.trace),
             })
-            from ctxbench.runtime.disturbances import build_runtime_disturbances
             planned_request = requests_by_id[invocation.execution_id]
             interceptors, applied_effects = build_runtime_disturbances(
                 plan.disturbances, component_sequence=planned_request.sequence_index,
                 candidate_id=invocation.candidate_id,
             )
-            if interceptors:
-                result = invoke_adaptive_execution(
-                    invocation, session, dataset=dataset, trace_options=dict(plan.trace),
-                    runtime_interceptors=interceptors,
-                )
-            else:
-                result = invoke_adaptive_execution(invocation, session, dataset=dataset,
-                                                   trace_options=dict(plan.trace))
+            result = invoke_adaptive_execution(
+                invocation, session, dataset=dataset, trace_options=dict(plan.trace),
+                runtime_interceptors=interceptors,
+            )
             return {**result, "_runtimeDisturbances": applied_effects()}
 
         with ExecutionSession(engine) as session:
@@ -541,6 +531,34 @@ def _validate_policy_targets(policy, candidate_ids: set[str]) -> None:
     unknown = set(named) - candidate_ids
     if unknown:
         raise ValueError(f"Policy references unknown candidates: {', '.join(sorted(unknown))}")
+
+
+def _validate_disturbances(disturbances, candidates, request_count: int) -> None:
+    """Refuse a disturbance that could never take effect, so a scenario is not silently undisturbed."""
+    strategies = {candidate.candidate_id: candidate.configuration["strategy"] for candidate in candidates}
+    names: set[str] = set()
+    for disturbance in disturbances:
+        name = disturbance["name"]
+        if name in names:
+            raise ValueError(f"Duplicate disturbance name: {name}")
+        names.add(name)
+        targets = list(disturbance.get("candidates") or ())
+        unknown = set(targets) - set(strategies)
+        if unknown:
+            raise ValueError(f"Unknown candidate(s) in disturbance {name}: {', '.join(sorted(unknown))}")
+        component = disturbance["component"]
+        if component != "model":  # every candidate calls a model; tool components depend on strategy
+            unaffected = sorted(candidate_id for candidate_id in (targets or strategies)
+                                if strategies[candidate_id] != component)
+            if targets and unaffected:
+                raise ValueError(f"Disturbance {name} targets component {component}, which candidate(s) "
+                                 f"{', '.join(unaffected)} do not use")
+            if not targets and len(unaffected) == len(strategies):
+                raise ValueError(f"Disturbance {name} targets component {component}, which no candidate uses")
+        first = disturbance.get("firstSequence", 1)
+        if first > request_count:
+            raise ValueError(f"Disturbance {name} starts at sequence {first}, after the last request "
+                             f"({request_count})")
 
 
 def _validate_policy_readings(policy, declared_signals) -> None:

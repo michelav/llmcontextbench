@@ -72,7 +72,7 @@ def adaptive_definition_schema() -> dict[str, Any]:
                                   "version": {"type": "string", "minLength": 1},
                                   "component": {"enum": ["local_function", "local_mcp", "remote_mcp", "model"]},
                                   "kind": {"enum": ["delay", "failure", "delay_and_failure"]},
-                                  "delayMs": {"type": "number", "minimum": 0},
+                                  "delayMs": {"type": "integer", "minimum": 0},
                                   "failureRate": {"type": "number", "minimum": 0, "maximum": 1},
                                   "firstSequence": {"type": "integer", "minimum": 1},
                                   "lastSequence": {"type": "integer", "minimum": 1},

@@ -17,10 +17,25 @@ Validation covered sequence and candidate scoping, deterministic seeded outcomes
 failure handling, fingerprint sensitivity, failure classification, latency accounting, and
 durable effect recording. No real providers were used.
 
+## Review fixes
+
+- `plan` refuses a disturbance that could never apply: a duplicate name, a tool component that a
+  named candidate (or, without `candidates`, any candidate) does not use, or a `firstSequence`
+  after the last request.
+- Failure draws hash the disturbance name, seed, sequence index, call index and operation as
+  separate fields. Before, `seed + sequence` made disturbances with nearby seeds draw shifted
+  copies of each other. Draws differ from those of the first WP-E version.
+- `delayMs` is an integer in the definition schema, as `DisturbanceSpec` requires.
+- The design (§6.12) now states the three kinds, that effects are per call, the provenance of
+  `appliedDelayMs`, and that model interception sits outside provider rate control.
+- Tests added in `tests/test_adaptive_disturbances.py`: tool components (counters, injected
+  failure category through the engine), requests and candidates outside the declared scope, two
+  whole runs with equal seed, and resume after an interruption between the durable writes.
+
 Checks:
 
-- `pytest -q tests/test_adaptive_contracts.py tests/test_adaptive_workflow.py tests/test_adaptive_signals_state.py tests/test_runtime.py` — 67 passed.
-- `pytest -q` — 495 passed.
+- `pytest -q tests/test_adaptive_disturbances.py tests/test_adaptive_contracts.py tests/test_adaptive_workflow.py tests/test_adaptive_signals_state.py` — 83 passed.
+- `pytest -q` — 516 passed.
 
 No artifact version change was needed: the active adaptive plan, execution result, and record
 versions already include the fields needed for this WP.

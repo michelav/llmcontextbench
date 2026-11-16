@@ -85,6 +85,7 @@ class ProvisioningRuntime:
         try:
             model_interceptor = self._interceptors.get("model")
             if model_interceptor is None:
+                # Engines that predate model interception take no such argument.
                 result = (owned or self._engine).execute(ai_request)
             else:
                 result = (owned or self._engine).execute(ai_request, model_interceptor=model_interceptor)
