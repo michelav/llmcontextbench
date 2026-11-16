@@ -55,7 +55,7 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
     if ledger.exists():
         for path in sorted(ledger.glob("*.json")):
             record = load_json(path)
-            if not isinstance(record, dict) or record.get("schemaVersion") != 2:
+            if not isinstance(record, dict) or record.get("schemaVersion") != 3:
                 raise ValueError(f"Unsupported adaptive request record: {path}")
             request_id = str(record.get("requestId") or "")
             if not request_id:
@@ -71,16 +71,17 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
             delivered_usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
             delivered_metrics = response.get("metricsSummary") if isinstance(response.get("metricsSummary"), dict) else {}
             eval_in, eval_out = evaluation.get("evaluationInputTokens"), evaluation.get("evaluationOutputTokens")
-            request_duration = _request_duration_ms(attempts)
+            request_duration = record.get("requestDurationMs")
+            if not isinstance(request_duration, (int, float)) or isinstance(request_duration, bool):
+                request_duration = None
             all_attempt_totals_known = bool(attempts) and all(
                 _attempt_total_tokens(row) is not None for row in attempts
             )
             ledger_attempts = record.get("attempts") if isinstance(record.get("attempts"), list) else []
             not_accepted = [row for row in ledger_attempts
-                            if isinstance(row, dict) and isinstance(row.get("analysis"), dict)
-                            and row["analysis"].get("accepted") is False]
-            unmet = sorted({str(value) for row in not_accepted
-                            for value in (row.get("analysis", {}).get("unmet") or [])})
+                            if isinstance(row, dict) and isinstance(row.get("observation"), dict)
+                            and row["observation"].get("accepted") is False]
+            unmet: list[str] = []
             delivered_attempt_ids = {str(delivery.get("attemptId"))} if delivery.get("attemptId") else set()
             non_delivered = [row for row in attempts if row.get("attemptId") not in delivered_attempt_ids]
             non_delivered_in, non_delivered_out, non_delivered_complete = _sum_attempt_usage(non_delivered)
@@ -100,7 +101,7 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
                 "attemptsNotAccepted": len(not_accepted),
                 "unmetConditions": "|".join(unmet),
                 "requestDurationMs": request_duration,
-                "requestDurationProvenance": "measured" if request_duration is not None else "unavailable",
+                "requestDurationProvenance": record.get("requestDurationProvenance", "unavailable"),
                 "generationInputTokens": generation_in,
                 "generationOutputTokens": generation_out,
                 "generationTotalTokens": _sum_known(generation_in, generation_out),

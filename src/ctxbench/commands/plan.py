@@ -14,6 +14,7 @@ def plan_command(
     verbose: bool = False,
     progress: bool = False,
     cache_dir: Path | None = None,
+    plugin_paths: tuple[Path, ...] = (),
 ) -> int:
     logger = PhaseLogger(verbose=verbose)
     source_path = Path(path).resolve()
@@ -25,6 +26,7 @@ def plan_command(
         definition,
         output=Path(output) if output else None,
         cache_dir=cache_dir,
+        plugin_paths=plugin_paths,
         logger=logger,
         progress=progress,
     )

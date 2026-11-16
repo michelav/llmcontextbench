@@ -7,6 +7,7 @@ from typing import Any
 from ctxbench._compat import BaseModel, Field, ValidationError
 from ctxbench.benchmark.surfaces import SurfaceSpec, parse_surface
 from ctxbench.core.provisioning import ProvisioningConfiguration, VALID_STRATEGY_NAMES
+from ctxbench.dataset.provenance import DatasetProvenance
 
 MODEL_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
 
@@ -91,111 +92,6 @@ class ExperimentDataset(BaseModel):
     def task_instances(self) -> str:
         if not self.root:
             raise ValueError("Dataset task_instances path is only available for local-root datasets.")
-        return str(Path(self.root) / "tasks.instance.json")
-
-
-class DatasetProvenance(BaseModel):
-    id: str
-    version: str
-    origin: str | None = None
-    resolved_revision: str | None = None
-    content_hash: str | None = None
-    materialized_path: str | None = None
-
-    @classmethod
-    def model_validate(cls, data: Any) -> "DatasetProvenance":
-        if isinstance(data, cls):
-            return data
-        if isinstance(data, ExperimentDataset):
-            root = data.root
-            inferred_id = data.id or (Path(root).name if root else "local-dataset")
-            inferred_version = data.version or "local"
-            return cls(
-                id=inferred_id,
-                version=inferred_version,
-                origin=data.origin or root,
-                materialized_path=root,
-            )
-        if isinstance(data, str):
-            root = str(Path(data).expanduser())
-            return cls(
-                id=Path(root).name or "local-dataset",
-                version="local",
-                origin=root,
-                materialized_path=root,
-            )
-        if isinstance(data, dict):
-            payload = dict(data)
-            legacy_paths = {"tasks", "contexts", "task_instances"}
-            if legacy_paths & set(payload) and "root" not in payload and "id" not in payload:
-                raise ValidationError(
-                    "Dataset provenance must reference a dataset root or id/version. "
-                    "Put tasks.json and tasks.instance.json in the dataset root "
-                    "and context files in <dataset>/context."
-                )
-            if "root" in payload:
-                root = str(payload.get("root") or "")
-                return cls(
-                    id=str(payload.get("id") or (Path(root).name if root else "local-dataset")),
-                    version=str(payload.get("version") or "local"),
-                    origin=str(payload.get("origin") or root) if (payload.get("origin") or root) else None,
-                    resolved_revision=payload.get("resolvedRevision") or payload.get("resolved_revision"),
-                    content_hash=payload.get("contentHash") or payload.get("content_hash"),
-                    materialized_path=str(
-                        payload.get("materializedPath")
-                        or payload.get("materialized_path")
-                        or root
-                    )
-                    if (
-                        payload.get("materializedPath")
-                        or payload.get("materialized_path")
-                        or root
-                    )
-                    else None,
-                )
-            if "id" in payload:
-                return cls(
-                    id=str(payload.get("id") or ""),
-                    version=str(payload.get("version") or ""),
-                    origin=str(payload.get("origin")) if payload.get("origin") is not None else None,
-                    resolved_revision=payload.get("resolvedRevision") or payload.get("resolved_revision"),
-                    content_hash=payload.get("contentHash") or payload.get("content_hash"),
-                    materialized_path=str(payload.get("materializedPath") or payload.get("materialized_path"))
-                    if (payload.get("materializedPath") or payload.get("materialized_path")) is not None
-                    else None,
-                )
-        raise ValidationError("DatasetProvenance requires an object input.")
-
-    def model_dump(self, mode: str = "python") -> dict[str, Any]:
-        return {
-            "id": self.id,
-            "version": self.version,
-            "origin": self.origin,
-            "resolvedRevision": self.resolved_revision,
-            "contentHash": self.content_hash,
-            "materializedPath": self.materialized_path,
-        }
-
-    @property
-    def root(self) -> str | None:
-        return self.materialized_path or self.origin
-
-    @property
-    def tasks(self) -> str:
-        if not self.root:
-            raise ValueError("Dataset tasks path is unavailable without a local materialized path.")
-        return str(Path(self.root) / "tasks.json")
-
-    @property
-    def contexts(self) -> str:
-        if not self.root:
-            raise ValueError("Dataset contexts path is unavailable without a local materialized path.")
-        return str(Path(self.root) / "context")
-
-    @property
-    def task_instances(self) -> str:
-        if not self.root:
-            raise ValueError("Dataset task_instances path is unavailable without a local materialized path.")
         return str(Path(self.root) / "tasks.instance.json")
 
 

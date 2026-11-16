@@ -9,7 +9,7 @@ from ctxbench.util.fs import load_json
 from ctxbench.util.jsonl import write_jsonl
 
 
-RESPONSE_SCHEMA_VERSION = 2
+RESPONSE_SCHEMA_VERSION = 3
 
 
 def rebuild_adaptive_responses(
@@ -20,7 +20,7 @@ def rebuild_adaptive_responses(
     """Project exactly one delivered response per terminal adaptive request.
 
     Request records and execution attempts remain the authorities. ``responses.jsonl`` is a
-    rebuildable view of successful deliveries; rejected and failed requests have no response.
+    rebuildable view of delivered requests; failed requests have no response.
     """
     artifact_root = Path(root)
     records_root = artifact_root / "adaptive-records"
@@ -30,7 +30,7 @@ def rebuild_adaptive_responses(
     if records_root.exists():
         for path in sorted(records_root.glob("*.json")):
             record = load_json(path)
-            if not isinstance(record, dict) or record.get("schemaVersion") != 2:
+            if not isinstance(record, dict) or record.get("schemaVersion") != 3:
                 raise ValueError(f"Unsupported adaptive request record: {path}")
             request_id = record.get("requestId")
             if not isinstance(request_id, str) or not request_id or path.stem != request_id:
@@ -66,6 +66,7 @@ def rebuild_adaptive_responses(
                 "responseSchemaVersion": RESPONSE_SCHEMA_VERSION,
                 "responseId": request_id,
                 "requestId": request_id,
+                "sequenceIndex": record.get("sequenceIndex"),
                 "executionId": execution_id,
                 "attemptId": attempt_id,
             })

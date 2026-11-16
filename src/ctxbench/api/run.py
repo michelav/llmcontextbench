@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Sequence
 
+from ctxbench.adaptive.definition import AdaptiveExperiment
 from ctxbench.api.errors import (
     ArtifactError, CapabilityError, CtxbenchError, DefinitionError, ExecutionStateError, RunNotFoundError,
 )
@@ -64,7 +65,7 @@ def _errors(default: type[CtxbenchError]):
         raise
 
 
-def plan(source: str | Path | Mapping[str, Any], *, output: str | Path | None = None,
+def plan(source: str | Path | Mapping[str, Any] | AdaptiveExperiment, *, output: str | Path | None = None,
          cache_dir: str | Path | None = None, plugin_paths: Sequence[str | Path] = (),
          logger: PhaseLogger | None = None, progress: bool = False) -> "Run":
     """Plan a benchmark or adaptive definition and return its run handle.
@@ -74,14 +75,19 @@ def plan(source: str | Path | Mapping[str, Any], *, output: str | Path | None = 
     """
     logger = logger or _silent_logger()
     with _errors(DefinitionError):
-        if isinstance(source, Mapping):
+        if isinstance(source, AdaptiveExperiment):
+            header = source.resolved_definition
+            definition_source = source
+        elif isinstance(source, Mapping):
             header: Any = source
             definition_source: Any = source
         else:
             definition_source = str(source)
             header = load_json(Path(source).expanduser().resolve())
         workflow = registry.for_definition(header)
-        definition = workflow.load_definition(definition_source, logger=logger)
+        definition = definition_source if isinstance(source, AdaptiveExperiment) else workflow.load_definition(
+            definition_source, logger=logger
+        )
     with _errors(ExecutionStateError):
         outcome = workflow.plan(
             definition,
@@ -129,10 +135,11 @@ class Run:
             return self._workflow.status(self.root, by=by)
 
     def execute(self, *, retry_uncertain: bool = False, force: bool = False, selector: Any = None,
-                logger: PhaseLogger | None = None, progress: bool = False) -> ExecuteOutcome:
+                logger: PhaseLogger | None = None, progress: bool = False,
+                plugin_paths: Sequence[str | Path] = ()) -> ExecuteOutcome:
         """Run answer generation. This is the only call that invokes generation providers."""
         options = ExecuteOptions(retry_uncertain=retry_uncertain, force=force, selector=selector,
-                                 progress=progress)
+                                 progress=progress, plugin_paths=tuple(Path(item) for item in plugin_paths))
         with _errors(ExecutionStateError):
             return self._workflow.execute(self.root, options=options, logger=logger or _silent_logger())
 

@@ -45,6 +45,7 @@ class ExecuteOptions:
     selector: Any = None
     progress: bool = False
     plan_path: Path | None = None  # explicit plan file inside the run directory, if any
+    plugin_paths: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

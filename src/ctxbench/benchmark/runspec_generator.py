@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-import re
 from typing import Any, Callable
 
-from ctxbench.benchmark.fingerprint import digest
-from ctxbench.benchmark.models import DatasetProvenance, Experiment, TrialMetadata, TrialSpec
+from ctxbench.core.fingerprint import digest
+from ctxbench.dataset.provenance import DatasetProvenance
+from ctxbench.dataset.tasks import render_task_template
+from ctxbench.benchmark.models import Experiment, TrialMetadata, TrialSpec
 from ctxbench.dataset.package import DatasetPackage
 from ctxbench.util.artifacts import canonical_trial_identity
 from ctxbench.util.env import resolve_plan_params
-
-TASK_TEMPLATE_PATTERN = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
-
 
 def resolve_params(experiment: Experiment, model_name: str, model_id: str | None = None) -> dict[str, Any]:
     common = dict(experiment.params.common)
@@ -190,46 +188,3 @@ def generate_runspecs(
             )
         )
     return runspecs
-
-
-def render_task_template(
-    task_template: str,
-    parameters: dict[str, Any],
-    *,
-    on_warning: Callable[..., None] | None = None,
-    task_id: str,
-    instance_id: str,
-) -> str:
-    placeholders = TASK_TEMPLATE_PATTERN.findall(task_template)
-    if not placeholders:
-        if parameters and on_warning is not None:
-            for key in sorted(parameters):
-                on_warning(
-                    "Unused task parameter; ignoring",
-                    taskId=task_id,
-                    instanceId=instance_id,
-                    parameter=key,
-                )
-        return task_template
-
-    rendered = task_template
-    for placeholder in placeholders:
-        if placeholder not in parameters and on_warning is not None:
-            on_warning(
-                "Missing task parameter; substituting empty string",
-                taskId=task_id,
-                instanceId=instance_id,
-                parameter=placeholder,
-            )
-        rendered = rendered.replace("{" + placeholder + "}", str(parameters.get(placeholder, "")))
-
-    if on_warning is not None:
-        for key in sorted(parameters):
-            if key not in placeholders:
-                on_warning(
-                    "Unused task parameter; ignoring",
-                    taskId=task_id,
-                    instanceId=instance_id,
-                    parameter=key,
-                )
-    return rendered

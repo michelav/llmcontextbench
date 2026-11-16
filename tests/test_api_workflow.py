@@ -104,7 +104,7 @@ def test_adaptive_lifecycle_through_api_is_silent_and_typed(tmp_path: Path, caps
     assert [row["state"] for row in run.requests()] == ["pending"]
 
     outcome = run.execute()
-    assert outcome.counts == {"delivered": 1, "rejected": 0, "failed": 0}
+    assert outcome.counts == {"delivered": 1, "failed": 0, "started": 0}
     assert [row["state"] for row in run.requests()] == ["delivered"]
     assert len(list(run.attempts())) == 1
     assert len(list(run.responses())) == 1

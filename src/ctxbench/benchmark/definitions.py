@@ -1,55 +1,18 @@
-"""Resolve versioned benchmark definitions before trial planning."""
+"""Benchmark-specific definition validation and planner conversion.
+
+Definition inheritance is shared by workflows and lives in ``ctxbench.core.definitions``.
+This module re-exports that resolver for existing callers.
+"""
 from __future__ import annotations
 
 from copy import deepcopy
-from pathlib import Path
-from typing import Any
-import json
+
+from ctxbench.core.definitions import resolve_definition
 
 DEFINITION_VERSION = 3
 
 
-def _merge(parent: dict, child: dict) -> dict:
-    result = deepcopy(parent)
-    for key, value in child.items():
-        if value is None:
-            result.pop(key, None)
-        elif isinstance(value, dict):
-            base = result.get(key)
-            result[key] = _merge(base if isinstance(base, dict) else {}, value)
-        else:
-            result[key] = deepcopy(value)
-    return result
-
-
-def resolve_definition(path: str | Path, *, _parents: tuple[Path, ...] = ()) -> dict[str, Any]:
-    """Resolve one parent, preserving the origin of each declared input path."""
-    source = Path(path).resolve()
-    if source in _parents:
-        raise ValueError(f"Definition inheritance cycle: {source}")
-    if len(_parents) >= 32:
-        raise ValueError("Definition inheritance exceeds 32 files")
-    with source.open(encoding="utf-8") as stream:
-        data = json.load(stream)
-    if not isinstance(data, dict):
-        raise ValueError(f"Definition must be an object: {source}")
-    parent = data.pop("extends", None)
-    if parent is not None and (not isinstance(parent, str) or not parent.strip()):
-        raise ValueError("extends must be a nonempty path string")
-    # Only input paths are rebased. Outputs remain relative to the leaf definition.
-    dataset = data.get("dataset")
-    if (data.get("schemaVersion") is not None or parent) and isinstance(dataset, dict) and isinstance(dataset.get("root"), str):
-        root = Path(dataset["root"]).expanduser()
-        dataset["root"] = str((source.parent / root).resolve())
-    if (data.get("schemaVersion") is not None or parent) and isinstance(dataset, str):
-        data["dataset"] = str((source.parent / Path(dataset).expanduser()).resolve())
-    if parent:
-        base = resolve_definition(source.parent / parent, _parents=(*_parents, source))
-        return _merge(base, data)
-    return data
-
-
-def planner_payload(definition: dict[str, Any]) -> dict[str, Any]:
+def planner_payload(definition: dict) -> dict:
     """Validate the current benchmark contract and translate it to planner models."""
     version = definition.get("schemaVersion")
     if version is None:
@@ -95,7 +58,7 @@ def planner_payload(definition: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def definition_schema() -> dict[str, Any]:
+def definition_schema() -> dict:
     """Schema is defined in Python so installed wheels validate without repo paths."""
     return {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -122,3 +85,6 @@ def definition_schema() -> dict[str, Any]:
             "evaluation": {"type": "object"}, "trace": {"type": "object"}, "artifacts": {"type": "object"},
         },
     }
+
+
+__all__ = ["DEFINITION_VERSION", "definition_schema", "planner_payload", "resolve_definition"]

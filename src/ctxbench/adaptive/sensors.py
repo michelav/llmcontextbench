@@ -9,7 +9,7 @@ from typing import Protocol
 
 from ctxbench.dataset.capabilities import SignalCapability
 
-from .types import Provenance, TokenUsage
+from ctxbench.core.provenance import Provenance, TokenUsage
 
 
 class SensorClass(StrEnum):

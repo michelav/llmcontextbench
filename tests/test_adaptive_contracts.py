@@ -5,29 +5,12 @@ from pathlib import Path
 import pytest
 
 from ctxbench.adapters.repoqa.package import RepoQADatasetAdapter
-from ctxbench.adaptive.calibration_contract import (
-    CalibrationArtifact,
-    CalibrationEstimate,
-    CalibrationProvenance,
-    CalibrationQualitySource,
-)
-from ctxbench.adaptive.estimator import (
-    EstimatorDefinition,
-    FeaturePartitionKey,
-    RollingWindowEstimator,
-)
 from ctxbench.adaptive.sensors import (
     MinimumResponseLengthSensor,
     QualityObservation,
     SensorClass,
 )
-from ctxbench.adaptive.types import (
-    Estimate,
-    Observation,
-    PerformanceEstimate,
-    Provenance,
-    TokenUsage,
-)
+from ctxbench.core.provenance import Provenance, TokenUsage
 from ctxbench.benchmark.models import ExperimentDataset
 from ctxbench.core.provisioning import ProvisioningConfiguration
 from ctxbench.dataset.capabilities import (
@@ -48,14 +31,6 @@ from ctxbench.ai.models.base import AIResult
 
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def _estimate(value, provenance=Provenance.REPORTED):
-    return Estimate(value, provenance, 1)
-
-
-def _performance(latency, tokens):
-    return PerformanceEstimate(_estimate(latency), _estimate(tokens))
 
 
 def test_feature_partitions_and_signal_capabilities_across_local_and_repoqa_datasets():
@@ -133,77 +108,6 @@ def test_response_acceptance_and_unavailable_quality_keep_signal_class_and_prove
             "request-1", "candidate-a", "accuracy", 0.8, "0..1", "judge", "1",
             SensorClass.JUDGE, Provenance.REPORTED,
             unavailable.cost,
-        )
-
-
-def test_rolling_estimator_uses_bounded_window_warmup_and_calibration_fallback():
-    schema = RequestFeatureSchema(
-        "features", "1", (FeatureCapability("context_bytes", "number", "measured", "bytes"),),
-        partition_keys=("context_bytes",),
-        partitions=(FeaturePartitionCapability("context_bytes", (10,), ("small", "large")),),
-    )
-    partition = FeaturePartitionKey.from_features(schema, {"context_bytes": 11})
-    assert partition is not None
-    estimator = RollingWindowEstimator(EstimatorDefinition(window_size=5, minimum_observations=3))
-    calibration = _performance(100, 500)
-    assert estimator.estimate("candidate-a", partition, calibration) == calibration
-
-    for index in range(1, 3):
-        estimator.observe(
-            "candidate-a", partition,
-            Observation("candidate-a", "success", index * 10,
-                        TokenUsage(index * 100, Provenance.REPORTED)),
-        )
-    assert estimator.estimate("candidate-a", partition, calibration) == calibration
-    estimator.observe(
-        "candidate-a", partition,
-        Observation("candidate-a", "success", 30, TokenUsage(300, Provenance.REPORTED)),
-    )
-    assert estimator.estimate("candidate-a", partition, calibration).latency_ms.value == 20
-    for index in range(4, 8):
-        estimator.observe(
-            "candidate-a", partition,
-            Observation("candidate-a", "success", index * 10,
-                        TokenUsage(index * 100, Provenance.REPORTED)),
-        )
-    estimate = estimator.estimate("candidate-a", partition, calibration)
-    assert estimator.observation_count("candidate-a", partition) == 5
-    assert estimate.latency_ms.value == 50
-    assert estimate.total_tokens.value == 500
-    assert estimate.latency_ms.provenance == Provenance.DERIVED
-
-
-def test_calibration_can_use_disjoint_judge_evaluation_but_rejects_episode_leakage():
-    estimator_definition = EstimatorDefinition()
-    source = CalibrationProvenance(
-        source_run_id="calibration-run",
-        source_artifact_fingerprint="sha256:calibration",
-        dataset_id="ctxbench/fake",
-        dataset_version="1",
-        candidate_catalog_fingerprint="sha256:candidates",
-        feature_schema_id="features",
-        feature_schema_version="1",
-        estimator=estimator_definition,
-        source_request_ids=("cal-1", "cal-2"),
-        quality_sources=(CalibrationQualitySource(
-            "accuracy", "reference-judge", SensorClass.JUDGE, Provenance.REPORTED,
-        ),),
-    )
-    partition = FeaturePartitionKey("features", "1", (("context_bytes", "small"),))
-    artifact = CalibrationArtifact(
-        source, (CalibrationEstimate("candidate-a", partition, _performance(100, 500)),),
-    )
-    source.validate_for(
-        active_request_ids={"active-1"}, dataset_id="ctxbench/fake", dataset_version="1",
-        candidate_catalog_fingerprint="sha256:candidates", feature_schema_id="features",
-        feature_schema_version="1", estimator=estimator_definition,
-    )
-    assert artifact.estimate_for("candidate-a", partition).latency_ms.value == 100
-    with pytest.raises(ValueError, match="overlap"):
-        source.validate_for(
-            active_request_ids={"cal-2"}, dataset_id="ctxbench/fake", dataset_version="1",
-            candidate_catalog_fingerprint="sha256:candidates", feature_schema_id="features",
-            feature_schema_version="1", estimator=estimator_definition,
         )
 
 

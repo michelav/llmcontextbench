@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from ctxbench.benchmark.selectors import TrialSelector, load_ids_from_file, load_ids_from_stdin
 from ctxbench.commands.dataset import fetch_command_from_args, inspect_command_from_args
@@ -231,6 +232,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override output directory (default: experiment.output/<id>/)",
     )
     plan_parser.add_argument("--cache-dir", help="Override dataset cache root for this command")
+    plan_parser.add_argument("--plugin-path", action="append", default=[], metavar="DIR",
+                             help="Add a directory to the import path for workflow plug-ins (repeatable)")
     plan_parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     plan_parser.add_argument("--progress", action="store_true", help="Show progress bar")
     plan_parser.set_defaults(
@@ -240,6 +243,7 @@ def build_parser() -> argparse.ArgumentParser:
             cache_dir=args.cache_dir,
             verbose=args.verbose,
             progress=args.progress,
+            plugin_paths=tuple(Path(item) for item in args.plugin_path),
         )
     )
 
@@ -262,6 +266,8 @@ def build_parser() -> argparse.ArgumentParser:
     _add_selector_args(execute_parser)
     execute_parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     execute_parser.add_argument("--progress", action="store_true", help="Show progress bar")
+    execute_parser.add_argument("--plugin-path", action="append", default=[], metavar="DIR",
+                                help="Add a directory to the import path for workflow plug-ins (repeatable)")
     execute_parser.set_defaults(
         func=lambda args: execute_command(
             args.trials,
@@ -270,6 +276,7 @@ def build_parser() -> argparse.ArgumentParser:
             verbose=args.verbose,
             progress=args.progress,
             selector=_selector_from_args(args),
+            plugin_paths=tuple(Path(item) for item in args.plugin_path),
         )
     )
 

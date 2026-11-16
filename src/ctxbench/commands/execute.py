@@ -16,6 +16,7 @@ def execute_command(
     progress: bool = False,
     selector: TrialSelector | None = None,
     retry_uncertain: bool = False,
+    plugin_paths: tuple[Path, ...] = (),
 ) -> int:
     source = Path(queries).resolve() if queries else Path("trials.jsonl").resolve()
     logger = PhaseLogger(verbose=verbose)
@@ -25,7 +26,7 @@ def execute_command(
         root,
         options=ExecuteOptions(
             retry_uncertain=retry_uncertain, force=force, selector=selector,
-            progress=progress, plan_path=source,
+            progress=progress, plan_path=source, plugin_paths=plugin_paths,
         ),
         logger=logger,
     )

@@ -3,8 +3,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ctxbench.benchmark.models import DatasetProvenance
 from ctxbench.dataset.errors import AdapterUnavailableError
+from ctxbench.dataset.provenance import DatasetProvenance
 from ctxbench.core.provisioning import ProvisioningConfiguration
 from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.adapters.registry import get_default_registry
@@ -18,8 +18,7 @@ def resolve_adaptive_dataset(dataset: dict[str, Any]):
         return get_default_registry().resolve(provenance)
     except AdapterUnavailableError:
         if provenance.materialized_path:
-            from ctxbench.benchmark.models import ExperimentDataset
-            return LocalDatasetPackage.from_dataset(ExperimentDataset(root=provenance.materialized_path))
+            return LocalDatasetPackage.from_dataset(provenance)
         raise
 
 
@@ -39,7 +38,8 @@ def invoke_adaptive_execution(execution_request, session, *, dataset, trace_opti
     result_metadata = dict(result_metadata)
     config = runtime_request.configuration
     provisioning = {
-        "configurationId": execution_request.candidate_id,
+        "configurationId": result_metadata.get("configurationId", execution_request.candidate_id),
+        "candidateId": execution_request.candidate_id,
         "strategy": config.strategy,
         "representation": config.representation,
         "surface": config.surface,
@@ -108,8 +108,8 @@ def _runtime_request(payload: dict[str, Any], execution_request, result_metadata
     config = ProvisioningConfiguration.model_validate(payload["configuration"])
     if config.strategy not in {"inline", "local_function", "local_mcp", "remote_mcp"}:
         raise ValueError("adaptive runtimeRequest uses an unsupported strategy")
-    if execution_request.candidate_id != result_metadata.get("configurationId", execution_request.candidate_id):
-        raise ValueError("resultMetadata configurationId differs from selected candidate")
+    if execution_request.candidate_id != result_metadata.get("candidateId", execution_request.candidate_id):
+        raise ValueError("resultMetadata candidateId differs from selected candidate")
     return RuntimeRequest(
         task=str(payload["task"]),
         task_id=execution_request.task_id,

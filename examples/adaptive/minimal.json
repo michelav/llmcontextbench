@@ -1,92 +1,38 @@
 {
   "workflowKind": "adaptive",
-  "schemaVersion": 3,
-  "workflowId": "adaptive-minimal",
-  "executionFingerprint": "example-fingerprint",
-  "datasetId": "ctxbench/fake",
-  "datasetVersion": "1",
-  "featureSchema": {
-    "schema_id": "ctxbench.fake.request-features",
-    "version": "1",
-    "features": [
-      {"feature_id": "context_bytes", "value_type": "number", "provenance": "measured", "unit": "bytes"}
-    ],
-    "partition_keys": ["context_bytes"],
-    "partitions": [],
-    "missing_partition_policy": "unpartitioned"
-  },
-  "policy": {"selection_metric": "declared_order", "minimum_response_length": 0},
-  "estimator": {
-    "estimator_id": "rolling_window_mean",
-    "version": "1",
-    "window_size": 5,
-    "minimum_observations": 3,
-    "accepted_status": "success"
-  },
-  "candidateCatalog": ["inline-mock"],
-  "calibration": null,
-  "requests": [
-    {
-      "requestId": "request-1",
-      "sequenceIndex": 1,
-      "taskId": "task_role",
-      "instanceId": "person-001",
-      "features": {"sequence_index": 1, "context_bytes": 256},
-      "featureValues": {"context_bytes": 256},
-      "candidateOrder": ["inline-mock"],
-      "candidates": {
-        "inline-mock": {
-          "candidate": {
-            "configuration_id": "inline-mock",
-            "executable": true,
-            "context_fit": {
-              "input_tokens": 256,
-              "output_reservation": 128,
-              "context_limit": 4096,
-              "provenance": "estimated"
-            }
-          },
-          "execution": {
-            "execution_id": "request-1-inline-mock",
-            "workflow_id": "adaptive-minimal",
-            "correlation_id": "request-1",
-            "experiment_id": "adaptive-minimal",
-            "execution_fingerprint": "example-fingerprint",
-            "task_id": "task_role",
-            "instance_id": "person-001",
-            "candidate_id": "inline-mock",
-            "payload": {
-              "runtimeRequest": {
-                "task": "Summarize the supplied profile.",
-                "provider": "mock",
-                "model_name": "mock",
-                "configuration": {"strategy": "inline", "representation": "json", "surface": "full"},
-                "surface_spec": {"type": "full_context"},
-                "params": {"max_tokens": 128}
-              },
-              "resultMetadata": {
-                "experimentId": "adaptive-minimal",
-                "configurationId": "inline-mock",
-                "modelId": "mock",
-                "dataset": {"id": "ctxbench/fake", "version": "1"},
-                "taskTags": [],
-                "validationConfig": {},
-                "parameters": {"max_tokens": 128},
-                "contextBlocks": []
-              }
-            },
-            "trial_id": null
-          }
-        }
-      }
-    }
-  ],
+  "schemaVersion": 4,
+  "id": "adaptive-minimal",
+  "output": "outputs",
+  "seed": 1,
+  "labels": {"example": "minimal"},
   "dataset": {
-    "id": "ctxbench/fake",
-    "version": "1",
-    "materializedPath": "tests/fixtures/fake_dataset/dataset"
+    "id": "ctxbench/fake-dataset",
+    "version": "0.1.0",
+    "root": "../../tests/fixtures/fake_dataset/dataset"
   },
+  "models": {
+    "mock": {"provider": "mock", "name": "mock", "modelParams": {"max_tokens": 128}}
+  },
+  "surfaces": {"full": {"type": "full_context"}},
+  "configurations": {
+    "inline-json": {"strategy": "inline", "representation": "json", "surface": "full"}
+  },
+  "candidates": {
+    "inline-mock": {"model": "mock", "configuration": "inline-json"}
+  },
+  "taskParams": {},
+  "execution": {"options": {}},
+  "workload": {
+    "requests": [
+      {"requestId": "request-1", "taskId": "task_role", "instanceId": "person-001"}
+    ]
+  },
+  "policy": {"ref": "static", "params": {"candidate": "inline-mock"}},
+  "window": {"requests": 5, "mode": "sliding"},
+  "signals": [],
+  "acceptance": {"minimumResponseLength": 0},
+  "goals": [],
+  "disturbances": [],
   "evaluation": {"enabled": false, "judges": []},
-  "trace": {"enabled": false, "writeFiles": false},
-  "output": "outputs"
+  "trace": {"enabled": false, "writeFiles": false}
 }

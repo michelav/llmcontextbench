@@ -1,43 +1,44 @@
-"""Dataset and provider helpers."""
+"""Dataset and provider helpers, lazily exported to keep shared contracts acyclic."""
+from __future__ import annotations
 
-from ctxbench.benchmark.models import DatasetProvenance
-from ctxbench.dataset.capabilities import (
-    DatasetCapabilityReport,
-    FeatureCapability,
-    FeaturePartitionCapability,
-    RequestFeatureSchema,
-    SignalCapability,
-    SignalCost,
-)
-from ctxbench.dataset.cache import DatasetCache, DatasetConflictError
-from ctxbench.dataset.conflicts import AmbiguousDatasetError, DatasetConflictDetector
-from ctxbench.dataset.inspect import build_inspect_result
-from ctxbench.dataset.materialization import MaterializationManifest
-from ctxbench.dataset.package import DatasetMetadata, DatasetPackage, StrategyDescriptor
-from ctxbench.dataset.provider import LocalDatasetPackage
-from ctxbench.dataset.resolver import DatasetNotFoundError, DatasetResolver, MultiDatasetError
-from ctxbench.dataset.validation import validate_package
+from importlib import import_module
 
-__all__ = [
-    "AmbiguousDatasetError",
-    "DatasetCache",
-    "DatasetConflictDetector",
-    "DatasetConflictError",
-    "DatasetCapabilityReport",
-    "FeatureCapability",
-    "FeaturePartitionCapability",
-    "DatasetMetadata",
-    "DatasetNotFoundError",
-    "DatasetPackage",
-    "DatasetProvenance",
-    "DatasetResolver",
-    "LocalDatasetPackage",
-    "MaterializationManifest",
-    "MultiDatasetError",
-    "RequestFeatureSchema",
-    "SignalCapability",
-    "SignalCost",
-    "StrategyDescriptor",
-    "build_inspect_result",
-    "validate_package",
-]
+
+_EXPORTS = {
+    "AmbiguousDatasetError": "conflicts",
+    "DatasetCache": "cache",
+    "DatasetConflictDetector": "conflicts",
+    "DatasetConflictError": "cache",
+    "DatasetCapabilityReport": "capabilities",
+    "FeatureCapability": "capabilities",
+    "FeaturePartitionCapability": "capabilities",
+    "DatasetMetadata": "package",
+    "DatasetNotFoundError": "resolver",
+    "DatasetPackage": "package",
+    "DatasetProvenance": "provenance",
+    "DatasetResolver": "resolver",
+    "LocalDatasetPackage": "provider",
+    "MaterializationManifest": "materialization",
+    "MultiDatasetError": "resolver",
+    "RequestFeatureSchema": "capabilities",
+    "SignalCapability": "capabilities",
+    "SignalCost": "capabilities",
+    "StrategyDescriptor": "package",
+    "build_inspect_result": "inspect",
+    "validate_package": "validation",
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str):
+    module_name = _EXPORTS.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(import_module(f"ctxbench.dataset.{module_name}"), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(__all__))

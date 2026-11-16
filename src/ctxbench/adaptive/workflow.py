@@ -1,160 +1,207 @@
-"""Causal adaptive MAPE-K workflow over the shared execution service."""
+"""Adaptive workflow planning and durable one-decision/one-attempt execution."""
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
 from contextlib import contextmanager
+from dataclasses import dataclass, replace
 import fcntl
-from math import isfinite
+import json
 from pathlib import Path
 import re
 from time import perf_counter
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
-from ctxbench.dataset.capabilities import RequestFeatureSchema, SignalCapability
-from ctxbench.execution.service import ExecutionRequest, ExecutionSession, TrialExecutionService
-from ctxbench.util.clock import utc_now_iso
-from ctxbench.util.fs import load_json, write_json
+from ctxbench.adaptive.artifacts import (
+    ADAPTIVE_ARTIFACT_VERSION, adaptive_plan_from_payload, adaptive_plan_payload,
+    validate_workflow_manifest, write_adaptive_artifacts,
+)
+from ctxbench.adaptive.definition import AdaptiveExperiment, load_adaptive_experiment
+from ctxbench.adaptive.invocation import build_execution_request
+from ctxbench.adaptive.plan import (
+    ADAPTIVE_PLAN_VERSION, AdaptivePlan, CandidateSpec, PlannedRequest, WindowSpec,
+)
+from ctxbench.adaptive.policy import (
+    CandidateRef, Decision, PolicyContractError, PrefixSystemState, resolve_policy,
+    validate_decision, verify_policy,
+)
+from ctxbench.core.fingerprint import digest
+from ctxbench.core.surfaces import parse_surface
 from ctxbench.core.workflow import (
     ExecuteOptions, ExecuteOutcome, MetricsOptions, MetricsOutcome, PlanOutcome, RunStatus,
     StatusGroupingError,
 )
-
-from .calibration_contract import CalibrationArtifact
-from .estimator import Estimator, EstimatorDefinition, FeaturePartitionKey, RollingWindowEstimator
-from .sensors import (
-    MinimumResponseLengthSensor,
-    OnlineQualityAssessor,
-    QualityObservation,
-    ResponseAcceptanceObservation,
-    SensorClass,
-    SensorCost,
-)
-from .types import (
-    Candidate,
-    Decision,
-    Observation,
-    PerformanceEstimate,
-    Provenance,
-    RequestFeatures,
-    TokenUsage,
-    validate_candidates,
-)
-
-ADAPTIVE_PLAN_VERSION = 3
-ADAPTIVE_RECORD_VERSION = 2
+from ctxbench.dataset.cache import DatasetCache
+from ctxbench.dataset.provenance import DatasetProvenance
+from ctxbench.dataset.resolver import DatasetResolver
+from ctxbench.dataset.validation import validate_package
+from ctxbench.execution.service import ExecutionRequest, ExecutionSession, TrialExecutionService
+from ctxbench.util.clock import utc_now_iso
+from ctxbench.util.env import resolve_plan_params
+from ctxbench.util.fs import load_json, write_json
 
 
-@dataclass(frozen=True, slots=True)
-class AdaptiveDefinition:
-    """A validated adaptive definition plus the location that relative paths resolve against."""
-    header: Mapping[str, Any]
-    plan: "AdaptivePlan"
-    base_dir: Path
-
-
-_REQUEST_STATES = ("delivered", "failed", "rejected", "started")
-_TERMINAL_STATES = {"delivered", "failed", "rejected"}
+ADAPTIVE_RECORD_VERSION = 3
+_TERMINAL = {"delivered", "failed"}
+_REQUEST_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 
 
 class AdaptiveWorkflow:
-    """Adaptive workflow: freeze a request workload, run the decision loop, report on it."""
+    """Adaptive run implementation behind the shared workflow contract."""
 
     kind = "adaptive"
 
-    # ---- definition and planning -------------------------------------------------------
+    def load_definition(self, source, *, logger=None) -> AdaptiveExperiment:
+        del logger
+        return load_adaptive_experiment(source)
 
-    def load_definition(self, source, *, logger=None) -> AdaptiveDefinition:
-        from ctxbench.adaptive.artifacts import validate_adaptive_definition
-        if isinstance(source, Mapping):
-            header, base_dir = dict(source), Path.cwd().resolve()
-        else:
-            path = Path(source).resolve()
-            header, base_dir = load_json(path), path.parent
-        return AdaptiveDefinition(header, validate_adaptive_definition(header), base_dir)
-
-    def plan(self, definition: AdaptiveDefinition, *, output: Path | None, cache_dir: Path | None = None,
+    def plan(self, definition: AdaptiveExperiment, *, output: Path | None, cache_dir: Path | None = None,
              plugin_paths: Sequence[Path] = (), logger=None, progress: bool = False) -> PlanOutcome:
-        from ctxbench.adaptive.artifacts import write_adaptive_artifacts
-        header, plan = definition.header, definition.plan
-        target = Path(output).resolve() if output else definition.base_dir / str(header.get("output", "outputs"))
-        dataset_metadata = header.get("dataset")
-        evaluation = header.get("evaluation")
-        trace = header.get("trace")
-        if target.exists() and any(target.iterdir()):
-            raise ValueError("Adaptive planning requires a fresh output directory; existing plans are never migrated.")
-        dataset = dataset_metadata if isinstance(dataset_metadata, dict) else {
-            "id": plan.dataset_id or "unknown", "version": plan.dataset_version or "unknown",
-            "origin": None, "materializedPath": None,
-        }
-        if ((plan.dataset_id and dataset.get("id") != plan.dataset_id)
-                or (plan.dataset_version and dataset.get("version") != plan.dataset_version)):
-            raise ValueError("Adaptive definition dataset differs from its frozen plan provenance.")
-        write_adaptive_artifacts(target, plan, dataset=dataset, evaluation=evaluation, trace=trace)
-        plan_path = target / "adaptive-plan.json"
-        return PlanOutcome(plan.workflow_id, self.kind, target, plan_path, len(plan.requests),
-                           f"Planned {len(plan.requests)} adaptive request(s) → {plan_path}")
+        del progress
+        from ctxbench.adapters.registry import get_default_registry
+        from ctxbench.dataset.errors import AdapterUnavailableError
 
-    # ---- execution ---------------------------------------------------------------------
+        logger = logger
+        cache = DatasetCache(cache_dir=cache_dir)
+        resolved = DatasetResolver().resolve_for_planning(definition.dataset, cache)
+        try:
+            package = get_default_registry().resolve(resolved.adapter_ref)
+        except AdapterUnavailableError:
+            package = resolved.package
+        validate_package(package)
+        report = package.capability_report()
+        provenance = DatasetProvenance(
+            id=package.identity(), version=package.version(), origin=package.origin(),
+            resolved_revision=report.resolved_revision, content_hash=report.content_hash,
+            materialized_path=report.materialized_path,
+        )
+
+        candidate_specs: list[CandidateSpec] = []
+        for candidate_id, declaration in definition.candidates.items():
+            model_id = declaration["model"]
+            config_id = declaration["configuration"]
+            if model_id not in definition.models:
+                raise ValueError(f"Unknown model reference in candidates.{candidate_id}: {model_id}")
+            if config_id not in definition.configurations:
+                raise ValueError(f"Unknown configuration reference in candidates.{candidate_id}: {config_id}")
+            model = definition.models[model_id]
+            config = definition.configurations[config_id]
+            surface_id = config["surface"]
+            if surface_id not in definition.surfaces:
+                raise ValueError(f"Unknown surface reference in configurations.{config_id}: {surface_id}")
+            surface = parse_surface(dict(definition.surfaces[surface_id]))
+            package.resolve_surface(surface)
+            params = resolve_plan_params({**definition.execution_options, **dict(model.get("modelParams") or {})})
+            candidate_specs.append(CandidateSpec(
+                candidate_id=candidate_id, model_id=model_id, provider=model["provider"],
+                model_name=model["name"], model_params=params, configuration_id=config_id,
+                configuration={"strategy": config["strategy"], "representation": config["representation"],
+                               "surface": config["surface"]},
+                surface_spec=surface.model_dump(mode="json"),
+                execution_options={}, labels=dict(declaration.get("labels") or {}),
+            ))
+
+        candidate_ids = {candidate.candidate_id for candidate in candidate_specs}
+        policy_decl = definition.policy
+        policy_ref, _policy = resolve_policy(
+            str(policy_decl["ref"]), dict(policy_decl.get("params") or {}), base_dir=definition.base_dir,
+            plugin_paths=plugin_paths, sources=tuple(policy_decl.get("sources") or ()),
+        )
+        _validate_policy_targets(policy_ref.ref, policy_ref.params, candidate_ids)
+
+        requests: list[PlannedRequest] = []
+        request_ids: set[str] = set()
+        for index, workload_item in enumerate(definition.workload, start=1):
+            request_id = workload_item.request_id or f"r-{index:06d}"
+            if not _REQUEST_ID.fullmatch(request_id) or request_id in {".", ".."}:
+                raise ValueError(f"Invalid requestId: {request_id!r}")
+            if request_id in request_ids:
+                raise ValueError(f"Duplicate requestId: {request_id}")
+            request_ids.add(request_id)
+            if workload_item.task_id not in package.list_task_ids():
+                raise ValueError(f"Unknown taskId in workload request {request_id}: {workload_item.task_id}")
+            if workload_item.instance_id not in package.list_instance_ids():
+                raise ValueError(f"Unknown instanceId in workload request {request_id}: {workload_item.instance_id}")
+            task = package.get_task(workload_item.task_id)
+            task_instance = package.get_task_instance(workload_item.instance_id, workload_item.task_id)
+            instance_params = task_instance.get("parameters", {}) if isinstance(task_instance, dict) else {}
+            parameters = {**dict(definition.task_params),
+                          **(instance_params if isinstance(instance_params, dict) else {})}
+            from ctxbench.dataset.tasks import render_task_template
+            statement = render_task_template(task.statement, parameters,
+                on_warning=(lambda message, **fields: logger.warn("PLAN", "task.template.warning", message, **fields))
+                if logger is not None else None,
+                task_id=workload_item.task_id, instance_id=workload_item.instance_id)
+            requests.append(PlannedRequest(
+                request_id=request_id, sequence_index=index, task_id=workload_item.task_id,
+                instance_id=workload_item.instance_id, task_statement=statement,
+                task_template=task.statement, parameters=parameters,
+                task_tags=tuple(task.tags), validation_type=task.validation_type,
+                validation_config=dict(task.validation_config), context_blocks=tuple(task.context_blocks),
+                labels=dict(workload_item.labels),
+            ))
+        mixed = definition.allow_mixed_models
+        plan = AdaptivePlan(
+            workflow_id=definition.id, seed=definition.seed, labels=dict(definition.labels),
+            candidates=tuple(candidate_specs), requests=tuple(requests),
+            workload_source={"kind": "explicit", "spec": {"requests": [
+                {"requestId": row.request_id, "taskId": row.task_id, "instanceId": row.instance_id,
+                 "labels": dict(row.labels)} for row in requests]},
+                "poolDigest": digest([(row.task_id, row.instance_id) for row in requests])},
+            policy=policy_ref, window=WindowSpec(definition.window["requests"], definition.window.get("mode", "sliding")),
+            acceptance={"minimumResponseLength": definition.acceptance.get("minimumResponseLength", 0)},
+            signals=definition.signals, goals=definition.goals, disturbances=definition.disturbances,
+            evaluation=definition.evaluation or {"enabled": False, "judges": []}, trace=definition.trace,
+            allow_mixed_models=mixed, dataset=provenance, resolved_definition=definition.resolved_definition,
+        )
+        target = Path(output).expanduser().resolve() if output else definition.base_dir / definition.output
+        if target.exists() and any(target.iterdir()):
+            raise ValueError("Adaptive planning requires a fresh output directory; create a fresh plan.")
+        manifest = write_adaptive_artifacts(target, plan)
+        return PlanOutcome(plan.workflow_id, self.kind, target, target / "adaptive-plan.json", len(requests),
+                           f"Planned {len(requests)} adaptive request(s) → {target / 'adaptive-plan.json'}")
 
     def execute(self, root: Path, *, options: ExecuteOptions, logger=None) -> ExecuteOutcome:
-        from dataclasses import replace
-
-        from ctxbench.adaptive.artifacts import adaptive_plan_from_payload, validate_workflow_manifest
-        from ctxbench.adaptive.runtime_adapter import invoke_adaptive_execution, resolve_adaptive_dataset
         from ctxbench.ai.engine import Engine
+        from ctxbench.adaptive.runtime_adapter import invoke_adaptive_execution, resolve_adaptive_dataset
         from ctxbench.util.logging import PhaseLogger
 
-        root = Path(root)
-        manifest = validate_workflow_manifest(root)
+        root = Path(root).resolve()
         if options.force:
             raise ValueError("--force is not supported for adaptive workflows; create a fresh plan and output directory.")
         selector = options.selector
         if selector is not None and any(getattr(selector, name) for name in selector.__dataclass_fields__):
             raise ValueError("Selectors cannot filter an adaptive workload because decisions require its frozen order.")
-        plan = adaptive_plan_from_payload(load_json(root / "adaptive-plan.json"))
-        dataset_metadata = manifest.get("dataset")
-        if not isinstance(dataset_metadata, dict):
-            raise ValueError("Adaptive manifest requires dataset provenance.")
-        dataset = resolve_adaptive_dataset(dataset_metadata)
-        logger = logger or PhaseLogger()
+        manifest = validate_workflow_manifest(root, execution=True, plugin_paths=options.plugin_paths)
+        plan = adaptive_plan_from_payload(load_json(root / "adaptive-plan.json"), dataset=manifest["dataset"])
+        plan = replace(plan, execution_fingerprint=manifest["executionFingerprint"])
+        dataset = resolve_adaptive_dataset(manifest["dataset"])
+        active_logger = logger or PhaseLogger()
         service = TrialExecutionService(root)
-        engine = Engine(event_logger=lambda event, message, fields: logger.event(
+        engine = Engine(event_logger=lambda event, message, fields: active_logger.event(
             str(fields.pop("level", "INFO")), str(fields.pop("phase", "EXECUTE")), event, message, **fields
         ))
 
         def invoke(request, session):
-            payload = request.payload
-            if not isinstance(payload, dict):
-                raise ValueError("adaptive execution payload must be an object")
-            metadata = dict(payload.get("resultMetadata") or {})
-            metadata.setdefault("dataset", dataset_metadata)
-            metadata.setdefault("experimentId", manifest.get("experimentId", plan.workflow_id))
-            metadata.setdefault("configurationId", request.candidate_id)
-            invocation = replace(request, payload={**payload, "resultMetadata": metadata})
-            return invoke_adaptive_execution(
-                invocation, session, dataset=dataset,
-                trace_options=dict(payload.get("traceOptions") or manifest.get("trace") or {}),
-            )
+            metadata = dict(request.payload["resultMetadata"])
+            metadata.setdefault("dataset", manifest["dataset"])
+            invocation = replace(request, payload={
+                **request.payload, "resultMetadata": metadata,
+                "traceOptions": dict(plan.trace),
+            })
+            return invoke_adaptive_execution(invocation, session, dataset=dataset,
+                                               trace_options=dict(plan.trace))
 
         with ExecutionSession(engine) as session:
             outcome = run_adaptive_workflow(
                 plan, root=root, service=service, session=session, invoke=invoke,
-                retry_uncertain=options.retry_uncertain,
+                retry_uncertain=options.retry_uncertain, plugin_paths=options.plugin_paths,
             )
-        return ExecuteOutcome(
-            str(manifest.get("experimentId", plan.workflow_id)), self.kind,
-            {"delivered": outcome.delivered, "rejected": outcome.rejected, "failed": outcome.failed},
-            f"Adaptive requests: {outcome.delivered} delivered, "
-            f"{outcome.rejected} rejected, {outcome.failed} failed.",
-        )
-
-    # ---- responses, status, metrics ----------------------------------------------------
+        summary = (f"Adaptive requests: {outcome.counts['delivered']} delivered, "
+                   f"{outcome.counts['failed']} failed.")
+        return ExecuteOutcome(plan.workflow_id, self.kind, outcome.counts, summary)
 
     def prepare_responses(self, root: Path) -> Mapping[str, Any]:
-        """Validate the run and refresh its delivered-response projection; returns the manifest."""
-        from ctxbench.adaptive.artifacts import validate_workflow_manifest
-        from ctxbench.adaptive.projections import rebuild_adaptive_responses
         manifest = validate_workflow_manifest(root)
+        from ctxbench.adaptive.projections import rebuild_adaptive_responses
         rebuild_adaptive_responses(root)
         return manifest
 
@@ -163,9 +210,9 @@ class AdaptiveWorkflow:
         yield from read_jsonl(Path(root) / "responses.jsonl")
 
     def requests(self, root: Path):
-        """Request records in planned order; a request not started yet has state ``pending``."""
-        records = _request_records(Path(root))
-        for request in self._plan(root).requests:
+        plan = self._plan(root)
+        records = _load_request_records(Path(root))
+        for request in plan.requests:
             yield records.get(request.request_id) or {
                 "requestId": request.request_id, "sequenceIndex": request.sequence_index,
                 "taskId": request.task_id, "instanceId": request.instance_id, "state": "pending",
@@ -174,100 +221,22 @@ class AdaptiveWorkflow:
     def attempts(self, root: Path):
         service = TrialExecutionService(Path(root))
         for request in self._plan(root).requests:
-            for invocation in request.candidates.values():
-                yield from service.attempts(invocation.execution.execution_id)
+            yield from service.attempts(request.request_id)
 
     def status(self, root: Path, *, by: str | None = None) -> RunStatus:
-        from ctxbench.adaptive.artifacts import validate_workflow_manifest
-        from ctxbench.adaptive.projections import rebuild_adaptive_responses
-        from ctxbench.util.status_tables import judge_breakdown_lines, last_status_map, tally
-
         root = Path(root)
         manifest = validate_workflow_manifest(root)
-        plan = self._plan(root)
-        rebuild_adaptive_responses(root)
-        records_path = root / "adaptive-records"
-        records = [load_json(path) for path in sorted(records_path.glob("*.json"))] if records_path.exists() else []
-        by_request = {str(row["requestId"]): row for row in records}
-        if len(by_request) != len(records):
-            raise ValueError("Adaptive request ledger contains duplicate request IDs.")
-        planned_requests = {request.request_id: request for request in plan.requests}
-        unknown_requests = set(by_request) - set(planned_requests)
-        if unknown_requests:
-            raise ValueError(f"Adaptive ledger contains request IDs outside its plan: {', '.join(sorted(unknown_requests))}")
-        if any(row.get("state") not in _TERMINAL_STATES | {"started"} for row in records):
-            raise ValueError("Adaptive request ledger contains an unsupported state.")
-        for request_id, record in by_request.items():
-            request = planned_requests[request_id]
-            if (record.get("sequenceIndex") != request.sequence_index
-                    or record.get("taskId") != request.task_id
-                    or record.get("instanceId") != request.instance_id):
-                raise ValueError(f"Adaptive ledger identity differs from frozen request {request_id}.")
-        state_counts = {state: sum(row.get("state") == state for row in records) for state in _REQUEST_STATES}
-        response_count = state_counts["delivered"]
-        eval_tally = tally(last_status_map(root / "evals.jsonl"))
-        eval_done = eval_tally.get("evaluated", 0)
-        eval_error = eval_tally.get("error", 0)
-        service = TrialExecutionService(root)
-        execution_ids = {
-            invocation.execution.execution_id
-            for request in plan.requests
-            for invocation in request.candidates.values()
-        }
-        attempts_by_execution = {execution_id: service.attempts(execution_id) for execution_id in execution_ids}
-        attempt_records = [row for rows in attempts_by_execution.values() for row in rows]
-        uncertain = sum(bool(rows) and rows[-1].get("state") == "started" for rows in attempts_by_execution.values())
-        planned = len(plan.requests)
-        pending = max(0, planned - len(records))
-        experiment_id = str(manifest.get("experimentId", plan.workflow_id))
-
-        col = (12, 8, 10, 8, 10, 8, 8)
-        header = (f"{'Phase':<{col[0]}} {'Total':>{col[1]}} {'Delivered':>{col[2]}} "
-                  f"{'Failed':>{col[3]}} {'Rejected':>{col[4]}} {'Started':>{col[5]}} {'Pending':>{col[6]}}")
-        delivered_attempts = sum(
-            row.get("attemptId") == ((by_request.get(str(row.get("correlationId")), {}).get("delivery") or {}).get("attemptId"))
-            for row in attempt_records
-        )
-        lines = [
-            f"Experiment : {experiment_id}",
-            f"Directory  : {root}",
-            "Workflow   : adaptive",
-            "",
-            header,
-            "─" * len(header),
-            f"{'requests':<{col[0]}} {planned:>{col[1]}} {state_counts['delivered']:>{col[2]}} "
-            f"{state_counts['failed']:>{col[3]}} {state_counts['rejected']:>{col[4]}} "
-            f"{state_counts['started']:>{col[5]}} {pending:>{col[6]}}",
-            f"{'attempts':<{col[0]}} {len(attempt_records):>{col[1]}} {delivered_attempts:>{col[2]}} "
-            f"{sum(row.get('state') == 'failed' for row in attempt_records):>{col[3]}} {0:>{col[4]}} "
-            f"{uncertain:>{col[5]}} {0:>{col[6]}}",
-            f"{'eval':<{col[0]}} {response_count:>{col[1]}} {eval_done:>{col[2]}} "
-            f"{eval_error:>{col[3]}} {0:>{col[4]}} {0:>{col[5]}} "
-            f"{max(0, response_count - eval_done - eval_error):>{col[6]}}",
-        ]
-        if by == "judge":
-            lines.extend(judge_breakdown_lines(root, response_count))
-        elif by in {"task", "instance", "candidate"}:
-            counts: dict[str, dict[str, int]] = {}
-            for request in plan.requests:
-                record = by_request.get(request.request_id, {})
-                value = (record.get("delivery") or {}).get("candidateId") if by == "candidate" else getattr(request, f"{by}_id")
-                label = str(value or "<unassigned>")
-                bucket = counts.setdefault(label, {"total": 0, "delivered": 0, "failed": 0, "pending": 0})
-                bucket["total"] += 1
-                state = record.get("state")
-                bucket["delivered"] += state == "delivered"
-                bucket["failed"] += state in {"failed", "rejected"}
-                bucket["pending"] += state not in _TERMINAL_STATES
-            lines.append(f"\n{by:<24} {'Total':>8} {'Delivered':>10} {'Failed':>8} {'Pending':>8}")
-            for label, row in sorted(counts.items()):
-                lines.append(f"{label:<24} {row['total']:>8} {row['delivered']:>10} {row['failed']:>8} {row['pending']:>8}")
-        elif by is not None:
-            raise StatusGroupingError("Adaptive status --by supports task, instance, candidate, or judge.", lines)
-        result_counts = {"planned": planned, **state_counts, "pending": pending,
-                         "attempts": len(attempt_records), "uncertainAttempts": uncertain,
-                         "evaluated": eval_done, "evaluationFailed": eval_error}
-        return RunStatus(experiment_id, self.kind, root, result_counts, tuple(lines))
+        plan = self._plan(root, manifest=manifest)
+        records = _load_request_records(root)
+        counts = {state: sum(record.get("state") == state for record in records.values())
+                  for state in ("delivered", "failed", "started")}
+        counts.update({"planned": len(plan.requests), "pending": len(plan.requests) - len(records)})
+        counts["attempts"] = sum(len(row.get("attempts", [])) for row in records.values())
+        if by is not None and by not in {"task", "instance", "candidate"}:
+            raise StatusGroupingError("Adaptive status --by supports task, instance, or candidate.")
+        lines = [f"Experiment : {manifest['experimentId']}", f"Directory  : {root}", "Workflow   : adaptive", "",
+                 "Requests: " + ", ".join(f"{key}={value}" for key, value in counts.items())]
+        return RunStatus(plan.workflow_id, self.kind, root, counts, tuple(lines))
 
     def metric_tables(self, root: Path):
         from ctxbench.metrics.adaptive import build_adaptive_metrics
@@ -275,862 +244,242 @@ class AdaptiveWorkflow:
         return {"requests": requests, "attempts": attempts}
 
     def write_metrics(self, roots: Sequence[str], *, options: MetricsOptions, logger=None) -> MetricsOutcome:
-        from ctxbench.adaptive.artifacts import validate_workflow_manifest
-        from ctxbench.metrics.adaptive import build_adaptive_metrics, write_adaptive_metrics
-
+        del logger
         if len(roots) != 1:
             raise ValueError("Adaptive metrics accept exactly one run directory.")
-        source = roots[0]
-        output_dir = options.output_dir
-        selector = options.selector
+        source, output_dir = Path(roots[0]), options.output_dir
         validate_workflow_manifest(source)
-        if selector and (selector.configuration or selector.strategy or selector.representation or selector.surface or selector.repetition):
-            raise ValueError("Adaptive metrics selectors support task, instance, status, and request ID only.")
+        from ctxbench.metrics.adaptive import build_adaptive_metrics
         requests, attempts = build_adaptive_metrics(source)
-        if selector:
-            requests = [row for row in requests if
-                        (not selector.task or row.get("taskId") in selector.task) and
-                        (not selector.instance or row.get("instanceId") in selector.instance) and
-                        (not selector.status or ("delivered" if row.get("delivered") else row.get("state")) in selector.status) and
-                        (not selector.trial_id or row.get("requestId") in selector.trial_id)]
-            selected = {row["requestId"] for row in requests}
-            attempts = [row for row in attempts if row.get("requestId") in selected]
         if output_dir.exists() and any(output_dir.iterdir()):
             if not options.force:
                 raise ValueError(f"Output directory exists and is non-empty: {output_dir}. Use --force to replace it.")
             import shutil
             shutil.rmtree(output_dir)
+        from ctxbench.metrics.adaptive import write_adaptive_metrics
         write_adaptive_metrics(output_dir, requests, attempts)
         request_states = {state: sum(row.get("state") == state for row in requests)
-                          for state in ("delivered", "failed", "rejected", "started")}
+                          for state in ("delivered", "failed", "started")}
         write_json(output_dir / "metrics-manifest.json", {
-            "schemaVersion": "3.0-adaptive",
-            "workflowKind": self.kind,
-            "inputDirectory": str(Path(source).expanduser()),
-            "requestCount": len(requests),
-            "attemptCount": len(attempts),
+            "schemaVersion": "4.0-adaptive", "workflowKind": self.kind,
+            "inputDirectory": str(source), "requestCount": len(requests), "attemptCount": len(attempts),
             "requestStates": request_states,
             "outputs": ["adaptive_request_metrics.csv", "adaptive_attempt_metrics.csv"],
         })
         return MetricsOutcome(self.kind, output_dir, {"requests": len(requests), "attempts": len(attempts)},
                               f"Wrote adaptive metrics to {output_dir}")
 
-    def _plan(self, root: Path) -> "AdaptivePlan":
-        from ctxbench.adaptive.artifacts import adaptive_plan_from_payload
-        return adaptive_plan_from_payload(load_json(Path(root) / "adaptive-plan.json"))
-
-
-def _request_records(root: Path) -> dict[str, dict[str, Any]]:
-    records_path = root / "adaptive-records"
-    if not records_path.exists():
-        return {}
-    return {str(row["requestId"]): row for row in (load_json(path) for path in sorted(records_path.glob("*.json")))}
-
-
-@dataclass(frozen=True, slots=True)
-class QualitySLO:
-    metric_id: str
-    minimum_value: float
-
-    def __post_init__(self) -> None:
-        if (not self.metric_id or isinstance(self.minimum_value, bool)
-                or not isinstance(self.minimum_value, (int, float)) or not isfinite(self.minimum_value)):
-            raise ValueError("quality SLO requires a metric and finite minimum")
-
-
-@dataclass(frozen=True, slots=True)
-class AdaptiveWorkflowPolicy:
-    """Frozen objectives and admission settings used by every MAPE-K decision."""
-
-    quality_slos: tuple[QualitySLO, ...] = ()
-    latency_limit_ms: float | None = None
-    token_limit: int | None = None
-    minimum_response_length: int = 0
-    token_budget: int | None = None
-    best_effort_admission: bool = False
-    selection_metric: str = "declared_order"
-
-    def __post_init__(self) -> None:
-        if len({slo.metric_id for slo in self.quality_slos}) != len(self.quality_slos):
-            raise ValueError("quality SLO metric IDs must be unique")
-        if self.latency_limit_ms is not None and (
-            isinstance(self.latency_limit_ms, bool)
-            or not isinstance(self.latency_limit_ms, (int, float))
-            or not isfinite(self.latency_limit_ms) or self.latency_limit_ms < 0
-        ):
-            raise ValueError("latency limit must be finite and nonnegative")
-        if self.token_limit is not None and (type(self.token_limit) is not int or self.token_limit < 0):
-            raise ValueError("token limit must be a nonnegative integer")
-        if type(self.minimum_response_length) is not int or self.minimum_response_length < 0:
-            raise ValueError("minimum response length must be nonnegative")
-        if type(self.best_effort_admission) is not bool:
-            raise ValueError("best_effort_admission must be a boolean")
-        if self.token_budget is not None and (type(self.token_budget) is not int or self.token_budget < 0):
-            raise ValueError("token budget must be a nonnegative integer")
-        if self.selection_metric not in {"declared_order", "latency", "tokens"}:
-            raise ValueError("selection_metric must be declared_order, latency, or tokens")
-
-
-@dataclass(frozen=True, slots=True)
-class AdaptiveCandidateInvocation:
-    candidate: Candidate
-    execution: ExecutionRequest
-
-    def __post_init__(self) -> None:
-        if self.execution.candidate_id != self.candidate.configuration_id:
-            raise ValueError("execution candidate ID does not match candidate contract")
-
-
-@dataclass(frozen=True, slots=True)
-class AdaptiveWorkloadRequest:
-    request_id: str
-    sequence_index: int
-    task_id: str
-    instance_id: str
-    features: RequestFeatures
-    feature_values: Mapping[str, object]
-    candidate_order: tuple[str, ...]
-    candidates: Mapping[str, AdaptiveCandidateInvocation]
-
-    def __post_init__(self) -> None:
-        if (not self.request_id or not self.task_id or not self.instance_id
-                or type(self.sequence_index) is not int or self.sequence_index < 1
-                or self.features.sequence_index != self.sequence_index):
-            raise ValueError("adaptive request identity or sequence is invalid")
-        if len(self.candidate_order) != len(set(self.candidate_order)):
-            raise ValueError("candidate order contains duplicates")
-        if set(self.candidate_order) != set(self.candidates):
-            raise ValueError("candidate order must name every declared request candidate exactly once")
-        validate_candidates(tuple(invocation.candidate for invocation in self.candidates.values()))
-        for candidate_id, invocation in self.candidates.items():
-            if candidate_id != invocation.candidate.configuration_id:
-                raise ValueError("candidate map key differs from candidate identity")
-            execution = invocation.execution
-            if (execution.task_id != self.task_id or execution.instance_id != self.instance_id
-                    or execution.trial_id is not None):
-                raise ValueError("adaptive execution must match request task/instance and omit trialId")
-
-
-@dataclass(frozen=True, slots=True)
-class AdaptivePlan:
-    workflow_id: str
-    execution_fingerprint: str
-    feature_schema: RequestFeatureSchema
-    policy: AdaptiveWorkflowPolicy
-    requests: tuple[AdaptiveWorkloadRequest, ...]
-    candidate_catalog: tuple[str, ...]
-    schema_version: int = ADAPTIVE_PLAN_VERSION
-    dataset_id: str | None = None
-    dataset_version: str | None = None
-    candidate_catalog_fingerprint: str | None = None
-    estimator_definition: EstimatorDefinition = field(default_factory=EstimatorDefinition)
-    calibration: CalibrationArtifact | None = None
-
-    def __post_init__(self) -> None:
-        if not self.workflow_id or not self.execution_fingerprint:
-            raise ValueError("adaptive plan requires workflow ID and execution fingerprint")
-        if self.schema_version != ADAPTIVE_PLAN_VERSION:
-            raise ValueError(f"unsupported adaptive plan schemaVersion {self.schema_version}")
-        if not self.requests:
-            raise ValueError("adaptive workload must not be empty")
-        request_ids = [row.request_id for row in self.requests]
-        if any(not re.fullmatch(r"[A-Za-z0-9_.-]+", request_id) or request_id in {".", ".."}
-               for request_id in request_ids):
-            raise ValueError("adaptive request IDs must be safe artifact identifiers")
-        if len(request_ids) != len(set(request_ids)):
-            raise ValueError("adaptive request IDs must be unique, including repeated task occurrences")
-        if [row.sequence_index for row in self.requests] != list(range(1, len(self.requests) + 1)):
-            raise ValueError("adaptive workload sequence must be contiguous and ordered")
-        if len(self.candidate_catalog) != len(set(self.candidate_catalog)):
-            raise ValueError("candidate catalog IDs must be unique")
-        catalog = set(self.candidate_catalog)
-        execution_ids: list[str] = []
-        for request in self.requests:
-            self.feature_schema.partition_for(dict(request.feature_values))
-            if not set(request.candidates).issubset(catalog):
-                raise ValueError("request contains a candidate outside the declared catalog")
-            for invocation in request.candidates.values():
-                execution = invocation.execution
-                if (execution.workflow_id != self.workflow_id
-                        or execution.execution_fingerprint != self.execution_fingerprint
-                        or execution.correlation_id != request.request_id):
-                    raise ValueError("execution request identity differs from its adaptive plan")
-                execution_ids.append(execution.execution_id)
-        if len(execution_ids) != len(set(execution_ids)):
-            raise ValueError("each request/candidate invocation requires a unique executionId")
-        if self.calibration is not None:
-            if not all((self.dataset_id, self.dataset_version, self.candidate_catalog_fingerprint)):
-                raise ValueError("calibration requires dataset and candidate-catalog provenance")
-            self.calibration.provenance.validate_for(
-                active_request_ids=set(request_ids),
-                dataset_id=str(self.dataset_id),
-                dataset_version=str(self.dataset_version),
-                candidate_catalog_fingerprint=str(self.candidate_catalog_fingerprint),
-                feature_schema_id=self.feature_schema.schema_id,
-                feature_schema_version=self.feature_schema.version,
-                estimator=self.estimator_definition,
-            )
-            if any(row.configuration_id not in catalog for row in self.calibration.estimates):
-                raise ValueError("calibration contains an estimate outside the declared candidate catalog")
+    def _plan(self, root: Path, *, manifest=None) -> AdaptivePlan:
+        manifest = manifest or validate_workflow_manifest(root)
+        plan = adaptive_plan_from_payload(load_json(Path(root) / "adaptive-plan.json"), dataset=manifest["dataset"])
+        return replace(plan, execution_fingerprint=manifest["executionFingerprint"])
 
 
 @dataclass(frozen=True, slots=True)
 class AdaptiveWorkflowOutcome:
-    requests: tuple[dict[str, Any], ...]
-    delivered: int
-    rejected: int
-    failed: int
+    counts: Mapping[str, int]
 
 
-def run_adaptive_workflow(
-    plan: AdaptivePlan,
-    *,
-    root: str | Path,
-    service: TrialExecutionService,
-    session: ExecutionSession,
-    invoke: Callable[[ExecutionRequest, ExecutionSession], dict[str, Any]],
-    quality_assessor: OnlineQualityAssessor | None = None,
-    estimator: Estimator | None = None,
-    retry_uncertain: bool = False,
-) -> AdaptiveWorkflowOutcome:
-    artifact_root = Path(root)
-    artifact_root.mkdir(parents=True, exist_ok=True)
-    with _adaptive_lock(artifact_root):
-        return _run_adaptive_workflow_locked(
-            plan,
-            root=artifact_root,
-            service=service,
-            session=session,
-            invoke=invoke,
-            quality_assessor=quality_assessor,
-            estimator=estimator,
-            retry_uncertain=retry_uncertain,
-        )
-
-
-def _run_adaptive_workflow_locked(
-    plan: AdaptivePlan,
-    *,
-    root: str | Path,
-    service: TrialExecutionService,
-    session: ExecutionSession,
-    invoke: Callable[[ExecutionRequest, ExecutionSession], dict[str, Any]],
-    quality_assessor: OnlineQualityAssessor | None = None,
-    estimator: Estimator | None = None,
-    retry_uncertain: bool = False,
-) -> AdaptiveWorkflowOutcome:
-    """Run requests serially; persist each decision before its execution attempt.
-
-    Existing request records are replayed in workload order. The controller sees calibration
-    priors and observations from earlier requests or earlier attempts of the current request only.
-    """
-    if session.closed:
-        raise RuntimeError("adaptive workflow requires an open execution session")
-    _validate_assessor(plan.policy, quality_assessor)
-    active_estimator = estimator or RollingWindowEstimator(plan.estimator_definition)
-    if active_estimator.definition != plan.estimator_definition:
-        raise ValueError("runtime estimator differs from the frozen adaptive plan")
-    artifact_root = Path(root)
-    records_root = artifact_root / "adaptive-records"
-    records_root.mkdir(parents=True, exist_ok=True)
-    existing: dict[str, dict[str, Any]] = {}
-    for request in plan.requests:
-        path = _record_path(records_root, request.request_id)
-        if path.exists():
-            record = load_json(path)
-            _validate_saved_record(record, plan, request, service)
-            existing[request.request_id] = record
-
-    started_at = utc_now_iso()
-    delivered = rejected = failed = 0
-    provider_invocations = replayed_executions = 0
-    results: list[dict[str, Any]] = []
-    for request in plan.requests:
-        record = existing.get(request.request_id)
-        if record is None:
-            record = _new_request_record(plan, request)
-            write_json(_record_path(records_root, request.request_id), record)
-        if record["state"] in {"delivered", "failed", "rejected"}:
-            _replay_request_observations(active_estimator, plan, request, record)
-            results.append(record)
-            delivered += record["state"] == "delivered"
-            rejected += record["state"] == "rejected"
-            failed += record["state"] == "failed"
-            continue
-
-        _replay_request_observations(active_estimator, plan, request, record)
-        tried = {row["decision"].get("candidateId") for row in record["attempts"]}
-        ordinal = len(record["attempts"]) + 1
-        while True:
-            if record["attempts"] and record["attempts"][-1].get("monitored"):
-                last = record["attempts"][-1]
-                if last.get("analysis", {}).get("accepted"):
-                    _restore_delivery(record, last, service)
-                    write_json(_record_path(records_root, request.request_id), record)
-                    break
-                if len(tried) >= len(request.candidates):
-                    record["state"] = "failed"
-                    record["terminalReason"] = "candidate_catalog_exhausted"
-                    write_json(_record_path(records_root, request.request_id), record)
-                    break
-            decision_row = record["attempts"][-1] if record["attempts"] and not record["attempts"][-1].get("monitored") else None
-            if decision_row is None:
-                decision = _plan_next_candidate(
-                    plan, request, active_estimator, tried, record,
-                    prior_spend=_spent_tokens_records(results),
-                )
-                decision, admission = decision
-                decision_row = {
-                    "decision": _decision_payload(decision, plan, request, ordinal),
-                    "executionId": (request.candidates[decision.selected_configuration].execution.execution_id
-                                    if decision.selected_configuration else None),
-                    "admission": admission,
-                    "monitored": False,
-                }
-                record["attempts"].append(decision_row)
+def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: TrialExecutionService,
+                          session: ExecutionSession,
+                          invoke,
+                          retry_uncertain: bool = False,
+                          plugin_paths: Sequence[str | Path] = ()) -> AdaptiveWorkflowOutcome:
+    root = Path(root)
+    with _adaptive_lock(root):
+        records_root = root / "adaptive-records"
+        records_root.mkdir(parents=True, exist_ok=True)
+        records = _load_request_records(root)
+        observations: list[dict[str, Any]] = []
+        memo: Mapping[str, Any] | None = None
+        counts = {"delivered": 0, "failed": 0, "started": 0}
+        for request in plan.requests:
+            record = records.get(request.request_id)
+            interrupted = record is not None and record.get("state") == "started"
+            if record is None:
+                record = _new_request_record(plan, request)
                 write_json(_record_path(records_root, request.request_id), record)
-
-            candidate_id = decision_row["decision"].get("candidateId")
-            if candidate_id is None:
-                record["knowledgeAfter"] = _knowledge_snapshot(plan, active_estimator)
-                record["state"] = "rejected"
-                record["terminalReason"] = decision_row["decision"].get("reason")
-                write_json(_record_path(records_root, request.request_id), record)
-                break
-
-            invocation = request.candidates[candidate_id]
-            def invoke_with_sensors(execution_request, active_session):
-                result = invoke(execution_request, active_session)
-                observation, acceptance, quality = _monitor(
-                    request, candidate_id, result, plan.policy, quality_assessor,
-                )
-                return {
-                    **result,
-                    "_adaptiveSignals": _signals_payload(observation, acceptance, quality),
-                }
-
-            outcome = service.execute(
-                invocation.execution, session, invoke_with_sensors,
-                retry_uncertain=retry_uncertain,
-            )
-            if outcome.resumed:
-                replayed_executions += 1
             else:
-                provider_invocations += 1
-            signals = outcome.result.get("_adaptiveSignals")
-            if not isinstance(signals, dict):
-                raise ValueError("completed adaptive execution is missing its persisted observations")
-            observation, acceptance, quality = _signals_from_payload(signals)
-            decision_row["execution"] = {
-                "executionId": outcome.execution_id,
-                "attemptId": outcome.attempt_id,
-                "status": outcome.status,
-                "resumed": outcome.resumed,
-            }
-            decision_row["observation"] = _observation_payload(observation)
-            decision_row["acceptance"] = _json_value(asdict(acceptance))
-            decision_row["quality"] = [_json_value(asdict(value)) for value in quality]
-            decision_row["analysis"] = _analyze(plan.policy, outcome.result, observation, acceptance, quality)
-            decision_row["monitored"] = True
-            write_json(_record_path(records_root, request.request_id), record)
-            _update_estimator(active_estimator, plan, request, candidate_id, observation)
-            record["knowledgeAfter"] = _knowledge_snapshot(plan, active_estimator)
-            write_json(_record_path(records_root, request.request_id), record)
-            tried.add(candidate_id)
-            if decision_row["analysis"]["accepted"]:
-                _restore_delivery(record, decision_row, service)
+                _validate_saved_record(record, plan, request)
+            attempt = record["attempts"][0] if record["attempts"] else None
+            decision_payload = attempt.get("decision") if attempt else None
+            if record.get("state") in _TERMINAL:
+                _append_observation(observations, record)
+                memo = (decision_payload or {}).get("memo")
+                counts[record["state"]] += 1
+                continue
+
+            started = perf_counter()
+            if attempt is None:
+                current_reference, policy = resolve_policy(
+                    plan.policy.ref, plan.policy.params, base_dir=root,
+                    plugin_paths=plugin_paths, sources=plan.policy.sources,
+                )
+                if current_reference.source_digest != plan.policy.source_digest:
+                    raise PolicyContractError("Policy source changed since planning; create a fresh adaptive plan.")
+                candidates = tuple(CandidateRef(item.candidate_id, item.labels) for item in plan.candidates)
+                state = PrefixSystemState(decision_index=request.sequence_index, observations=observations,
+                                          memo=memo, seed=plan.seed,
+                                          decision_id=f"{request.request_id}:d1")
+                try:
+                    decision = validate_decision(policy.decide(candidates, state),
+                                                 {row.candidate_id for row in plan.candidates})
+                except PolicyContractError:
+                    raise
+                except Exception as exc:
+                    raise PolicyContractError(f"Policy decision failed: {exc}") from exc
+                candidate_id = decision.candidate_id
+                attempt = {
+                    "ordinal": 1,
+                    "decision": {
+                        "decisionId": f"{request.request_id}:d1", "decisionIndex": request.sequence_index,
+                        "policy": {"id": plan.policy.policy_id, "version": plan.policy.version},
+                        "candidateId": candidate_id, "reason": decision.reason,
+                        "memo": dict(decision.memo) if decision.memo is not None else None,
+                        "readings": [], "createdAt": utc_now_iso(),
+                    },
+                    "executionId": request.request_id,
+                }
+                record["attempts"].append(attempt)
+                decision_payload = attempt["decision"]
                 write_json(_record_path(records_root, request.request_id), record)
-                break
-            ordinal += 1
-            if ordinal > len(request.candidates):
-                record["state"] = "failed"
-                record["terminalReason"] = "candidate_catalog_exhausted"
-                write_json(_record_path(records_root, request.request_id), record)
-                break
+            else:
+                candidate_id = decision_payload["candidateId"]
+                decision = Decision(candidate_id, decision_payload["reason"], decision_payload.get("memo"))
 
-        results.append(record)
-        delivered += record["state"] == "delivered"
-        rejected += record["state"] == "rejected"
-        failed += record["state"] == "failed"
+            candidate = next(item for item in plan.candidates if item.candidate_id == candidate_id)
+            execution_request = build_execution_request(plan, request, candidate,
+                                                        _load_manifest_fingerprint(root))
 
-    lifecycle_path = artifact_root / "adaptive-lifecycle.json"
-    lifecycle = load_json(lifecycle_path) if lifecycle_path.exists() else {"schemaVersion": 1, "sessions": []}
-    if lifecycle.get("schemaVersion") != 1 or not isinstance(lifecycle.get("sessions"), list):
-        raise ValueError("invalid adaptive lifecycle record")
-    lifecycle["sessions"].append({"startedAt": started_at, "finishedAt": utc_now_iso(),
-                                  "providerInvocations": provider_invocations,
-                                  "replayedExecutions": replayed_executions,
-                                  "sessionReusedAcrossRequests": provider_invocations > 1})
-    write_json(lifecycle_path, lifecycle)
-    from .projections import rebuild_adaptive_responses
-    rebuild_adaptive_responses(artifact_root, service=service)
-    return AdaptiveWorkflowOutcome(tuple(results), delivered, rejected, failed)
+            def invoke_with_acceptance(active_request: ExecutionRequest, active_session: ExecutionSession):
+                result = invoke(active_request, active_session)
+                response = result.get("response")
+                response_text = response if isinstance(response, str) else str(response or "")
+                accepted = result.get("status") == "success" and len(response_text.strip()) >= int(
+                    plan.acceptance.get("minimumResponseLength", 0))
+                return {**result, "_adaptiveSignals": {"accepted": accepted}}
+
+            outcome = service.execute(execution_request, session, invoke_with_acceptance,
+                                      retry_uncertain=retry_uncertain)
+            result = outcome.result
+            signals = result.get("_adaptiveSignals") or {}
+            response = result.get("response")
+            response_text = response if isinstance(response, str) else str(response or "")
+            accepted = bool(signals.get("accepted", result.get("status") == "success" and
+                               len(response_text.strip()) >= int(plan.acceptance.get("minimumResponseLength", 0))))
+            status = "success" if result.get("status") == "success" else "error"
+            terminal_reason = "delivered" if accepted else (
+                "response_too_short" if status == "success" else "attempt_failed")
+            attempt["execution"] = {"attemptId": outcome.attempt_id, "status": outcome.status,
+                                    "resumed": outcome.resumed}
+            attempt["observation"] = {"status": status, "failureCategory": None,
+                                      "signals": {}, "accepted": accepted}
+            record["state"] = "delivered" if accepted else "failed"
+            record["terminalReason"] = terminal_reason
+            record["requestDurationMs"] = max(0, int((perf_counter() - started) * 1000))
+            record["requestDurationProvenance"] = "measured"
+            record["interrupted"] = bool(interrupted or outcome.resumed)
+            record["delivery"] = ({"candidateId": candidate_id, "executionId": outcome.execution_id,
+                                   "attemptId": outcome.attempt_id} if accepted else None)
+            write_json(_record_path(records_root, request.request_id), record)
+            _append_observation(observations, record)
+            memo = decision_payload.get("memo")
+            counts[record["state"]] += 1
+        lifecycle_path = root / "adaptive-lifecycle.json"
+        lifecycle = load_json(lifecycle_path) if lifecycle_path.exists() else {"schemaVersion": 1, "sessions": []}
+        lifecycle["sessions"].append({"startedAt": utc_now_iso(), "finishedAt": utc_now_iso(),
+                                      "providerInvocations": counts["delivered"] + counts["failed"],
+                                      "replayedExecutions": 0})
+        write_json(lifecycle_path, lifecycle)
+        from ctxbench.adaptive.projections import rebuild_adaptive_responses
+        rebuild_adaptive_responses(root, service=service)
+        return AdaptiveWorkflowOutcome(counts)
 
 
-def _plan_next_candidate(
-    plan: AdaptivePlan,
-    request: AdaptiveWorkloadRequest,
-    estimator: Estimator,
-    tried: set[str],
-    record: dict[str, Any],
-    *,
-    prior_spend: tuple[int, bool],
-) -> tuple[Decision, dict[str, Any]]:
-    eligible = tuple(
-        request.candidates[cid].candidate
-        for cid in request.candidate_order
-        if cid not in tried and request.candidates[cid].candidate.eligible
-    )
-    estimates: dict[str, PerformanceEstimate] = {}
-    for candidate in eligible:
-        estimates[candidate.configuration_id] = estimator.estimate(
-            candidate.configuration_id,
-            _partition(plan, request),
-            plan.calibration.estimate_for(candidate.configuration_id, _partition(plan, request))
-            if plan.calibration else None,
-        )
-    selected: str | None = None
-    reason = "candidate_catalog_exhausted"
-    current_spend = _spent_tokens(record)
-    admission = (prior_spend[0] + current_spend[0], prior_spend[1] or current_spend[1])
-    remaining = (None if plan.policy.token_budget is None
-                 else max(0, plan.policy.token_budget - admission[0]))
-    unknown_spend = admission[1]
-    candidates = list(eligible)
-    if plan.policy.selection_metric != "declared_order":
-        metric = "latency_ms" if plan.policy.selection_metric == "latency" else "total_tokens"
-        candidates.sort(key=lambda candidate: (
-            getattr(estimates[candidate.configuration_id], metric).value is None,
-            getattr(estimates[candidate.configuration_id], metric).value
-            if getattr(estimates[candidate.configuration_id], metric).value is not None else float("inf"),
-            request.candidate_order.index(candidate.configuration_id),
-        ))
-    admission_rows = []
-    for candidate in candidates:
-        estimate = estimates[candidate.configuration_id].total_tokens.value
-        candidate_reason = "admission_disabled"
-        if plan.policy.token_budget is not None:
-            if unknown_spend and not plan.policy.best_effort_admission:
-                candidate_reason = "unknown_prior_consumption"
-                admission_rows.append({"candidateId": candidate.configuration_id,
-                                       "estimatedTokens": estimate, "status": candidate_reason})
-                reason = "admission_unknown_prior_consumption"
-                continue
-            if estimate is None and not plan.policy.best_effort_admission:
-                candidate_reason = "unknown_candidate_cost"
-                admission_rows.append({"candidateId": candidate.configuration_id,
-                                       "estimatedTokens": None, "status": candidate_reason})
-                reason = "admission_unknown_candidate_cost"
-                continue
-            if estimate is not None and remaining is not None and estimate > remaining:
-                candidate_reason = "token_budget_exceeded"
-                admission_rows.append({"candidateId": candidate.configuration_id,
-                                       "estimatedTokens": estimate, "status": candidate_reason})
-                reason = "admission_token_budget_exceeded"
-                continue
-        selected = candidate.configuration_id
-        candidate_reason = "admitted"
-        admission_rows.append({"candidateId": candidate.configuration_id,
-                               "estimatedTokens": estimate, "status": candidate_reason})
-        reason = "selected_by_declared_order" if plan.policy.selection_metric == "declared_order" else "selected_by_estimate"
-        break
-    features = request.features
-    decision = Decision(
-        sequence_index=features.sequence_index,
-        features=features,
-        eligible_candidates=tuple(candidate.configuration_id for candidate in eligible),
-        estimates=estimates,
-        selected_configuration=selected,
-        reason=reason,
-        probe=False,
-        cooldown_active=False,
-        candidates=tuple(eligible),
-    )
-    admission_record = {
-        "enabled": plan.policy.token_budget is not None,
-        "budgetTokens": plan.policy.token_budget,
-        "spentTokensBeforeRequest": admission[0] - current_spend[0],
-        "spentTokensEarlierAttempts": current_spend[0],
-        "unknownConsumptionBeforeCandidate": admission[1],
-        "remainingTokens": remaining,
-        "bestEffort": plan.policy.best_effort_admission,
-        "candidates": admission_rows,
+def _new_request_record(plan: AdaptivePlan, request: PlannedRequest) -> dict[str, Any]:
+    return {
+        "schemaVersion": ADAPTIVE_RECORD_VERSION, "requestId": request.request_id,
+        "sequenceIndex": request.sequence_index, "executionFingerprint": _load_manifest_fingerprint_from_plan(plan),
+        "taskId": request.task_id, "instanceId": request.instance_id, "labels": dict(request.labels),
+        "state": "started", "terminalReason": None, "requestDurationMs": None,
+        "requestDurationProvenance": "unavailable", "interrupted": False, "attempts": [], "delivery": None,
     }
-    return decision, admission_record
 
 
-def _monitor(request, candidate_id, result, policy, assessor):
-    response = result.get("response")
-    response_text = response if isinstance(response, str) else str(response or "")
-    acceptance = MinimumResponseLengthSensor(policy.minimum_response_length).observe(
-        request.request_id, candidate_id, response_text,
-    )
-    timing = result.get("timing") or {}
-    metrics = result.get("metricsSummary") or {}
-    duration = timing.get("durationMs")
-    if duration is None:
-        duration = metrics.get("totalDurationMs")
-    duration_available = (not isinstance(duration, bool) and isinstance(duration, (int, float))
-                          and isfinite(duration) and duration >= 0)
-    duration_provenance = Provenance.MEASURED if duration_available else Provenance.UNAVAILABLE
-    total_tokens = metrics.get("totalTokens")
-    try:
-        token_provenance = Provenance(metrics.get("totalTokensProvenance", "unavailable"))
-    except ValueError:
-        token_provenance = Provenance.UNAVAILABLE
-    token_available = (
-        type(total_tokens) is int and total_tokens >= 0
-        and token_provenance != Provenance.UNAVAILABLE
-    )
-    if not token_available:
-        token_provenance = Provenance.UNAVAILABLE
-    observation = Observation(
-        candidate_id,
-        str(result.get("status", "error")),
-        float(duration) if duration_available else None,
-        TokenUsage(total_tokens if token_available else None, token_provenance),
-        duration_provenance,
-    )
-    quality: list[QualityObservation] = []
-    if assessor is not None:
-        capability = assessor.capability
-        started = perf_counter()
-        try:
-            signal = assessor.assess(request.request_id, candidate_id, response_text)
-        except Exception:
-            signal = None
-        assessment_duration = max(0.0, (perf_counter() - started) * 1000)
-        valid_signal = isinstance(signal, QualityObservation)
-        if valid_signal:
-            valid_signal = (
-                signal.request_id == request.request_id
-                and signal.candidate_id == candidate_id
-                and signal.metric_id == capability.metric_id
-                and signal.assessor_id == capability.signal_id
-                and signal.assessor_version == capability.version
-                and signal.sensor_class.value == capability.sensor_class
-                and signal.uses_reference_data == capability.uses_reference_data
-                and (signal.provenance.value == capability.value_provenance
-                     or (signal.provenance == Provenance.UNAVAILABLE and signal.value is None))
-                and signal.value_scale == (capability.value_scale or "")
-            )
-        if not valid_signal:
-            signal = QualityObservation(
-                request_id=request.request_id,
-                candidate_id=candidate_id,
-                metric_id=capability.metric_id,
-                value=None,
-                value_scale=capability.value_scale or "unknown",
-                assessor_id=capability.signal_id,
-                assessor_version=capability.version,
-                sensor_class=SensorClass(capability.sensor_class),
-                provenance=Provenance.UNAVAILABLE,
-                cost=SensorCost(
-                    assessment_duration, Provenance.MEASURED,
-                    TokenUsage(None, Provenance.UNAVAILABLE),
-                ),
-                uses_reference_data=capability.uses_reference_data,
-            )
-        quality = [signal]
-    return observation, acceptance, quality
+def _load_manifest_fingerprint_from_plan(plan: AdaptivePlan) -> str:
+    return plan.execution_fingerprint
 
 
-def _analyze(policy, result, observation, acceptance, quality):
-    unmet: list[str] = []
-    if result.get("status") != "success":
-        unmet.append("execution_success")
-    if not acceptance.accepted:
-        unmet.append(acceptance.sensor_id)
-    if policy.latency_limit_ms is not None:
-        duration = observation.end_to_end_duration_ms
-        if duration is None or duration > policy.latency_limit_ms:
-            unmet.append("latency_slo_unavailable" if duration is None else "latency_slo")
-    if policy.token_limit is not None:
-        tokens = observation.tokens.value
-        if tokens is None or tokens > policy.token_limit:
-            unmet.append("token_slo_unavailable" if tokens is None else "token_slo")
-    quality_by_metric = {row.metric_id: row for row in quality}
-    for slo in policy.quality_slos:
-        signal = quality_by_metric.get(slo.metric_id)
-        if signal is None or signal.value is None:
-            unmet.append(f"quality_unavailable:{slo.metric_id}")
-        elif signal.value < slo.minimum_value:
-            unmet.append(f"quality_slo:{slo.metric_id}")
-    return {"accepted": not unmet, "unmet": unmet,
-            "qualitySloStatus": {slo.metric_id: _quality_status(quality_by_metric.get(slo.metric_id), slo.minimum_value)
-                                 for slo in policy.quality_slos}}
+def _load_manifest_fingerprint(root: Path) -> str:
+    return str(load_json(root / "manifest.json")["executionFingerprint"])
 
 
-def _quality_status(observation: QualityObservation | None, minimum: float) -> str:
-    if observation is None or observation.value is None:
-        return "unavailable"
-    return "met" if observation.value >= minimum else "missed"
-
-
-def _validate_assessor(policy: AdaptiveWorkflowPolicy, assessor: OnlineQualityAssessor | None) -> None:
-    if policy.quality_slos and assessor is None:
-        raise ValueError("quality SLOs require a declared online quality assessor")
-    if assessor is None:
+def _append_observation(observations: list[dict[str, Any]], record: Mapping[str, Any]) -> None:
+    attempts = record.get("attempts") or []
+    if not attempts:
         return
-    capability = assessor.capability
-    if not isinstance(capability, SignalCapability):
-        raise ValueError("online assessor must expose a declared signal capability")
-    if policy.quality_slos and {slo.metric_id for slo in policy.quality_slos} != {capability.metric_id}:
-        raise ValueError("one online assessor per metric is required for the declared quality SLOs")
-    if capability.sensor_class not in {"semantic_proxy", "judge", "oracle"}:
-        raise ValueError("online quality assessor capability must declare a quality sensor class")
+    last = attempts[0]
+    decision = last.get("decision") or {}
+    observation = last.get("observation") or {}
+    observations.append({"candidateId": decision.get("candidateId"),
+                         "status": observation.get("status", "error")})
 
 
-def _update_estimator(estimator, plan, request, candidate_id, observation):
-    estimator.observe(candidate_id, _partition(plan, request), observation)
+def _validate_saved_record(record: Mapping[str, Any], plan: AdaptivePlan, request: PlannedRequest) -> None:
+    if record.get("schemaVersion") != ADAPTIVE_RECORD_VERSION:
+        raise ValueError("Unsupported adaptive request record; create a fresh adaptive plan.")
+    if (record.get("requestId") != request.request_id or record.get("sequenceIndex") != request.sequence_index
+            or record.get("taskId") != request.task_id or record.get("instanceId") != request.instance_id):
+        raise ValueError(f"Adaptive request record differs from frozen request {request.request_id}")
+    if record.get("state") not in _TERMINAL | {"started"}:
+        raise ValueError(f"Invalid adaptive request state for {request.request_id}")
+    attempts = record.get("attempts")
+    if not isinstance(attempts, list) or len(attempts) > 1:
+        raise ValueError(f"Adaptive request {request.request_id} must have at most one attempt")
+    if attempts:
+        decision = attempts[0].get("decision")
+        if not isinstance(decision, dict) or decision.get("candidateId") not in {c.candidate_id for c in plan.candidates}:
+            raise ValueError(f"Invalid saved decision for {request.request_id}")
 
 
-def _replay_request_observations(estimator, plan, request, record):
-    for row in record.get("attempts", []):
-        observation = row.get("observation")
-        candidate_id = row.get("decision", {}).get("candidateId")
-        if not row.get("monitored") or not candidate_id or not isinstance(observation, dict):
-            continue
-        typed = _observation_from_payload(observation)
-        _update_estimator(estimator, plan, request, candidate_id, typed)
-
-
-def _observation_payload(observation: Observation) -> dict[str, Any]:
-    return _json_value(asdict(observation))
-
-
-def _signals_payload(observation, acceptance, quality) -> dict[str, Any]:
-    return {
-        "observation": _observation_payload(observation),
-        "acceptance": _json_value(asdict(acceptance)),
-        "quality": [_json_value(asdict(row)) for row in quality],
-    }
-
-
-def _signals_from_payload(payload):
-    observation = _observation_from_payload(payload["observation"])
-    acceptance_row = payload["acceptance"]
-    cost = acceptance_row["cost"]
-    acceptance = ResponseAcceptanceObservation(
-        request_id=acceptance_row["request_id"],
-        candidate_id=acceptance_row["candidate_id"],
-        sensor_id=acceptance_row["sensor_id"],
-        sensor_version=acceptance_row["sensor_version"],
-        accepted=acceptance_row["accepted"],
-        sensor_class=SensorClass(acceptance_row["sensor_class"]),
-        provenance=Provenance(acceptance_row["provenance"]),
-        cost=SensorCost(
-            cost.get("duration_ms"), Provenance(cost["duration_provenance"]),
-            TokenUsage(cost["tokens"].get("value"), Provenance(cost["tokens"]["provenance"])),
-        ),
-    )
-    quality = []
-    for row in payload.get("quality", []):
-        cost = row["cost"]
-        quality.append(QualityObservation(
-            request_id=row["request_id"], candidate_id=row["candidate_id"],
-            metric_id=row["metric_id"], value=row.get("value"), value_scale=row["value_scale"],
-            assessor_id=row["assessor_id"], assessor_version=row["assessor_version"],
-            sensor_class=SensorClass(row["sensor_class"]), provenance=Provenance(row["provenance"]),
-            cost=SensorCost(
-                cost.get("duration_ms"), Provenance(cost["duration_provenance"]),
-                TokenUsage(cost["tokens"].get("value"), Provenance(cost["tokens"]["provenance"])),
-            ),
-            uses_reference_data=row.get("uses_reference_data", False),
-        ))
-    return observation, acceptance, quality
-
-
-def _observation_from_payload(payload: dict[str, Any]) -> Observation:
-    token = payload["tokens"]
-    return Observation(
-        configuration_id=payload["configuration_id"],
-        status=payload["status"], end_to_end_duration_ms=payload.get("end_to_end_duration_ms"),
-        tokens=TokenUsage(token.get("value"), Provenance(token["provenance"])),
-        duration_provenance=Provenance(payload["duration_provenance"]),
-    )
-
-
-def _decision_payload(decision: Decision, plan: AdaptivePlan, request: AdaptiveWorkloadRequest, ordinal: int) -> dict[str, Any]:
-    return {
-        "decisionId": f"{request.request_id}:decision:{ordinal:04d}",
-        "requestId": request.request_id,
-        "sequenceIndex": request.sequence_index,
-        "attemptOrdinal": ordinal,
-        "candidateId": decision.selected_configuration,
-        "eligibleCandidates": list(decision.eligible_candidates),
-        "reason": decision.reason,
-        "estimates": {cid: _json_value(asdict(value)) for cid, value in decision.estimates.items()},
-        "features": _json_value(asdict(request.features)),
-        "featureValues": _json_value(dict(request.feature_values)),
-        "partition": _json_value(asdict(_partition(plan, request))),
-        "createdAt": utc_now_iso(),
-    }
-
-
-def _knowledge_snapshot(plan: AdaptivePlan, estimator: Estimator) -> dict[str, Any]:
-    partitions = {_partition(plan, request) for request in plan.requests}
-    snapshot = []
-    for partition in sorted(partitions, key=lambda value: (value.schema_id, value.schema_version, value.values)):
-        for candidate_id in plan.candidate_catalog:
-            estimate = estimator.estimate(
-                candidate_id,
-                partition,
-                plan.calibration.estimate_for(candidate_id, partition) if plan.calibration else None,
-            )
-            snapshot.append({
-                "candidateId": candidate_id,
-                "partition": _json_value(asdict(partition)),
-                "estimate": _json_value(asdict(estimate)),
-            })
-    return {"estimatorId": estimator.definition.estimator_id,
-            "estimatorVersion": estimator.definition.version,
-            "windowSize": estimator.definition.window_size,
-            "minimumObservations": estimator.definition.minimum_observations,
-            "estimates": snapshot}
-
-
-def _partition(plan: AdaptivePlan, request: AdaptiveWorkloadRequest) -> FeaturePartitionKey:
-    partition = FeaturePartitionKey.from_features(plan.feature_schema, dict(request.feature_values))
-    if partition is None:
-        return FeaturePartitionKey(plan.feature_schema.schema_id, plan.feature_schema.version, ())
-    return partition
-
-
-def _new_request_record(plan: AdaptivePlan, request: AdaptiveWorkloadRequest) -> dict[str, Any]:
-    return {
-        "schemaVersion": ADAPTIVE_RECORD_VERSION,
-        "requestId": request.request_id,
-        "sequenceIndex": request.sequence_index,
-        "executionFingerprint": plan.execution_fingerprint,
-        "taskId": request.task_id,
-        "instanceId": request.instance_id,
-        "state": "started",
-        "attempts": [],
-        "delivery": None,
-    }
-
-
-def _validate_saved_record(
-    record: Any, plan: AdaptivePlan, request: AdaptiveWorkloadRequest,
-    service: TrialExecutionService,
-) -> None:
-    if (not isinstance(record, dict) or record.get("schemaVersion") != ADAPTIVE_RECORD_VERSION
-            or record.get("requestId") != request.request_id
-            or record.get("sequenceIndex") != request.sequence_index
-            or record.get("executionFingerprint") != plan.execution_fingerprint
-            or record.get("taskId") != request.task_id or record.get("instanceId") != request.instance_id
-            or record.get("state") not in {"started", "delivered", "failed", "rejected"}
-            or not isinstance(record.get("attempts"), list)):
-        raise ValueError(f"adaptive request ledger mismatch for {request.request_id}")
-    if len(record["attempts"]) > len(request.candidates):
-        raise ValueError(f"adaptive request has excess attempts: {request.request_id}")
-    if record["state"] == "delivered" and not isinstance(record.get("delivery"), dict):
-        raise ValueError(f"delivered request has no delivery record: {request.request_id}")
-    if record["state"] in {"failed", "rejected"} and record.get("delivery") is not None:
-        raise ValueError(f"undelivered request has a delivery record: {request.request_id}")
-    seen_candidates: set[str] = set()
-    for index, row in enumerate(record["attempts"], 1):
-        if not isinstance(row, dict) or not isinstance(row.get("decision"), dict):
-            raise ValueError(f"invalid adaptive attempt record for {request.request_id}")
-        decision = row.get("decision", {})
-        if (decision.get("decisionId") != f"{request.request_id}:decision:{index:04d}"
-                or decision.get("sequenceIndex") != request.sequence_index
-                or decision.get("requestId") != request.request_id):
-            raise ValueError(f"adaptive decision identity mismatch for {request.request_id}")
-        candidate_id = decision.get("candidateId")
-        if candidate_id is not None and candidate_id not in request.candidates:
-            raise ValueError(f"adaptive decision selected undeclared candidate {candidate_id}")
-        if candidate_id is not None and candidate_id in seen_candidates:
-            raise ValueError(f"adaptive request repeats candidate decision {candidate_id}")
-        if candidate_id is not None:
-            seen_candidates.add(candidate_id)
-        expected_execution = request.candidates[candidate_id].execution.execution_id if candidate_id else None
-        if row.get("executionId") != expected_execution:
-            raise ValueError(f"adaptive decision execution identity mismatch for {request.request_id}")
-        execution_meta = row.get("execution")
-        if row.get("monitored") is True and execution_meta is None:
-            raise ValueError(f"monitored adaptive attempt has no execution link for {request.request_id}")
-        if execution_meta is not None:
-            if expected_execution is None:
-                raise ValueError(f"adaptive admission decision has an execution link for {request.request_id}")
-            if not isinstance(execution_meta, dict) or execution_meta.get("executionId") != expected_execution:
-                raise ValueError(f"adaptive execution link mismatch for {request.request_id}")
-            attempts = service.attempts(expected_execution)
-            matching = next((attempt for attempt in attempts
-                             if attempt.get("attemptId") == execution_meta.get("attemptId")), None)
-            if matching is None or matching.get("state") not in {"succeeded", "failed"}:
-                raise ValueError(f"adaptive execution outcome is missing for {request.request_id}")
-            if row.get("monitored") is True:
-                signals = matching.get("result", {}).get("_adaptiveSignals")
-                if not isinstance(signals, dict) or signals.get("observation") != row.get("observation"):
-                    raise ValueError(f"adaptive observation differs from execution record for {request.request_id}")
-
-
-def _spent_tokens(record: dict[str, Any]) -> tuple[int, bool]:
-    total, unknown = 0, False
-    for row in record.get("attempts", []):
-        observation = row.get("observation")
-        token = observation.get("tokens", {}) if isinstance(observation, dict) else {}
-        value = token.get("value")
-        if isinstance(value, (int, float)):
-            total += int(value)
-        elif row.get("monitored"):
-            unknown = True
-    return total, unknown
-
-
-def _spent_tokens_records(records: list[dict[str, Any]]) -> tuple[int, bool]:
-    total, unknown = 0, False
-    for record in records:
-        spent, incomplete = _spent_tokens(record)
-        total += spent
-        unknown = unknown or incomplete
-    return total, unknown
-
-
-def _restore_delivery(record, attempt, service):
-    candidate_id = attempt["decision"].get("candidateId")
-    execution_id = attempt.get("executionId")
-    outcomes = service.attempts(execution_id) if execution_id else []
-    if not outcomes:
-        raise ValueError(f"missing execution outcome for delivered request {record['requestId']}")
-    attempt_id = (attempt.get("execution") or {}).get("attemptId")
-    execution = next((row for row in outcomes if row.get("attemptId") == attempt_id), None)
-    if execution is None or execution.get("state") != "succeeded":
-        raise ValueError(f"delivery does not reference a successful execution for {record['requestId']}")
-    record["state"] = "delivered"
-    record["delivery"] = {
-        "candidateId": candidate_id,
-        "executionId": execution_id,
-        "attemptId": attempt_id,
-    }
-    record["terminalReason"] = "all_declared_acceptance_and_quality_slos_met"
+def _load_request_records(root: Path) -> dict[str, dict[str, Any]]:
+    records_root = root / "adaptive-records"
+    if not records_root.exists():
+        return {}
+    rows = [load_json(path) for path in sorted(records_root.glob("*.json"))]
+    result = {str(row.get("requestId")): row for row in rows}
+    if len(result) != len(rows):
+        raise ValueError("Adaptive request ledger contains duplicate request IDs")
+    return result
 
 
 def _record_path(root: Path, request_id: str) -> Path:
     return root / f"{request_id}.json"
 
 
+def _validate_policy_targets(ref: str, params: Mapping[str, Any], candidate_ids: set[str]) -> None:
+    named: list[str] = []
+    if ref == "static" and isinstance(params.get("candidate"), str):
+        named.append(params["candidate"])
+    if ref in {"random", "round_robin"} and params.get("candidates") is not None:
+        if not isinstance(params["candidates"], list):
+            raise ValueError(f"{ref} policy candidates must be a list")
+        named.extend(params["candidates"])
+    unknown = set(named) - candidate_ids
+    if unknown:
+        raise ValueError(f"Policy references unknown candidates: {', '.join(sorted(unknown))}")
+
+
 @contextmanager
 def _adaptive_lock(root: Path):
     lock_path = root / ".adaptive.lock"
-    with lock_path.open("a+b") as handle:
-        try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise RuntimeError(f"Another adaptive workflow holds {lock_path}.") from exc
+    with lock_path.open("a+") as stream:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
         try:
             yield
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
-def _json_value(value: Any) -> Any:
-    if hasattr(value, "value") and isinstance(value.value, str):
-        return value.value
-    if isinstance(value, dict):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_value(item) for item in value]
-    return value
+__all__ = ["ADAPTIVE_PLAN_VERSION", "ADAPTIVE_RECORD_VERSION", "AdaptiveWorkflow",
+           "AdaptiveWorkflowOutcome", "run_adaptive_workflow"]
