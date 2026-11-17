@@ -83,6 +83,10 @@ class ResolvedDatasetPackage:
     def get_evidence(self, instance_id: str, task_id: str) -> EvidencePayload:
         raise NotImplementedError("Dataset artifacts are not available from the S4 resolver package wrapper.")
 
+    def online_assessor(self, signal_id: str) -> object | None:
+        del signal_id
+        return None
+
     def get_oracle(self, instance_id: str, task_id: str) -> OracleUnavailable:
         return ORACLE_UNAVAILABLE
 

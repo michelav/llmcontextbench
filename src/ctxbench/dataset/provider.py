@@ -260,6 +260,11 @@ class LocalDatasetPackage:
             request_feature_schema=self.request_feature_schema(),
         )
 
+    def online_assessor(self, signal_id: str) -> object | None:
+        """Local file datasets do not provide semantic quality assessors by default."""
+        del signal_id
+        return None
+
     def mcp_server(self, *, allowed_operations=None) -> object | None:
         return None
 

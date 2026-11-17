@@ -10,11 +10,14 @@ from ctxbench.util.fs import load_json
 
 REQUEST_FIELDS = [
     "requestId", "sequenceIndex", "taskId", "instanceId", "state", "terminalReason", "delivered",
+    "privileged",
     "candidateId", "executionId", "attemptId", "attemptCount", "fallbackCount",
     "attemptsNotAccepted", "unmetConditions",
     "requestDurationMs", "requestDurationProvenance",
     "generationInputTokens", "generationOutputTokens", "generationTotalTokens",
     "generationTotalTokensProvenance", "generationUsageCompleteness",
+    "assessorDurationMs", "assessorDurationProvenance", "assessorTotalTokens",
+    "assessorTokenProvenance", "knownAssessorTotalTokens",
     "nonDeliveredAttemptCount", "knownNonDeliveredInputTokens",
     "knownNonDeliveredOutputTokens", "knownNonDeliveredTotalTokens",
     "nonDeliveredUsageCompleteness",
@@ -29,6 +32,8 @@ ATTEMPT_FIELDS = [
     "requestId", "candidateId", "executionId", "attemptId", "attemptIndex",
     "executionStatus", "startedAt", "finishedAt", "durationMs",
     "inputTokens", "outputTokens", "totalTokens", "tokenProvenance", "delivered",
+    "assessorDurationMs", "assessorDurationProvenance", "assessorTotalTokens",
+    "assessorTokenProvenance", "knownAssessorTotalTokens",
 ]
 
 
@@ -37,6 +42,8 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
     from ctxbench.adaptive.projections import rebuild_adaptive_responses
     rebuild_adaptive_responses(artifact_root)
     request_records: list[dict[str, Any]] = []
+    manifest = load_json(artifact_root / "manifest.json")
+    privileged = bool(manifest.get("privileged")) if isinstance(manifest, dict) else False
     by_request: dict[str, list[dict[str, Any]]] = {}
     records_root = artifact_root / "execution-records"
     if records_root.exists():
@@ -78,6 +85,9 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
                 _attempt_total_tokens(row) is not None for row in attempts
             )
             ledger_attempts = record.get("attempts") if isinstance(record.get("attempts"), list) else []
+            assessor_cost = _combine_assessor_costs(
+                [item.get("assessorCost", []) for item in ledger_attempts if isinstance(item, dict)]
+            )
             not_accepted = [row for row in ledger_attempts
                             if isinstance(row, dict) and isinstance(row.get("observation"), dict)
                             and row["observation"].get("accepted") is False]
@@ -93,6 +103,7 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
                 "state": record.get("state"),
                 "terminalReason": record.get("terminalReason"),
                 "delivered": record.get("state") == "delivered",
+                "privileged": privileged,
                 "candidateId": delivery.get("candidateId"),
                 "executionId": delivery.get("executionId"),
                 "attemptId": delivery.get("attemptId"),
@@ -107,6 +118,7 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
                 "generationTotalTokens": _sum_known(generation_in, generation_out),
                 "generationTotalTokensProvenance": "derived" if all_attempt_totals_known else "unavailable",
                 "generationUsageCompleteness": _usage_completeness(attempts),
+                **assessor_cost,
                 "nonDeliveredAttemptCount": len(non_delivered),
                 "knownNonDeliveredInputTokens": non_delivered_in,
                 "knownNonDeliveredOutputTokens": non_delivered_out,
@@ -137,6 +149,8 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
     for request_id, attempts in by_request.items():
         for attempt in sorted(attempts, key=lambda row: row.get("attemptIndex", 0)):
             result = attempt.get("result") if isinstance(attempt.get("result"), dict) else {}
+            adaptive_signals = result.get("_adaptiveSignals") if isinstance(result.get("_adaptiveSignals"), dict) else {}
+            assessor_cost = _combine_assessor_costs([adaptive_signals.get("assessorCost", [])])
             usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
             started, finished = attempt.get("startedAt"), attempt.get("finishedAt")
             attempt_rows.append({
@@ -154,6 +168,7 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
                 "totalTokens": usage.get("totalTokens"),
                 "tokenProvenance": (result.get("metricsSummary") or {}).get("totalTokensProvenance", "unavailable"),
                 "delivered": attempt.get("attemptId") in deliveries,
+                **assessor_cost,
             })
     request_records.sort(key=lambda row: (row.get("sequenceIndex") or 0, row["requestId"]))
     attempt_rows.sort(key=lambda row: (row["requestId"], row.get("attemptIndex") or 0))
@@ -258,3 +273,36 @@ def _write_csv(path: Path, fields: list[str], rows: list[dict[str, Any]]) -> Non
         writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore", lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _combine_assessor_costs(groups: list[Any]) -> dict[str, Any]:
+    costs = [item for group in groups if isinstance(group, list)
+             for item in group if isinstance(item, dict)]
+    if not costs:
+        return {
+            "assessorDurationMs": None, "assessorDurationProvenance": "unavailable",
+            "assessorTotalTokens": None, "assessorTokenProvenance": "unavailable",
+            "knownAssessorTotalTokens": None,
+        }
+    durations = [item.get("durationMs") for item in costs]
+    duration_provenances = [item.get("durationProvenance", "unavailable") for item in costs]
+    duration_complete = all(isinstance(value, (int, float)) and not isinstance(value, bool)
+                            for value in durations)
+    token_values = [item.get("totalTokens") for item in costs]
+    known_tokens = [value for value in token_values if type(value) is int and value >= 0]
+    tokens_complete = len(known_tokens) == len(costs)
+    token_provenances = [item.get("tokenProvenance", "unavailable") for item in costs]
+    token_provenance = (
+        "unavailable" if not tokens_complete else
+        token_provenances[0] if len(set(token_provenances)) == 1 else "derived"
+    )
+    return {
+        "assessorDurationMs": sum(durations) if duration_complete else None,
+        "assessorDurationProvenance": (
+            duration_provenances[0] if duration_complete and len(set(duration_provenances)) == 1 else
+            "derived" if duration_complete else "unavailable"
+        ),
+        "assessorTotalTokens": sum(known_tokens) if tokens_complete else None,
+        "assessorTokenProvenance": token_provenance,
+        "knownAssessorTotalTokens": sum(known_tokens) if known_tokens else None,
+    }

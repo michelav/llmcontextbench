@@ -24,11 +24,15 @@ from ctxbench.adaptive.policy import (
     CandidateRef, Decision, PolicyContractError, resolve_policy,
     validate_decision, verify_policy,
 )
-from ctxbench.adaptive.signals import extract_signals
+from ctxbench.adaptive.sensors import (
+    AssessmentInput, assess_quality, resolve_quality_assessors,
+)
+from ctxbench.adaptive.signals import SignalValue, extract_signals
 from ctxbench.adaptive.state import Observation, WindowSystemState, validate_reading_request
 from ctxbench.core.errors import CapabilityUnavailableError, InvalidDefinitionError
 from ctxbench.runtime.disturbances import build_runtime_disturbances
 from ctxbench.core.fingerprint import digest
+from ctxbench.core.provenance import Provenance
 from ctxbench.core.surfaces import parse_surface
 from ctxbench.core.workflow import (
     ExecuteOptions, ExecuteOutcome, MetricsOptions, MetricsOutcome, PlanOutcome, RunStatus,
@@ -128,7 +132,11 @@ class AdaptiveWorkflow:
             plugin_paths=plugin_paths, sources=tuple(policy_decl.get("sources") or ()),
         )
         _validate_policy_targets(policy, candidate_ids)
-        _validate_policy_readings(policy, definition.signals)
+        resolved_assessors = resolve_quality_assessors(
+            definition.signals, package, plugin_paths=plugin_paths,
+        )
+        resolved_signals = tuple(row.signal for row in resolved_assessors)
+        _validate_policy_readings(policy, resolved_signals)
 
         requests: list[PlannedRequest] = []
         request_ids: set[str] = set()
@@ -170,7 +178,7 @@ class AdaptiveWorkflow:
                 "poolDigest": digest([(row.task_id, row.instance_id) for row in requests])},
             policy=policy_ref, window=WindowSpec(definition.window["requests"], definition.window.get("mode", "sliding")),
             acceptance={"minimumResponseLength": definition.acceptance.get("minimumResponseLength", 0)},
-            signals=definition.signals, goals=definition.goals, disturbances=definition.disturbances,
+            signals=resolved_signals, goals=definition.goals, disturbances=definition.disturbances,
             evaluation=definition.evaluation or {"enabled": False, "judges": []}, trace=definition.trace,
             allow_mixed_models=definition.allow_mixed_models, dataset=provenance,
             resolved_definition=definition.resolved_definition,
@@ -191,6 +199,9 @@ class AdaptiveWorkflow:
         plan = adaptive_plan_from_payload(load_json(root / "adaptive-plan.json"), dataset=manifest["dataset"])
         plan = replace(plan, execution_fingerprint=manifest["executionFingerprint"])
         dataset = resolve_adaptive_dataset(manifest["dataset"])
+        assessors = resolve_quality_assessors(
+            plan.signals, dataset, plugin_paths=options.plugin_paths, expected=True,
+        )
         requests_by_id = {row.request_id: row for row in plan.requests}
         active_logger = logger or PhaseLogger()
         service = TrialExecutionService(root)
@@ -214,6 +225,27 @@ class AdaptiveWorkflow:
                 invocation, session, dataset=dataset, trace_options=dict(plan.trace),
                 runtime_interceptors=interceptors,
             )
+            response = result.get("response")
+            response_text = response if isinstance(response, str) else str(response or "")
+            quality_values: dict[str, dict[str, Any]] = {}
+            assessor_cost: list[dict[str, Any]] = []
+            for resolved_assessor in assessors:
+                observation, cost = assess_quality(
+                    resolved_assessor,
+                    AssessmentInput(
+                        request_id=planned_request.request_id, task_id=planned_request.task_id,
+                        instance_id=planned_request.instance_id, candidate_id=invocation.candidate_id,
+                        response=response_text,
+                    ),
+                )
+                quality_values[str(resolved_assessor.signal["id"])] = {
+                    "value": observation.value,
+                    "provenance": observation.provenance.value,
+                    "unit": observation.value_scale,
+                }
+                assessor_cost.append(cost)
+            result["_runtimeQuality"] = quality_values
+            result["_runtimeAssessorCost"] = assessor_cost
             return {**result, "_runtimeDisturbances": applied_effects()}
 
         with ExecutionSession(engine) as session:
@@ -305,9 +337,11 @@ class AdaptiveWorkflow:
         write_adaptive_metrics(output_dir, requests, attempts)
         request_states = {state: sum(row.get("state") == state for row in requests)
                           for state in ("delivered", "failed", "started")}
+        manifest = load_json(source / "manifest.json")
         write_json(output_dir / "metrics-manifest.json", {
             "schemaVersion": "4.0-adaptive", "workflowKind": self.kind,
             "inputDirectory": str(source), "requestCount": len(requests), "attemptCount": len(attempts),
+            "privileged": bool(manifest.get("privileged")),
             "requestStates": request_states,
             "outputs": ["adaptive_request_metrics.csv", "adaptive_attempt_metrics.csv"],
         })
@@ -409,12 +443,19 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
                     plan.acceptance.get("minimumResponseLength", 0))
                 signal_values, known_subtotals, failure_category = extract_signals(result, accepted=accepted)
                 disturbances = result.pop("_runtimeDisturbances", [])
+                quality_values = result.pop("_runtimeQuality", {})
+                assessor_cost = result.pop("_runtimeAssessorCost", [])
+                for name, raw in quality_values.items():
+                    signal_values[name] = SignalValue(
+                        raw.get("value"), Provenance(raw["provenance"]), str(raw["unit"]),
+                    )
                 adaptive_signals = {
                     "signals": {name: value.to_dict() for name, value in signal_values.items()},
                     "knownSubtotals": known_subtotals,
                     "failureCategory": failure_category,
                     "accepted": accepted,
                     "disturbances": disturbances,
+                    "assessorCost": assessor_cost,
                 }
                 return {**result, "_adaptiveSignals": adaptive_signals}
 
@@ -446,6 +487,7 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
                                       "knownSubtotals": dict(runtime_signals.get("knownSubtotals") or {}),
                                       "failureCategory": failure_category, "accepted": accepted}
             attempt["disturbances"] = list(runtime_signals.get("disturbances") or [])
+            attempt["assessorCost"] = list(runtime_signals.get("assessorCost") or [])
             record["state"] = "delivered" if accepted else "failed"
             record["terminalReason"] = terminal_reason
             record["requestDurationMs"] = max(0, int((perf_counter() - started) * 1000))

@@ -108,6 +108,10 @@ class CompleteDatasetPackage:
     def capability_report(self) -> DatasetCapabilityReport:
         return _capability_report()
 
+    def online_assessor(self, signal_id: str):
+        del signal_id
+        return None
+
     def tool_provider(self) -> object | None:
         return None
 

@@ -115,6 +115,10 @@ class FakeDatasetAdapter:
             conformant=True,
         )
 
+    def online_assessor(self, signal_id: str) -> object | None:
+        del signal_id
+        return None
+
     def get_oracle(self, instance_id: str, task_id: str) -> object:
         if instance_id != "inst-001":
             raise KeyError(instance_id)

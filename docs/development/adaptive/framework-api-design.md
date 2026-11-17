@@ -1,8 +1,9 @@
 # Self-adaptive provisioning and framework API — design
 
-**Status:** implementation design. WP-A, WP-B, WP-C and WP-E have implementation commits; see
-[`wp-e-acceptance.md`](wp-e-acceptance.md). Each work package
-in [section 11](#11-work-packages) needs its own approval before implementation starts.
+**Status:** implementation design. WP-A, WP-B, WP-C and WP-E are implemented; WP-E review is
+recorded in [`wp-e-acceptance.md`](wp-e-acceptance.md). WP-F implementation is complete and
+awaiting review; see [`wp-f-acceptance.md`](wp-f-acceptance.md). Each later work package in
+[section 11](#11-work-packages) needs its own approval before implementation starts.
 
 **Audience:** an agent or team implementing the refactor without access to the design discussion.
 
@@ -807,14 +808,18 @@ class OnlineQualityAssessor(Protocol):
 
 - The assessor sees the request; the **policy does not**. Only the resulting signal value enters
   the state.
-- The assessor runs after the attempt and before the observation is committed. An exception or
-  an invalid observation yields an unavailable value with the measured assessor duration (this
-  is today's behaviour in `_monitor`; keep it).
+- The assessor receives `AssessmentInput(request_id, task_id, instance_id, candidate_id, response)`
+  and runs after the invocation, before the observation is committed. An exception or invalid
+  observation yields an unavailable value with measured assessor duration.
+- Dataset-backed assessor references resolve through `DatasetPackage.online_assessor`; external
+  `module:Class` references expose a `SignalCapability` and their source digest is frozen in the
+  adaptive plan and execution fingerprint. Execution refuses changed assessor sources or
+  capability declarations.
 - **Privileged runs.** If any enabled assessor declares `uses_reference_data = True`, `plan`
   writes `"privileged": true` in the manifest, and metrics and comparison reports carry the
   flag. A privileged run cannot be presented as deployable behaviour.
-- Assessor cost is recorded per attempt under `assessorCost` and reported in its own metric
-  columns (R22).
+- Assessor token usage and measured duration are recorded per attempt under `assessorCost` and
+  reported in separate metric columns (R22); they are not generation or evaluation usage.
 
 ### 6.10 Goals
 
@@ -1654,13 +1659,16 @@ flowchart LR
 ### WP-F — Online quality signals
 
 - **Scope:** R5 (quality), R22. Corresponds to plan WP9.
-- **Tasks:** `signals` declaration; `DatasetPackage.online_assessor`; `AssessmentInput`;
-  assessor cost recording; privileged flag; a provider-free assessor in the fake dataset
-  fixture.
+- **Tasks:** resolve declared capabilities through `DatasetPackage.online_assessor`; run either
+  a dataset assessor or an external `module:Class` reference using `AssessmentInput`; validate
+  observation identity, scale, class and provenance; fingerprint external source; persist signal
+  values and measured assessor cost with the execution result; mark reference-data runs
+  privileged; add a deterministic provider-free assessor to the fake dataset fixtures.
 - **Gate:** a quality signal is readable through `state.window("quality.<id>", …)` and usable by
-  `window_threshold` and by a goal; assessor failure yields unavailable, never satisfied; resume does not
-  assess twice; assessor cost is absent from generation signals; a reference-data assessor
-  marks the run privileged; tests prove offline evaluation artifacts cannot influence decisions.
+  `window_threshold`; assessor failure yields unavailable, never a satisfied value; resume does not
+  assess twice; assessor cost is absent from generation signals and reported in separate metrics;
+  a reference-data assessor marks the run privileged; tests prove offline evaluation artifacts
+  cannot influence decisions. Goal evaluation is verified in WP-H, which owns the goal metrics.
 
 ### WP-G — Workload builder and experiments in code
 

@@ -65,6 +65,11 @@ class DatasetPackage(Protocol):
 
     def capability_report(self) -> DatasetCapabilityReport: ...
 
+    def online_assessor(self, signal_id: str) -> object | None:
+        """Return the runtime assessor for a declared quality signal, when available."""
+        del signal_id
+        return None
+
     def get_oracle(self, instance_id: str, task_id: str) -> object:
         return ORACLE_UNAVAILABLE
 

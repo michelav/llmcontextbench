@@ -37,6 +37,7 @@ _OPTIONAL_METHODS = (
     "validators",
     "request_feature_schema",
     "semantic_quality_assessors",
+    "online_assessor",
 )
 
 _DESCRIPTOR_FIELDS = (

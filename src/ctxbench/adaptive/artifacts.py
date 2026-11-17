@@ -123,6 +123,10 @@ def write_adaptive_artifacts(artifact_root: str | Path, plan: AdaptivePlan, *,
     dataset_root = provenance.get("materializedPath") or provenance.get("materialized_path")
     dataset_digest = tree_digest(Path(dataset_root)) if dataset_root and Path(dataset_root).is_dir() else provenance.get("contentHash")
     plugin_inputs = [{"ref": plan.policy.ref, "sourceDigest": plan.policy.source_digest}]
+    plugin_inputs.extend(
+        {"ref": row["assessor"], "sourceDigest": row["sourceDigest"]}
+        for row in plan.signals if row.get("sourceDigest")
+    )
     inputs = {
         "artifacts": {"resolved.json": file_digest(resolved_path), "adaptive-plan.json": file_digest(plan_path)},
         "implementation": implementation_digest(), "dataset": dataset_digest,
@@ -143,7 +147,9 @@ def write_adaptive_artifacts(artifact_root: str | Path, plan: AdaptivePlan, *,
         "dataset": provenance,
         "evaluation": evaluation or dict(plan.evaluation) or {"enabled": False, "judges": []},
         "trace": trace or dict(plan.trace) or {"enabled": False, "writeFiles": False},
-        "labels": dict(plan.labels), "privileged": False, "seed": plan.seed,
+        "labels": dict(plan.labels),
+        "privileged": any(bool(row.get("usesReferenceData")) for row in plan.signals),
+        "seed": plan.seed,
         "mixedModels": plan.allow_mixed_models,
     }
     write_json(root / "manifest.json", manifest)

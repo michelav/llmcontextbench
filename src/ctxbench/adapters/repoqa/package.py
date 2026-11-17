@@ -14,6 +14,8 @@ from ctxbench.dataset.provider import LocalDatasetPackage
 from ctxbench.dataset.validation import validate_package
 from ctxbench.adapters.repoqa.mcp_server import build_repoqa_mcp_server
 from ctxbench.adapters.repoqa.tools import REPOQA_ALL_OPERATIONS, RepoQAToolService
+from ctxbench.adaptive.sensors import AssessmentInput, QualityObservation, SensorClass, SensorCost
+from ctxbench.core.provenance import Provenance, TokenUsage
 from ctxbench.util.fs import load_json
 
 
@@ -29,6 +31,34 @@ REPRESENTATION_ARTIFACTS = {
 }
 
 
+class _RepoQAOnlineAssessor:
+    """Reference-data scorer exposed as an explicit privileged online signal."""
+
+    def __init__(self, dataset_root: str | Path, capability: SignalCapability) -> None:
+        self.dataset_root = Path(dataset_root)
+        self.capability = capability
+
+    def assess(self, item: AssessmentInput) -> QualityObservation:
+        from ctxbench.adapters.repoqa.evaluation import (
+            _load_native_task, _load_raw_repoqa_dataset, _load_scorer, _repo_info,
+        )
+
+        native_task = _load_native_task(self.dataset_root, item.instance_id)
+        repoqa_dataset = _load_raw_repoqa_dataset(self.dataset_root)
+        verdict, _best_target, similarity = _load_scorer()(
+            item.response.strip(), native_task, _repo_info(repoqa_dataset, native_task), False,
+        )
+        value = float(str(getattr(verdict, "value", verdict)) == "best_match" and float(similarity or 0) >= 0.8)
+        return QualityObservation(
+            request_id=item.request_id, candidate_id=item.candidate_id,
+            metric_id=self.capability.metric_id, value=value, value_scale=self.capability.value_scale or "unit",
+            assessor_id=self.capability.signal_id, assessor_version=self.capability.version,
+            sensor_class=SensorClass.ORACLE, provenance=Provenance.DERIVED,
+            cost=SensorCost(None, Provenance.UNAVAILABLE, TokenUsage(0, Provenance.DERIVED)),
+            uses_reference_data=True,
+        )
+
+
 class RepoQADatasetAdapter(LocalDatasetPackage):
     def semantic_quality_assessors(self) -> tuple[SignalCapability, ...]:
         return (SignalCapability(
@@ -42,6 +72,11 @@ class RepoQADatasetAdapter(LocalDatasetPackage):
             uses_reference_data=True,
             deployment_scope="reference-data",
         ),)
+
+    def online_assessor(self, signal_id: str) -> object | None:
+        capability = next((row for row in self.semantic_quality_assessors()
+                           if row.signal_id == signal_id), None)
+        return _RepoQAOnlineAssessor(self._root, capability) if capability is not None else None
 
     def validators(self) -> dict[str, object]:
         from ctxbench.adapters.repoqa.evaluation import evaluate_configured_response
