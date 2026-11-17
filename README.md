@@ -464,7 +464,7 @@ notes, and local clone overrides.
 
 The adaptive workflow uses the shared execution service and records decisions and
 deliveries per request. See the [provider-free validation guide](docs/development/validation-guide.md)
-for both lifecycles and [the adaptive plan contract](docs/architecture/contracts/adaptive-plan-v3.md).
+for both lifecycles and [the adaptive plan contract](docs/architecture/contracts/adaptive-plan.md).
 
 ## Compatibility Notes
 
