@@ -215,10 +215,9 @@ src/ctxbench/
 ├── workload/                     NEW  generic request-list construction
 │   └── builder.py                Workload, Segment, RequestSpec
 ├── adaptive/
-│   ├── definition.py             NEW  definition model (AdaptiveExperiment, Candidate, PolicyRef,
-│   │                                  Window, Goal, Acceptance, Disturbance,
-│   │                                  SignalRef), schema v4, parse/serialise, validation,
-│   │                                  expansion to a plan
+│   ├── definition.py             NEW  definition model (AdaptiveExperiment, WorkloadRequest;
+│   │                                  sections are schema-validated mappings), schema v4,
+│   │                                  parse/serialise, validation, expansion to a plan
 │   ├── plan.py                   NEW  AdaptivePlan v4, CandidateSpec, PlannedRequest (frozen model)
 │   ├── artifacts.py              CHANGED  plan/manifest/record I/O, fingerprint
 │   ├── policy.py                 NEW  Policy protocol, Decision, registry, external loader
@@ -1311,24 +1310,15 @@ packages before the branch is released. Earlier adaptive artifacts fail with the
 ### 9.1 Surface
 
 ```python
-# Adaptive definition model: frozen dataclasses DEFINED in adaptive/definition.py and
-# core/definitions.py, re-exported here. They are what the tool parses a definition file into.
-# from_definition(dict) / to_definition() convert to and from the document of section 8.1.
-Model(provider, name, model_params={})
-Configuration(strategy, representation, surface)
-Candidate(id, model, configuration, labels={})          # model/configuration: object or key
-PolicyRef(ref, params={}, sources=())
-Window(requests=None, all=False, mode="sliding")
-Goal(id, signal, statistic, upper=None, lower=None, scope="system", window=None)
-Acceptance(minimum_response_length=0)
-SignalRef(id, assessor)
-Disturbance(name, component, kind, first_sequence, last_sequence=None, seed=0,
-            delay_ms=0, failure_rate=0.0, candidates=(), version="1")
-AdaptiveExperiment(id, dataset, candidates, policy, workload, window, disturbances=(), seed=0,
-                   goals=(), acceptance=Acceptance(), signals=(),
-                   allow_mixed_models=False, labels={}, evaluation=…, trace=…)
-Scenario(name, workload, disturbances=())    # helper only: experiment.with_scenario(s) sets
-                                             # workload and disturbances; not a stored object
+# Adaptive definition model: one frozen dataclass DEFINED in adaptive/definition.py and
+# re-exported here. It is what the tool parses a definition file into. Its sections are plain
+# mappings in the camelCase shape of section 8.1, validated by the v4 JSON schema and
+# normalised at load; there is no typed class per section (see "Typed envelope, plain parts").
+AdaptiveExperiment(id, dataset, models, surfaces, configurations, candidates, workload, policy,
+                   window, seed=0, output="outputs", labels={}, task_params={},
+                   execution_options={}, acceptance={}, signals=(), goals=(), disturbances=(),
+                   evaluation={}, trace={}, allow_mixed_models=False)
+WorkloadRequest(task_id, instance_id, request_id=None, labels={})   # items of `workload`
 # Benchmark experiments have no typed object in this release: pass a path or a definition dict.
 
 # Datasets and workloads
@@ -1371,6 +1361,17 @@ CtxbenchError
 ├── PolicyContractError    # policy raised or returned an invalid decision
 └── ExecutionStateError    # locked run, uncertain attempt without retry_uncertain, …
 ```
+
+**Typed envelope, plain parts.** The definition document is the source of truth: the plan
+stores its normalised form and the fingerprint is computed from it, so `plan(path)` and
+`plan(dict)` take the same input and studies need only definition files. Sections such as
+candidates, policy, window, goals and disturbances therefore stay plain mappings in the public
+API; a second, typed form would have to be kept in step with the schema. Code that acts on a
+section converts it at the boundary to an internal type (for example
+`runtime/disturbances.py::DisturbanceSpec`, the policy objects). If typed construction is wanted
+later, it is added as builders that emit the canonical mappings (`...to_definition()`), not as
+replacements for them. A scenario is not a type either: the WP-G `Scenario` helper returns the
+`workload` and `disturbances` sections to put in a definition.
 
 ### 9.2 Behavioural rules of the API
 
@@ -1517,7 +1518,8 @@ flowchart LR
   resolver, `benchmark/fingerprint.py`, `render_task_template`, `DatasetProvenance`) to `core/`
   and `dataset/` with re-exports, and add the boundary test that `adaptive` does not import
   `benchmark`. Then: definition schema v4 with explicit workload only; the definition model
-  (`AdaptiveExperiment` and parts) as the parsed form, re-exported by `ctxbench.api`,
+  (`AdaptiveExperiment`, with sections as schema-validated mappings) as the parsed form,
+  re-exported by `ctxbench.api`,
   `plan(experiment)`; `AdaptivePlan` v4,
   `CandidateSpec`, `PlannedRequest`; single-model check with `allowMixedModels`; decision-time invocation and
   one execution ID per request; one decision and at most one attempt per request (the fallback
@@ -1642,7 +1644,7 @@ flowchart LR
 
 - **Scope:** R1, R17, R18.
 - **Tasks:** `workload/builder.py`; `generator` in the definition; `load_dataset`; the
-  `Scenario` helper.
+  `Scenario` helper, which returns `workload` and `disturbances` sections, not a stored type.
 - **Gate:** equal seed and specification produce identical request lists across processes;
   a generated workload and its explicit expansion give byte-identical plans; segments filter by declared
   features only and fail clearly on unknown features or insufficient pools; feature values
