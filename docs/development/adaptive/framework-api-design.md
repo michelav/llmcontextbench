@@ -1806,8 +1806,8 @@ flowchart LR
   │                    spec-workflow.md, usage-log.md
   └── sprints/         development history, one folder per major effort
       ├── README.md    index: sprint, dates, status, outcome, ADRs produced
-      └── <yyyy-mm>-<slug>/   README.md (goal, status, links) plus drafts, design,
-                              reviews, work-packages/, acceptance/
+      └── <slug>/      README.md (goal, dates, status, links) plus drafts, design,
+                       reviews, work-packages/, acceptance/
   ```
 
 - **Rules** (written into `docs/README.md`):
@@ -1818,17 +1818,22 @@ flowchart LR
   - Closing a sprint promotes its results: durable decisions become ADRs in
     `architecture/decisions/`, design content is merged into `architecture/`, user-visible
     behaviour goes into `guide/`, and the sprint README links to all three.
+  - Sprint folders have semantic names without dates; dates live in the sprint README and in
+    the `sprints/README.md` index.
   - `specs/` stays as managed by spec-kit; sprint READMEs link to the relevant spec folders.
+  - Fenced blocks tagged `console` are executed by the docs command test. A command that cannot
+    run provider-free (real provider, Lattes or RepoQA data) goes in a `shell` or `text` block
+    preceded by `<!-- docs-test: skip (<reason>) -->`; the reason is required.
 - **Tasks**, one commit each, in this order:
   1. **Move only.** `git mv` existing documents to the layout above without editing content,
-     and fix relative links. Sprints: `2026-xx-v1-refactor/` (v1 refactor plan and review
-     questions), `2026-xx-runtime-extraction/` (runtime extraction baseline and slices),
-     `2026-xx-evolution-plan/` (evolution plan), `2026-10-adaptive-framework/` (this document as
+     and fix relative links. Sprints: `v1-refactor/` (v1 refactor plan and review
+     questions), `runtime-extraction/` (runtime extraction baseline and slices),
+     `evolution-plan/` (evolution plan), `adaptive-framework/` (this document as
      `design.md`, assessment and plan, plan review, use cases, `work-packages/` for the WP
      decision records and audits, `acceptance/` for the WP acceptance reports). Move
      `docs/prompts/spec-kit/` out of `docs/` (to `.specify/prompts/`). Update the paths in
-     `CLAUDE.md`, `AGENTS.md` and skills that reference moved files. Exact sprint dates are
-     taken from git history.
+     `CLAUDE.md`, `AGENTS.md` and skills that reference moved files. Sprint dates, recorded in
+     the sprint READMEs, are taken from git history.
   2. **Promote the adaptive-framework sprint.** Merge the normative parts of this document
      (workflow protocol and registry, policy and state contract, signals and assessors, plug-in
      resolution and fingerprint, resume and replay, plan v4, manifest, request and execution
@@ -1848,10 +1853,12 @@ flowchart LR
      columns with the provenance class of each value (reported, measured, derived, estimated,
      unavailable). `adaptive-experiments.md` replaces `examples/adaptive/README.md`;
      `experiments-in-code.md` walks through `examples/adaptive/code_built.py`. Every example uses
-     the fake dataset and the mock provider.
+     the fake dataset and the mock provider; a small copy of the fake dataset is promoted to
+     `examples/datasets/fake/` so documented commands do not depend on test fixtures.
   4. **Make the gate executable.** Add a test that extracts fenced `llmctxbench …` commands and
-     `python examples/…` invocations from `README.md` and `docs/guide/`, and runs them
-     provider-free in a temporary directory; and a test that every relative Markdown link in
+     `python examples/…` invocations from `console` blocks in `README.md` and `docs/guide/`, and
+     runs them provider-free in a temporary directory, failing on any unmarked non-`console`
+     block that contains such a command; and a test that every relative Markdown link in
      `README.md` and `docs/` resolves.
   5. **Cleanup** (separate from documentation): remove re-exports that have no remaining
      caller; remove the empty `examples/adaptive-lattes/`, `examples/adaptive-repoqa/` and
