@@ -216,8 +216,9 @@ src/ctxbench/
 │   └── builder.py                Workload, Segment, RequestSpec
 ├── adaptive/
 │   ├── definition.py             NEW  definition model (AdaptiveExperiment, WorkloadRequest;
-│   │                                  sections are schema-validated mappings), schema v4,
-│   │                                  parse/serialise, validation, expansion to a plan
+│   │                                  sections stored as schema-validated mappings), section
+│   │                                  builders for code (WP-G), schema v4, parse/serialise,
+│   │                                  validation, expansion to a plan
 │   ├── plan.py                   NEW  AdaptivePlan v4, CandidateSpec, PlannedRequest (frozen model)
 │   ├── artifacts.py              CHANGED  plan/manifest/record I/O, fingerprint
 │   ├── policy.py                 NEW  Policy protocol, Decision, registry, external loader
@@ -1310,15 +1311,28 @@ packages before the branch is released. Earlier adaptive artifacts fail with the
 ### 9.1 Surface
 
 ```python
-# Adaptive definition model: one frozen dataclass DEFINED in adaptive/definition.py and
-# re-exported here. It is what the tool parses a definition file into. Its sections are plain
-# mappings in the camelCase shape of section 8.1, validated by the v4 JSON schema and
-# normalised at load; there is no typed class per section (see "Typed envelope, plain parts").
+# Adaptive definition model, DEFINED in adaptive/definition.py and re-exported here. It is
+# what a definition file is parsed into and what code builds directly (see "Two entry paths,
+# one stored form"). Its sections are stored as mappings in the camelCase shape of section 8.1.
 AdaptiveExperiment(id, dataset, models, surfaces, configurations, candidates, workload, policy,
                    window, seed=0, output="outputs", labels={}, task_params={},
                    execution_options={}, acceptance={}, signals=(), goals=(), disturbances=(),
                    evaluation={}, trace={}, allow_mixed_models=False)
 WorkloadRequest(task_id, instance_id, request_id=None, labels={})   # items of `workload`
+
+# Section builders (WP-G): frozen dataclasses for writing experiments in code. Each validates
+# on construction and converts with to_definition() / from_definition(mapping). Wherever
+# AdaptiveExperiment takes a section, it accepts a builder or a mapping.
+Model(provider, name, model_params={})
+Configuration(strategy, representation, surface)
+Candidate(id, model, configuration, labels={})          # model/configuration: builder or key
+PolicyRef(ref, params={}, sources=())
+Window(requests=None, all=False, mode="sliding")
+Goal(id, signal, statistic, upper=None, lower=None, scope="system", window=None)
+Acceptance(minimum_response_length=0)
+SignalRef(id, assessor)
+Disturbance(name, component, kind, first_sequence, last_sequence=None, seed=0,
+            delay_ms=0, failure_rate=0.0, candidates=(), version="1")
 # Benchmark experiments have no typed object in this release: pass a path or a definition dict.
 
 # Datasets and workloads
@@ -1362,16 +1376,24 @@ CtxbenchError
 └── ExecutionStateError    # locked run, uncertain attempt without retry_uncertain, …
 ```
 
-**Typed envelope, plain parts.** The definition document is the source of truth: the plan
-stores its normalised form and the fingerprint is computed from it, so `plan(path)` and
-`plan(dict)` take the same input and studies need only definition files. Sections such as
-candidates, policy, window, goals and disturbances therefore stay plain mappings in the public
-API; a second, typed form would have to be kept in step with the schema. Code that acts on a
-section converts it at the boundary to an internal type (for example
-`runtime/disturbances.py::DisturbanceSpec`, the policy objects). If typed construction is wanted
-later, it is added as builders that emit the canonical mappings (`...to_definition()`), not as
-replacements for them. A scenario is not a type either: the WP-G `Scenario` helper returns the
-`workload` and `disturbances` sections to put in a definition.
+**Two entry paths, one stored form.** An experiment is either read from a definition file or
+built in code; both paths are first-class. They converge on one stored form: `AdaptiveExperiment`
+normalises every section to the canonical mapping of section 8.1 when it is constructed, so a
+builder and the equivalent mapping or file give equal experiments. The plan, `resolved.json` and
+the fingerprint are computed from that form only, so `plan(code-built)` and `plan(path)` are
+indistinguishable and reproducibility does not depend on how an experiment was written.
+
+- Builders are input types, not a second representation: `AdaptiveExperiment` stores mappings,
+  and reading a section back returns the mapping. `from_definition(mapping)` gives a builder
+  when code wants to edit a loaded section.
+- One validation rule per section. A builder validates by normalising its `to_definition()`
+  output through the same code a file goes through (the section's fragment of the v4 schema,
+  then the section's normaliser, e.g. `DisturbanceSpec` for a disturbance). A value that is
+  invalid in a file is invalid in a builder, and the error names the same field.
+- Code that acts on a section still converts it at that point to an internal type (for example
+  `runtime/disturbances.py::DisturbanceSpec`, the policy objects); builders do not replace those.
+- A scenario is not a stored type: the WP-G `Scenario` helper returns the `workload` and
+  `disturbances` sections to put in an experiment.
 
 ### 9.2 Behavioural rules of the API
 
@@ -1488,7 +1510,7 @@ flowchart LR
     B --> C[WP-C Signals, state, built-in policies]
     C --> E[WP-E Disturbances and scenarios]
     C --> F[WP-F Online quality signals]
-    B --> G[WP-G Workload builder]
+    B --> G[WP-G Workload builder, experiments in code]
     C --> H[WP-H Metrics, goals, summarize, headroom]
     E --> H
     F --> H
@@ -1640,15 +1662,26 @@ flowchart LR
   assess twice; assessor cost is absent from generation signals; a reference-data assessor
   marks the run privileged; tests prove offline evaluation artifacts cannot influence decisions.
 
-### WP-G — Workload builder
+### WP-G — Workload builder and experiments in code
 
-- **Scope:** R1, R17, R18.
+- **Scope:** R1, R17, R18; experiments built in code (section 9.1, "Two entry paths, one stored
+  form").
 - **Tasks:** `workload/builder.py`; `generator` in the definition; `load_dataset`; the
-  `Scenario` helper, which returns `workload` and `disturbances` sections, not a stored type.
+  `Scenario` helper, which returns `workload` and `disturbances` sections, not a stored type;
+  the section builders of section 9.1 (`Model`, `Configuration`, `Candidate`, `PolicyRef`,
+  `Window`, `Goal`, `Acceptance`, `SignalRef`, `Disturbance`) in `adaptive/definition.py`,
+  re-exported by `ctxbench.api`; `AdaptiveExperiment` accepts a builder or a mapping for each
+  section and normalises both to the stored mapping; a code-built example under
+  `examples/adaptive/` with the fake dataset and mock provider.
 - **Gate:** equal seed and specification produce identical request lists across processes;
   a generated workload and its explicit expansion give byte-identical plans; segments filter by declared
   features only and fail clearly on unknown features or insufficient pools; feature values
-  appear only in request `labels`.
+  appear only in request `labels`. For every section, an experiment built with builders and the
+  equivalent definition file give byte-identical `adaptive-plan.json`, `resolved.json` and
+  execution fingerprint; `X.from_definition(m).to_definition() == m` for each builder `X` on
+  normalised mappings; every value the schema or normaliser refuses in a file is refused by the
+  builder, with an error naming the same field; the API round-trip test runs on a code-built
+  experiment.
 
 ### WP-H — Metrics, goals, summarize, headroom
 
