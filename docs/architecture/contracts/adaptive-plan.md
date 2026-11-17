@@ -2,7 +2,8 @@
 
 The frozen adaptive plan is the authority for an adaptive run. `plan` writes it from an adaptive
 definition (`workflowKind: "adaptive"`, `schemaVersion: 4`); `execute`, `status`, `eval`,
-`export` and `metrics` read it and never re-read the definition. The definition schema's
+`export` and `metrics` read it and never re-read the definition. The definition is documented
+in [the adaptive definition reference](../../guide/reference/definition-adaptive.md); its
 machine-readable form is `ctxbench.adaptive.definition.adaptive_definition_schema()`.
 
 Writer and reader: `ctxbench/adaptive/artifacts.py` (`adaptive_plan_payload`,

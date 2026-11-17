@@ -1,0 +1,18 @@
+{
+  "datasetId": "ctxbench/fake-dataset",
+  "version": "0.1.0",
+  "instances": [
+    {
+      "instanceId": "person-001",
+      "contextBlocks": "context/person-001/blocks.json",
+      "tasks": [
+        {
+          "id": "task_role",
+          "parameters": {
+            "person_name": "Avery Example"
+          }
+        }
+      ]
+    }
+  ]
+}

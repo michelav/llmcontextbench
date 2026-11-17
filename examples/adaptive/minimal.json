@@ -8,7 +8,7 @@
   "dataset": {
     "id": "ctxbench/fake-dataset",
     "version": "0.1.0",
-    "root": "../../tests/fixtures/fake_dataset/dataset"
+    "root": "../datasets/fake"
   },
   "models": {
     "mock": {"provider": "mock", "name": "mock", "modelParams": {"max_tokens": 128}}

@@ -16,7 +16,8 @@ Lifecycle commands are local-only. They do not fetch, clone, or download dataset
 
 Use this path when the experiment references a dataset by `id` and `version`.
 
-```bash
+<!-- docs-test: skip (needs an external or remote dataset) -->
+```shell
 llmctxbench dataset fetch \
   --descriptor-url https://github.com/ctxbench/lattes/releases/download/v0.1.0-dataset/ctxbench-lattes-v0.1.0.dataset.json \
   --cache-dir ./.ctxbench/datasets
@@ -55,7 +56,8 @@ Use this path when the experiment points directly to a dataset root.
 
 For local paths, skip `llmctxbench dataset fetch` and go straight to inspection or planning:
 
-```bash
+<!-- docs-test: skip (needs an external or remote dataset) -->
+```shell
 llmctxbench dataset inspect datasets/local-dataset
 llmctxbench plan experiment.json --output outputs/local_example
 ```
@@ -66,21 +68,24 @@ llmctxbench plan experiment.json --output outputs/local_example
 
 Preferred remote source:
 
-```bash
+<!-- docs-test: skip (needs an external or remote dataset) -->
+```shell
 llmctxbench dataset fetch \
   --descriptor-url https://github.com/ctxbench/lattes/releases/download/v0.1.0-dataset/ctxbench-lattes-v0.1.0.dataset.json
 ```
 
 Offline descriptor source:
 
-```bash
+<!-- docs-test: skip (needs an external or remote dataset) -->
+```shell
 llmctxbench dataset fetch \
   --descriptor-file ./downloads/ctxbench-lattes-v0.1.0.dataset.json
 ```
 
 ### Direct archive URL with `--sha256`
 
-```bash
+<!-- docs-test: skip (needs an external or remote dataset) -->
+```shell
 llmctxbench dataset fetch \
   --dataset-url https://github.com/ctxbench/lattes/releases/download/v0.1.0-dataset/ctxbench-lattes-v0.1.0.tar.gz \
   --id ctxbench/lattes \
@@ -90,7 +95,8 @@ llmctxbench dataset fetch \
 
 ### Direct archive URL with `--sha256-url`
 
-```bash
+<!-- docs-test: skip (needs an external or remote dataset) -->
+```shell
 llmctxbench dataset fetch \
   --dataset-url https://github.com/ctxbench/lattes/releases/download/v0.1.0-dataset/ctxbench-lattes-v0.1.0.tar.gz \
   --id ctxbench/lattes \
@@ -100,7 +106,8 @@ llmctxbench dataset fetch \
 
 ### Local archive with `--sha256-file`
 
-```bash
+<!-- docs-test: skip (needs an external or remote dataset) -->
+```shell
 llmctxbench dataset fetch \
   --dataset-file ./downloads/ctxbench-lattes-v0.1.0.tar.gz \
   --id ctxbench/lattes \
@@ -110,7 +117,8 @@ llmctxbench dataset fetch \
 
 ### Local unpacked directory
 
-```bash
+<!-- docs-test: skip (needs an external or remote dataset) -->
+```shell
 llmctxbench dataset fetch --dataset-dir ./datasets/lattes
 ```
 
@@ -148,7 +156,8 @@ It fails if there is no manifest, or more than one manifest.
 
 If `llmctxbench plan` cannot resolve `dataset.id@version` locally, it fails and tells you to run:
 
-```bash
+<!-- docs-test: skip (needs an external or remote dataset) -->
+```shell
 llmctxbench dataset fetch --descriptor-url <url>
 ```
 

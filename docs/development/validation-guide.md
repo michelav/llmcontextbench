@@ -26,10 +26,11 @@ llmctxbench status /tmp/ctxbench-adaptive
 llmctxbench metrics /tmp/ctxbench-adaptive
 ```
 
-The adaptive plan contains ordered request identities and candidate invocations. Decisions and
-deliveries are canonical in `adaptive-records/`, durable attempts are under `execution-records/`,
-and `responses.jsonl` contains delivered requests. Request and attempt metrics retain failed and
-rejected work.
+The adaptive plan contains the ordered requests, the candidate catalogue and the policy. One
+decision, the observation and the delivery per request are canonical in `adaptive-records/`,
+durable attempts are under `execution-records/`, and `responses.jsonl` contains delivered
+requests. Request and attempt metrics retain failed work. `examples/adaptive/window-threshold.json`
+exercises a generated workload, two candidates, a goal and a disturbance the same way.
 
 ## Contract and test checks
 
@@ -46,6 +47,6 @@ pytest -q -m e2e
 The complete suite is also provider-free by default; do not run benchmark execution against real
 provider definitions unless that spend is intended.
 
-Only version-3 benchmark definitions, version-4 benchmark artifacts, and adaptive plan schema v3
-are supported. Old study/RepoQA adaptation protocols and historical artifact readers have been
+Only version-3 benchmark definitions, version-4 benchmark artifacts, version-4 adaptive
+definitions and adaptive plan version 4 are supported. Old study/RepoQA adaptation protocols and historical artifact readers have been
 removed; retain an older checkout if those artifacts still need analysis.

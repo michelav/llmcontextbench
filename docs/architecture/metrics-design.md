@@ -1,8 +1,8 @@
 # Metrics design
 
 `llmctxbench metrics` (API: `Run.metrics`) turns run artifacts into metric tables. This document
-states the rules the metrics follow; the column-by-column reference is the guide's metrics
-reference (`docs/guide/reference/metrics.md`). Code: `ctxbench/metrics/` and
+states the rules the metrics follow; the column-by-column reference is the guide's
+[metrics reference](../guide/reference/metrics.md). Code: `ctxbench/metrics/` and
 `AdaptiveWorkflow.write_metrics`.
 
 ## Principles

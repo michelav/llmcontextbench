@@ -1,4 +1,4 @@
-"""Build and plan a small adaptive experiment entirely through the Python API.
+"""Build, plan and run a small adaptive experiment entirely through the Python API.
 
 Usage: python examples/adaptive/code_built.py [OUTPUT_DIR]
 
@@ -16,7 +16,7 @@ from ctxbench.api import (
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
-DATASET_ROOT = REPOSITORY_ROOT / "tests/fixtures/fake_dataset/dataset"
+DATASET_ROOT = REPOSITORY_ROOT / "examples/datasets/fake"
 
 
 def main(output: Path | None = None) -> None:
@@ -43,6 +43,12 @@ def main(output: Path | None = None) -> None:
     )
     run = plan(experiment, output=output)
     print(f"Planned {len(list(run.requests()))} requests at {run.root}")
+    outcome = run.execute()
+    print(outcome.summary)
+    for request in run.requests():
+        decision = request["attempts"][0]["decision"]
+        print(request["requestId"], request["state"], decision["candidateId"], decision["reason"])
+    print(run.metrics().summary)
 
 
 if __name__ == "__main__":

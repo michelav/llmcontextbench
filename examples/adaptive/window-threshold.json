@@ -1,0 +1,42 @@
+{
+  "workflowKind": "adaptive",
+  "schemaVersion": 4,
+  "id": "adaptive-window-threshold",
+  "seed": 7,
+  "labels": {"example": "window-threshold"},
+  "dataset": {"root": "../datasets/fake"},
+  "models": {
+    "mock": {"provider": "mock", "name": "mock", "modelParams": {"max_tokens": 128}}
+  },
+  "surfaces": {"full": {"type": "full_context"}},
+  "configurations": {
+    "inline-json": {"strategy": "inline", "representation": "json", "surface": "full"},
+    "inline-blocks": {"strategy": "inline", "representation": "blocks", "surface": "full"}
+  },
+  "candidates": {
+    "json": {"model": "mock", "configuration": "inline-json"},
+    "blocks": {"model": "mock", "configuration": "inline-blocks"}
+  },
+  "workload": {"generator": {"seed": 7, "segments": [{"size": 12}]}},
+  "policy": {
+    "ref": "window_threshold",
+    "params": {
+      "signal": "total_tokens", "statistic": "sum",
+      "window": {"requests": 4, "mode": "fixed"},
+      "capacity": 50,
+      "tiers": [{"upTo": 0.5, "select": "json"}],
+      "otherwise": "blocks",
+      "when_unavailable": "blocks"
+    }
+  },
+  "window": {"requests": 4},
+  "goals": [
+    {"id": "tokens-per-block", "signal": "total_tokens", "statistic": "sum", "upper": 60,
+     "window": {"requests": 4, "mode": "fixed"}}
+  ],
+  "disturbances": [
+    {"name": "slow-model", "version": "1", "component": "model", "kind": "delay",
+     "delayMs": 20, "firstSequence": 5, "lastSequence": 8, "seed": 1}
+  ],
+  "evaluation": {"enabled": false}
+}

@@ -3,7 +3,7 @@
   "kind": "benchmark",
   "id": "v1-fake",
   "dataset": {
-    "root": "../../tests/fixtures/fake_dataset/dataset"
+    "root": "../datasets/fake"
   },
   "models": {
     "mock": {

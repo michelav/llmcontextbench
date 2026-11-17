@@ -140,13 +140,15 @@ Unsafe archive entries are rejected.
 
 Validate the dataset package without real provider calls:
 
-```bash
+<!-- docs-test: skip (needs a dataset of your own) -->
+```shell
 llmctxbench dataset inspect /path/to/dataset-root
 ```
 
 Or, for a materialized cached dataset:
 
-```bash
+<!-- docs-test: skip (needs a dataset of your own) -->
+```shell
 llmctxbench dataset inspect dataset-id@version
 ```
 
