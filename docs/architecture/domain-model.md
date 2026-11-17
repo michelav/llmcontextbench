@@ -1,6 +1,8 @@
-# Vocabulary
+# Domain model
 
-> Current architecture and workflow contracts are documented in [workflow-contracts](workflows/workflow-contract.md).
+The vocabulary of the tool. Workflow contracts are in
+[workflows/workflow-contract.md](workflows/workflow-contract.md); the adaptive domain diagram is
+in [workflows/adaptive.md](workflows/adaptive.md#domain-model).
 
 ## Core terms
 
@@ -30,6 +32,30 @@
 | `trace` | Detailed event record of execution or evaluation. |
 | `result` | Derived analysis-ready artifact, usually exported as CSV. |
 | `metric dimension` | One of five canonical metric groupings computed by `llmctxbench metrics`: effectiveness, efficiency, robustness, evaluation reliability, observability. |
+| `run` | One planned experiment in one output directory. In the API, the handle returned by `plan` or `open_run`. Not used for a trial, attempt or request. |
+| `execution` / `attempt` | One durable invocation, identified by `executionId` and `attemptId`. |
+
+## Adaptive terms
+
+| Term | Meaning |
+|---|---|
+| `request` | One workload item before a candidate is chosen: `requestId`, sequence index, task, instance, opaque labels. Repeated task/instance pairs are distinct requests. |
+| `candidate` | A model plus a provisioning configuration, with a stable `candidateId`. One catalogue per experiment, identical for every request. |
+| `attempt` | The one durable execution of one candidate for one request. A request has at most one attempt. |
+| `signal` | A named quantity observed per attempt, with unit and provenance. Built-in signals come from every execution; quality signals (`quality.<metric>`) come from online assessors. |
+| `observation` | The signal values, status and failure category of one attempt. |
+| `window` | A selection of observations counted in requests: the last `N` (sliding), the current block of `N` (fixed), or the whole run. |
+| `reading` | One signal aggregated over one window and scope with one statistic; carries value, provenance and sample counts. |
+| `system state` | The read-only view over the causal prefix of observations given to a policy. It contains nothing about the current request. |
+| `policy` | A named, versioned decision rule `(candidates, state) → decision`. |
+| `decision` | The selection of one candidate for one request, with a reason. |
+| `goal` | A bound on a reading. Reported by `metrics`, never enforced. |
+| `disturbance` | A seeded delay or failure injected into a runtime component for a range of the sequence. |
+| `scenario` | A workload plus disturbances; a helper for building both sections, not a stored type. |
+| `online assessor` | A dataset-provided or external component that turns a response into a quality signal during execution. Distinct from offline evaluation (`eval`). |
+
+The tool does not use the words study, episode, probe, cascade, size bin or burst. An "arm" (one
+experimental condition) is study vocabulary; the tool stores only `labels`.
 
 ## Instance
 

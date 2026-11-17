@@ -1,7 +1,5 @@
 # LLMContextBench Architecture
 
-> Current architecture and workflow contracts are documented in [workflow-contracts](workflows/workflow-contract.md).
-
 This document is the entry point for the LLMContextBench architecture documentation. It's loosely organized into [C4 Model](https://c4model.com/) style but with a few other structures added when necessary.
 
 LLMContextBench is a Python-based command-line benchmark framework for evaluating context provisioning strategies in LLM-based systems. It is a research tool: the architecture prioritizes simplicity, reproducibility, explicit artifacts, and comparability between strategies.
@@ -32,10 +30,11 @@ llmctxbench export
 results.csv
 ```
 
-Adaptive plans use `adaptive-plan.json` rather than `trials.jsonl`. Each request persists
-its decisions and delivery; every invocation has a durable execution record. The adaptive
-`responses.jsonl` projection contains delivered responses, while attempt records retain
-failures, rejection, retries, and cost. See [workflow contracts](workflows/workflow-contract.md).
+Adaptive plans use `adaptive-plan.json` rather than `trials.jsonl`. Each request persists one
+decision, at most one attempt, its observation and its delivery; every invocation has a durable
+execution record. The adaptive `responses.jsonl` projection contains delivered responses, while
+attempt records retain failures and cost. See [the workflow contract](workflows/workflow-contract.md)
+and [the adaptive workflow](workflows/adaptive.md).
 
 ## Technology baseline
 
@@ -120,15 +119,18 @@ This documentation follows the C4 organization where it helps, without forcing u
 
 | File | Purpose |
 |---|---|
-| `artifact-contracts.md` | Authoritative artifact set, classification, provenance taxonomy, and no-alias policy. |
-| `vocabulary.md` | Canonical terminology and naming rules. |
-| `workflow.md` | User workflow, phases, commands, artifacts, and strategy overview. |
-| `cli-architecture.md` | CLI architecture, command contract, selectors, and migration notes. |
-| `system-context.md` | C4 Level 1: system context. |
-| `container.md` | C4 Level 2: containers/modules. |
-| `component.md` | C4 Level 3: internal components. |
-| `deployment.md` | C4 supplementary: physical/runtime deployment, including local and remote MCP. |
-| `dynamic.md` | C4 supplementary: runtime interaction flows for each strategy. |
+| [`domain-model.md`](domain-model.md) | Canonical terminology and naming rules, benchmark and adaptive. |
+| [`workflows/workflow-contract.md`](workflows/workflow-contract.md) | The `Workflow` protocol, the registry, shared phases and recovery. |
+| [`workflows/benchmark.md`](workflows/benchmark.md) | Benchmark workflow. |
+| [`workflows/adaptive.md`](workflows/adaptive.md) | Adaptive workflow: loop, signals, state, policies, plug-ins, disturbances, goals, resume. |
+| [`contracts/artifacts.md`](contracts/artifacts.md) | Artifact set, versions, authority, provenance taxonomy, no-alias policy. |
+| [`contracts/adaptive-plan.md`](contracts/adaptive-plan.md) | Frozen adaptive plan v4. |
+| [`contracts/manifest.md`](contracts/manifest.md) | Benchmark and adaptive manifests. |
+| [`contracts/records.md`](contracts/records.md) | Execution records, adaptive request records, projections. |
+| [`metrics-design.md`](metrics-design.md) | Metric principles, provenance, dimensions, adaptive metrics, run analysis. |
+| [`cli.md`](cli.md) | CLI architecture, command contract, selectors. |
+| [`c4/`](c4/) | C4 views: system context, container, component, deployment, dynamic. |
+| [`decisions/`](decisions/) | Architecture decision records. |
 
 ## C4 usage in this project
 
@@ -161,14 +163,22 @@ llmcontextbench/
 ├── pyproject.toml
 ├── src/
 │   └── ctxbench/
-│       ├── cli.py
-│       ├── commands/
-│       ├── benchmark/
-│       ├── dataset/
-│       ├── strategies/
-│       ├── models/
-│       ├── mcp/
-│       └── tracing/
+│       ├── cli.py         argument parsing and printing
+│       ├── commands/      thin wrappers over ctxbench.api
+│       ├── api/           public Python API (plan, open_run, Run, summarize, headroom)
+│       ├── core/          Workflow protocol and registry, definitions, fingerprint, provenance
+│       ├── benchmark/     benchmark workflow
+│       ├── adaptive/      adaptive workflow, policies, state, signals, assessors
+│       ├── workload/      request-list builder
+│       ├── phases/        shared eval and export phases
+│       ├── execution/     durable attempts
+│       ├── runtime/       provisioning runtime, disturbances
+│       ├── ai/            engine, model adapters, strategies, traces
+│       ├── dataset/       dataset protocols, resolution, provenance
+│       ├── adapters/      dataset adapters (Lattes, RepoQA)
+│       ├── metrics/       metric tables
+│       ├── analysis/      summarize, headroom
+│       └── util/
 ├── tests/
 ├── docs/
 └── examples/
@@ -214,6 +224,21 @@ outputs/<experimentId>/
     │   └── <trialId>.json
     └── evals/
         └── <trialId>.json
+```
+
+Adaptive runs:
+
+```text
+outputs/<experimentId>/
+├── manifest.json
+├── resolved.json
+├── adaptive-plan.json
+├── adaptive-records/<requestId>.json
+├── adaptive-lifecycle.json
+├── execution-records/<key>/attempt-NNNNNN.json
+├── responses.jsonl
+├── evals.jsonl, judge_votes.jsonl
+└── traces/
 ```
 
 ## Historical migration reference
