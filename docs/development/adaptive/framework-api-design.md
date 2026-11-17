@@ -1,7 +1,7 @@
 # Self-adaptive provisioning and framework API — design
 
-**Status:** implementation design. WP-A, WP-B, and WP-C have implementation commits. WP-E is
-implemented and awaiting review; see [`wp-e-acceptance.md`](wp-e-acceptance.md). Each work package
+**Status:** implementation design. WP-A, WP-B, WP-C and WP-E have implementation commits; see
+[`wp-e-acceptance.md`](wp-e-acceptance.md). Each work package
 in [section 11](#11-work-packages) needs its own approval before implementation starts.
 
 **Audience:** an agent or team implementing the refactor without access to the design discussion.
@@ -452,7 +452,10 @@ information, but available through one binary windowed signal per category, name
 `failed.<category>`):
 
 `context_overflow`, `rate_limited`, `provider_error`, `tool_error`, `step_limit`,
-`empty_response`, `capability_unavailable`, `injected_disturbance`, `unknown`.
+`empty_response`, `capability_unavailable`, `unknown`.
+
+There is no category for injected failures: an injected failure takes the category of a real
+failure of its component (section 6.12), so no signal tells a policy that a failure was injected.
 
 For a terminal observation, `failed.<category>` is `1` when the observation has that failure
 category and `0` otherwise, including successful attempts. It has `derived` provenance. The
@@ -917,9 +920,14 @@ Definition:
   `disturbances: [{name, version, appliedDelayMs, injectedFailures}]`, one entry per disturbance
   whose component the attempt instantiated; an attempt outside every disturbance's scope stores
   an empty list. `appliedDelayMs` is `derived`: the configured delay times the number of
-  affected calls, not a measured sleep. `injectedFailures` is `measured` (a count). An injected
-  failure has failure category `injected_disturbance`. Injected delay is inside measured latency
-  by design and is also reported separately.
+  affected calls, not a measured sleep. `injectedFailures` is `measured` (a count). Injected delay
+  is inside measured latency by design and is also reported separately.
+- **Injected failures look real to policies.** An injected failure takes the category a real
+  failure of the same component gets: `tool_error` for a tool component, `provider_error` for
+  `model`. A policy therefore cannot tell an injected failure from a real one through
+  `failed.<category>`. The injection stays auditable in the attempt's `disturbances` entry and in
+  the trace error message (`Injected disturbance <name> on <component>`), which policies never
+  read.
 - The model interceptor wraps the adapter outside provider rate control. An injected model
   failure is therefore never retried by a configured `rate_limit` retry and records no model
   call.
@@ -1454,7 +1462,7 @@ about disturbances.
 | `adaptive/projections.py` | Read record v3; set `responseSchemaVersion: 3`. Add `sequenceIndex` to each response row (today the sort key reads a field the row does not carry). |
 | `runtime/runtime.py` | Accept interceptor key `model`; pass through to the engine copy. |
 | `runtime/disturbances.py` | Add `RuntimeComponent.MODEL`, `ModelRuntimeDisturbance`, applied-effect counters on both wrappers. |
-| `ai/engine.py` | `copy_with_tool_runtime_factories(..., model_interceptor=None)`; wrap the resolved model adapter when present. |
+| `ai/engine.py` | `execute(..., model_interceptor=None)` and `execute_model_input(..., model_interceptor=None)`; wrap the resolved model adapter when present, after the capability check, so the check sees the adapter. |
 | `ai/rate_control.py`, `ai/models/*.py` | `ProviderErrorInfo.category`; provider-specific context-length detection inside each adapter; category written to trace error metadata. |
 | `dataset/package.py` | Add `online_assessor(signal_id)` with default `None`. |
 | `commands/plan.py`, `execute.py`, `eval.py`, `export.py`, `metrics.py`, `status.py` | Move the per-kind bodies into `BenchmarkWorkflow` (`benchmark/workflow.py`) and `AdaptiveWorkflow` (`adaptive/workflow.py`) behind the `Workflow` protocol; `api/run.py` dispatches through the registry; commands keep argument handling and printing and lose every `workflowKind` branch. |
@@ -1615,7 +1623,8 @@ flowchart LR
   engine interceptor; applied-effect recording; fingerprint coverage.
 - **Gate:** with an injected sleeper and seed, tests show the disturbance applies exactly to the
   declared sequence range and candidates, for tool components and for the model component;
-  injected failures are categorised; two runs with equal seed inject identical effects;
+  injected failures get the category of a real failure of their component, and no signal
+  distinguishes them; two runs with equal seed inject identical effects;
   measured latency includes the injected delay and the record reports it separately.
 
 ### WP-F — Online quality signals

@@ -167,12 +167,12 @@ def test_tool_disturbance_counts_delay_and_tags_injected_failures(component: str
     runtime = _ToolRuntime()
     with pytest.raises(RuntimeError, match="Injected disturbance tool-outage") as raised:
         interceptors[component](runtime).call_tool("lookup", {})
-    assert failure_category(raised.value) == "injected_disturbance"
+    assert failure_category(raised.value) == "tool_error"  # as a real tool failure
     assert runtime.calls == []  # the tool itself was not reached
     assert effects() == [{"name": "tool-outage", "version": "1", "appliedDelayMs": 0, "injectedFailures": 1}]
 
 
-def test_injected_tool_failure_reaches_the_trace_as_injected_disturbance_not_tool_error():
+def test_injected_tool_failure_reaches_the_trace_as_a_real_tool_error():
     outage = {"name": "tool-outage", "version": "1", "component": "local_function", "kind": "failure",
               "failureRate": 1, "firstSequence": 1, "seed": 1}
     interceptors, effects = build_runtime_disturbances([outage], component_sequence=1, candidate_id="A")
@@ -191,7 +191,8 @@ def test_injected_tool_failure_reaches_the_trace_as_injected_disturbance_not_too
         "metadata": {"instance_id": "instance-1"},
     }))
     error = next(event for event in result.trace["events"] if event["type"] == "error")
-    assert error["metadata"]["category"] == "injected_disturbance"
+    assert error["metadata"]["category"] == "tool_error"
+    assert "Injected disturbance tool-outage" in error["metadata"]["error"]  # auditable in the trace
     assert effects()[0]["injectedFailures"] == 1
 
 
@@ -227,7 +228,7 @@ def test_two_runs_with_equal_seed_inject_identical_effects_only_where_declared(t
         assert [row["name"] for row in attempt["disturbances"]] == ["outage"]
         failures = attempt["disturbances"][0]["injectedFailures"]
         assert failures in (0, 1)
-        assert (attempt["observation"]["failureCategory"] == "injected_disturbance") == (failures == 1)
+        assert attempt["observation"]["failureCategory"] == ("provider_error" if failures else None)
         injected += failures
     assert sum(1 for row in first if row["disturbances"]) == 4  # A at sequences 3, 5, 7, 9
     assert 0 < injected < 4  # with this seed the rate of 0.5 yields both outcomes
@@ -264,5 +265,107 @@ def test_resume_keeps_recorded_disturbance_effects_without_executing_again(tmp_p
     assert run.execute().counts["failed"] == 1
     attempt = _attempts(run.root, 1)[0]
     assert attempt["disturbances"] == recorded
-    assert attempt["observation"]["failureCategory"] == "injected_disturbance"
+    assert attempt["observation"]["failureCategory"] == "provider_error"
     assert len(TrialExecutionService(run.root).attempts("r-0001")) == 1
+
+
+# --- measured latency, capability checks, wrapper arguments -----------------------------------
+
+class _ToolService:
+    def list_tools(self):
+        return [ToolSpec(name="lookup", input_schema={"type": "object"})]
+
+    def call_tool(self, name, arguments):
+        return ToolResult(name=name, content={"value": 1})
+
+    def close(self) -> None:
+        return None
+
+
+class _ToolSource:
+    def tool_provider(self, **_kwargs):
+        return _ToolService()
+
+    def dataset_instructions(self):
+        return None
+
+
+class _TwoLookupsThenAnswer(ModelAdapter):
+    params: dict = {}
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def generate(self, model_input, request, trace=None):
+        self.calls += 1
+        if self.calls == 1:
+            return ModelResponse(requested_tool_calls=[ToolCall(name="lookup", arguments={}),
+                                                       ToolCall(name="lookup", arguments={})],
+                                 duration_ms=0, input_tokens=1, output_tokens=0, total_tokens=1)
+        return ModelResponse(text="answer", duration_ms=0, input_tokens=1, output_tokens=1, total_tokens=2)
+
+
+def _tool_request(provider: str):
+    from ctxbench.core.provisioning import ProvisioningConfiguration
+    from ctxbench.runtime.models import RuntimeRequest
+
+    return RuntimeRequest(
+        task="task", task_id="task-1", instance_id="instance-1", provider=provider, model_name=provider,
+        configuration=ProvisioningConfiguration(strategy="local_function", representation="json",
+                                                surface="full"),
+        surface_spec={}, params={},
+    )
+
+
+def test_tool_delay_is_in_measured_runtime_and_reported_separately():
+    from ctxbench.runtime.runtime import ProvisioningRuntime
+
+    clock = [0.0]
+    delay = {"name": "slow-tools", "version": "1", "component": "local_function", "kind": "delay",
+             "delayMs": 30, "firstSequence": 1, "seed": 1}
+    interceptors, effects = build_runtime_disturbances(
+        [delay], component_sequence=1, candidate_id="A",
+        sleeper=lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    engine = Engine()
+    engine._models["scripted"] = _TwoLookupsThenAnswer()
+    execution = ProvisioningRuntime(engine, _ToolSource(), runtime_interceptors=interceptors,
+                                    monotonic=lambda: clock[0]).execute(_tool_request("scripted"))
+    assert execution.ai_result.answer == "answer"
+    assert execution.duration_ms == 60  # two tool calls, each delayed inside the measured interval
+    assert effects() == [{"name": "slow-tools", "version": "1", "appliedDelayMs": 60, "injectedFailures": 0}]
+
+
+def test_capability_check_sees_the_adapter_not_the_model_disturbance():
+    from ctxbench.runtime.runtime import ProvisioningRuntime
+
+    class NoTools(_TwoLookupsThenAnswer):
+        supports_tool_calling = False
+
+    slow_model = {"name": "slow-model", "version": "1", "component": "model", "kind": "delay",
+                  "delayMs": 5, "firstSequence": 1, "seed": 1}
+    interceptors, effects = build_runtime_disturbances([slow_model], component_sequence=1, candidate_id="A",
+                                                       sleeper=lambda _seconds: None)
+    engine = Engine()
+    engine._models["no-tools"] = NoTools()
+    result = ProvisioningRuntime(engine, _ToolSource(), runtime_interceptors=interceptors).execute(
+        _tool_request("no-tools")).ai_result
+    error = next(event for event in result.trace["events"] if event["type"] == "error")
+    assert error["metadata"]["category"] == "capability_unavailable"
+    assert "ModelRuntimeDisturbance" not in result.error
+    assert effects() == []  # no model call was made, so the disturbance was not instantiated
+
+
+@pytest.mark.parametrize("wrapper", ["tool", "model"])
+@pytest.mark.parametrize("overrides", [
+    {"name": ""}, {"delay_ms": -1}, {"delay_ms": 1.5}, {"delay_ms": True},
+    {"failure_rate": 1.5}, {"failure_rate": float("nan")}, {"failure_seed": "1"},
+])
+def test_runtime_disturbance_wrappers_refuse_invalid_effects(wrapper: str, overrides: dict):
+    from ctxbench.runtime.disturbances import ModelRuntimeDisturbance, RuntimeComponent, ToolRuntimeDisturbance
+
+    arguments = {"name": "d", "delay_ms": 0, "failure_rate": 0.0, "failure_seed": 0, **overrides}
+    with pytest.raises(ValueError):
+        if wrapper == "tool":
+            ToolRuntimeDisturbance(_ToolRuntime(), component=RuntimeComponent.LOCAL_FUNCTION, **arguments)
+        else:
+            ModelRuntimeDisturbance(_Model(), component=RuntimeComponent.MODEL, **arguments)

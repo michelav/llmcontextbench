@@ -552,6 +552,8 @@ def test_known_subtotal_is_kept_apart_from_the_signal_and_feeds_window_sums():
 @pytest.mark.parametrize("params,message", [
     ({"signal": "request_context_size", "statistic": "mean"}, "Unknown signal"),
     ({"signal": "failed.not_a_category", "statistic": "rate"}, "Unknown signal"),
+    # Injected failures share real categories, so no signal can single them out.
+    ({"signal": "failed.injected_disturbance", "statistic": "rate"}, "Unknown signal"),
     ({"signal": "total_tokens", "statistic": "p1e1"}, "Unknown statistic"),
     ({"signal": "total_tokens", "statistic": "p100"}, "Unknown statistic"),
     ({"signal": "total_tokens", "statistic": "rate"}, "requires a 0/1 signal"),

@@ -10,7 +10,7 @@ from ctxbench.core.provenance import Provenance
 
 FAILURE_CATEGORIES = frozenset({
     "context_overflow", "rate_limited", "provider_error", "tool_error", "step_limit",
-    "empty_response", "capability_unavailable", "injected_disturbance", "unknown",
+    "empty_response", "capability_unavailable", "unknown",
 })
 
 

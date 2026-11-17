@@ -155,7 +155,7 @@ def test_disturbance_failure_is_fingerprinted_and_persisted_on_attempt(tmp_path:
     assert run.execute().counts["failed"] == 1
     record = load_json(run.root / "adaptive-records" / "r-0001.json")
     attempt = record["attempts"][0]
-    assert attempt["observation"]["failureCategory"] == "injected_disturbance"
+    assert attempt["observation"]["failureCategory"] == "provider_error"
     assert attempt["disturbances"] == [{
         "name": "model-outage", "version": "1", "appliedDelayMs": 0, "injectedFailures": 1,
     }]

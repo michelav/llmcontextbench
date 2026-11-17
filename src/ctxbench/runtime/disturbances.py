@@ -162,23 +162,31 @@ def _failure_draw(disturbance: str, failure_seed: int, sequence: int, call_index
     return int.from_bytes(sha256(key.encode("utf-8")).digest()[:8], "big") / (2**64)
 
 
-class ToolRuntimeDisturbance:
-    """Apply seeded delay/failure effects to tool operations for a specific component."""
+# An injected failure carries the category a real failure of the same component would get, so a
+# policy reading `failed.<category>` cannot tell an injected failure from a real one. The attempt
+# record's `disturbances` entry and the trace message keep the injection auditable.
+_INJECTED_FAILURE_CATEGORY = {
+    RuntimeComponent.LOCAL_FUNCTION: "tool_error",
+    RuntimeComponent.LOCAL_MCP: "tool_error",
+    RuntimeComponent.REMOTE_MCP: "tool_error",
+    RuntimeComponent.MODEL: "provider_error",
+}
 
-    def __init__(self, runtime, *, name: str, component: RuntimeComponent, delay_ms: int = 0,
-                 failure_rate: float = 0.0, failure_seed: int = 0, sequence: int = 0, sleeper=sleep) -> None:
-        if component not in {RuntimeComponent.LOCAL_FUNCTION, RuntimeComponent.LOCAL_MCP, RuntimeComponent.REMOTE_MCP}:
-            raise ValueError("tool runtime disturbance requires a tool component")
-        if (isinstance(delay_ms, bool) or not isinstance(delay_ms, (int, float))
-                or not isfinite(delay_ms) or delay_ms < 0
-                or isinstance(failure_rate, bool) or not isinstance(failure_rate, (int, float))
+
+class _SeededDisturbance:
+    """Seeded per-call delay and failure shared by the tool and model wrappers."""
+
+    def __init__(self, *, name: str, component: RuntimeComponent, delay_ms: int, failure_rate: float,
+                 failure_seed: int, sequence: int, sleeper) -> None:
+        if not name or type(failure_seed) is not int or type(sequence) is not int:
+            raise ValueError("runtime disturbance requires a name, an integer seed and an integer sequence")
+        if type(delay_ms) is not int or delay_ms < 0:
+            raise ValueError("runtime disturbance delay must be a nonnegative integer of milliseconds")
+        if (isinstance(failure_rate, bool) or not isinstance(failure_rate, (int, float))
                 or not isfinite(failure_rate) or not 0 <= failure_rate <= 1):
-            raise ValueError("invalid tool runtime disturbance effect")
-        if type(failure_seed) is not int or not name:
-            raise ValueError("tool runtime disturbance requires a name and integer seed")
-        self.runtime = runtime
+            raise ValueError("runtime disturbance failure rate must be between zero and one")
         self.name = name
-        self.component = component
+        self.component = RuntimeComponent(component)
         self.delay_ms = delay_ms
         self.failure_rate = failure_rate
         self.failure_seed = failure_seed
@@ -188,49 +196,57 @@ class ToolRuntimeDisturbance:
         self.applied_delay_ms = 0
         self.injected_failures = 0
 
-    def list_tools(self):
-        return self.runtime.list_tools()
-
-    def call_tool(self, name, arguments):
+    def _before_call(self, operation: str) -> None:
+        """Apply the delay, then draw the failure for this call."""
         if self.delay_ms:
             self.sleeper(self.delay_ms / 1000)
-            self.applied_delay_ms += int(self.delay_ms)
+            self.applied_delay_ms += self.delay_ms
         call_index = self.call_index
         self.call_index += 1
-        if self.failure_rate:
-            if _failure_draw(self.name, self.failure_seed, self.sequence, call_index, name) < self.failure_rate:
-                self.injected_failures += 1
-                error = RuntimeError(f"Injected disturbance {self.name} on {self.component.value}")
-                tag_failure(error, "injected_disturbance")
-                raise error
-        return self.runtime.call_tool(name, arguments)
+        if self.failure_rate and _failure_draw(
+                self.name, self.failure_seed, self.sequence, call_index, operation) < self.failure_rate:
+            self.injected_failures += 1
+            error = RuntimeError(f"Injected disturbance {self.name} on {self.component.value}")
+            tag_failure(error, _INJECTED_FAILURE_CATEGORY[self.component])
+            raise error
 
     def effect_record(self, name: str, version: str):
         return {"name": name, "version": version, "appliedDelayMs": self.applied_delay_ms,
                 "injectedFailures": self.injected_failures}
 
+
+class ToolRuntimeDisturbance(_SeededDisturbance):
+    """Apply seeded delay/failure effects to tool operations for a specific component."""
+
+    def __init__(self, runtime, *, name: str, component: RuntimeComponent, delay_ms: int = 0,
+                 failure_rate: float = 0.0, failure_seed: int = 0, sequence: int = 0, sleeper=sleep) -> None:
+        if RuntimeComponent(component) == RuntimeComponent.MODEL:
+            raise ValueError("tool runtime disturbance requires a tool component")
+        super().__init__(name=name, component=component, delay_ms=delay_ms, failure_rate=failure_rate,
+                         failure_seed=failure_seed, sequence=sequence, sleeper=sleeper)
+        self.runtime = runtime
+
+    def list_tools(self):
+        return self.runtime.list_tools()
+
+    def call_tool(self, name, arguments):
+        self._before_call(name)
+        return self.runtime.call_tool(name, arguments)
+
     def close(self):
         self.runtime.close()
 
 
-class ModelRuntimeDisturbance:
+class ModelRuntimeDisturbance(_SeededDisturbance):
     """Apply deterministic delay/failure effects to per-call model generation."""
 
     def __init__(self, model: ModelAdapter, *, name: str, component: RuntimeComponent,
                  delay_ms: int = 0, failure_rate: float = 0.0, failure_seed: int = 0, sequence: int = 0, sleeper=sleep):
-        if component != RuntimeComponent.MODEL:
+        if RuntimeComponent(component) != RuntimeComponent.MODEL:
             raise ValueError("model runtime disturbance requires the model component")
+        super().__init__(name=name, component=component, delay_ms=delay_ms, failure_rate=failure_rate,
+                         failure_seed=failure_seed, sequence=sequence, sleeper=sleeper)
         self.model = model
-        self.name = name
-        self.component = component
-        self.delay_ms = delay_ms
-        self.failure_rate = failure_rate
-        self.failure_seed = failure_seed
-        self.sequence = sequence
-        self.sleeper = sleeper
-        self.call_index = 0
-        self.applied_delay_ms = 0
-        self.injected_failures = 0
 
     def __getattr__(self, name):
         return getattr(self.model, name)
@@ -239,19 +255,5 @@ class ModelRuntimeDisturbance:
         return self.model.failure_category(exc)
 
     def generate(self, model_input: ModelInput, request, trace=None) -> ModelResponse:
-        if self.delay_ms:
-            self.sleeper(self.delay_ms / 1000)
-            self.applied_delay_ms += int(self.delay_ms)
-        call_index = self.call_index
-        self.call_index += 1
-        if self.failure_rate:
-            if _failure_draw(self.name, self.failure_seed, self.sequence, call_index, "model") < self.failure_rate:
-                self.injected_failures += 1
-                error = RuntimeError(f"Injected disturbance {self.name} on model")
-                tag_failure(error, "injected_disturbance")
-                raise error
+        self._before_call("model")
         return self.model.generate(model_input, request, trace=trace)
-
-    def effect_record(self, name: str, version: str):
-        return {"name": name, "version": version, "appliedDelayMs": self.applied_delay_ms,
-                "injectedFailures": self.injected_failures}

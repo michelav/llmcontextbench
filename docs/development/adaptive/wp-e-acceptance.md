@@ -1,12 +1,13 @@
 # WP-E acceptance report: disturbances and scenarios
 
-**Status:** implementation complete; awaiting review.
+**Status:** accepted after two review rounds.
 
 WP-E wires frozen disturbance definitions into adaptive execution. Definitions normalize through
 `DisturbanceSpec`, and the canonical disturbance list remains in the adaptive plan payload, so it
 is covered by the execution fingerprint. Each selected request and candidate receives only the
 matching component interceptors. Tool and model wrappers report accumulated delay and injected
-failure counts. Injected failures are tagged at the injection point as `injected_disturbance`.
+failure counts. Injected failures are tagged at the injection point with the category of a real
+failure of their component (see Second review).
 
 Model interception is per call through `Engine`; it does not mutate a shared engine or provider
 adapter. Tool and model delays run inside the measured runtime interval. Applied effects are
@@ -39,3 +40,25 @@ Checks:
 
 No artifact version change was needed: the active adaptive plan, execution result, and record
 versions already include the fields needed for this WP.
+
+## Second review
+
+- Policies can no longer tell injected failures from real ones. An injected failure takes the
+  category a real failure of its component gets: `tool_error` for a tool component,
+  `provider_error` for `model`. `injected_disturbance` is removed from the failure categories, so
+  `failed.injected_disturbance` is an unknown signal, refused at `plan` and by `state.window()`.
+  The injection stays auditable in the attempt's `disturbances` entry and the trace error message.
+  Failure categories of disturbed runs made before this change differ.
+- `Engine` checks capabilities on the resolved adapter before applying the model interceptor. A
+  capability error names the adapter, and an attempt refused for capability makes no model call
+  and records no model disturbance entry.
+- Tool and model wrappers share one base (`_SeededDisturbance`) for argument checks, delay,
+  failure draw and effect record. The model wrapper now refuses invalid arguments as the tool
+  wrapper does; both require an integer delay.
+- Tests added: tool delay inside measured runtime latency and reported separately; capability
+  check sees the adapter; wrapper argument checks; `failed.injected_disturbance` refused.
+
+Checks:
+
+- `pytest -q tests/test_adaptive_disturbances.py tests/test_adaptive_contracts.py tests/test_adaptive_workflow.py tests/test_adaptive_signals_state.py` — 100 passed.
+- `pytest -q` — 533 passed.

@@ -45,9 +45,10 @@ class Engine:
         try:
             with trace.span("engine.execute", "engine.execute"):
                 model = self._resolve_model(request.provider_name, request.model_name, request.params)
+                # Validate the resolved adapter, not a disturbance wrapper around it.
+                self._validate_capabilities(model, request.strategy_name)
                 if model_interceptor is not None:
                     model = model_interceptor(model)
-                self._validate_capabilities(model, request.strategy_name)
                 strategy, owned_runtime = self._resolve_strategy(request.strategy_name)
                 result = strategy.execute(model, request, trace)
         except Exception as exc:
@@ -80,9 +81,10 @@ class Engine:
         try:
             with trace.span("engine.execute_model_input", "engine.execute_model_input"):
                 model = self._resolve_model(request.provider_name, request.model_name, request.params)
+                # Validate the resolved adapter, not a disturbance wrapper around it.
+                self._validate_capabilities(model, request.strategy_name)
                 if model_interceptor is not None:
                     model = model_interceptor(model)
-                self._validate_capabilities(model, request.strategy_name)
                 with provider_call(request.provider_name, model):
                     model_response = model.generate(model_input, request, trace=trace)
                 trace.record_model_call(

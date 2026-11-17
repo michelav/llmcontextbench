@@ -259,7 +259,7 @@ def test_model_disturbance_failure_is_tagged_at_injection_site():
         wrapped.generate(ModelInput(prompt="prompt"), AIRequest(
             question="q", context="", provider_name="mock", model_name="mock", strategy_name="inline",
             context_representation="json"))
-    assert failure_category(error.value) == "injected_disturbance"
+    assert failure_category(error.value) == "provider_error"  # as a real provider failure
     assert wrapped.effect_record("model-failure", "1")["injectedFailures"] == 1
 
 
