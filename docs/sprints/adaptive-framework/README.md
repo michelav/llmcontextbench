@@ -20,7 +20,7 @@
 - Acceptance reports: [WP-B](acceptance/wp-b-acceptance.md), [WP-C](acceptance/wp-c-acceptance.md),
   [WP-E](acceptance/wp-e-acceptance.md), [WP-F](acceptance/wp-f-acceptance.md),
   [WP-P](acceptance/wp-p-acceptance.md), [WP-G](acceptance/wp-g-acceptance.md),
-  [WP-H](acceptance/wp-h-acceptance.md)
+  [WP-H](acceptance/wp-h-acceptance.md), [WP-I](acceptance/wp-i-acceptance.md)
 
 ## Promoted results
 
