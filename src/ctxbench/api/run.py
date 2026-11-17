@@ -111,6 +111,18 @@ def open_run(path: str | Path) -> "Run":
     return Run(root, workflow, workflow_id)
 
 
+def summarize(runs, *, signals):
+    """Return artifact-only adaptive run summaries for research scripts."""
+    from ctxbench.analysis.summarize import summarize as summarize_runs
+    return summarize_runs(runs, signals=signals)
+
+
+def headroom(run, *, signal, objective="min", by=None):
+    """Compare the best static benchmark candidate with its per-request oracle."""
+    from ctxbench.analysis.headroom import headroom as analyze_headroom
+    return analyze_headroom(run, signal=signal, objective=objective, by=by)
+
+
 class Run:
     """Handle for lifecycle operations on one frozen output directory."""
 

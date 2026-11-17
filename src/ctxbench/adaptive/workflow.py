@@ -355,9 +355,10 @@ class AdaptiveWorkflow:
         return RunStatus(plan.workflow_id, self.kind, root, counts, tuple(lines))
 
     def metric_tables(self, root: Path):
-        from ctxbench.metrics.adaptive import build_adaptive_metrics
+        from ctxbench.metrics.adaptive import build_adaptive_goal_metrics, build_adaptive_metrics
         requests, attempts = build_adaptive_metrics(root)
-        return {"requests": requests, "attempts": attempts}
+        goals = build_adaptive_goal_metrics(root)
+        return {"requests": requests, "attempts": attempts, "goals": goals}
 
     def write_metrics(self, roots: Sequence[str], *, options: MetricsOptions, logger=None) -> MetricsOutcome:
         del logger
@@ -365,15 +366,16 @@ class AdaptiveWorkflow:
             raise ValueError("Adaptive metrics accept exactly one run directory.")
         source, output_dir = Path(roots[0]), options.output_dir
         validate_workflow_manifest(source)
-        from ctxbench.metrics.adaptive import build_adaptive_metrics
+        from ctxbench.metrics.adaptive import build_adaptive_goal_metrics, build_adaptive_metrics
         requests, attempts = build_adaptive_metrics(source)
+        goals = build_adaptive_goal_metrics(source)
         if output_dir.exists() and any(output_dir.iterdir()):
             if not options.force:
                 raise ValueError(f"Output directory exists and is non-empty: {output_dir}. Use --force to replace it.")
             import shutil
             shutil.rmtree(output_dir)
         from ctxbench.metrics.adaptive import write_adaptive_metrics
-        write_adaptive_metrics(output_dir, requests, attempts)
+        write_adaptive_metrics(output_dir, requests, attempts, goals)
         request_states = {state: sum(row.get("state") == state for row in requests)
                           for state in ("delivered", "failed", "started")}
         manifest = load_json(source / "manifest.json")
@@ -388,9 +390,11 @@ class AdaptiveWorkflow:
             "implementationDigests": implementation_digests,
             "mixedImplementations": len(implementation_digests) > 1,
             "requestStates": request_states,
-            "outputs": ["adaptive_request_metrics.csv", "adaptive_attempt_metrics.csv"],
+            "outputs": ["adaptive_request_metrics.csv", "adaptive_attempt_metrics.csv",
+                        "adaptive_goal_metrics.csv"],
         })
-        return MetricsOutcome(self.kind, output_dir, {"requests": len(requests), "attempts": len(attempts)},
+        return MetricsOutcome(self.kind, output_dir, {"requests": len(requests), "attempts": len(attempts),
+                                                      "goals": len(goals)},
                               f"Wrote adaptive metrics to {output_dir}")
 
     def _plan(self, root: Path, *, manifest=None) -> AdaptivePlan:
@@ -603,14 +607,8 @@ def _validate_saved_record(record: Mapping[str, Any], plan: AdaptivePlan, reques
 
 
 def _load_request_records(root: Path) -> dict[str, dict[str, Any]]:
-    records_root = root / "adaptive-records"
-    if not records_root.exists():
-        return {}
-    rows = [load_json(path) for path in sorted(records_root.glob("*.json"))]
-    result = {str(row.get("requestId")): row for row in rows}
-    if len(result) != len(rows):
-        raise ValueError("Adaptive request ledger contains duplicate request IDs")
-    return result
+    from ctxbench.adaptive.artifacts import load_adaptive_request_records
+    return load_adaptive_request_records(root)
 
 
 def _record_path(root: Path, request_id: str) -> Path:

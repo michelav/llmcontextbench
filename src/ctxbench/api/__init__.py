@@ -2,7 +2,7 @@
 from ctxbench.api.errors import (
     ArtifactError, CapabilityError, CtxbenchError, DefinitionError, ExecutionStateError, RunNotFoundError,
 )
-from ctxbench.api.run import PhaseOutcome, Run, open_run, plan
+from ctxbench.api.run import PhaseOutcome, Run, headroom, open_run, plan, summarize
 from ctxbench.adaptive.definition import (
     Acceptance, AdaptiveExperiment, Candidate, Configuration, Disturbance, Goal, Model,
     PolicyRef, Scenario, SignalRef, Window, WorkloadRequest,
@@ -19,5 +19,5 @@ __all__ = [
     "Model", "Configuration", "Candidate", "PolicyRef", "Window", "Goal", "Acceptance",
     "SignalRef", "Disturbance", "Scenario", "WorkloadRequest", "DatasetHandle", "Segment", "Workload",
     "load_dataset",
-    "open_run", "plan",
+    "open_run", "plan", "summarize", "headroom",
 ]

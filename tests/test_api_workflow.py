@@ -108,8 +108,8 @@ def test_adaptive_lifecycle_through_api_is_silent_and_typed(tmp_path: Path, caps
     assert [row["state"] for row in run.requests()] == ["delivered"]
     assert len(list(run.attempts())) == 1
     assert len(list(run.responses())) == 1
-    assert set(run.metric_tables()) == {"requests", "attempts"}
-    assert run.metrics().counts == {"requests": 1, "attempts": 1}
+    assert set(run.metric_tables()) == {"requests", "attempts", "goals"}
+    assert run.metrics().counts == {"requests": 1, "attempts": 1, "goals": 0}
     assert run.export().messages
     assert open_run(run.root).kind == "adaptive"
     with pytest.raises(ExecutionStateError):

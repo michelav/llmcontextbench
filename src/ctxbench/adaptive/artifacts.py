@@ -192,6 +192,22 @@ def validate_workflow_manifest(root: str | Path, *, execution: bool = False,
     return manifest
 
 
+def load_adaptive_request_records(root: str | Path) -> dict[str, dict[str, Any]]:
+    """Load the durable request ledger, keyed by request ID."""
+    artifact_root = Path(root)
+    records_root = artifact_root / "adaptive-records"
+    if not records_root.exists():
+        return {}
+    rows = [load_json(path) for path in sorted(records_root.glob("*.json"))]
+    result: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        request_id = row.get("requestId") if isinstance(row, dict) else None
+        if not isinstance(request_id, str) or not request_id or request_id in result:
+            raise ValueError("Adaptive request ledger contains duplicate or invalid request records")
+        result[request_id] = row
+    return result
+
+
 def adaptive_plan_schema() -> dict[str, Any]:
     return {"type": "object", "additionalProperties": False,
             "required": ["adaptivePlanVersion", "workflowId", "seed", "labels", "candidates", "requests",

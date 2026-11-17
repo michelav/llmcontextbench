@@ -10,9 +10,8 @@ from ctxbench.util.fs import load_json
 
 REQUEST_FIELDS = [
     "requestId", "sequenceIndex", "taskId", "instanceId", "state", "terminalReason", "delivered",
-    "privileged",
-    "candidateId", "executionId", "attemptId", "attemptCount", "fallbackCount",
-    "attemptsNotAccepted", "unmetConditions",
+    "privileged", "failureCategory", "policyId", "policyVersion",
+    "candidateId", "executionId", "attemptId", "attemptCount",
     "requestDurationMs", "requestDurationProvenance",
     "generationDurationMs", "generationDurationProvenance",
     "generationInputTokens", "generationOutputTokens", "generationTotalTokens",
@@ -35,6 +34,7 @@ ATTEMPT_FIELDS = [
     "executionStatus", "startedAt", "finishedAt", "durationMs",
     "generationDurationMs", "generationDurationProvenance",
     "inputTokens", "outputTokens", "totalTokens", "tokenProvenance", "delivered",
+    "failureCategory", "accepted", "injectedDelayMs", "injectedFailures",
     "assessorDurationMs", "assessorDurationProvenance", "assessorTotalTokens",
     "assessorTokenProvenance", "knownAssessorTotalTokens",
 ]
@@ -46,6 +46,16 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
     rebuild_adaptive_responses(artifact_root)
     request_records: list[dict[str, Any]] = []
     manifest = load_json(artifact_root / "manifest.json")
+    plan = load_json(artifact_root / "adaptive-plan.json")
+    policy = plan.get("policy") if isinstance(plan, dict) else {}
+    policy_id = policy.get("id") if isinstance(policy, dict) else None
+    policy_version = policy.get("version") if isinstance(policy, dict) else None
+    declared_signal_ids = [str(row["id"]) for row in plan.get("signals", [])
+                           if isinstance(row, dict) and row.get("id")]
+    signal_ids = list(dict.fromkeys([
+        "latency_ms", "total_tokens", "input_tokens", "output_tokens", "cached_input_tokens",
+        "reasoning_tokens", "model_calls", "tool_calls", "failed", "accepted", *declared_signal_ids,
+    ]))
     privileged = bool(manifest.get("privileged")) if isinstance(manifest, dict) else False
     by_request: dict[str, list[dict[str, Any]]] = {}
     records_root = artifact_root / "execution-records"
@@ -91,10 +101,8 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
             assessor_cost = _combine_assessor_costs(
                 [item.get("assessorCost", []) for item in ledger_attempts if isinstance(item, dict)]
             )
-            not_accepted = [row for row in ledger_attempts
-                            if isinstance(row, dict) and isinstance(row.get("observation"), dict)
-                            and row["observation"].get("accepted") is False]
-            unmet: list[str] = []
+            observation = (ledger_attempts[0].get("observation")
+                           if ledger_attempts and isinstance(ledger_attempts[0], dict) else {})
             delivered_attempt_ids = {str(delivery.get("attemptId"))} if delivery.get("attemptId") else set()
             non_delivered = [row for row in attempts if row.get("attemptId") not in delivered_attempt_ids]
             non_delivered_in, non_delivered_out, non_delivered_complete = _sum_attempt_usage(non_delivered)
@@ -107,13 +115,14 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
                 "terminalReason": record.get("terminalReason"),
                 "delivered": record.get("state") == "delivered",
                 "privileged": privileged,
+                "failureCategory": observation.get("failureCategory") if isinstance(observation, dict) else None,
+                "policyId": policy_id,
+                "policyVersion": policy_version,
+                **{f"labels.{key}": value for key, value in (record.get("labels") or {}).items()},
                 "candidateId": delivery.get("candidateId"),
                 "executionId": delivery.get("executionId"),
                 "attemptId": delivery.get("attemptId"),
                 "attemptCount": len(attempts),
-                "fallbackCount": max(0, len({row.get("candidateId") for row in attempts}) - 1),
-                "attemptsNotAccepted": len(not_accepted),
-                "unmetConditions": "|".join(unmet),
                 "requestDurationMs": request_duration,
                 "requestDurationProvenance": record.get("requestDurationProvenance", "unavailable"),
                 **_generation_duration(attempts),
@@ -157,6 +166,8 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
             assessor_cost = _combine_assessor_costs([adaptive_signals.get("assessorCost", [])])
             usage = result.get("usage") if isinstance(result.get("usage"), dict) else {}
             started, finished = attempt.get("startedAt"), attempt.get("finishedAt")
+            signal_values = adaptive_signals.get("signals") if isinstance(adaptive_signals.get("signals"), dict) else {}
+            disturbance_rows = adaptive_signals.get("disturbances") if isinstance(adaptive_signals.get("disturbances"), list) else []
             attempt_rows.append({
                 "requestId": request_id,
                 "candidateId": attempt.get("candidateId"),
@@ -175,6 +186,19 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
                 "totalTokens": usage.get("totalTokens"),
                 "tokenProvenance": (result.get("metricsSummary") or {}).get("totalTokensProvenance", "unavailable"),
                 "delivered": attempt.get("attemptId") in deliveries,
+                "failureCategory": adaptive_signals.get("failureCategory"),
+                "accepted": adaptive_signals.get("accepted"),
+                "injectedDelayMs": sum(
+                    int(row.get("appliedDelayMs", 0)) for row in disturbance_rows
+                    if isinstance(row, dict) and type(row.get("appliedDelayMs", 0)) in (int, float)
+                ),
+                "injectedFailures": sum(
+                    int(row.get("injectedFailures", 0)) for row in disturbance_rows
+                    if isinstance(row, dict) and type(row.get("injectedFailures", 0)) in (int, float)
+                ),
+                **{name: (signal_values.get(name) or {}).get("value") for name in signal_ids},
+                **{f"{name}Provenance": (signal_values.get(name) or {}).get("provenance", "unavailable")
+                   for name in signal_ids},
                 **assessor_cost,
             })
     request_records.sort(key=lambda row: (row.get("sequenceIndex") or 0, row["requestId"]))
@@ -182,10 +206,45 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
     return request_records, attempt_rows
 
 
-def write_adaptive_metrics(output_dir: Path, requests: list[dict[str, Any]], attempts: list[dict[str, Any]]) -> None:
+GOAL_FIELDS = ["requestId", "sequenceIndex", "goalId", "signal", "statistic", "scope", "window",
+               "status", "value", "provenance", "sampleCount", "missingCount", "boundType", "bound"]
+
+
+def build_adaptive_goal_metrics(root: str | Path) -> list[dict[str, Any]]:
+    from ctxbench.adaptive.artifacts import adaptive_plan_from_payload, load_adaptive_request_records
+    artifact_root = Path(root)
+    payload = load_json(artifact_root / "adaptive-plan.json")
+    plan = adaptive_plan_from_payload(payload)
+    records = list(load_adaptive_request_records(artifact_root).values())
+    if not plan.goals:
+        return []
+    from ctxbench.adaptive.goals import evaluate_goals
+    return evaluate_goals(
+        records, plan.goals, candidates=[row.candidate_id for row in plan.candidates],
+        signals=plan.signals, default_window=plan.window,
+    )
+
+
+def write_adaptive_metrics(output_dir: Path, requests: list[dict[str, Any]], attempts: list[dict[str, Any]],
+                           goals: list[dict[str, Any]] | None = None) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
-    _write_csv(output_dir / "adaptive_request_metrics.csv", REQUEST_FIELDS, requests)
-    _write_csv(output_dir / "adaptive_attempt_metrics.csv", ATTEMPT_FIELDS, attempts)
+    request_fields = [*REQUEST_FIELDS, *_dynamic_fields(requests, "labels.")]
+    attempt_fields = [*ATTEMPT_FIELDS, *_signal_fields(attempts)]
+    _write_csv(output_dir / "adaptive_request_metrics.csv", request_fields, requests)
+    _write_csv(output_dir / "adaptive_attempt_metrics.csv", attempt_fields, attempts)
+    _write_csv(output_dir / "adaptive_goal_metrics.csv", GOAL_FIELDS, goals or [])
+
+
+def _dynamic_fields(rows: list[dict[str, Any]], prefix: str) -> list[str]:
+    return sorted({key for row in rows for key in row if key.startswith(prefix)})
+
+
+def _signal_fields(rows: list[dict[str, Any]]) -> list[str]:
+    excluded = {"assessorDurationProvenance", "assessorTokenProvenance", "generationDurationProvenance",
+                "tokenProvenance"}
+    return sorted({key for row in rows for key in row
+                   if key not in ATTEMPT_FIELDS and key not in excluded
+                   and (key.endswith("Provenance") or key in row)})
 
 
 def _index_jsonl(path: Path, primary: str, fallback: str | None = None) -> dict[str, dict[str, Any]]:
@@ -276,10 +335,13 @@ def _duration_ms(started: Any, finished: Any) -> int | None:
 
 
 def _write_csv(path: Path, fields: list[str], rows: list[dict[str, Any]]) -> None:
+    import json
     with path.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore", lineterminator="\n")
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows([{key: json.dumps(value, ensure_ascii=False, sort_keys=True)
+                           if isinstance(value, (dict, list)) else value for key, value in row.items()}
+                          for row in rows])
 
 
 def _generation_duration(attempts: list[dict[str, Any]]) -> dict[str, Any]:
