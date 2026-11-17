@@ -119,3 +119,21 @@ def test_workflow_kind_is_resolved_only_by_the_registry() -> None:
             if isinstance(node, ast.Constant) and node.value in {"workflowKind", "adaptive", "benchmark"}:
                 offenders.append(f"{path.relative_to(SRC_ROOT)}:{node.lineno} {node.value!r}")
     assert offenders == []
+
+
+ANALYSIS_ALLOWED_PREFIXES = (
+    "ctxbench.util", "ctxbench.core", "ctxbench.analysis",
+    "ctxbench.adaptive.state", "ctxbench.adaptive.goals",
+    "ctxbench.adaptive.artifacts", "ctxbench.metrics.adaptive",
+)
+
+
+def test_import_boundary_analysis_reads_artifacts_only() -> None:
+    offenders = []
+    for path in _python_files("analysis"):
+        for module in _imported_modules(path):
+            if module == "ctxbench" or not module.startswith("ctxbench."):
+                continue
+            if not any(module == prefix or module.startswith(f"{prefix}.") for prefix in ANALYSIS_ALLOWED_PREFIXES):
+                offenders.append(f"{path.relative_to(REPO_ROOT)}: {module}")
+    assert offenders == []

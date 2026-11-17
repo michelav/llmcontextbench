@@ -57,16 +57,7 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
         "reasoning_tokens", "model_calls", "tool_calls", "failed", "accepted", *declared_signal_ids,
     ]))
     privileged = bool(manifest.get("privileged")) if isinstance(manifest, dict) else False
-    by_request: dict[str, list[dict[str, Any]]] = {}
-    records_root = artifact_root / "execution-records"
-    if records_root.exists():
-        for path in records_root.glob("*/*.json"):
-            attempt = load_json(path)
-            if not isinstance(attempt, dict) or attempt.get("executionRecordVersion") != 1:
-                continue
-            correlation = attempt.get("correlationId")
-            if isinstance(correlation, str):
-                by_request.setdefault(correlation, []).append(attempt)
+    by_request = load_execution_attempts(artifact_root)
     responses_path = artifact_root / "responses.jsonl"
     evals_path = artifact_root / "evals.jsonl"
     responses = _index_jsonl(responses_path, "requestId")
@@ -196,7 +187,9 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
                     int(row.get("injectedFailures", 0)) for row in disturbance_rows
                     if isinstance(row, dict) and type(row.get("injectedFailures", 0)) in (int, float)
                 ),
-                **{name: (signal_values.get(name) or {}).get("value") for name in signal_ids},
+                # A signal named like an existing column (``accepted``) keeps that column.
+                **{name: (signal_values.get(name) or {}).get("value") for name in signal_ids
+                   if name not in ATTEMPT_FIELDS},
                 **{f"{name}Provenance": (signal_values.get(name) or {}).get("provenance", "unavailable")
                    for name in signal_ids},
                 **assessor_cost,
@@ -204,6 +197,27 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
     request_records.sort(key=lambda row: (row.get("sequenceIndex") or 0, row["requestId"]))
     attempt_rows.sort(key=lambda row: (row["requestId"], row.get("attemptIndex") or 0))
     return request_records, attempt_rows
+
+
+def load_execution_attempts(root: str | Path) -> dict[str, list[dict[str, Any]]]:
+    """Read every adaptive execution attempt record, keyed by request ID, ordered by attempt.
+
+    Read-only: includes attempts of requests that never became terminal (for example an
+    uncertain ``started`` attempt), which is what a run cost.
+    """
+    by_request: dict[str, list[dict[str, Any]]] = {}
+    records_root = Path(root) / "execution-records"
+    if records_root.exists():
+        for path in sorted(records_root.glob("*/*.json")):
+            attempt = load_json(path)
+            if not isinstance(attempt, dict) or attempt.get("executionRecordVersion") != 1:
+                continue
+            correlation = attempt.get("correlationId")
+            if isinstance(correlation, str):
+                by_request.setdefault(correlation, []).append(attempt)
+    for attempts in by_request.values():
+        attempts.sort(key=lambda row: row.get("attemptIndex", 0))
+    return by_request
 
 
 GOAL_FIELDS = ["requestId", "sequenceIndex", "goalId", "signal", "statistic", "scope", "window",

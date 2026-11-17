@@ -1,9 +1,12 @@
 # Self-adaptive provisioning and framework API — design
 
-**Status:** implementation design. WP-A, WP-B, WP-C, WP-E, WP-F, WP-P and WP-G are accepted;
-their reports are recorded in the corresponding `wp-*-acceptance.md` files. WP-H implementation
-is complete and awaits acceptance; see [`wp-h-acceptance.md`](wp-h-acceptance.md). Each later work
-package in [section 11](#11-work-packages) needs its own approval before implementation starts.
+**Status:** implementation design. WP-A, WP-B, WP-C and WP-E are implemented; WP-E is accepted
+([`wp-e-acceptance.md`](wp-e-acceptance.md)) and WP-F is approved
+([`wp-f-acceptance.md`](wp-f-acceptance.md)). WP-P and WP-G are implemented with review fixes
+applied and await acceptance ([`wp-p-acceptance.md`](wp-p-acceptance.md),
+[`wp-g-acceptance.md`](wp-g-acceptance.md)). WP-H is implemented with review fixes applied and
+awaits acceptance ([`wp-h-acceptance.md`](wp-h-acceptance.md)). Each later work package in
+[section 11](#11-work-packages) needs its own approval before implementation starts.
 
 **Audience:** an agent or team implementing the refactor without access to the design discussion.
 
@@ -263,7 +266,8 @@ These extend the plan's "Allowed dependency direction" table. Enforce them in
 | `adaptive` | `execution`, `runtime`, `core`, `dataset` protocols, `workload` | `benchmark`, `commands`, `api`, concrete adapters |
 | `adaptive.policies`, external policies | `adaptive.policy`, `adaptive.state` (read-only types) | `execution`, `runtime`, `ai`, `dataset`, artifact I/O |
 | `workload` | `dataset` protocols | workflows, `commands` |
-| `analysis`, `metrics` | `util`, `core`, and the pure modules `adaptive.state` and `adaptive.goals` (windows, statistics, goal evaluation; no I/O) | `ai`, `runtime`, `execution` (they read artifacts only) |
+| `analysis` | `util`, `core`, the pure modules `adaptive.state` and `adaptive.goals` (windows, statistics, goal evaluation; no I/O), and the read-only artifact readers `adaptive.artifacts` and `metrics.adaptive` | `ai`, `runtime`, `execution`, workflows, `api`, `commands` (it reads artifacts only) |
+| `metrics` | `util`, `core`, `adaptive.state`, `adaptive.goals`, `adaptive.artifacts`; existing exceptions: benchmark metrics read through `benchmark` artifact helpers, and `metrics.adaptive` rebuilds `responses.jsonl` through `adaptive.projections` | `ai`, `runtime` (not yet enforced) |
 | `runtime`, `ai`, `execution` | unchanged | workflows, `api` |
 
 One existing violation must be removed: `adaptive/runtime_adapter.py` imports

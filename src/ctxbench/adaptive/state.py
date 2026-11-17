@@ -159,15 +159,20 @@ class WindowSystemState:
     """Policy-readable view over terminal observations before the current request."""
 
     __slots__ = ("decision_index", "completed_requests", "default_window", "memo", "_log",
-                 "_candidate_ids", "_declared_signals", "_audit", "_rng")
+                 "_candidate_ids", "_declared_signals", "_audit", "_rng", "_through_current")
 
     def __init__(self, *, decision_index: int, observations: Sequence[Observation],
                  memo: Mapping[str, Any] | None, seed: int, decision_id: str,
                  default_window: WindowSpec, candidate_ids: Sequence[str],
-                 declared_signals: Sequence[Mapping[str, Any]] = ()) -> None:
+                 declared_signals: Sequence[Mapping[str, Any]] = (),
+                 through_current: bool = False) -> None:
+        # through_current=True is for goal evaluation after request `decision_index` completed
+        # (section 6.10): windows then include that request. Policy decisions never set it.
         self.decision_index = decision_index
+        self._through_current = through_current
         self._log = ObservationLog(observations)
-        if self._log.prefix() and self._log.prefix()[-1].sequence_index >= decision_index:
+        last = self._log.prefix()[-1].sequence_index if self._log.prefix() else None
+        if last is not None and (last > decision_index or (last == decision_index and not through_current)):
             raise ValueError("system state cannot include the current or a later request")
         self.completed_requests = len(self._log)
         self.memo = MappingProxyType(dict(memo)) if memo is not None else None
@@ -205,7 +210,8 @@ class WindowSystemState:
             or not math.isfinite(float(capacity)) or capacity <= 0
         ):
             raise PolicyContractError("capacity must be a finite positive number")
-        rows = _select_window(self._log.prefix(), self.decision_index, selected_window)
+        rows = _select_window(self._log.prefix(), self.decision_index, selected_window,
+                              through_current=self._through_current)
         if scope.startswith("candidate:"):
             candidate_id = scope.split(":", 1)[1]
             rows = [row for row in rows if row.candidate_id == candidate_id]
@@ -317,8 +323,10 @@ def _parse_window(value: WindowSpec | Mapping[str, Any] | None, default: WindowS
 
 
 def _select_window(rows: Sequence[Observation], decision_index: int,
-                   window: WindowSpec | None) -> list[Observation]:
-    before = [row for row in rows if row.sequence_index < decision_index]
+                   window: WindowSpec | None, *, through_current: bool = False) -> list[Observation]:
+    """Select the window for request `decision_index`; its block is the same either way."""
+    limit = decision_index + 1 if through_current else decision_index
+    before = [row for row in rows if row.sequence_index < limit]
     if window is None:
         return before
     if window.mode == "sliding":

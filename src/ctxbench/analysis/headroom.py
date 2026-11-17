@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
+from ctxbench.analysis import run_root
 from ctxbench.util.fs import load_json
 from ctxbench.util.jsonl import read_jsonl
 
@@ -34,7 +35,7 @@ def headroom(run: str | Path, *, signal: str, objective: str = "min",
     """Compute headroom from successful benchmark trials and their recorded responses."""
     if objective not in {"min", "max"}:
         raise ValueError("objective must be 'min' or 'max'")
-    root = Path(getattr(run, "root", run)).expanduser().resolve()
+    root = run_root(run)
     manifest = load_json(root / "manifest.json")
     if not isinstance(manifest, Mapping) or manifest.get("workflowKind", "benchmark") != "benchmark":
         raise ValueError(f"headroom expects a benchmark run: {root}")

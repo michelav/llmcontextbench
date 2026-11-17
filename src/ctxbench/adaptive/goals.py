@@ -23,10 +23,10 @@ def evaluate_goals(records: Sequence[Mapping[str, Any]], goals: Sequence[Mapping
                 # Definition normalization preserves mode on all-windows; it has no meaning here.
                 window = {"all": True}
             state = WindowSystemState(
-                decision_index=sequence + 1, observations=observations, memo=None,
+                decision_index=sequence, observations=observations, memo=None,
                 seed=0, decision_id=f"goal:{goal['id']}:{sequence}",
                 default_window=default_window, candidate_ids=candidates,
-                declared_signals=signals,
+                declared_signals=signals, through_current=True,
             )
             reading = state.window(
                 str(goal["signal"]), str(goal["statistic"]),

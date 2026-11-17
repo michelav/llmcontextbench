@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from ctxbench.adaptive.artifacts import load_adaptive_request_records
+from ctxbench.analysis import run_root
+from ctxbench.metrics.adaptive import build_adaptive_goal_metrics, load_execution_attempts
 from ctxbench.util.fs import load_json
 
 
@@ -15,7 +17,7 @@ def summarize(runs: Iterable[str | Path], *, signals: Iterable[str]) -> list[dic
     signals = tuple(signals)
     rows: list[dict[str, Any]] = []
     for run in runs:
-        root = _run_root(run)
+        root = run_root(run)
         manifest = load_json(root / "manifest.json")
         if not isinstance(manifest, Mapping) or manifest.get("workflowKind") != "adaptive":
             raise ValueError(f"summarize expects adaptive runs: {root}")
@@ -27,7 +29,9 @@ def summarize(runs: Iterable[str | Path], *, signals: Iterable[str]) -> list[dic
             requests, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
         ).encode("utf-8")).hexdigest()
         records = sorted(load_adaptive_request_records(root).values(), key=lambda item: item.get("sequenceIndex", 0))
-        goal_metrics = _goal_rows(root)
+        goal_metrics = build_adaptive_goal_metrics(root)
+        execution_attempts = [attempt for attempts in load_execution_attempts(root).values()
+                              for attempt in attempts]
         policy = plan.get("policy") or {}
         candidates = plan.get("candidates") or []
         rate_limits = {
@@ -53,8 +57,11 @@ def summarize(runs: Iterable[str | Path], *, signals: Iterable[str]) -> list[dic
             if category:
                 failures[str(category)] = failures.get(str(category), 0) + 1
         output.update({f"failures.{category}": count for category, count in failures.items()})
+        output["attempts"] = len(execution_attempts)
         for signal in signals:
-            all_values = [_request_signal(record, signal) for record in terminal]
+            # What the run cost: every recorded execution attempt, including attempts of
+            # requests that never became terminal; an attempt without a result is missing.
+            all_values = [_attempt_signal(attempt, signal) for attempt in execution_attempts]
             delivered_values = [_request_signal(record, signal) for record in terminal
                                 if record.get("state") == "delivered"]
             for service_view, values in (("allAttempts", all_values), ("deliveredRequests", delivered_values)):
@@ -85,6 +92,20 @@ def _request_signal(record: Mapping[str, Any], signal: str) -> tuple[float | Non
     return value.get("value"), str(value.get("provenance", "unavailable")), known
 
 
+def _attempt_signal(attempt: Mapping[str, Any], signal: str) -> tuple[float | None, str, float | None]:
+    result = attempt.get("result") if isinstance(attempt.get("result"), Mapping) else {}
+    runtime = result.get("_adaptiveSignals") if isinstance(result.get("_adaptiveSignals"), Mapping) else {}
+    if not runtime:
+        return None, "unavailable", None
+    if signal.startswith("failed."):
+        return float(runtime.get("failureCategory") == signal.partition(".")[2]), "derived", None
+    signals = runtime.get("signals") if isinstance(runtime.get("signals"), Mapping) else {}
+    value = signals.get(signal) if isinstance(signals.get(signal), Mapping) else {}
+    known = runtime.get("knownSubtotals")
+    known = known.get(signal) if isinstance(known, Mapping) else None
+    return value.get("value"), str(value.get("provenance", "unavailable")), known
+
+
 def _signal_summary(values: list[tuple[Any, str, Any]]) -> dict[str, Any]:
     available = [float(value) for value, _, _ in values if isinstance(value, (int, float)) and not isinstance(value, bool)]
     missing = len(values) - len(available)
@@ -101,13 +122,3 @@ def _signal_summary(values: list[tuple[Any, str, Any]]) -> dict[str, Any]:
         "mean": sum(available) / len(available) if available else None,
         "meanProvenance": provenance, "sampleCount": len(available), "missingCount": missing,
     }
-
-
-def _goal_rows(root: Path) -> list[dict[str, Any]]:
-    from ctxbench.metrics.adaptive import build_adaptive_goal_metrics
-    return build_adaptive_goal_metrics(root)
-
-
-def _run_root(run: Any) -> Path:
-    value = getattr(run, "root", run)
-    return Path(value).expanduser().resolve()
