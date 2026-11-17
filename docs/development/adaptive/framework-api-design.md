@@ -2,7 +2,8 @@
 
 **Status:** implementation design. WP-A, WP-B, WP-C and WP-E are implemented; WP-E review is
 recorded in [`wp-e-acceptance.md`](wp-e-acceptance.md). WP-F is implemented with its review fixes
-applied and awaits approval; see [`wp-f-acceptance.md`](wp-f-acceptance.md). Each later work package in
+applied and awaits approval; see [`wp-f-acceptance.md`](wp-f-acceptance.md). WP-P (plan as
+fingerprint) follows WP-F and precedes WP-G. Each later work package in
 [section 11](#11-work-packages) needs its own approval before implementation starts.
 
 **Audience:** an agent or team implementing the refactor without access to the design discussion.
@@ -140,7 +141,7 @@ constants were resolved by WP-A and WP-B.
 | Retry | `candidateOrder` is both preference and fallback list; any unmet SLO triggers the next candidate until the catalogue is exhausted. | Removed: one attempt per request (R8); SLOs become reported goals (R9). |
 | Disturbances | `runtime/disturbances.py` defines `DisturbanceSpec` and `ToolRuntimeDisturbance`; `ProvisioningRuntime` accepts interceptors; no command wires them. | Wired through the definition (R7). |
 | Online quality | `OnlineQualityAssessor`, `QualityObservation`, `SignalCapability` exist; `commands/execute.py` passes no assessor. | Wired through dataset capabilities (R5). |
-| Fingerprint | Benchmark plans compute and verify `executionFingerprint` (`benchmark/fingerprint.py`). Adaptive plans take the fingerprint from the definition and `execute` does not verify implementation or dataset. | Adaptive plans compute and verify it, including plug-in sources (R16, R19). |
+| Fingerprint | Benchmark plans compute and verify `executionFingerprint` (`benchmark/fingerprint.py`). Adaptive plans take the fingerprint from the definition and `execute` does not verify implementation or dataset. | Adaptive plans compute and verify it, including plug-in sources (R16, R19). After WP-P the plan is the fingerprint (section 8.3): plug-in sources and dataset are verified; the implementation is recorded per attempt, not enforced. |
 | Programmatic use | `commands/*.py` expose keyword-argument functions that print and return exit codes. `run_adaptive_workflow` accepts injected `estimator`, `quality_assessor`, `invoke`. | A public `ctxbench.api` with typed results (R12–R14). |
 | Version constants | `ADAPTIVE_PLAN_VERSION = 3`, `ADAPTIVE_RECORD_VERSION = 2`, `ADAPTIVE_ARTIFACT_VERSION = 2`, adaptive manifest `schemaVersion = 2`, `RESPONSE_SCHEMA_VERSION = 2`. | Bumped once (section 8.6). |
 
@@ -750,7 +751,8 @@ A policy reference in a definition is `{"ref": <string>, "params": {...}}`.
   to add directories to the import path for that call only.
 
 The same reference scheme applies to online assessors that are not provided by a dataset
-package (section 6.9).
+package (section 6.9), including the optional `"sources"` list (added to signal declarations in
+WP-P).
 
 ### 6.8 Delivery and failure
 
@@ -783,6 +785,9 @@ Declared in the experiment:
 ```json
 "signals": [{"id": "quality.<metric_id>", "assessor": "<signal_id>"}]
 ```
+
+An external `module:Class` assessor may also list `"sources": [paths]`, extra files covered by
+its `sourceDigest` (WP-P; section 6.7).
 
 - `assessor` names a `SignalCapability.signal_id` from the dataset's
   `DatasetCapabilityReport.semantic_quality_assessors`, or is a `"module:Class"` reference.
@@ -1121,7 +1126,11 @@ by the existing `.adaptive.lock`.
 
 `execute` on an existing run:
 
-1. Validate manifest, plan digest and fingerprint (implementation, dataset, plug-in sources).
+1. Validate the manifest and the fingerprint: `adaptive-plan.json` still hashes to
+   `executionFingerprint`, and the live plug-in sources and dataset still match the digests in
+   the plan's `provenance` (section 8.3). A mismatch is refused. The implementation is **not**
+   checked: each attempt records the implementation digest that executed it, and `status` and
+   `metrics` report a run that mixes implementations.
 2. For each request in order, load its record if present and validate it against the plan and
    the execution records (today's `_validate_saved_record`, adapted).
 3. **Terminal request:** append its observation to the log and restore the memo. No policy
@@ -1231,9 +1240,17 @@ Unchanged in shape:
              "params": {}, "sourceDigest": "<sha256>"},
   "window": {"requests": 10},
   "signals": [], "acceptance": {},
-  "goals": [], "disturbances": []
+  "goals": [], "disturbances": [],
+  "provenance": {
+    "dataset": {"digest": "<sha256>"},
+    "implementation": {"digest": "<sha256>", "dependencies": {"openai": "…"}}
+  }
 }
 ```
+
+`provenance` (added in WP-P) is the single record of what the run depends on besides the plan's
+own content. Plug-in source digests stay where they are declared: `policy.sourceDigest` and each
+external signal's `sourceDigest`.
 
 Size is `O(requests + candidates)`; no per-request candidate map and no embedded execution
 payloads.
@@ -1243,11 +1260,17 @@ payloads.
 Existing keys stay. Changes:
 
 - `schemaVersion: 3`, `adaptiveArtifactVersion: 3`, `adaptivePlanVersion: 4`.
-- `executionFingerprint` is **computed**, with
+- `executionFingerprint` is **computed**. Until WP-P it is the digest of
   `fingerprintInputs = {"artifacts": {"resolved.json": …, "adaptive-plan.json": …},
   "implementation": …, "dataset": …, "plugins": [{"ref": …, "sourceDigest": …}]}`
-  using `benchmark/fingerprint.py` (move to `ctxbench/core/fingerprint.py`, keep a re-export;
-  `verify_snapshot` already lists `adaptive-plan.json` as an allowed frozen artifact).
+  using `ctxbench/core/fingerprint.py`.
+- **From WP-P, the plan is the fingerprint:** `executionFingerprint = sha256(adaptive-plan.json)`.
+  The plan holds everything the run depends on (section 8.2 `provenance`, plug-in
+  `sourceDigest`s), so the manifest drops `fingerprintInputs` and `planDigest`, and
+  `resolved.json` is written for readers but not hashed. `execute` checks two things: the plan
+  file still has that hash, and the live plug-in sources and dataset still match the plan's
+  digests. The implementation digest is provenance, not a gate (section 7.5). Benchmark
+  manifests and checks are unchanged.
 - New: `labels`, `privileged` (boolean), `seed`.
 
 ### 8.4 Request record (`adaptive-records/<requestId>.json`, schemaVersion 3)
@@ -1285,6 +1308,7 @@ Existing keys stay. Changes:
     "accepted": true,
     "assessorCost": [],
     "disturbances": [],
+    "implementationDigest": "<sha256>",
     "monitored": true
   }],
   "delivery": {"candidateId": "B", "executionId": "r-0007", "attemptId": "…"}
@@ -1292,7 +1316,9 @@ Existing keys stay. Changes:
 ```
 
 `attempts` keeps the list shape of record v2 and holds exactly one element once the request is
-terminal. The
+terminal. `implementationDigest` (WP-P) is the implementation that executed the attempt; it is
+stored with the durable execution result (`_adaptiveSignals`) and copied here, so an attempt
+replayed on resume keeps the digest it ran with. The
 record stores no state snapshot and no goal status: the observation log is rebuilt from the
 records, and goals are computed by `metrics`.
 
@@ -1528,6 +1554,8 @@ flowchart LR
     B --> C[WP-C Signals, state, built-in policies]
     C --> E[WP-E Disturbances and scenarios]
     C --> F[WP-F Online quality signals]
+    F --> P[WP-P Plan as fingerprint]
+    P --> G
     B --> G[WP-G Workload builder, experiments in code]
     C --> H[WP-H Metrics, goals, summarize, headroom]
     E --> H
@@ -1683,6 +1711,35 @@ flowchart LR
   a reference-data assessor marks the run privileged; tests prove offline evaluation artifacts
   cannot influence decisions. Goal evaluation is verified in WP-H, which owns the goal metrics.
 
+### WP-P — Plan as fingerprint
+
+- **Scope:** R16, R19; simplifies run provenance for adaptive runs. Small package, after WP-F and
+  before WP-G, so that code-built and file-defined experiments are compared through one hash.
+- **Tasks:**
+  - Add `provenance` to the frozen plan (section 8.2): dataset digest and implementation
+    digest with dependency versions, computed at `plan`.
+  - `executionFingerprint = sha256(adaptive-plan.json)`. Remove `fingerprintInputs` and
+    `planDigest` from the adaptive manifest; keep writing `resolved.json` without hashing it.
+  - Replace the adaptive use of `verify_snapshot` with one check at `execute`: plan file hash,
+    plug-in sources (policy and external assessors, re-resolved as today) and dataset digest
+    against the plan. Remove the implementation check for adaptive runs.
+  - Record `implementationDigest` per attempt in `_adaptiveSignals` and copy it to the request
+    record. `status` reports whether attempts span more than one implementation; metrics add
+    an attempt column `implementationDigest` and `implementationDigests` plus
+    `mixedImplementations` to `metrics-manifest.json`.
+  - Add the optional `"sources": [paths]` list to signal declarations (section 6.7 scheme,
+    resolved relative to the definition) and include those files in the assessor's
+    `sourceDigest`.
+  - Benchmark manifests, `verify_snapshot` for benchmark runs and benchmark artifacts are
+    unchanged. No version bump (unreleased branch, section 8.6).
+- **Gate:** `executionFingerprint` equals the hash of `adaptive-plan.json`, and the manifest has
+  no `fingerprintInputs` or `planDigest`; an edited plan, a changed dataset, and a changed
+  policy or assessor source (including a file in `sources`) are refused at `execute`; a changed
+  implementation digest (injected in tests) is not refused, the attempts after it record the
+  new digest, and `status` and the metrics manifest report mixed implementations; an
+  interrupted run resumed under a different implementation keeps the original digest on the
+  replayed attempt; benchmark fingerprint tests pass unchanged.
+
 ### WP-G — Workload builder and experiments in code
 
 - **Scope:** R1, R17, R18; experiments built in code (section 9.1, "Two entry paths, one stored
@@ -1747,7 +1804,7 @@ flowchart LR
 | WP15: driver as external tooling that "generates adaptive definitions and invokes the CLI". | Split: workload building, the definition model, run handle, the run-summary table and `headroom` are in the tool; pairing, matrices of policies and seeds stay in scripts. | R12–R14, R17. |
 | "Avoid a plugin registry, generic workload DSL" (first refactor). | A small policy registry with external references, and a minimal segment-based generator. | R6, R16; scoped so that scripts keep anything richer. |
 | "Keep the current CLI" / commands own lifecycle bodies. | CLI unchanged externally; bodies move behind `ctxbench.api`. | R12. |
-| Adaptive `executionFingerprint` supplied by the definition. | Computed and verified, including plug-in sources. | R16, R19. |
+| Adaptive `executionFingerprint` supplied by the definition. | Computed and verified, including plug-in sources. From WP-P: the hash of the frozen plan; implementation recorded per attempt, not enforced. | R16, R19; one provenance record; code fixes must not block resuming a long run. |
 
 Everything else in the plan stands, in particular: peer workflows over shared services, the
 dependency directions, singular canonical records, serial processing, decision-before-execution
@@ -1806,7 +1863,11 @@ Follow the plan's test pyramid. New or changed test areas:
   `taskId`, `instanceId`, label value or task statement of the plan.
 - **Causality test:** a policy that records every reading it can obtain; assert that readings at
   decision `n` are unchanged when later records are altered or removed.
-- **Plug-in fingerprint:** modified external policy source is refused at `execute`.
+- **Plug-in fingerprint:** modified external policy or assessor source, including a file listed
+  in `sources`, is refused at `execute`.
+- **Plan as fingerprint (WP-P):** `executionFingerprint` equals the hash of
+  `adaptive-plan.json`; an edited plan or changed dataset is refused; a changed implementation is
+  not refused, is recorded per attempt and is reported by `status` and `metrics`.
 - **API round trip:** `plan(object)` ≡ `plan(path)`; `open_run` ≡ handle from `plan`.
 - **Workflow contract:** one parametrised suite runs load → plan → status → execute →
   responses → metric tables against both implementations; registry resolution for definitions
