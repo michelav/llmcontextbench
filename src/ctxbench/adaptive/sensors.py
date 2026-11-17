@@ -16,6 +16,7 @@ from ctxbench.core.errors import CapabilityUnavailableError
 from ctxbench.core.fingerprint import digest, file_digest
 
 from ctxbench.core.provenance import Provenance, TokenUsage
+from ctxbench.adaptive.signals import is_binary_scale
 
 
 class SensorClass(StrEnum):
@@ -284,6 +285,27 @@ def assess_quality(
     return normalized, cost_record
 
 
+def skipped_quality(resolved: ResolvedAssessor) -> dict[str, Any]:
+    """Signal value of a quality signal for an attempt that was not assessed."""
+    return {"value": None, "provenance": Provenance.UNAVAILABLE.value,
+            "unit": resolved.capability.value_scale or "unit"}
+
+
+def skipped_assessment_cost(resolved: ResolvedAssessor) -> dict[str, Any]:
+    """Cost record of an assessor that did not run because the attempt failed.
+
+    The assessor was not called, so its cost is a known zero (`derived`), not unavailable.
+    """
+    capability = resolved.capability
+    return {
+        "signalId": str(resolved.signal["id"]), "assessorId": capability.signal_id,
+        "assessorVersion": capability.version, "durationMs": 0,
+        "durationProvenance": Provenance.DERIVED.value,
+        "totalTokens": 0, "tokenProvenance": Provenance.DERIVED.value,
+        "skipped": "attempt_not_successful",
+    }
+
+
 def _validate_quality_observation(
     observation: QualityObservation, item: AssessmentInput, capability: SignalCapability,
 ) -> None:
@@ -299,7 +321,7 @@ def _validate_quality_observation(
                            else Provenance(capability.value_provenance))
     scale = (capability.value_scale or "unit").lower().replace(" ", "")
     scale_is_valid = True
-    if observation.value is not None and scale in {"binary", "bool", "boolean", "0/1"}:
+    if observation.value is not None and is_binary_scale(scale):
         scale_is_valid = observation.value in {0, 1}
     elif observation.value is not None and scale in {"0..1", "0-1", "[0,1]"}:
         scale_is_valid = 0 <= observation.value <= 1

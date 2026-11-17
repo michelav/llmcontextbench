@@ -69,3 +69,26 @@ class FakeReferenceAssessor(FakeQualityAssessor):
 class FailingQualityAssessor(FakeQualityAssessor):
     def assess(self, item: AssessmentInput) -> QualityObservation:
         raise RuntimeError("synthetic assessor failure")
+
+
+class FakeScoreAssessor(FakeQualityAssessor):
+    """Provider-free fixture with a continuous 0..1 scale, which does not accept `rate`."""
+
+    capability = SignalCapability(
+        signal_id="fake-response-score",
+        version="1",
+        metric_id="response_quality",
+        sensor_class="semantic_proxy",
+        value_provenance="derived",
+        cost=SignalCost(None, "unavailable", 0, "derived"),
+        value_scale="0..1",
+    )
+
+    def assess(self, item: AssessmentInput) -> QualityObservation:
+        result = super().assess(item)
+        return QualityObservation(
+            request_id=result.request_id, candidate_id=result.candidate_id, metric_id=result.metric_id,
+            value=result.value, value_scale=self.capability.value_scale,
+            assessor_id=self.capability.signal_id, assessor_version=self.capability.version,
+            sensor_class=result.sensor_class, provenance=result.provenance, cost=result.cost,
+        )

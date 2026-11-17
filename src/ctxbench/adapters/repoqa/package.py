@@ -39,16 +39,14 @@ class _RepoQAOnlineAssessor:
         self.capability = capability
 
     def assess(self, item: AssessmentInput) -> QualityObservation:
-        from ctxbench.adapters.repoqa.evaluation import (
-            _load_native_task, _load_raw_repoqa_dataset, _load_scorer, _repo_info,
-        )
+        # Same rule and default threshold as offline evaluation (`score_repoqa_response`). An
+        # experiment-specific offline threshold (validationConfig) is not applied online.
+        from ctxbench.adapters.repoqa.evaluation import score_repoqa_response
 
-        native_task = _load_native_task(self.dataset_root, item.instance_id)
-        repoqa_dataset = _load_raw_repoqa_dataset(self.dataset_root)
-        verdict, _best_target, similarity = _load_scorer()(
-            item.response.strip(), native_task, _repo_info(repoqa_dataset, native_task), False,
-        )
-        value = float(str(getattr(verdict, "value", verdict)) == "best_match" and float(similarity or 0) >= 0.8)
+        response = item.response.strip()
+        passed = bool(response) and score_repoqa_response(
+            self.dataset_root, item.instance_id, response)["passed"]
+        value = float(passed)
         return QualityObservation(
             request_id=item.request_id, candidate_id=item.candidate_id,
             metric_id=self.capability.metric_id, value=value, value_scale=self.capability.value_scale or "unit",

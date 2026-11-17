@@ -11,7 +11,7 @@ from types import MappingProxyType
 from typing import Any, Mapping, Protocol, Sequence
 
 from ctxbench.adaptive.signals import (
-    BUILTIN_SIGNAL_UNITS, FAILURE_CATEGORIES, SignalValue, signal_from_dict,
+    BUILTIN_SIGNAL_UNITS, FAILURE_CATEGORIES, SignalValue, is_binary_scale, signal_from_dict,
 )
 from ctxbench.core.errors import PolicyContractError
 from ctxbench.core.provenance import Provenance
@@ -173,8 +173,9 @@ class WindowSystemState:
         self.memo = MappingProxyType(dict(memo)) if memo is not None else None
         self.default_window = default_window
         self._candidate_ids = tuple(candidate_ids)
-        self._declared_signals = {str(row.get("id")) for row in declared_signals
-                                  if isinstance(row, Mapping) and row.get("id")}
+        # Keep the declaration rows: their value scale decides whether `rate` applies.
+        self._declared_signals = tuple(row for row in declared_signals
+                                       if isinstance(row, Mapping) and row.get("id"))
         self._audit: list[dict[str, Any]] = []
         # decision_id embeds the request ID: it seeds the generator and is not kept.
         derived_seed = int(hashlib.sha256(f"{seed}:{decision_id}".encode()).hexdigest()[:16], 16)
@@ -240,12 +241,18 @@ PrefixSystemState = WindowSystemState
 def validate_reading_request(signal: Any, statistic: Any, declared_signals: Any = ()) -> None:
     """Check a (signal, statistic) pair. Used by `plan` and by every `window()` call.
 
-    `declared_signals` is a collection of signal IDs or of declaration rows with an `id`.
+    `declared_signals` is a collection of signal IDs or of declaration rows with an `id`. A row's
+    `valueScale` gives a declared signal its unit: a binary scale is `bool`, so `rate` is checked
+    by the same rule for built-in and declared signals. A bare ID has no known scale.
     """
-    declared = {str(row.get("id")) if isinstance(row, Mapping) else str(row) for row in declared_signals}
+    declared = {str(row.get("id")) if isinstance(row, Mapping) else str(row):
+                row if isinstance(row, Mapping) else {} for row in declared_signals}
     unit = _signal_unit(signal)
     if unit is None and signal not in declared:
         raise ValueError(f"Unknown signal {signal!r}")
+    if unit is None:
+        scale = declared[signal].get("valueScale")
+        unit = "bool" if is_binary_scale(scale) else (str(scale) if scale else None)
     if not isinstance(statistic, str) or (statistic not in _STATISTICS and _percentile_q(statistic) is None):
         raise ValueError(f"Unknown statistic {statistic!r}; percentiles are p<q> with 0 < q < 100")
     if statistic == "rate" and unit is not None and unit != "bool":

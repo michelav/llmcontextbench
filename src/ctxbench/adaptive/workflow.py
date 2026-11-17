@@ -25,7 +25,7 @@ from ctxbench.adaptive.policy import (
     validate_decision, verify_policy,
 )
 from ctxbench.adaptive.sensors import (
-    AssessmentInput, assess_quality, resolve_quality_assessors,
+    AssessmentInput, assess_quality, resolve_quality_assessors, skipped_assessment_cost, skipped_quality,
 )
 from ctxbench.adaptive.signals import SignalValue, extract_signals
 from ctxbench.adaptive.state import Observation, WindowSystemState, validate_reading_request
@@ -229,7 +229,15 @@ class AdaptiveWorkflow:
             response_text = response if isinstance(response, str) else str(response or "")
             quality_values: dict[str, dict[str, Any]] = {}
             assessor_cost: list[dict[str, Any]] = []
+            succeeded = result.get("status") == "success"
             for resolved_assessor in assessors:
+                if not succeeded:
+                    # A failed attempt has no answer to assess. Its quality is unavailable, not zero,
+                    # so quality readings never mix failures with poor answers; failure has its own
+                    # failed.<category> signals.
+                    quality_values[str(resolved_assessor.signal["id"])] = skipped_quality(resolved_assessor)
+                    assessor_cost.append(skipped_assessment_cost(resolved_assessor))
+                    continue
                 observation, cost = assess_quality(
                     resolved_assessor,
                     AssessmentInput(

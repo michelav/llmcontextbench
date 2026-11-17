@@ -31,11 +31,41 @@ REPOQA_SUBPROCESS_ERROR = (
 
 RepoQAScorer = Callable[[str, dict[str, Any], dict[str, Any], bool], tuple[Any, str | None, float]]
 
+# Pass rule shared by offline evaluation and the online assessor: the response is the best match
+# for the target function and its similarity reaches the threshold.
+DEFAULT_THRESHOLD = 0.8
+
+
+def score_repoqa_response(
+    dataset_root: str | Path, instance_id: str, response: str, *,
+    threshold: float = DEFAULT_THRESHOLD, ignore_comments: bool = False,
+) -> dict[str, Any]:
+    """Score a non-empty response against its RepoQA target with the native scorer."""
+    root = Path(dataset_root)
+    native_task = _load_native_task(root, instance_id)
+    repo_info = _repo_info(_load_raw_repoqa_dataset(root), native_task)
+    verdict, best_target, best_similarity = _load_scorer()(
+        response, native_task, repo_info, bool(ignore_comments),
+    )
+    best_score = float(best_similarity or 0.0)
+    is_best_match = str(getattr(verdict, "value", verdict)) == "best_match"
+    return {
+        "threshold": threshold,
+        "ignoreComments": ignore_comments,
+        "language": native_task.get("language"),
+        "repo": native_task.get("repo"),
+        "target": native_task.get("name"),
+        "bestTarget": best_target,
+        "bestSimilarScore": best_score,
+        "isBestMatch": is_best_match,
+        "passed": bool(is_best_match and best_score >= threshold),
+    }
+
 
 def evaluate_response(
     result: TrialResult,
     *,
-    threshold: float = 0.8,
+    threshold: float = DEFAULT_THRESHOLD,
     ignore_comments: bool = False,
 ) -> EvaluationTrialResult:
     if result.status != "success":
@@ -69,36 +99,9 @@ def evaluate_response(
             },
         )
 
-    dataset_root = _dataset_root(result)
-    native_task = _load_native_task(dataset_root, result.instanceId)
-    repoqa_dataset = _load_raw_repoqa_dataset(dataset_root)
-    repo_info = _repo_info(repoqa_dataset, native_task)
-    scorer = _load_scorer()
-
-    verdict, best_target, best_similarity = scorer(
-        response,
-        native_task,
-        repo_info,
-        bool(ignore_comments),
-    )
-    best_score = float(best_similarity or 0.0)
-    is_best_match = str(getattr(verdict, "value", verdict)) == "best_match"
-    passed = bool(is_best_match and best_score >= threshold)
-    return _build_result(
-        result,
-        outcome={"passed": passed},
-        repoqa={
-            "threshold": threshold,
-            "ignoreComments": ignore_comments,
-            "language": native_task.get("language"),
-            "repo": native_task.get("repo"),
-            "target": native_task.get("name"),
-            "bestTarget": best_target,
-            "bestSimilarScore": best_score,
-            "isBestMatch": is_best_match,
-            "passed": passed,
-        },
-    )
+    scored = score_repoqa_response(_dataset_root(result), result.instanceId, response,
+                                   threshold=threshold, ignore_comments=ignore_comments)
+    return _build_result(result, outcome={"passed": scored["passed"]}, repoqa=scored)
 
 
 def _dataset_root(result: TrialResult) -> Path:
@@ -320,7 +323,7 @@ def _build_result(
 
 def evaluate_configured_response(result: TrialResult) -> EvaluationTrialResult:
     config = dict(result.validationConfig or result.metadata.validationConfig)
-    raw = config.get("threshold", 0.8)
+    raw = config.get("threshold", DEFAULT_THRESHOLD)
     try:
         threshold = float(raw)
     except (TypeError, ValueError) as exc:

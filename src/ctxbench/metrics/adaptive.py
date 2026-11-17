@@ -14,6 +14,7 @@ REQUEST_FIELDS = [
     "candidateId", "executionId", "attemptId", "attemptCount", "fallbackCount",
     "attemptsNotAccepted", "unmetConditions",
     "requestDurationMs", "requestDurationProvenance",
+    "generationDurationMs", "generationDurationProvenance",
     "generationInputTokens", "generationOutputTokens", "generationTotalTokens",
     "generationTotalTokensProvenance", "generationUsageCompleteness",
     "assessorDurationMs", "assessorDurationProvenance", "assessorTotalTokens",
@@ -31,6 +32,7 @@ REQUEST_FIELDS = [
 ATTEMPT_FIELDS = [
     "requestId", "candidateId", "executionId", "attemptId", "attemptIndex",
     "executionStatus", "startedAt", "finishedAt", "durationMs",
+    "generationDurationMs", "generationDurationProvenance",
     "inputTokens", "outputTokens", "totalTokens", "tokenProvenance", "delivered",
     "assessorDurationMs", "assessorDurationProvenance", "assessorTotalTokens",
     "assessorTokenProvenance", "knownAssessorTotalTokens",
@@ -113,6 +115,7 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
                 "unmetConditions": "|".join(unmet),
                 "requestDurationMs": request_duration,
                 "requestDurationProvenance": record.get("requestDurationProvenance", "unavailable"),
+                **_generation_duration(attempts),
                 "generationInputTokens": generation_in,
                 "generationOutputTokens": generation_out,
                 "generationTotalTokens": _sum_known(generation_in, generation_out),
@@ -162,7 +165,9 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
                 "executionStatus": result.get("status", attempt.get("state")),
                 "startedAt": started,
                 "finishedAt": finished,
+                # Attempt wall time, including online assessment; generationDurationMs excludes it.
                 "durationMs": _duration_ms(started, finished),
+                **_generation_duration([attempt]),
                 "inputTokens": usage.get("inputTokens"),
                 "outputTokens": usage.get("outputTokens"),
                 "totalTokens": usage.get("totalTokens"),
@@ -273,6 +278,24 @@ def _write_csv(path: Path, fields: list[str], rows: list[dict[str, Any]]) -> Non
         writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore", lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
+
+
+def _generation_duration(attempts: list[dict[str, Any]]) -> dict[str, Any]:
+    """Runtime-measured generation time of the attempts, without online assessment.
+
+    One attempt gives its `measured` value; several give a `derived` sum. Any attempt without a
+    measured duration makes the total unavailable.
+    """
+    values = []
+    for attempt in attempts:
+        result = attempt.get("result") if isinstance(attempt.get("result"), dict) else {}
+        timing = result.get("timing") if isinstance(result.get("timing"), dict) else {}
+        value = timing.get("durationMs")
+        values.append(value if isinstance(value, (int, float)) and not isinstance(value, bool) else None)
+    if not values or any(value is None for value in values):
+        return {"generationDurationMs": None, "generationDurationProvenance": "unavailable"}
+    return {"generationDurationMs": sum(values),
+            "generationDurationProvenance": "measured" if len(values) == 1 else "derived"}
 
 
 def _combine_assessor_costs(groups: list[Any]) -> dict[str, Any]:

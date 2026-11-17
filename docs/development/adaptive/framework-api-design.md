@@ -1,8 +1,8 @@
 # Self-adaptive provisioning and framework API — design
 
 **Status:** implementation design. WP-A, WP-B, WP-C and WP-E are implemented; WP-E review is
-recorded in [`wp-e-acceptance.md`](wp-e-acceptance.md). WP-F implementation is complete and
-awaiting review; see [`wp-f-acceptance.md`](wp-f-acceptance.md). Each later work package in
+recorded in [`wp-e-acceptance.md`](wp-e-acceptance.md). WP-F is implemented with its review fixes
+applied and awaits approval; see [`wp-f-acceptance.md`](wp-f-acceptance.md). Each later work package in
 [section 11](#11-work-packages) needs its own approval before implementation starts.
 
 **Audience:** an agent or team implementing the refactor without access to the design discussion.
@@ -583,7 +583,7 @@ policy decides on it.
 | `sum` | Sum of values. | `value = None`, `provenance = unavailable`, `known_subtotal` = sum of available values. |
 | `mean`, `median`, `min`, `max`, `last` | Over available values. | Computed over available values; `missing_count` reported. |
 | `p<q>` (for example `p95`) | Linear-interpolation percentile over available values, `0 < q < 100`, as computed by `metrics/aggregate.py::percentile`. Needs at least two available values; with fewer the reading is unavailable. | Same as `mean`. |
-| `rate` | Mean of a 0/1 signal. | Same as `mean`. |
+| `rate` | Mean of a 0/1 signal: a built-in `bool` signal, or a declared signal whose `valueScale` is binary (`binary`, `bool`, `boolean`, `0/1`). Checked at `plan` and at `window()`. | Same as `mean`. |
 | `count` | Number of observations in the window (available or not). | Always available. |
 
 - An empty selection gives `value = None`, `provenance = unavailable`, `sample_count = 0` for
@@ -811,6 +811,15 @@ class OnlineQualityAssessor(Protocol):
 - The assessor receives `AssessmentInput(request_id, task_id, instance_id, candidate_id, response)`
   and runs after the invocation, before the observation is committed. An exception or invalid
   observation yields an unavailable value with measured assessor duration.
+- **Only successful attempts are assessed.** An attempt whose execution status is not `success`
+  has no answer to judge: the assessor is not called, the quality signal is `unavailable` (never
+  `0`), and the cost record is a known zero (`durationMs: 0`, `totalTokens: 0`, both `derived`)
+  with `skipped: "attempt_not_successful"`. Quality readings therefore never mix failures with
+  poor answers; failure has its own `failed.<category>` signals.
+- Assessment runs inside the attempt, so its result is stored atomically with the execution and
+  resume never assesses twice. The attempt's wall time (`durationMs`) therefore includes
+  assessment; `generationDurationMs` (the runtime-measured `timing.durationMs`, also the
+  `latency_ms` signal) does not.
 - Dataset-backed assessor references resolve through `DatasetPackage.online_assessor`; external
   `module:Class` references expose a `SignalCapability` and their source digest is frozen in the
   adaptive plan and execution fingerprint. Execution refuses changed assessor sources or
@@ -1432,7 +1441,11 @@ indistinguishable and reproducibility does not depend on how an experiment was w
 
 `metrics/adaptive.py` request rows gain: `labels.*` (one column per label key),
 `failureCategory`, `policyId`, `policyVersion`, `privileged`,
-`assessorTotalTokens`, `assessorDurationMs`. Attempt rows gain one column per
+`assessorTotalTokens`, `assessorDurationMs` (with provenance columns and
+`knownAssessorTotalTokens`), `generationDurationMs` and its provenance (runtime-measured
+generation time without online assessment; `measured` for one attempt). Attempt rows gain the
+same assessor and generation-duration columns; their `durationMs` is attempt wall time,
+including assessment. Attempt rows also gain one column per
 built-in signal with a `<signal>Provenance` column, `failureCategory`, `accepted`,
 `injectedDelayMs`, `injectedFailures`. Existing columns keep their names and meanings; the
 fallback columns (`fallbackCount`, `attemptsNotAccepted`) are removed, because a request has at

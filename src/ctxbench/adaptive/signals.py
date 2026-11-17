@@ -32,6 +32,15 @@ class SignalValue:
         return {"value": self.value, "provenance": self.provenance.value, "unit": self.unit}
 
 
+# Value scales of declared (quality) signals that hold only 0 and 1. Such a signal accepts the
+# `rate` statistic, exactly like a built-in `bool` signal.
+BINARY_VALUE_SCALES = frozenset({"binary", "bool", "boolean", "0/1"})
+
+
+def is_binary_scale(scale: Any) -> bool:
+    return isinstance(scale, str) and scale.lower().replace(" ", "") in BINARY_VALUE_SCALES
+
+
 BUILTIN_SIGNAL_UNITS = {
     "latency_ms": "ms", "total_tokens": "tokens", "input_tokens": "tokens",
     "output_tokens": "tokens", "cached_input_tokens": "tokens", "reasoning_tokens": "tokens",
@@ -152,5 +161,5 @@ def _number(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and isfinite(float(value))
 
 
-__all__ = ["BUILTIN_SIGNAL_UNITS", "FAILURE_CATEGORIES", "SignalValue", "classify_failure",
+__all__ = ["BINARY_VALUE_SCALES", "BUILTIN_SIGNAL_UNITS", "FAILURE_CATEGORIES", "is_binary_scale", "SignalValue", "classify_failure",
            "extract_signals", "signal_from_dict"]
