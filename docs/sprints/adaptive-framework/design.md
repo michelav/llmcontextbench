@@ -1,11 +1,11 @@
 # Self-adaptive provisioning and framework API — design
 
 **Status:** implementation design. WP-A, WP-B, WP-C and WP-E are implemented; WP-E is accepted
-([`wp-e-acceptance.md`](wp-e-acceptance.md)) and WP-F is approved
-([`wp-f-acceptance.md`](wp-f-acceptance.md)). WP-P and WP-G are implemented with review fixes
-applied and await acceptance ([`wp-p-acceptance.md`](wp-p-acceptance.md),
-[`wp-g-acceptance.md`](wp-g-acceptance.md)). WP-H is implemented with review fixes applied and
-awaits acceptance ([`wp-h-acceptance.md`](wp-h-acceptance.md)). Each later work package in
+([`wp-e-acceptance.md`](acceptance/wp-e-acceptance.md)) and WP-F is approved
+([`wp-f-acceptance.md`](acceptance/wp-f-acceptance.md)). WP-P and WP-G are implemented with review fixes
+applied and await acceptance ([`wp-p-acceptance.md`](acceptance/wp-p-acceptance.md),
+[`wp-g-acceptance.md`](acceptance/wp-g-acceptance.md)). WP-H is implemented with review fixes applied and
+awaits acceptance ([`wp-h-acceptance.md`](acceptance/wp-h-acceptance.md)). Each later work package in
 [section 11](#11-work-packages) needs its own approval before implementation starts.
 
 **Audience:** an agent or team implementing the refactor without access to the design discussion.

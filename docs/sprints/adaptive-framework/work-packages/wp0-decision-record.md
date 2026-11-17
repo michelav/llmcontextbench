@@ -4,7 +4,7 @@ Status: decisions frozen for WP1–WP6 implementation, subject to review at the 
 Date: 2026-11-11
 
 This record resolves the contract questions for the staged re-architecture described in
-[`architecture-assessment-and-plan.md`](architecture-assessment-and-plan.md). It constrains new
+[`architecture-assessment-and-plan.md`](../architecture-assessment-and-plan.md). It constrains new
 behavior; it does not certify current adaptive v1 behavior as correct.
 
 ## Workflow and identity

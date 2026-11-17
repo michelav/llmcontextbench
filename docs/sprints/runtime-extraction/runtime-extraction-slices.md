@@ -1,10 +1,10 @@
 # Runtime Extraction Implementation Slices
 
-> Current architecture and workflow contracts are documented in [workflow-contracts](workflow-contracts.md).
+> Current architecture and workflow contracts are documented in [workflow-contracts](../../architecture/workflows/workflow-contract.md).
 
 Use this sequence with the baseline in
 [`runtime-extraction.md`](runtime-extraction.md) and the long-term roadmap in
-[`../llmcontextbench-evolution-plan.md`](../llmcontextbench-evolution-plan.md).
+[`../llmcontextbench-evolution-plan.md`](../evolution-plan/llmcontextbench-evolution-plan.md).
 Implement one green slice per commit. Do not begin the next slice until the
 preceding acceptance gate passes.
 

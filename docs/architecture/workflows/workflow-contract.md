@@ -34,8 +34,8 @@ according to the explicit retry policy.
 - Evaluation records remain separate from execution and controller observations.
   Offline evaluation does not become online Knowledge for the active episode.
 
-See [artifact contracts](artifact-contracts.md), [adaptive plan contract](adaptive-plan-v3.md),
-and the [architecture assessment and removal plan](../development/adaptive/architecture-assessment-and-plan.md).
+See [artifact contracts](../contracts/artifacts.md), [adaptive plan contract](../contracts/adaptive-plan-v3.md),
+and the [architecture assessment and removal plan](../../sprints/adaptive-framework/architecture-assessment-and-plan.md).
 
 ## Support policy
 

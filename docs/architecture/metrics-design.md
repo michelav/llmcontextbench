@@ -1,6 +1,6 @@
 <!-- Current benchmark provisioning artifacts use version 4; adaptive artifacts follow their separate versioned contract. -->
 
-> Current architecture and workflow contracts are documented in [workflow-contracts](workflow-contracts.md).
+> Current architecture and workflow contracts are documented in [workflow-contracts](workflows/workflow-contract.md).
 # Benchmark metrics design: `llmctxbench metrics`
 
 > Design reference for the already-shipped `llmctxbench metrics` command. Relocated
@@ -12,7 +12,7 @@
 > projections. The command also dispatches adaptive artifacts to request-level and
 > attempt-level metrics (`adaptive_request_metrics.csv` and
 > `adaptive_attempt_metrics.csv`); those records have separate units and do not use the
-> benchmark trial dimensions below. See [workflow contracts](workflow-contracts.md) for
+> benchmark trial dimensions below. See [workflow contracts](workflows/workflow-contract.md) for
 > the current artifact authority and [the adaptive metrics implementation](../../src/ctxbench/metrics/adaptive.py).
 
 ## 1. Feature Summary

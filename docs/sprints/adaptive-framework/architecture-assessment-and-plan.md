@@ -95,7 +95,7 @@ Other findings that constrain the target design:
 ### Review addendum: decisions required before implementation
 
 The WP0 contract decisions are recorded in
-[`wp0-decision-record.md`](wp0-decision-record.md). That record supersedes the open design
+[`wp0-decision-record.md`](work-packages/wp0-decision-record.md). That record supersedes the open design
 questions below for the staged implementation; the architecture assessment remains the description
 of current behavior and implementation risks.
 
@@ -170,9 +170,9 @@ The current `kind: "adaptive"` cascade example has a fixed primary and fallback 
 policies can use calibration/history, but the current path is not yet a uniform, explicit MAPE-K
 workflow architecture. The existing study runners have richer controller behavior, but remain
 separate paths. See the implemented contracts in
-[`workflow-contracts.md`](../../architecture/workflow-contracts.md#implemented-increment-minimal-adaptive-lifecycle-s08-and-request-outcomes-s09)
+[`workflow-contracts.md`](../../architecture/workflows/workflow-contract.md#implemented-increment-minimal-adaptive-lifecycle-s08-and-request-outcomes-s09)
 and the MAPE-K discussion in the historical
-[`llmctxbench-evolution-plan.md`](../../llmcontextbench-evolution-plan.md).
+[`llmctxbench-evolution-plan.md`](../evolution-plan/llmcontextbench-evolution-plan.md).
 
 ## Target architecture
 

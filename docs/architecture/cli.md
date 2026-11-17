@@ -1,6 +1,6 @@
 # CLI Architecture
 
-> Current architecture and workflow contracts are documented in [workflow-contracts](workflow-contracts.md).
+> Current architecture and workflow contracts are documented in [workflow-contracts](workflows/workflow-contract.md).
 
 ## Purpose
 
@@ -121,7 +121,7 @@ llmctxbench
 
 The table below is a migration reference only. Public CLI commands and selectors use the target
 forms only and do not expose aliases. For the authoritative artifact reference, see
-`docs/architecture/artifact-contracts.md`.
+`docs/architecture/contracts/artifacts.md`.
 
 | Current | Target |
 |---|---|

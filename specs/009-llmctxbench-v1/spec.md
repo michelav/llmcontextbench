@@ -3,7 +3,7 @@
 Status: accepted; Level 3 architectural/schema/provider change.
 
 The normative requirements, exclusions and migration policy are in the
-[accepted design](../../docs/development/llmctxbench-v1-refactor-plan.md).
+[accepted design](../../docs/sprints/v1-refactor/llmctxbench-v1-refactor-plan.md).
 The [architecture contracts](../../docs/architecture/v1-contracts.md) specify ownership and recovery.
 The [tasks](tasks.md) define delivery gates; [worklog](worklog.md) records evidence.
 

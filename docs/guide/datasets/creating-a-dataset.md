@@ -158,7 +158,7 @@ What to check:
 - missing mandatory capabilities are empty
 
 For workflow-level validation, use the provider-free conformance path described in
-[`quickstart.md`](../../specs/003-dataset-distribution/quickstart.md) and keep fake
+[`quickstart.md`](../../../specs/003-dataset-distribution/quickstart.md) and keep fake
 responders/judges in test-only fixtures.
 
 ## Boundary ownership note

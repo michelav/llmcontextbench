@@ -1,6 +1,6 @@
 # LLMContextBench Architecture
 
-> Current architecture and workflow contracts are documented in [workflow-contracts](workflow-contracts.md).
+> Current architecture and workflow contracts are documented in [workflow-contracts](workflows/workflow-contract.md).
 
 This document is the entry point for the LLMContextBench architecture documentation. It's loosely organized into [C4 Model](https://c4model.com/) style but with a few other structures added when necessary.
 
@@ -35,7 +35,7 @@ results.csv
 Adaptive plans use `adaptive-plan.json` rather than `trials.jsonl`. Each request persists
 its decisions and delivery; every invocation has a durable execution record. The adaptive
 `responses.jsonl` projection contains delivered responses, while attempt records retain
-failures, rejection, retries, and cost. See [workflow contracts](workflow-contracts.md).
+failures, rejection, retries, and cost. See [workflow contracts](workflows/workflow-contract.md).
 
 ## Technology baseline
 
@@ -219,7 +219,7 @@ outputs/<experimentId>/
 ## Historical migration reference
 
 The table below is a migration reference only. The public CLI, selectors, artifact names, record fields, and strategy labels use the target forms only. Legacy names are not accepted as aliases.
-For the authoritative artifact contract, see `docs/architecture/artifact-contracts.md`.
+For the authoritative artifact contract, see `docs/architecture/contracts/artifacts.md`.
 
 | Current | Target |
 |---|---|

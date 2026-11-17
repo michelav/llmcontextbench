@@ -47,7 +47,7 @@ through their declared capabilities. Dataset-specific behavior stays in its adap
 
 `export`, `metrics`, and `status` read existing artifacts without resolving or fetching datasets.
 They rebuild derived projections from canonical records and do not call model providers.
-See [artifact contracts](artifact-contracts.md) for authority, versions, provenance, and historical
+See [artifact contracts](../contracts/artifacts.md) for authority, versions, provenance, and historical
 artifact policy.
 
 ## Version policy

@@ -2,7 +2,7 @@
 
 Accepted by the research owner in this conversation; implementation branch: `refactor/llmctxbench-v1`.
 This replaces the earlier draft and its proposed decisions. Implementation status is tracked in
-[the slice checklist](../../specs/009-llmctxbench-v1/tasks.md), not inferred from this target design.
+[the slice checklist](../../../specs/009-llmctxbench-v1/tasks.md), not inferred from this target design.
 
 ## Purpose and scope
 
@@ -56,7 +56,7 @@ Models and provisioning configurations are separate; a candidate is their pair.
 
 ## Artifact authority and migration
 
-See [the target contracts](../architecture/workflow-contracts.md). Existing artifact contracts remain the
+See [the target contracts](../../architecture/workflows/workflow-contract.md). Existing artifact contracts remain the
 implemented baseline until the corresponding slice migrates readers and writers together.
 Breaking changes use explicit versions and reject historical artifacts; historical readers live at
 the old tag. No automatic in-place artifact migration or compatibility-reader framework is planned.

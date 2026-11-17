@@ -153,7 +153,7 @@ nix run
 
 For NixOS users working with RepoQA tooling, prefer the wrappers under
 `tools/repoqa/`. They add runtime library paths needed by some binary wheels.
-See [`docs/repoqa.md`](docs/repoqa.md).
+See [`docs/guide/datasets/repoqa.md`](docs/guide/datasets/repoqa.md).
 
 ### Non-Nix Systems
 
@@ -229,7 +229,7 @@ For provider-free examples, start with
 [`examples/benchmark/static-minimal.json`](examples/benchmark/static-minimal.json)
 or [`examples/adaptive/minimal.json`](examples/adaptive/minimal.json). The concrete
 Lattes and RepoQA benchmark examples use configured providers and may incur cost if
-executed. See [workflow contracts](docs/architecture/workflow-contracts.md) for
+executed. See [workflow contracts](docs/architecture/workflows/workflow-contract.md) for
 artifact versions, recovery, and unsupported historical formats.
 
 ### 3. Plan the Experiment
@@ -362,7 +362,7 @@ Or by package identity and version when materialized in the cache:
 ```
 
 For dataset authoring and distribution requirements, see
-[`docs/datasets/creating-a-dataset.md`](docs/datasets/creating-a-dataset.md).
+[`docs/guide/datasets/creating-a-dataset.md`](docs/guide/datasets/creating-a-dataset.md).
 
 ## Strategies
 
@@ -416,7 +416,7 @@ Canonical lifecycle artifacts are JSON or JSONL. `results.csv` is a derived
 export for analysis.
 
 For the detailed artifact contract and migration rules, see
-[`docs/architecture/artifact-contracts.md`](docs/architecture/artifact-contracts.md).
+[`docs/architecture/contracts/artifacts.md`](docs/architecture/contracts/artifacts.md).
 
 ## Development
 
@@ -457,14 +457,14 @@ cd ../..
 tools/repoqa/repoqa_build_dataset --help
 ```
 
-See [`docs/repoqa.md`](docs/repoqa.md) for RepoQA-specific setup, Nix runtime
+See [`docs/guide/datasets/repoqa.md`](docs/guide/datasets/repoqa.md) for RepoQA-specific setup, Nix runtime
 notes, and local clone overrides.
 
 ## Adaptive execution
 
 The adaptive workflow uses the shared execution service and records decisions and
 deliveries per request. See the [provider-free validation guide](docs/development/validation-guide.md)
-for both lifecycles and [the adaptive plan contract](docs/architecture/adaptive-plan-v3.md).
+for both lifecycles and [the adaptive plan contract](docs/architecture/contracts/adaptive-plan-v3.md).
 
 ## Compatibility Notes
 

@@ -1,6 +1,6 @@
 # Vocabulary
 
-> Current architecture and workflow contracts are documented in [workflow-contracts](workflow-contracts.md).
+> Current architecture and workflow contracts are documented in [workflow-contracts](workflows/workflow-contract.md).
 
 ## Core terms
 
@@ -149,7 +149,7 @@ judge_votes.jsonl
 
 This mapping is provided for migration planning only. Public CLI and artifact contracts use the
 target terms only and do not expose legacy aliases. For the authoritative artifact reference, see
-`docs/architecture/artifact-contracts.md`.
+`docs/architecture/contracts/artifacts.md`.
 
 | Current | Target |
 |---|---|

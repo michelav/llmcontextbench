@@ -1,6 +1,6 @@
 # LLMCtxBench v1 implementation checklist
 
-Authority: [accepted design](../../docs/development/llmctxbench-v1-refactor-plan.md).
+Authority: [accepted design](../../docs/sprints/v1-refactor/llmctxbench-v1-refactor-plan.md).
 States: pending → in progress → verified → complete. Completion requires checks, diff review,
 documentation updates and a commit. Record command output summaries and commits in worklog.md.
 

@@ -1,6 +1,6 @@
 # C4 — Deployment Diagram
 
-> Current architecture and workflow contracts are documented in [workflow-contracts](workflow-contracts.md).
+> Current architecture and workflow contracts are documented in [workflow-contracts](../workflows/workflow-contract.md).
 
 ## Purpose
 

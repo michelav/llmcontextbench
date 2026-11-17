@@ -1,13 +1,13 @@
 # Historical Runtime Extraction Baseline
 
-> Current architecture and workflow contracts are documented in [workflow-contracts](workflow-contracts.md).
+> Current architecture and workflow contracts are documented in [workflow-contracts](../../architecture/workflows/workflow-contract.md).
 
 This historical note records the first implementation boundary for the staged evolution in
-[`../llmcontextbench-evolution-plan.md`](../llmcontextbench-evolution-plan.md).
+[`../llmcontextbench-evolution-plan.md`](../evolution-plan/llmcontextbench-evolution-plan.md).
 It covers Phases 0–3: establish the current execution path, introduce
 trial-independent contracts, add a benchmark adapter, and migrate `inline` only.
 It describes an earlier implementation snapshot and is not the current runtime API
-or workflow contract. See [workflow contracts](workflow-contracts.md) for the current
+or workflow contract. See [workflow contracts](../../architecture/workflows/workflow-contract.md) for the current
 benchmark/adaptive architecture.
 
 ## Status in this historical snapshot
