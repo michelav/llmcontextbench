@@ -302,3 +302,22 @@ def test_repoqa_online_assessor_uses_the_offline_scoring_rule(monkeypatch, verdi
     assert observation.value == float(passed)
     empty, _ = assess_quality(resolved, AssessmentInput("r", "t", "i", "A", "   "))
     assert empty.value == 0.0  # as offline: an empty response does not pass
+
+
+def test_external_assessor_declared_source_changes_are_refused(tmp_path: Path):
+    plugin = tmp_path / "quality_plugins"
+    plugin.mkdir()
+    (plugin / "online_assessor.py").write_text(
+        (FIXTURE_ROOT / "online_assessor.py").read_text(encoding="utf-8"), encoding="utf-8")
+    table = plugin / "table.json"
+    table.write_text("{}", encoding="utf-8")
+    definition = _definition(request_count=1)
+    definition["signals"][0]["sources"] = [str(table)]
+    run = plan(definition, output=tmp_path / "sources-run", plugin_paths=[plugin])
+    signal = load_json(run.root / "adaptive-plan.json")["signals"][0]
+    assert signal["sources"] == ["table.json"]
+    assert str(tmp_path) not in json.dumps(signal)
+
+    table.write_text('{"changed": true}', encoding="utf-8")
+    with pytest.raises(ExecutionStateError, match="Online assessor source changed"):
+        run.execute(plugin_paths=[plugin])

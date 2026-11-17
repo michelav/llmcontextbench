@@ -12,7 +12,7 @@ from time import perf_counter
 from typing import Any, Mapping, Sequence
 
 from ctxbench.adaptive.artifacts import (
-    ADAPTIVE_ARTIFACT_VERSION, adaptive_plan_from_payload, adaptive_plan_payload,
+    ADAPTIVE_ARTIFACT_VERSION, adaptive_dataset_digest, adaptive_plan_from_payload, adaptive_plan_payload,
     validate_workflow_manifest, write_adaptive_artifacts,
 )
 from ctxbench.adaptive.definition import AdaptiveExperiment, load_adaptive_experiment
@@ -31,7 +31,7 @@ from ctxbench.adaptive.signals import SignalValue, extract_signals
 from ctxbench.adaptive.state import Observation, WindowSystemState, validate_reading_request
 from ctxbench.core.errors import CapabilityUnavailableError, InvalidDefinitionError
 from ctxbench.runtime.disturbances import build_runtime_disturbances
-from ctxbench.core.fingerprint import digest, implementation_digest, implementation_provenance, tree_digest
+from ctxbench.core.fingerprint import digest, implementation_digest, implementation_provenance
 from ctxbench.core.provenance import Provenance
 from ctxbench.core.surfaces import parse_surface
 from ctxbench.core.workflow import (
@@ -169,11 +169,7 @@ class AdaptiveWorkflow:
                 validation_config=dict(task.validation_config), context_blocks=tuple(task.context_blocks),
                 labels=dict(workload_item.labels),
             ))
-        dataset_root = provenance.materialized_path
-        dataset_digest = (tree_digest(Path(dataset_root)) if dataset_root and Path(dataset_root).is_dir()
-                          else provenance.content_hash)
-        if not dataset_digest:
-            raise ValueError("Adaptive planning requires a dataset content digest.")
+        dataset_digest = adaptive_dataset_digest(provenance)
         return AdaptivePlan(
             workflow_id=definition.id, seed=definition.seed, labels=dict(definition.labels),
             candidates=tuple(candidate_specs), requests=tuple(requests),
@@ -485,7 +481,7 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
                     "accepted": accepted,
                     "disturbances": disturbances,
                     "assessorCost": assessor_cost,
-                    "implementationDigest": result.pop("_runtimeImplementationDigest", active_implementation_digest),
+                    "implementationDigest": active_implementation_digest,
                 }
                 return {**result, "_adaptiveSignals": adaptive_signals}
 

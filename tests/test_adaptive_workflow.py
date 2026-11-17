@@ -381,3 +381,129 @@ def test_interrupted_run_resumes_to_the_same_records_as_an_uninterrupted_run(tmp
     assert comparable(resumed) == comparable(uninterrupted)
     assert [row["interrupted"] for row in resumed.requests()] == [False, False, True, False]
     assert verify_replay(resumed.root) == []
+
+
+# --- WP-P: plan as fingerprint -----------------------------------------------------------------
+
+def _attempt_digests(root: Path) -> list[str]:
+    return [load_json(path)["attempts"][0]["implementationDigest"]
+            for path in sorted((root / "adaptive-records").glob("*.json"))]
+
+
+def test_execution_fingerprint_is_plan_hash_and_plan_records_provenance(tmp_path: Path) -> None:
+    from ctxbench.core.fingerprint import file_digest, implementation_digest, tree_digest
+
+    run = plan(_definition(), output=tmp_path / "run")
+    manifest = load_json(run.root / "manifest.json")
+    assert manifest["executionFingerprint"] == file_digest(run.root / "adaptive-plan.json")
+    assert "fingerprintInputs" not in manifest and "planDigest" not in manifest
+    provenance = load_json(run.root / "adaptive-plan.json")["provenance"]
+    assert provenance["dataset"]["digest"] == tree_digest(DATASET.resolve())
+    assert provenance["implementation"]["digest"] == implementation_digest()
+    assert "openai" in provenance["implementation"]["dependencies"]
+
+
+def test_edited_plan_is_refused_at_execute(tmp_path: Path) -> None:
+    run = plan(_definition(), output=tmp_path / "run")
+    plan_path = run.root / "adaptive-plan.json"
+    payload = load_json(plan_path)
+    payload["seed"] = payload["seed"] + 1
+    plan_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with pytest.raises(ExecutionStateError, match="frozen adaptive plan"):
+        open_run(run.root).execute()
+    assert not (run.root / "adaptive-records").exists() or not any((run.root / "adaptive-records").iterdir())
+
+
+def test_changed_dataset_is_refused_at_execute(tmp_path: Path) -> None:
+    import shutil
+
+    dataset = tmp_path / "dataset"
+    shutil.copytree(DATASET, dataset)
+    definition = _definition()
+    definition["dataset"]["root"] = str(dataset)
+    run = plan(definition, output=tmp_path / "run")
+    changed = next(path for path in sorted(dataset.rglob("*")) if path.is_file())
+    changed.write_text(changed.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    with pytest.raises(ExecutionStateError, match="dataset changed since planning"):
+        open_run(run.root).execute()
+
+
+def test_missing_dataset_is_reported_as_missing(tmp_path: Path) -> None:
+    import shutil
+
+    dataset = tmp_path / "dataset"
+    shutil.copytree(DATASET, dataset)
+    definition = _definition()
+    definition["dataset"]["root"] = str(dataset)
+    run = plan(definition, output=tmp_path / "run")
+    shutil.rmtree(dataset)
+    with pytest.raises(ExecutionStateError, match="dataset is missing"):
+        open_run(run.root).execute()
+
+
+def test_changed_implementation_is_recorded_not_refused(tmp_path: Path, monkeypatch) -> None:
+    import ctxbench.adaptive.workflow as workflow_module
+
+    run = plan(_definition(request_count=2), output=tmp_path / "run")
+    real_execute = TrialExecutionService.execute
+    calls = {"count": 0}
+
+    def stop_before_second_request(self, *args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            raise RuntimeError("simulated stop")
+        return real_execute(self, *args, **kwargs)
+
+    monkeypatch.setattr(TrialExecutionService, "execute", stop_before_second_request)
+    with pytest.raises(RuntimeError, match="simulated stop"):
+        run.execute()
+    monkeypatch.setattr(TrialExecutionService, "execute", real_execute)
+    monkeypatch.setattr(workflow_module, "implementation_digest", lambda: "changed-implementation")
+    resumed = open_run(run.root)
+    assert resumed.execute().counts["delivered"] == 2
+
+    first, second = _attempt_digests(run.root)
+    assert first != "changed-implementation"
+    assert second == "changed-implementation"
+    assert "Implementations: 2 digest(s); mixed=True" in resumed.status().report
+
+    resumed.metrics(output=tmp_path / "metrics")
+    metrics_manifest = load_json(tmp_path / "metrics" / "metrics-manifest.json")
+    assert metrics_manifest["implementationDigests"] == sorted([first, second])
+    assert metrics_manifest["mixedImplementations"] is True
+    with (tmp_path / "metrics" / "adaptive_attempt_metrics.csv").open(encoding="utf-8") as handle:
+        import csv
+        rows = list(csv.DictReader(handle))
+    assert sorted(row["implementationDigest"] for row in rows) == sorted([first, second])
+
+
+def test_single_implementation_is_not_reported_as_mixed(tmp_path: Path) -> None:
+    run = plan(_definition(request_count=2), output=tmp_path / "run")
+    run.execute()
+    assert len(set(_attempt_digests(run.root))) == 1
+    assert "Implementations: 1 digest(s); mixed=False" in open_run(run.root).status().report
+    run.metrics(output=tmp_path / "metrics")
+    assert load_json(tmp_path / "metrics" / "metrics-manifest.json")["mixedImplementations"] is False
+
+
+def test_replayed_attempt_keeps_the_digest_it_ran_with(tmp_path: Path, monkeypatch) -> None:
+    import ctxbench.adaptive.workflow as workflow_module
+
+    run = plan(_definition(), output=tmp_path / "run")
+    real_write = workflow_module.write_json
+
+    def interrupt_before_terminal_record(path, value):
+        if Path(path).parent.name == "adaptive-records" and value.get("state") == "delivered":
+            raise RuntimeError("simulated interruption after durable execution")
+        return real_write(path, value)
+
+    monkeypatch.setattr(workflow_module, "implementation_digest", lambda: "original-implementation")
+    monkeypatch.setattr(workflow_module, "write_json", interrupt_before_terminal_record)
+    with pytest.raises(RuntimeError, match="after durable execution"):
+        run.execute()
+
+    monkeypatch.setattr(workflow_module, "write_json", real_write)
+    monkeypatch.setattr(workflow_module, "implementation_digest", lambda: "resumed-implementation")
+    outcome = open_run(run.root).execute()
+    assert outcome.counts["delivered"] == 1
+    assert _attempt_digests(run.root) == ["original-implementation"]

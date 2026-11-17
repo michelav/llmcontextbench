@@ -184,7 +184,7 @@ def validate_workflow_manifest(root: str | Path, *, execution: bool = False,
         raise ValueError("Adaptive manifest does not match its frozen adaptive plan.")
     if execution:
         expected_dataset_digest = plan.provenance.get("dataset", {}).get("digest")
-        actual_dataset_digest = _dataset_digest(manifest["dataset"])
+        actual_dataset_digest = adaptive_dataset_digest(manifest["dataset"])
         if not expected_dataset_digest or actual_dataset_digest != expected_dataset_digest:
             raise ValueError("Adaptive dataset changed since planning; create a fresh adaptive plan.")
         from ctxbench.adaptive.policy import verify_policy
@@ -226,13 +226,26 @@ def _plan_fingerprint(payload: dict[str, Any]) -> str:
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 
 
-def _dataset_digest(provenance: dict[str, Any]) -> str | None:
-    dataset_root = provenance.get("materializedPath") or provenance.get("materialized_path")
-    if dataset_root and Path(dataset_root).is_dir():
+def adaptive_dataset_digest(dataset: DatasetProvenance | dict[str, Any]) -> str:
+    """Return the dataset digest frozen in, and verified against, an adaptive plan.
+
+    A materialized dataset is digested from its files. A dataset without a materialized path
+    falls back to its declared ``contentHash``; that value is an identifier from the dataset
+    source, not a digest of files the benchmark can read, so changes behind it are not detected.
+    """
+    provenance = DatasetProvenance.model_validate(dataset)
+    dataset_root = provenance.materialized_path
+    if dataset_root:
+        if not Path(dataset_root).is_dir():
+            raise ValueError(f"Adaptive dataset is missing at {dataset_root}; "
+                             "restore it or create a fresh adaptive plan.")
         return tree_digest(Path(dataset_root))
-    return provenance.get("contentHash") or provenance.get("content_hash")
+    if not provenance.content_hash:
+        raise ValueError("Adaptive dataset has neither a materialized path nor a content digest.")
+    return provenance.content_hash
 
 
-__all__ = ["ADAPTIVE_ARTIFACT_VERSION", "ADAPTIVE_MANIFEST_VERSION", "adaptive_plan_payload",
+__all__ = ["ADAPTIVE_ARTIFACT_VERSION", "ADAPTIVE_MANIFEST_VERSION", "adaptive_dataset_digest",
+           "adaptive_plan_payload",
            "adaptive_plan_from_payload", "adaptive_plan_schema", "validate_workflow_manifest",
            "write_adaptive_artifacts"]
