@@ -31,6 +31,7 @@ REQUEST_FIELDS = [
 ]
 ATTEMPT_FIELDS = [
     "requestId", "candidateId", "executionId", "attemptId", "attemptIndex",
+    "implementationDigest",
     "executionStatus", "startedAt", "finishedAt", "durationMs",
     "generationDurationMs", "generationDurationProvenance",
     "inputTokens", "outputTokens", "totalTokens", "tokenProvenance", "delivered",
@@ -162,6 +163,7 @@ def build_adaptive_metrics(root: str | Path) -> tuple[list[dict[str, Any]], list
                 "executionId": attempt.get("executionId"),
                 "attemptId": attempt.get("attemptId"),
                 "attemptIndex": attempt.get("attemptIndex"),
+                "implementationDigest": adaptive_signals.get("implementationDigest"),
                 "executionStatus": result.get("status", attempt.get("state")),
                 "startedAt": started,
                 "finishedAt": finished,

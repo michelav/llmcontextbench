@@ -6,6 +6,7 @@ from enum import StrEnum
 import importlib
 import inspect
 from math import isfinite
+import os
 from pathlib import Path
 import sys
 from time import perf_counter
@@ -134,6 +135,7 @@ class ResolvedAssessor:
 def resolve_quality_assessors(
     signals: Sequence[Mapping[str, Any]], package: object, *,
     plugin_paths: Sequence[str | Path] = (), expected: bool = False,
+    base_dir: str | Path | None = None,
 ) -> tuple[ResolvedAssessor, ...]:
     """Resolve declared quality sensors and validate their frozen capability contract."""
     report = package.capability_report()
@@ -151,10 +153,10 @@ def resolve_quality_assessors(
         ref = str(row.get("assessor", ""))
         if not ref:
             raise ValueError(f"Quality signal {signal_id!r} requires an assessor reference")
-        source_digest = None
+        source_path: Path | None = None
         if ":" in ref:
             try:
-                assessor, capability, source_digest = _load_external_assessor(ref, plugin_paths)
+                assessor, capability, source_path = _load_external_assessor(ref, plugin_paths)
             except Exception as exc:
                 raise ValueError(f"Could not resolve online assessor {ref!r}: {exc}") from exc
         else:
@@ -176,11 +178,15 @@ def resolve_quality_assessors(
             if not source:
                 raise ValueError(f"Could not locate source for dataset online assessor {ref!r}")
             source_path = Path(source).resolve()
-            source_digest = digest([(source_path.name, file_digest(source_path))])
         if capability.metric_id != metric_id:
             raise ValueError(
                 f"Quality signal {signal_id!r} does not match assessor metric {capability.metric_id!r}"
             )
+        if source_path is None:
+            raise ValueError(f"Could not locate source for online assessor {ref!r}")
+        source_digest, recorded_sources = _assessor_sources(
+            source_path, row.get("sources") or (), base_dir=base_dir,
+        )
         frozen = {
             **dict(row),
             "metricId": capability.metric_id,
@@ -200,6 +206,10 @@ def resolve_quality_assessors(
             if expected and row.get("sourceDigest") != source_digest:
                 raise ValueError("Online assessor source changed since planning; create a fresh adaptive plan.")
             frozen["sourceDigest"] = source_digest
+            if recorded_sources:
+                if expected and tuple(row.get("sources") or ()) != recorded_sources:
+                    raise ValueError("Online assessor source list changed since planning; create a fresh adaptive plan.")
+                frozen["sources"] = list(recorded_sources)
         if expected:
             for key in ("metricId", "assessorVersion", "sensorClass", "valueProvenance",
                         "valueScale", "usesReferenceData", "declaredCost"):
@@ -232,12 +242,32 @@ def _load_external_assessor(ref: str, plugin_paths: Sequence[str | Path]):
         if not isinstance(capability, SignalCapability) or not source:
             raise ValueError(f"Online assessor {ref!r} must expose a SignalCapability and source file")
         source_path = Path(source).resolve()
-        return instance, capability, digest([(source_path.name, file_digest(source_path))])
+        return instance, capability, source_path
     finally:
         sys.modules.pop(module_name, None)
         if previous_module is not None:
             sys.modules[module_name] = previous_module
         sys.path[:] = old_path
+
+
+def _assessor_sources(
+    assessor_path: Path, sources: Sequence[str], *, base_dir: str | Path | None,
+) -> tuple[str, tuple[str, ...]]:
+    module_dir = assessor_path.parent
+    source_paths = [assessor_path]
+    recorded: list[str] = []
+    for source in sources:
+        path = Path(source).expanduser()
+        if not path.is_absolute():
+            path = (Path(base_dir).expanduser() if base_dir is not None else module_dir) / path
+        path = path.resolve()
+        if not path.is_file():
+            raise ValueError(f"Online assessor source file does not exist: {path}")
+        source_paths.append(path)
+        recorded.append(Path(os.path.relpath(path, module_dir)).as_posix())
+    source_paths = list(dict.fromkeys(source_paths))
+    source_digest = digest([(path.name, file_digest(path)) for path in source_paths])
+    return source_digest, tuple(recorded)
 
 
 def assess_quality(

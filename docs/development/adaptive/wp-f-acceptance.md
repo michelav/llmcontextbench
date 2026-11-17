@@ -1,6 +1,6 @@
 # WP-F acceptance report: online quality signals
 
-**Status:** review fixes applied; awaiting approval.
+**Status:** approved; review fixes applied.
 
 WP-F resolves quality signal declarations against either a dataset capability and its
 `online_assessor` implementation or an external `module:Class` assessor. External source digests

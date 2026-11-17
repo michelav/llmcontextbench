@@ -61,6 +61,7 @@ class AdaptivePlan:
     allow_mixed_models: bool = False
     schema_version: int = ADAPTIVE_PLAN_VERSION
     dataset: DatasetProvenance | None = None  # runtime binding; dataset is canonical in manifest
+    provenance: Mapping[str, Any] = field(default_factory=dict)
     resolved_definition: Mapping[str, Any] = field(default_factory=dict)
     execution_fingerprint: str = ""  # runtime binding; fingerprint is canonical in manifest
 

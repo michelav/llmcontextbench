@@ -31,7 +31,7 @@ from ctxbench.adaptive.signals import SignalValue, extract_signals
 from ctxbench.adaptive.state import Observation, WindowSystemState, validate_reading_request
 from ctxbench.core.errors import CapabilityUnavailableError, InvalidDefinitionError
 from ctxbench.runtime.disturbances import build_runtime_disturbances
-from ctxbench.core.fingerprint import digest
+from ctxbench.core.fingerprint import digest, implementation_digest, implementation_provenance, tree_digest
 from ctxbench.core.provenance import Provenance
 from ctxbench.core.surfaces import parse_surface
 from ctxbench.core.workflow import (
@@ -133,7 +133,7 @@ class AdaptiveWorkflow:
         )
         _validate_policy_targets(policy, candidate_ids)
         resolved_assessors = resolve_quality_assessors(
-            definition.signals, package, plugin_paths=plugin_paths,
+            definition.signals, package, plugin_paths=plugin_paths, base_dir=definition.base_dir,
         )
         resolved_signals = tuple(row.signal for row in resolved_assessors)
         _validate_policy_readings(policy, resolved_signals)
@@ -169,6 +169,11 @@ class AdaptiveWorkflow:
                 validation_config=dict(task.validation_config), context_blocks=tuple(task.context_blocks),
                 labels=dict(workload_item.labels),
             ))
+        dataset_root = provenance.materialized_path
+        dataset_digest = (tree_digest(Path(dataset_root)) if dataset_root and Path(dataset_root).is_dir()
+                          else provenance.content_hash)
+        if not dataset_digest:
+            raise ValueError("Adaptive planning requires a dataset content digest.")
         return AdaptivePlan(
             workflow_id=definition.id, seed=definition.seed, labels=dict(definition.labels),
             candidates=tuple(candidate_specs), requests=tuple(requests),
@@ -181,6 +186,8 @@ class AdaptiveWorkflow:
             signals=resolved_signals, goals=definition.goals, disturbances=definition.disturbances,
             evaluation=definition.evaluation or {"enabled": False, "judges": []}, trace=definition.trace,
             allow_mixed_models=definition.allow_mixed_models, dataset=provenance,
+            provenance={"dataset": {"digest": dataset_digest},
+                        "implementation": implementation_provenance()},
             resolved_definition=definition.resolved_definition,
         )
 
@@ -298,8 +305,15 @@ class AdaptiveWorkflow:
                   for state in ("delivered", "failed", "started")}
         counts.update({"planned": len(plan.requests), "pending": len(plan.requests) - len(records)})
         counts["attempts"] = sum(len(row.get("attempts", [])) for row in records.values())
+        implementation_digests = {
+            str(attempt["implementationDigest"])
+            for record in records.values()
+            for attempt in record.get("attempts", [])
+            if isinstance(attempt, dict) and attempt.get("implementationDigest")
+        }
         lines = [f"Experiment : {manifest['experimentId']}", f"Directory  : {root}", "Workflow   : adaptive", "",
-                 "Requests: " + ", ".join(f"{key}={value}" for key, value in counts.items())]
+                 "Requests: " + ", ".join(f"{key}={value}" for key, value in counts.items()),
+                 f"Implementations: {len(implementation_digests)} digest(s); mixed={len(implementation_digests) > 1}"]
         if by in {"task", "instance", "candidate"}:
             groups: dict[str, dict[str, int]] = {}
             for request in plan.requests:
@@ -346,10 +360,16 @@ class AdaptiveWorkflow:
         request_states = {state: sum(row.get("state") == state for row in requests)
                           for state in ("delivered", "failed", "started")}
         manifest = load_json(source / "manifest.json")
+        implementation_digests = sorted({
+            str(row["implementationDigest"]) for row in attempts
+            if row.get("implementationDigest")
+        })
         write_json(output_dir / "metrics-manifest.json", {
             "schemaVersion": "4.0-adaptive", "workflowKind": self.kind,
             "inputDirectory": str(source), "requestCount": len(requests), "attemptCount": len(attempts),
             "privileged": bool(manifest.get("privileged")),
+            "implementationDigests": implementation_digests,
+            "mixedImplementations": len(implementation_digests) > 1,
             "requestStates": request_states,
             "outputs": ["adaptive_request_metrics.csv", "adaptive_attempt_metrics.csv"],
         })
@@ -374,6 +394,7 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
                           plugin_paths: Sequence[str | Path] = ()) -> AdaptiveWorkflowOutcome:
     root = Path(root)
     with _adaptive_lock(root):
+        active_implementation_digest = implementation_digest()
         records_root = root / "adaptive-records"
         records_root.mkdir(parents=True, exist_ok=True)
         records = _load_request_records(root)
@@ -464,6 +485,7 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
                     "accepted": accepted,
                     "disturbances": disturbances,
                     "assessorCost": assessor_cost,
+                    "implementationDigest": result.pop("_runtimeImplementationDigest", active_implementation_digest),
                 }
                 return {**result, "_adaptiveSignals": adaptive_signals}
 
@@ -496,6 +518,9 @@ def run_adaptive_workflow(plan: AdaptivePlan, *, root: str | Path, service: Tria
                                       "failureCategory": failure_category, "accepted": accepted}
             attempt["disturbances"] = list(runtime_signals.get("disturbances") or [])
             attempt["assessorCost"] = list(runtime_signals.get("assessorCost") or [])
+            attempt["implementationDigest"] = runtime_signals.get(
+                "implementationDigest", active_implementation_digest,
+            )
             record["state"] = "delivered" if accepted else "failed"
             record["terminalReason"] = terminal_reason
             record["requestDurationMs"] = max(0, int((perf_counter() - started) * 1000))

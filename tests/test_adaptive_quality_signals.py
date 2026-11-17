@@ -9,6 +9,7 @@ import pytest
 from ctxbench.adaptive.sensors import AssessmentInput, QualityObservation, assess_quality, resolve_quality_assessors
 from ctxbench.adapters.repoqa.package import RepoQADatasetAdapter
 from ctxbench.api import ExecutionStateError, plan
+from ctxbench.core.fingerprint import file_digest
 from ctxbench.core.provenance import Provenance
 from ctxbench.util.fs import load_json
 
@@ -48,9 +49,9 @@ def test_quality_signal_is_persisted_and_available_to_policy_and_metrics(tmp_pat
     assert signal["metricId"] == "response_quality"
     assert signal["assessorVersion"] == "1"
     assert signal["sourceDigest"]
-    assert run.manifest["fingerprintInputs"]["plugins"][-1] == {
-        "ref": "online_assessor:FakeQualityAssessor", "sourceDigest": signal["sourceDigest"],
-    }
+    assert run.manifest["executionFingerprint"] == file_digest(run.root / "adaptive-plan.json")
+    assert "fingerprintInputs" not in run.manifest
+    assert "planDigest" not in run.manifest
     assert run.manifest["privileged"] is False
 
     # Offline evaluation rows are not an input to execution or policy decisions.

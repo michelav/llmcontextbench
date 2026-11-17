@@ -29,14 +29,24 @@ def tree_digest(root: Path) -> str:
 def implementation_digest() -> str:
     package = Path(__file__).resolve().parents[1]
     files = sorted(p for p in package.rglob("*.py") if "__pycache__" not in p.parts)
+    dependencies = implementation_dependencies()
+    return digest({"sources": [(p.relative_to(package).as_posix(), file_digest(p)) for p in files],
+                   "dependencies": dependencies})
+
+
+def implementation_dependencies() -> dict[str, str | None]:
     dependencies = {}
     for name in ("pydantic", "jsonschema", "openai", "anthropic", "google-genai", "fastmcp"):
         try:
             dependencies[name] = version(name)
         except PackageNotFoundError:
             dependencies[name] = None
-    return digest({"sources": [(p.relative_to(package).as_posix(), file_digest(p)) for p in files],
-                   "dependencies": dependencies})
+    return dependencies
+
+
+def implementation_provenance() -> dict[str, object]:
+    """Return the implementation digest and dependency versions used to compute it."""
+    return {"digest": implementation_digest(), "dependencies": implementation_dependencies()}
 
 
 def verify_snapshot(root: Path, manifest: dict, *, execution: bool = False,
@@ -63,4 +73,5 @@ def verify_snapshot(root: Path, manifest: dict, *, execution: bool = False,
             raise ValueError("Execution fingerprint mismatch: dataset changed")
 
 
-__all__ = ["digest", "file_digest", "tree_digest", "implementation_digest", "verify_snapshot"]
+__all__ = ["digest", "file_digest", "tree_digest", "implementation_digest",
+           "implementation_dependencies", "implementation_provenance", "verify_snapshot"]

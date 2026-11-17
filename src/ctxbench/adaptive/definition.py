@@ -56,7 +56,8 @@ def adaptive_definition_schema() -> dict[str, Any]:
     assessor = {"type": "object", "additionalProperties": False,
                 "required": ["id", "assessor"],
                 "properties": {"id": {"type": "string", "minLength": 1},
-                               "assessor": {"type": "string", "minLength": 1}}}
+                               "assessor": {"type": "string", "minLength": 1},
+                               "sources": {"type": "array", "items": {"type": "string", "minLength": 1}}}}
     goal = {"type": "object", "additionalProperties": False,
             "required": ["id", "signal", "statistic"],
             "properties": {"id": {"type": "string", "minLength": 1},

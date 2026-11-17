@@ -13,7 +13,7 @@ from ctxbench.adaptive.plan import (
 )
 from ctxbench.adaptive.policy import PolicyReference
 from ctxbench.core.fingerprint import (
-    digest, file_digest, implementation_digest, tree_digest, verify_snapshot,
+    file_digest, tree_digest,
 )
 from ctxbench.dataset.provenance import DatasetProvenance
 from ctxbench.util.fs import load_json, write_json
@@ -54,6 +54,7 @@ def adaptive_plan_payload(plan: AdaptivePlan) -> dict[str, Any]:
         "goals": _jsonable(plan.goals), "disturbances": _jsonable(plan.disturbances),
         "evaluation": _jsonable(plan.evaluation), "trace": _jsonable(plan.trace),
         "allowMixedModels": plan.allow_mixed_models,
+        "provenance": _jsonable(plan.provenance),
     }
 
 
@@ -69,8 +70,18 @@ def adaptive_plan_from_payload(payload: Any, *, dataset: Any = None,
         )
     required = {"adaptivePlanVersion", "workflowId", "seed", "labels", "candidates", "requests",
                 "workloadSource", "policy", "window", "signals", "acceptance", "goals",
-                "disturbances", "evaluation", "trace", "allowMixedModels"}
+                "disturbances", "evaluation", "trace", "allowMixedModels", "provenance"}
     _exact_keys(payload, required, "adaptive plan")
+    provenance = payload["provenance"]
+    _exact_keys(provenance, {"dataset", "implementation"}, "plan provenance")
+    _exact_keys(provenance["dataset"], {"digest"}, "dataset provenance")
+    _exact_keys(provenance["implementation"], {"digest", "dependencies"}, "implementation provenance")
+    if (not isinstance(provenance["dataset"]["digest"], str)
+            or not provenance["dataset"]["digest"]
+            or not isinstance(provenance["implementation"]["digest"], str)
+            or not provenance["implementation"]["digest"]
+            or not isinstance(provenance["implementation"]["dependencies"], dict)):
+        raise ValueError("Invalid adaptive plan provenance")
     policy_payload = payload["policy"]
     _exact_keys(policy_payload, {"ref", "id", "version", "params", "sourceDigest", "sources"}, "policy")
     policy = PolicyReference(
@@ -104,7 +115,8 @@ def adaptive_plan_from_payload(payload: Any, *, dataset: Any = None,
         acceptance=payload["acceptance"], signals=tuple(payload["signals"]), goals=tuple(payload["goals"]),
         disturbances=tuple(payload["disturbances"]), evaluation=payload["evaluation"], trace=payload["trace"],
         allow_mixed_models=payload["allowMixedModels"], dataset=DatasetProvenance.model_validate(dataset)
-        if dataset is not None else None, resolved_definition=resolved_definition or {},
+        if dataset is not None else None, provenance=payload["provenance"],
+        resolved_definition=resolved_definition or {},
     )
 
 
@@ -120,19 +132,9 @@ def write_adaptive_artifacts(artifact_root: str | Path, plan: AdaptivePlan, *,
     write_json(plan_path, plan_payload)
     write_json(resolved_path, _jsonable(plan.resolved_definition))
     provenance = dataset or (plan.dataset.model_dump(mode="json") if plan.dataset else {})
-    dataset_root = provenance.get("materializedPath") or provenance.get("materialized_path")
-    dataset_digest = tree_digest(Path(dataset_root)) if dataset_root and Path(dataset_root).is_dir() else provenance.get("contentHash")
-    plugin_inputs = [{"ref": plan.policy.ref, "sourceDigest": plan.policy.source_digest}]
-    plugin_inputs.extend(
-        {"ref": row["assessor"], "sourceDigest": row["sourceDigest"]}
-        for row in plan.signals if row.get("sourceDigest")
-    )
-    inputs = {
-        "artifacts": {"resolved.json": file_digest(resolved_path), "adaptive-plan.json": file_digest(plan_path)},
-        "implementation": implementation_digest(), "dataset": dataset_digest,
-        "plugins": plugin_inputs,
-    }
-    fingerprint = digest(inputs)
+    fingerprint = file_digest(plan_path)
+    if fingerprint != _plan_fingerprint(plan_payload):
+        raise ValueError("Adaptive plan serialization is not stable; create a fresh adaptive plan.")
     manifest = {
         "schemaVersion": ADAPTIVE_MANIFEST_VERSION,
         "workflowKind": "adaptive",
@@ -142,8 +144,6 @@ def write_adaptive_artifacts(artifact_root: str | Path, plan: AdaptivePlan, *,
         "experimentId": plan.workflow_id,
         "workflowId": plan.workflow_id,
         "executionFingerprint": fingerprint,
-        "planDigest": digest(plan_payload),
-        "fingerprintInputs": inputs,
         "dataset": provenance,
         "evaluation": evaluation or dict(plan.evaluation) or {"enabled": False, "judges": []},
         "trace": trace or dict(plan.trace) or {"enabled": False, "writeFiles": False},
@@ -173,16 +173,20 @@ def validate_workflow_manifest(root: str | Path, *, execution: bool = False,
         raise ValueError("Unsupported adaptive artifact contract; create a fresh adaptive plan.")
     required = {"schemaVersion", "workflowKind", "adaptiveArtifactVersion", "adaptivePlanVersion",
                 "executionRecordVersion", "experimentId", "workflowId", "executionFingerprint",
-                "planDigest", "fingerprintInputs", "dataset", "evaluation", "trace", "labels",
-                "privileged", "seed", "mixedModels"}
+                "dataset", "evaluation", "trace", "labels", "privileged", "seed", "mixedModels"}
     _exact_keys(manifest, required, "adaptive manifest")
     plan_payload = load_json(artifact_root / "adaptive-plan.json")
     plan = adaptive_plan_from_payload(plan_payload, dataset=manifest["dataset"])
-    if (digest(plan_payload) != manifest["planDigest"] or plan.workflow_id != manifest["workflowId"]
+    plan_path = artifact_root / "adaptive-plan.json"
+    if (file_digest(plan_path) != manifest["executionFingerprint"]
+            or plan.workflow_id != manifest["workflowId"]
             or manifest["experimentId"] != plan.workflow_id):
         raise ValueError("Adaptive manifest does not match its frozen adaptive plan.")
-    verify_snapshot(artifact_root, manifest, execution=execution)
     if execution:
+        expected_dataset_digest = plan.provenance.get("dataset", {}).get("digest")
+        actual_dataset_digest = _dataset_digest(manifest["dataset"])
+        if not expected_dataset_digest or actual_dataset_digest != expected_dataset_digest:
+            raise ValueError("Adaptive dataset changed since planning; create a fresh adaptive plan.")
         from ctxbench.adaptive.policy import verify_policy
         verify_policy(plan.policy, plugin_paths=plugin_paths)
     return manifest
@@ -192,7 +196,7 @@ def adaptive_plan_schema() -> dict[str, Any]:
     return {"type": "object", "additionalProperties": False,
             "required": ["adaptivePlanVersion", "workflowId", "seed", "labels", "candidates", "requests",
                          "workloadSource", "policy", "window", "signals", "acceptance", "goals",
-                         "disturbances", "evaluation", "trace", "allowMixedModels"],
+                         "disturbances", "evaluation", "trace", "allowMixedModels", "provenance"],
             "properties": {"adaptivePlanVersion": {"const": ADAPTIVE_PLAN_VERSION}}}
 
 
@@ -215,6 +219,18 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, (tuple, list)):
         return [_jsonable(item) for item in value]
     raise TypeError(f"Adaptive plan contains non-JSON value: {type(value).__name__}")
+
+
+def _plan_fingerprint(payload: dict[str, Any]) -> str:
+    encoded = json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _dataset_digest(provenance: dict[str, Any]) -> str | None:
+    dataset_root = provenance.get("materializedPath") or provenance.get("materialized_path")
+    if dataset_root and Path(dataset_root).is_dir():
+        return tree_digest(Path(dataset_root))
+    return provenance.get("contentHash") or provenance.get("content_hash")
 
 
 __all__ = ["ADAPTIVE_ARTIFACT_VERSION", "ADAPTIVE_MANIFEST_VERSION", "adaptive_plan_payload",
