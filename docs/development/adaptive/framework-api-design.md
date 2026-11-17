@@ -3,7 +3,8 @@
 **Status:** implementation design. WP-A, WP-B, WP-C and WP-E are implemented; WP-E review is
 recorded in [`wp-e-acceptance.md`](wp-e-acceptance.md). WP-F is approved; see
 [`wp-f-acceptance.md`](wp-f-acceptance.md). WP-P (plan as fingerprint) is implemented and awaits
-acceptance; see [`wp-p-acceptance.md`](wp-p-acceptance.md). WP-G follows WP-P. Each later work package in
+acceptance; see [`wp-p-acceptance.md`](wp-p-acceptance.md). WP-G implementation is complete and
+awaits acceptance; see [`wp-g-acceptance.md`](wp-g-acceptance.md). Each later work package in
 [section 11](#11-work-packages) needs its own approval before implementation starts.
 
 **Audience:** an agent or team implementing the refactor without access to the design discussion.
@@ -1561,7 +1562,7 @@ flowchart LR
     E --> H
     F --> H
     G --> H
-    H --> I[WP-I Documentation, examples, cleanup]
+    H --> I[WP-I Documentation reorganisation, examples, cleanup]
 ```
 
 ### WP-A — API foundation (no behaviour change)
@@ -1772,15 +1773,90 @@ flowchart LR
   delivered-request views separate; `headroom` reproduces hand-computed values on a small fixture and reports missing
   cells.
 
-### WP-I — Documentation, examples, cleanup
+### WP-I — Documentation reorganisation, examples, cleanup
 
-- **Tasks:** rewrite `docs/architecture/adaptive-plan-v3.md` as the v4 contract;
-  update `workflow-contracts.md`, `artifact-contracts.md`, `README.md`,
-  `docs/development/validation-guide.md`, `examples/adaptive/README.md`; add a generic example
-  script under `examples/adaptive/` that exercises the API with the fake dataset and mock
-  provider; add a pointer from the plan to this document; remove re-exports that have no
-  remaining caller.
-- **Gate:** every documented command and example runs provider-free as written.
+- **Scope:** documentation for the finished framework, reorganised so that current behaviour,
+  current design and development history live in separate places. Last package; it closes the
+  adaptive-framework sprint.
+- **Target layout:**
+
+  ```
+  README.md            what the tool is, install, 5-minute quickstart, links into docs/
+  docs/
+  ├── README.md        map of the docs and the rule for where each kind of content goes
+  ├── guide/           tool documentation: how to use it, current behaviour only
+  │   ├── getting-started.md, concepts.md
+  │   ├── benchmark-experiments.md, adaptive-experiments.md, experiments-in-code.md
+  │   ├── datasets/    creating-a-dataset.md, using-external-datasets.md, repoqa.md
+  │   └── reference/   cli.md, definition-benchmark.md, definition-adaptive.md,
+  │                    python-api.md, output-artifacts.md, metrics.md
+  ├── architecture/    tool architecture: current design, normative
+  │   ├── README.md    scope, principles, layering, repository layout
+  │   ├── domain-model.md
+  │   ├── c4/          system-context, container, component, deployment, dynamic
+  │   ├── workflows/   workflow-contract.md, benchmark.md, adaptive.md
+  │   ├── contracts/   artifacts.md, adaptive-plan.md (v4), manifest.md, records.md
+  │   ├── metrics-design.md, cli.md
+  │   └── decisions/   ADRs, NNNN-<slug>.md
+  ├── development/     contributing: setup, tests, validation-guide.md, scenario-guide.md,
+  │                    spec-workflow.md, usage-log.md
+  └── sprints/         development history, one folder per major effort
+      ├── README.md    index: sprint, dates, status, outcome, ADRs produced
+      └── <yyyy-mm>-<slug>/   README.md (goal, status, links) plus drafts, design,
+                              reviews, work-packages/, acceptance/
+  ```
+
+- **Rules** (written into `docs/README.md`):
+  - `guide/` and `architecture/` describe the code as it is. They change in the same change set
+    as the behaviour they describe and never refer to work packages or planned work.
+  - `sprints/` is history. Drafts, designs, reviews and acceptance reports live there; after a
+    sprint closes only its README status changes.
+  - Closing a sprint promotes its results: durable decisions become ADRs in
+    `architecture/decisions/`, design content is merged into `architecture/`, user-visible
+    behaviour goes into `guide/`, and the sprint README links to all three.
+  - `specs/` stays as managed by spec-kit; sprint READMEs link to the relevant spec folders.
+- **Tasks**, one commit each, in this order:
+  1. **Move only.** `git mv` existing documents to the layout above without editing content,
+     and fix relative links. Sprints: `2026-xx-v1-refactor/` (v1 refactor plan and review
+     questions), `2026-xx-runtime-extraction/` (runtime extraction baseline and slices),
+     `2026-xx-evolution-plan/` (evolution plan), `2026-10-adaptive-framework/` (this document as
+     `design.md`, assessment and plan, plan review, use cases, `work-packages/` for the WP
+     decision records and audits, `acceptance/` for the WP acceptance reports). Move
+     `docs/prompts/spec-kit/` out of `docs/` (to `.specify/prompts/`). Update the paths in
+     `CLAUDE.md`, `AGENTS.md` and skills that reference moved files. Exact sprint dates are
+     taken from git history.
+  2. **Promote the adaptive-framework sprint.** Merge the normative parts of this document
+     (workflow protocol and registry, policy and state contract, signals and assessors, plug-in
+     resolution and fingerprint, resume and replay, plan v4, manifest, request and execution
+     records) into `architecture/workflows/` and `architecture/contracts/`;
+     `contracts/adaptive-plan.md` replaces `adaptive-plan-v3.md`. Requirements, divergences and
+     work packages stay in the sprint. Merge `vocabulary.md` into `domain-model.md`, and
+     `workflow.md` with `workflow-contracts.md`. Split `metrics.md` into
+     `architecture/metrics-design.md` and the column reference in `guide/reference/metrics.md`.
+     Write ADRs for the durable decisions, at least: request-blind policies (R3), one decision
+     and at most one attempt per request (R8), plug-ins referenced by name with fingerprinted
+     source (R16), the plan as the fingerprint (WP-P), two entry paths with one canonical
+     definition form, and the `Workflow` protocol behind a registry (R24). Each ADR links to the
+     sprint material it came from.
+  3. **Write the guide.** Move usage content out of `README.md` into `guide/` and reduce the
+     README to its outline above. Add the references: CLI (`plan`, `execute`, `eval`, `export`,
+     `metrics`, `status`), both definition schemas, the Python API, output artifacts, and metric
+     columns with the provenance class of each value (reported, measured, derived, estimated,
+     unavailable). `adaptive-experiments.md` replaces `examples/adaptive/README.md`;
+     `experiments-in-code.md` walks through `examples/adaptive/code_built.py`. Every example uses
+     the fake dataset and the mock provider.
+  4. **Make the gate executable.** Add a test that extracts fenced `llmctxbench …` commands and
+     `python examples/…` invocations from `README.md` and `docs/guide/`, and runs them
+     provider-free in a temporary directory; and a test that every relative Markdown link in
+     `README.md` and `docs/` resolves.
+  5. **Cleanup** (separate from documentation): remove re-exports that have no remaining
+     caller; remove the empty `examples/adaptive-lattes/`, `examples/adaptive-repoqa/` and
+     `examples/v1/`; fold `demo-video.md` into the README.
+- **Gate:** the layout and rules above are in place; `guide/` and `architecture/` contain no
+  references to work packages or planned behaviour; `contracts/adaptive-plan.md` matches plan
+  v4 as implemented; each listed ADR exists and links to its sprint; the docs command test and
+  the link test pass, so every documented command and example runs provider-free as written;
+  `pytest -q` is green.
 
 ---
 
