@@ -1822,8 +1822,9 @@ flowchart LR
     the `sprints/README.md` index.
   - `specs/` stays as managed by spec-kit; sprint READMEs link to the relevant spec folders.
   - Fenced blocks tagged `console` are executed by the docs command test. A command that cannot
-    run provider-free (real provider, Lattes or RepoQA data) goes in a `shell` or `text` block
-    preceded by `<!-- docs-test: skip (<reason>) -->`; the reason is required.
+    run provider-free (real provider, Lattes or RepoQA data) goes in a `shell` block preceded by
+    `<!-- docs-test: skip (<reason>) -->`; the reason is required. `text` blocks are display
+    only.
 - **Tasks**, one commit each, in this order:
   1. **Move only.** `git mv` existing documents to the layout above without editing content,
      and fix relative links. Sprints: `v1-refactor/` (v1 refactor plan and review
@@ -1857,8 +1858,8 @@ flowchart LR
      `examples/datasets/fake/` so documented commands do not depend on test fixtures.
   4. **Make the gate executable.** Add a test that extracts fenced `llmctxbench …` commands and
      `python examples/…` invocations from `console` blocks in `README.md` and `docs/guide/`, and
-     runs them provider-free in a temporary directory, failing on any unmarked non-`console`
-     block that contains such a command; and a test that every relative Markdown link in
+     runs them provider-free in a temporary directory, failing on any unmarked `shell` block
+     that contains such a command; and a test that every relative Markdown link in
      `README.md` and `docs/` resolves.
   5. **Cleanup** (separate from documentation): remove re-exports that have no remaining
      caller; remove the empty `examples/adaptive-lattes/`, `examples/adaptive-repoqa/` and

@@ -20,6 +20,7 @@
   behaviour goes into `guide/`, and the sprint README links to all three.
 - `specs/` stays as managed by spec-kit; sprint READMEs link to the relevant spec folders.
 - Commands in fenced blocks tagged `console` in `README.md` and `guide/` are executed by the docs
-  test and must run provider-free as written. A command that cannot (real provider, Lattes or
-  RepoQA data) goes in a `shell` or `text` block preceded by
-  `<!-- docs-test: skip (<reason>) -->`; the reason is required.
+  test (`tests/test_docs.py`) and must run provider-free as written. A command that cannot (real
+  provider, judge, Lattes or RepoQA data, installation) goes in a `shell` block preceded by
+  `<!-- docs-test: skip (<reason>) -->`; the reason is required. `text` blocks are for display
+  only (usage synopses, output).
