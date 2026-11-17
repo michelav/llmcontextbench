@@ -10,6 +10,9 @@ Run the code-built example from the repository root with:
 python examples/adaptive/code_built.py
 ```
 
+It plans into a fresh temporary directory and prints its path; pass a directory that does not
+exist yet as the first argument to choose the location.
+
 The example uses `load_dataset(...)` to inspect available tasks, instances, and declared request
 features. `Workload.generate(...)` samples an ordered workload; planning expands it into explicit
 requests and stores the generator specification and pool digest in the adaptive plan.

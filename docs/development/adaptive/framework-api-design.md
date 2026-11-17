@@ -1373,7 +1373,7 @@ Goal(id, signal, statistic, upper=None, lower=None, scope="system", window=None)
 Acceptance(minimum_response_length=0)
 SignalRef(id, assessor)
 Disturbance(name, component, kind, first_sequence, last_sequence=None, seed=0,
-            delay_ms=0, failure_rate=0.0, candidates=(), version="1")
+            delay_ms=None, failure_rate=None, candidates=(), version="1")   # None = not declared
 # Benchmark experiments have no typed object in this release: pass a path or a definition dict.
 
 # Datasets and workloads
@@ -1753,7 +1753,9 @@ flowchart LR
   section and normalises both to the stored mapping; a code-built example under
   `examples/adaptive/` with the fake dataset and mock provider.
 - **Gate:** equal seed and specification produce identical request lists across processes;
-  a generated workload and its explicit expansion give byte-identical plans; segments filter by declared
+  a generated workload and its explicit expansion freeze an identical `requests` array, and their
+  plans are byte-identical except `workloadSource` (which records where the requests came from, so
+  their execution fingerprints differ by design); segments filter by declared
   features only and fail clearly on unknown features or insufficient pools; feature values
   appear only in request `labels`. For every section, an experiment built with builders and the
   equivalent definition file give byte-identical `adaptive-plan.json`, `resolved.json` and

@@ -1,4 +1,12 @@
-"""Build and plan a small adaptive experiment entirely through the Python API."""
+"""Build and plan a small adaptive experiment entirely through the Python API.
+
+Usage: python examples/adaptive/code_built.py [OUTPUT_DIR]
+
+OUTPUT_DIR must not exist yet; by default a fresh temporary directory is used, so the example
+can be run repeatedly.
+"""
+import sys
+import tempfile
 from pathlib import Path
 
 from ctxbench.api import (
@@ -11,7 +19,9 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DATASET_ROOT = REPOSITORY_ROOT / "tests/fixtures/fake_dataset/dataset"
 
 
-def main() -> None:
+def main(output: Path | None = None) -> None:
+    if output is None:
+        output = Path(tempfile.mkdtemp(prefix="ctxbench-code-built-")) / "run"
     dataset = load_dataset(DATASET_ROOT)
     workload = Workload.generate(
         dataset,
@@ -31,9 +41,9 @@ def main() -> None:
         policy=PolicyRef("static", {"candidate": "A"}),
         window=Window(requests=4),
     )
-    run = plan(experiment, output=Path("/tmp/ctxbench-code-built-example"))
+    run = plan(experiment, output=output)
     print(f"Planned {len(list(run.requests()))} requests at {run.root}")
 
 
 if __name__ == "__main__":
-    main()
+    main(Path(sys.argv[1]) if len(sys.argv) > 1 else None)

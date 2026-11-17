@@ -50,14 +50,61 @@ def _validate_builder(section: str, value: Mapping[str, Any]) -> None:
         raise ValueError(f"Invalid adaptive definition at {field_name}: {error.message}")
 
 
+def _normalise_section(section: str, value: Mapping[str, Any]) -> dict[str, Any]:
+    """Fill defaults and apply a section's normaliser.
+
+    This is the one normalisation rule for a section: definition files, mappings passed to
+    ``AdaptiveExperiment`` and section builders all go through it, so equal inputs give equal
+    stored mappings. It assumes the value already passed the section's schema fragment.
+    """
+    result = deepcopy(dict(value))
+    if section == "models":
+        result["modelParams"] = result.get("modelParams") or {}
+    elif section == "policy":
+        result["params"] = result.get("params") or {}
+    elif section == "window":
+        result["mode"] = result.get("mode", "sliding")
+    elif section == "goals":
+        result["scope"] = result.get("scope", "system")
+        if isinstance(result.get("window"), Mapping):
+            result["window"] = _normalise_section("window", result["window"])
+    elif section == "acceptance":
+        result = {"minimumResponseLength": result.get("minimumResponseLength", 0)}
+    elif section == "disturbances":
+        try:
+            result = DisturbanceSpec.from_definition(result).to_definition()
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid adaptive disturbance definition: {exc}") from exc
+    elif section == "workload" and "generator" in result:
+        generator = result["generator"]
+        generator.setdefault("tasks", [])
+        generator.setdefault("instances", [])
+        generator.setdefault("sampling", "with_replacement")
+        generator.setdefault("labelFeatures", [])
+        result = {"generator": generator}
+    return result
+
+
+def _normalise_mapping(section: str, value: Any) -> Any:
+    """Normalise a mapping given in code; invalid values are left for schema validation at plan."""
+    if not isinstance(value, Mapping):
+        return value
+    try:
+        return _normalise_section(section, value)
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return value
+
+
 class _SectionBuilder:
     section: str
 
     def __post_init__(self) -> None:
         self.to_definition()
 
-    def _validate(self, value: Mapping[str, Any]) -> None:
+    def _validate(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        """Validate through the file schema fragment and normaliser; return the stored mapping."""
         _validate_builder(self.section, value)
+        return _normalise_section(self.section, value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,8 +116,7 @@ class Model(_SectionBuilder):
 
     def to_definition(self) -> dict[str, Any]:
         value = {"provider": self.provider, "name": self.name, "modelParams": dict(self.model_params)}
-        self._validate(value)
-        return value
+        return self._validate(value)
 
     @classmethod
     def from_definition(cls, value: Mapping[str, Any]) -> "Model":
@@ -86,8 +132,7 @@ class Configuration(_SectionBuilder):
 
     def to_definition(self) -> dict[str, Any]:
         value = {"strategy": self.strategy, "representation": self.representation, "surface": self.surface}
-        self._validate(value)
-        return value
+        return self._validate(value)
 
     @classmethod
     def from_definition(cls, value: Mapping[str, Any]) -> "Configuration":
@@ -125,8 +170,7 @@ class PolicyRef(_SectionBuilder):
         value = {"ref": self.ref, "params": dict(self.params)}
         if self.sources:
             value["sources"] = list(self.sources)
-        self._validate(value)
-        return value
+        return self._validate(value)
 
     @classmethod
     def from_definition(cls, value: Mapping[str, Any]) -> "PolicyRef":
@@ -141,12 +185,13 @@ class Window(_SectionBuilder):
     section = "window"
 
     def to_definition(self) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        if self.requests is not None:
+            value["requests"] = self.requests
         if self.all:
-            value = {"all": True}
-        else:
-            value = {"requests": self.requests, "mode": self.mode}
-        self._validate(value)
-        return value
+            value["all"] = True
+        value["mode"] = self.mode
+        return self._validate(value)
 
     @classmethod
     def from_definition(cls, value: Mapping[str, Any]) -> "Window":
@@ -172,8 +217,7 @@ class Goal(_SectionBuilder):
             value["lower"] = self.lower
         if self.window is not None:
             value["window"] = _builder_value(self.window)
-        self._validate(value)
-        return value
+        return self._validate(value)
 
     @classmethod
     def from_definition(cls, value: Mapping[str, Any]) -> "Goal":
@@ -188,8 +232,7 @@ class Acceptance(_SectionBuilder):
 
     def to_definition(self) -> dict[str, Any]:
         value = {"minimumResponseLength": self.minimum_response_length}
-        self._validate(value)
-        return value
+        return self._validate(value)
 
     @classmethod
     def from_definition(cls, value: Mapping[str, Any]) -> "Acceptance":
@@ -207,8 +250,7 @@ class SignalRef(_SectionBuilder):
         value = {"id": self.id, "assessor": self.assessor}
         if self.sources:
             value["sources"] = list(self.sources)
-        self._validate(value)
-        return value
+        return self._validate(value)
 
     @classmethod
     def from_definition(cls, value: Mapping[str, Any]) -> "SignalRef":
@@ -223,8 +265,8 @@ class Disturbance(_SectionBuilder):
     first_sequence: int
     last_sequence: int | None = None
     seed: int = 0
-    delay_ms: int = 0
-    failure_rate: float = 0.0
+    delay_ms: int | None = None
+    failure_rate: float | None = None
     candidates: tuple[str, ...] = ()
     version: str = "1"
     section = "disturbances"
@@ -234,20 +276,19 @@ class Disturbance(_SectionBuilder):
                  "firstSequence": self.first_sequence, "seed": self.seed}
         if self.last_sequence is not None:
             value["lastSequence"] = self.last_sequence
-        if self.kind in {"delay", "delay_and_failure"}:
+        if self.delay_ms is not None:
             value["delayMs"] = self.delay_ms
-        if self.kind in {"failure", "delay_and_failure"}:
+        if self.failure_rate is not None:
             value["failureRate"] = self.failure_rate
         if self.candidates:
             value["candidates"] = list(self.candidates)
-        self._validate(value)
-        return value
+        return self._validate(value)
 
     @classmethod
     def from_definition(cls, value: Mapping[str, Any]) -> "Disturbance":
         return cls(value["name"], value["component"], value["kind"], value.get("firstSequence", 1),
-                   value.get("lastSequence"), value.get("seed", 0), value.get("delayMs", 0),
-                   value.get("failureRate", 0.0), tuple(value.get("candidates") or ()), value.get("version", "1"))
+                   value.get("lastSequence"), value.get("seed", 0), value.get("delayMs"),
+                   value.get("failureRate"), tuple(value.get("candidates") or ()), value.get("version", "1"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -293,7 +334,8 @@ class AdaptiveExperiment:
             return {key: _builder_value(value) if isinstance(value, builder_type) else value
                     for key, value in values.items()}
 
-        object.__setattr__(self, "models", keyed("models", self.models, Model))
+        object.__setattr__(self, "models", {key: _normalise_mapping("models", value)
+                                            for key, value in keyed("models", self.models, Model).items()})
         object.__setattr__(self, "configurations", keyed("configurations", self.configurations, Configuration))
         candidate_values = self.candidates
         if isinstance(candidate_values, Mapping):
@@ -313,13 +355,17 @@ class AdaptiveExperiment:
             workload = dict(self.workload)
         else:
             workload = Workload.explicit(self.workload).to_definition()
-        object.__setattr__(self, "workload", workload)
-        object.__setattr__(self, "policy", _builder_value(self.policy))
-        object.__setattr__(self, "window", _builder_value(self.window))
-        object.__setattr__(self, "acceptance", _builder_value(self.acceptance))
+        # Builders are already normalised; mappings are normalised by the same per-section rule,
+        # so a builder and the equivalent mapping give equal experiments.
+        object.__setattr__(self, "workload", _normalise_mapping("workload", workload))
+        object.__setattr__(self, "policy", _normalise_mapping("policy", _builder_value(self.policy)))
+        object.__setattr__(self, "window", _normalise_mapping("window", _builder_value(self.window)))
+        object.__setattr__(self, "acceptance", _normalise_mapping("acceptance", _builder_value(self.acceptance)))
         object.__setattr__(self, "signals", tuple(_builder_value(item) for item in self.signals))
-        object.__setattr__(self, "goals", tuple(_builder_value(item) for item in self.goals))
-        object.__setattr__(self, "disturbances", tuple(_builder_value(item) for item in self.disturbances))
+        object.__setattr__(self, "goals", tuple(_normalise_mapping("goals", _builder_value(item))
+                                                for item in self.goals))
+        object.__setattr__(self, "disturbances", tuple(_normalise_mapping("disturbances", _builder_value(item))
+                                                       for item in self.disturbances))
 
 
 def adaptive_definition_schema() -> dict[str, Any]:
@@ -504,11 +550,8 @@ def load_adaptive_experiment(source: str | Path | Mapping[str, Any] | AdaptiveEx
         first = errors[0]
         location = ".".join(str(item) for item in first.absolute_path) or "$"
         raise ValueError(f"Invalid adaptive definition at {location}: {first.message}")
-    try:
-        normalized_disturbances = [DisturbanceSpec.from_definition(row).to_definition()
-                                   for row in resolved.get("disturbances", [])]
-    except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError(f"Invalid adaptive disturbance definition: {exc}") from exc
+    normalized_disturbances = [_normalise_section("disturbances", row)
+                               for row in resolved.get("disturbances", [])]
     resolved = {
         **resolved,
         "output": resolved.get("output", "outputs"),
@@ -517,27 +560,18 @@ def load_adaptive_experiment(source: str | Path | Mapping[str, Any] | AdaptiveEx
         "allowMixedModels": resolved.get("allowMixedModels", False),
         "taskParams": deepcopy(resolved.get("taskParams") or {}),
         "execution": {"options": deepcopy((resolved.get("execution") or {}).get("options") or {})},
-        "acceptance": {"minimumResponseLength": (resolved.get("acceptance") or {}).get("minimumResponseLength", 0)},
+        "acceptance": _normalise_section("acceptance", resolved.get("acceptance") or {}),
         "signals": deepcopy(resolved.get("signals") or []),
         "goals": deepcopy(resolved.get("goals") or []),
         "disturbances": normalized_disturbances,
         "evaluation": deepcopy(resolved.get("evaluation") or {}),
         "trace": deepcopy(resolved.get("trace") or {}),
     }
-    resolved["models"] = {
-        key: {**deepcopy(value), "modelParams": deepcopy(value.get("modelParams") or {})}
-        for key, value in resolved["models"].items()
-    }
-    resolved["policy"] = {**deepcopy(resolved["policy"]), "params": deepcopy(resolved["policy"].get("params") or {})}
-    resolved["window"] = {**deepcopy(resolved["window"]), "mode": resolved["window"].get("mode", "sliding")}
-    resolved["goals"] = [{**deepcopy(row), "scope": row.get("scope", "system")} for row in resolved["goals"]]
-    if "generator" in resolved["workload"]:
-        generator = deepcopy(resolved["workload"]["generator"])
-        generator.setdefault("tasks", [])
-        generator.setdefault("instances", [])
-        generator.setdefault("sampling", "with_replacement")
-        generator.setdefault("labelFeatures", [])
-        resolved["workload"] = {"generator": generator}
+    resolved["models"] = {key: _normalise_section("models", value) for key, value in resolved["models"].items()}
+    resolved["policy"] = _normalise_section("policy", resolved["policy"])
+    resolved["window"] = _normalise_section("window", resolved["window"])
+    resolved["goals"] = [_normalise_section("goals", row) for row in resolved["goals"]]
+    resolved["workload"] = _normalise_section("workload", resolved["workload"])
     return AdaptiveExperiment(
         id=resolved["id"], dataset=resolved["dataset"], models=deepcopy(resolved["models"]),
         surfaces=deepcopy(resolved["surfaces"]), configurations=deepcopy(resolved["configurations"]),
