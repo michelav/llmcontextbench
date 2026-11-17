@@ -21,3 +21,19 @@
   [WP-E](acceptance/wp-e-acceptance.md), [WP-F](acceptance/wp-f-acceptance.md),
   [WP-P](acceptance/wp-p-acceptance.md), [WP-G](acceptance/wp-g-acceptance.md),
   [WP-H](acceptance/wp-h-acceptance.md)
+
+## Promoted results
+
+- Architecture: [adaptive workflow](../../architecture/workflows/adaptive.md),
+  [workflow contract](../../architecture/workflows/workflow-contract.md),
+  [adaptive plan](../../architecture/contracts/adaptive-plan.md),
+  [manifests](../../architecture/contracts/manifest.md),
+  [records](../../architecture/contracts/records.md),
+  [metrics design](../../architecture/metrics-design.md),
+  [domain model](../../architecture/domain-model.md)
+- ADRs: [0001](../../architecture/decisions/0001-request-blind-policies.md),
+  [0002](../../architecture/decisions/0002-one-decision-one-attempt.md),
+  [0003](../../architecture/decisions/0003-plugins-by-reference-with-fingerprinted-source.md),
+  [0004](../../architecture/decisions/0004-plan-as-fingerprint.md),
+  [0005](../../architecture/decisions/0005-two-entry-paths-one-definition-form.md),
+  [0006](../../architecture/decisions/0006-workflow-protocol-registry.md)
