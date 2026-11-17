@@ -42,6 +42,7 @@ from ctxbench.dataset.cache import DatasetCache
 from ctxbench.dataset.provenance import DatasetProvenance
 from ctxbench.dataset.resolver import DatasetResolver
 from ctxbench.dataset.validation import validate_package
+from ctxbench.workload.builder import DatasetHandle, generate_requests
 from ctxbench.execution.service import ExecutionRequest, ExecutionSession, TrialExecutionService
 from ctxbench.util.clock import utc_now_iso
 from ctxbench.util.env import resolve_plan_params
@@ -124,8 +125,22 @@ class AdaptiveWorkflow:
                 execution_options={}, labels=dict(declaration.get("labels") or {}),
             ))
 
+        if "generator" in definition.workload:
+            dataset_handle = DatasetHandle(
+                package=package, feature_schema=package.capability_report().request_feature_schema,
+                task_ids=tuple(package.list_task_ids()), instance_ids=tuple(package.list_instance_ids()),
+            )
+            workload_rows, pool_digest = generate_requests(dataset_handle, definition.workload["generator"])
+            workload_source = {"kind": "generated", "spec": dict(definition.workload["generator"]),
+                               "poolDigest": pool_digest}
+        else:
+            workload_rows = [dict(row) for row in definition.workload["requests"]]
+            workload_source = {
+                "kind": "explicit", "spec": {"requests": workload_rows},
+                "poolDigest": digest([(row["taskId"], row["instanceId"]) for row in workload_rows]),
+            }
         candidate_ids = {candidate.candidate_id for candidate in candidate_specs}
-        _validate_disturbances(definition.disturbances, candidate_specs, len(definition.workload))
+        _validate_disturbances(definition.disturbances, candidate_specs, len(workload_rows))
         policy_decl = definition.policy
         policy_ref, policy = resolve_policy(
             str(policy_decl["ref"]), dict(policy_decl.get("params") or {}), base_dir=definition.base_dir,
@@ -140,19 +155,21 @@ class AdaptiveWorkflow:
 
         requests: list[PlannedRequest] = []
         request_ids: set[str] = set()
-        for index, workload_item in enumerate(definition.workload, start=1):
-            request_id = workload_item.request_id or f"r-{index:06d}"
+        for index, workload_item in enumerate(workload_rows, start=1):
+            request_id = workload_item.get("requestId") or f"r-{index:06d}"
             if not _REQUEST_ID.fullmatch(request_id) or request_id in {".", ".."}:
                 raise ValueError(f"Invalid requestId: {request_id!r}")
             if request_id in request_ids:
                 raise ValueError(f"Duplicate requestId: {request_id}")
             request_ids.add(request_id)
-            if workload_item.task_id not in package.list_task_ids():
-                raise ValueError(f"Unknown taskId in workload request {request_id}: {workload_item.task_id}")
-            if workload_item.instance_id not in package.list_instance_ids():
-                raise ValueError(f"Unknown instanceId in workload request {request_id}: {workload_item.instance_id}")
-            task = package.get_task(workload_item.task_id)
-            task_instance = package.get_task_instance(workload_item.instance_id, workload_item.task_id)
+            task_id = workload_item["taskId"]
+            instance_id = workload_item["instanceId"]
+            if task_id not in package.list_task_ids():
+                raise ValueError(f"Unknown taskId in workload request {request_id}: {task_id}")
+            if instance_id not in package.list_instance_ids():
+                raise ValueError(f"Unknown instanceId in workload request {request_id}: {instance_id}")
+            task = package.get_task(task_id)
+            task_instance = package.get_task_instance(instance_id, task_id)
             instance_params = task_instance.get("parameters", {}) if isinstance(task_instance, dict) else {}
             parameters = {**dict(definition.task_params),
                           **(instance_params if isinstance(instance_params, dict) else {})}
@@ -160,24 +177,28 @@ class AdaptiveWorkflow:
             statement = render_task_template(task.statement, parameters,
                 on_warning=(lambda message, **fields: logger.warn("PLAN", "task.template.warning", message, **fields))
                 if logger is not None else None,
-                task_id=workload_item.task_id, instance_id=workload_item.instance_id)
+                task_id=task_id, instance_id=instance_id)
             requests.append(PlannedRequest(
-                request_id=request_id, sequence_index=index, task_id=workload_item.task_id,
-                instance_id=workload_item.instance_id, task_statement=statement,
+                request_id=request_id, sequence_index=index, task_id=task_id,
+                instance_id=instance_id, task_statement=statement,
                 task_template=task.statement, parameters=parameters,
                 task_tags=tuple(task.tags), validation_type=task.validation_type,
                 validation_config=dict(task.validation_config), context_blocks=tuple(task.context_blocks),
-                labels=dict(workload_item.labels),
+                labels=dict(workload_item.get("labels") or {}),
             ))
+        if workload_source["kind"] == "explicit":
+            workload_source["spec"] = {"requests": [
+                {"requestId": row.request_id, "taskId": row.task_id, "instanceId": row.instance_id,
+                 "labels": dict(row.labels)} for row in requests]}
         dataset_digest = adaptive_dataset_digest(provenance)
+        default_window = definition.window
+        if default_window.get("all") is True:
+            default_window = {"requests": len(requests), "mode": default_window.get("mode", "sliding")}
         return AdaptivePlan(
             workflow_id=definition.id, seed=definition.seed, labels=dict(definition.labels),
             candidates=tuple(candidate_specs), requests=tuple(requests),
-            workload_source={"kind": "explicit", "spec": {"requests": [
-                {"requestId": row.request_id, "taskId": row.task_id, "instanceId": row.instance_id,
-                 "labels": dict(row.labels)} for row in requests]},
-                "poolDigest": digest([(row.task_id, row.instance_id) for row in requests])},
-            policy=policy_ref, window=WindowSpec(definition.window["requests"], definition.window.get("mode", "sliding")),
+            workload_source=workload_source,
+            policy=policy_ref, window=WindowSpec(default_window["requests"], default_window.get("mode", "sliding")),
             acceptance={"minimumResponseLength": definition.acceptance.get("minimumResponseLength", 0)},
             signals=resolved_signals, goals=definition.goals, disturbances=definition.disturbances,
             evaluation=definition.evaluation or {"enabled": False, "judges": []}, trace=definition.trace,

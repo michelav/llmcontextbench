@@ -260,7 +260,7 @@ def test_experiment_object_built_in_a_script_plans_and_executes(tmp_path: Path) 
 
     assert run.kind == "adaptive"
     resolved = load_json(run.root / "resolved.json")
-    assert resolved["id"] == "scripted" and resolved["policy"] == {"ref": "round_robin"}
+    assert resolved["id"] == "scripted" and resolved["policy"] == {"ref": "round_robin", "params": {}}
     assert run.execute().counts["delivered"] == 2
     assert [row["candidateId"] for row in _decision_rows(run.root)] == ["A", "B"]
 

@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 from ctxbench.core.definitions import resolve_definition, resolve_definition_data
 from ctxbench.runtime.disturbances import DisturbanceSpec
+from ctxbench.workload.builder import Workload
 
 
 ADAPTIVE_DEFINITION_VERSION = 4
@@ -20,6 +21,244 @@ class WorkloadRequest:
     request_id: str | None = None
     labels: Mapping[str, str] = field(default_factory=dict)
 
+    def to_definition(self) -> dict[str, Any]:
+        result = {"taskId": self.task_id, "instanceId": self.instance_id}
+        if self.request_id is not None:
+            result["requestId"] = self.request_id
+        if self.labels:
+            result["labels"] = dict(self.labels)
+        return result
+
+
+def _builder_value(value: Any) -> Any:
+    return value.to_definition() if hasattr(value, "to_definition") else value
+
+
+def _validate_builder(section: str, value: Mapping[str, Any]) -> None:
+    from jsonschema import Draft202012Validator
+
+    schema = adaptive_definition_schema()["properties"][section]
+    if section in {"models", "configurations", "candidates"}:
+        schema = schema["additionalProperties"]
+    elif section in {"goals", "signals", "disturbances"}:
+        schema = schema["items"]
+    errors = list(Draft202012Validator(schema).iter_errors(value))
+    if errors:
+        error = sorted(errors, key=lambda item: list(item.absolute_path))[0]
+        location = ".".join(str(item) for item in error.absolute_path)
+        field_name = f"{section}.{location}" if location else section
+        raise ValueError(f"Invalid adaptive definition at {field_name}: {error.message}")
+
+
+class _SectionBuilder:
+    section: str
+
+    def __post_init__(self) -> None:
+        self.to_definition()
+
+    def _validate(self, value: Mapping[str, Any]) -> None:
+        _validate_builder(self.section, value)
+
+
+@dataclass(frozen=True, slots=True)
+class Model(_SectionBuilder):
+    provider: str
+    name: str
+    model_params: Mapping[str, Any] = field(default_factory=dict)
+    section = "models"
+
+    def to_definition(self) -> dict[str, Any]:
+        value = {"provider": self.provider, "name": self.name, "modelParams": dict(self.model_params)}
+        self._validate(value)
+        return value
+
+    @classmethod
+    def from_definition(cls, value: Mapping[str, Any]) -> "Model":
+        return cls(value["provider"], value["name"], value.get("modelParams") or {})
+
+
+@dataclass(frozen=True, slots=True)
+class Configuration(_SectionBuilder):
+    strategy: str
+    representation: str
+    surface: str
+    section = "configurations"
+
+    def to_definition(self) -> dict[str, Any]:
+        value = {"strategy": self.strategy, "representation": self.representation, "surface": self.surface}
+        self._validate(value)
+        return value
+
+    @classmethod
+    def from_definition(cls, value: Mapping[str, Any]) -> "Configuration":
+        return cls(value["strategy"], value["representation"], value["surface"])
+
+
+@dataclass(frozen=True, slots=True)
+class Candidate(_SectionBuilder):
+    id: str
+    model: str
+    configuration: str
+    labels: Mapping[str, str] = field(default_factory=dict)
+    section = "candidates"
+
+    def to_definition(self) -> dict[str, Any]:
+        value: dict[str, Any] = {"id": self.id, "model": self.model, "configuration": self.configuration}
+        if self.labels:
+            value["labels"] = dict(self.labels)
+        self._validate({key: val for key, val in value.items() if key != "id"})
+        return value
+
+    @classmethod
+    def from_definition(cls, value: Mapping[str, Any]) -> "Candidate":
+        return cls(value["id"], value["model"], value["configuration"], value.get("labels") or {})
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyRef(_SectionBuilder):
+    ref: str
+    params: Mapping[str, Any] = field(default_factory=dict)
+    sources: tuple[str, ...] = ()
+    section = "policy"
+
+    def to_definition(self) -> dict[str, Any]:
+        value = {"ref": self.ref, "params": dict(self.params)}
+        if self.sources:
+            value["sources"] = list(self.sources)
+        self._validate(value)
+        return value
+
+    @classmethod
+    def from_definition(cls, value: Mapping[str, Any]) -> "PolicyRef":
+        return cls(value["ref"], value.get("params") or {}, tuple(value.get("sources") or ()))
+
+
+@dataclass(frozen=True, slots=True)
+class Window(_SectionBuilder):
+    requests: int | None = None
+    all: bool = False
+    mode: str = "sliding"
+    section = "window"
+
+    def to_definition(self) -> dict[str, Any]:
+        if self.all:
+            value = {"all": True}
+        else:
+            value = {"requests": self.requests, "mode": self.mode}
+        self._validate(value)
+        return value
+
+    @classmethod
+    def from_definition(cls, value: Mapping[str, Any]) -> "Window":
+        return cls(value.get("requests"), bool(value.get("all", False)), value.get("mode", "sliding"))
+
+
+@dataclass(frozen=True, slots=True)
+class Goal(_SectionBuilder):
+    id: str
+    signal: str
+    statistic: str
+    upper: float | None = None
+    lower: float | None = None
+    scope: str = "system"
+    window: Mapping[str, Any] | Window | None = None
+    section = "goals"
+
+    def to_definition(self) -> dict[str, Any]:
+        value = {"id": self.id, "signal": self.signal, "statistic": self.statistic, "scope": self.scope}
+        if self.upper is not None:
+            value["upper"] = self.upper
+        if self.lower is not None:
+            value["lower"] = self.lower
+        if self.window is not None:
+            value["window"] = _builder_value(self.window)
+        self._validate(value)
+        return value
+
+    @classmethod
+    def from_definition(cls, value: Mapping[str, Any]) -> "Goal":
+        return cls(value["id"], value["signal"], value["statistic"], value.get("upper"), value.get("lower"),
+                   value.get("scope", "system"), value.get("window"))
+
+
+@dataclass(frozen=True, slots=True)
+class Acceptance(_SectionBuilder):
+    minimum_response_length: int = 0
+    section = "acceptance"
+
+    def to_definition(self) -> dict[str, Any]:
+        value = {"minimumResponseLength": self.minimum_response_length}
+        self._validate(value)
+        return value
+
+    @classmethod
+    def from_definition(cls, value: Mapping[str, Any]) -> "Acceptance":
+        return cls(value.get("minimumResponseLength", 0))
+
+
+@dataclass(frozen=True, slots=True)
+class SignalRef(_SectionBuilder):
+    id: str
+    assessor: str
+    sources: tuple[str, ...] = ()
+    section = "signals"
+
+    def to_definition(self) -> dict[str, Any]:
+        value = {"id": self.id, "assessor": self.assessor}
+        if self.sources:
+            value["sources"] = list(self.sources)
+        self._validate(value)
+        return value
+
+    @classmethod
+    def from_definition(cls, value: Mapping[str, Any]) -> "SignalRef":
+        return cls(value["id"], value["assessor"], tuple(value.get("sources") or ()))
+
+
+@dataclass(frozen=True, slots=True)
+class Disturbance(_SectionBuilder):
+    name: str
+    component: str
+    kind: str
+    first_sequence: int
+    last_sequence: int | None = None
+    seed: int = 0
+    delay_ms: int = 0
+    failure_rate: float = 0.0
+    candidates: tuple[str, ...] = ()
+    version: str = "1"
+    section = "disturbances"
+
+    def to_definition(self) -> dict[str, Any]:
+        value = {"name": self.name, "version": self.version, "component": self.component, "kind": self.kind,
+                 "firstSequence": self.first_sequence, "seed": self.seed}
+        if self.last_sequence is not None:
+            value["lastSequence"] = self.last_sequence
+        if self.kind in {"delay", "delay_and_failure"}:
+            value["delayMs"] = self.delay_ms
+        if self.kind in {"failure", "delay_and_failure"}:
+            value["failureRate"] = self.failure_rate
+        if self.candidates:
+            value["candidates"] = list(self.candidates)
+        self._validate(value)
+        return value
+
+    @classmethod
+    def from_definition(cls, value: Mapping[str, Any]) -> "Disturbance":
+        return cls(value["name"], value["component"], value["kind"], value.get("firstSequence", 1),
+                   value.get("lastSequence"), value.get("seed", 0), value.get("delayMs", 0),
+                   value.get("failureRate", 0.0), tuple(value.get("candidates") or ()), value.get("version", "1"))
+
+
+@dataclass(frozen=True, slots=True)
+class Scenario:
+    workload: Workload
+    disturbances: tuple[Disturbance | Mapping[str, Any], ...] = ()
+
+    def to_sections(self) -> dict[str, Any]:
+        return {"workload": self.workload.to_definition(),
+                "disturbances": [_builder_value(item) for item in self.disturbances]}
+
 
 @dataclass(frozen=True, slots=True)
 class AdaptiveExperiment:
@@ -31,23 +270,56 @@ class AdaptiveExperiment:
     surfaces: Mapping[str, Mapping[str, Any]]
     configurations: Mapping[str, Mapping[str, Any]]
     candidates: Mapping[str, Mapping[str, Any]]
-    workload: tuple[WorkloadRequest, ...]
-    policy: Mapping[str, Any]
-    window: Mapping[str, Any]
+    workload: Mapping[str, Any] | Workload | tuple[WorkloadRequest, ...]
+    policy: Mapping[str, Any] | PolicyRef
+    window: Mapping[str, Any] | Window
     seed: int = 0
     output: str = "outputs"
     labels: Mapping[str, str] = field(default_factory=dict)
     task_params: Mapping[str, Any] = field(default_factory=dict)
     execution_options: Mapping[str, Any] = field(default_factory=dict)
-    acceptance: Mapping[str, Any] = field(default_factory=dict)
-    signals: tuple[Mapping[str, Any], ...] = ()
-    goals: tuple[Mapping[str, Any], ...] = ()
-    disturbances: tuple[Mapping[str, Any], ...] = ()
+    acceptance: Mapping[str, Any] | Acceptance = field(default_factory=dict)
+    signals: tuple[Mapping[str, Any] | SignalRef, ...] = ()
+    goals: tuple[Mapping[str, Any] | Goal, ...] = ()
+    disturbances: tuple[Mapping[str, Any] | Disturbance, ...] = ()
     evaluation: Mapping[str, Any] = field(default_factory=dict)
     trace: Mapping[str, Any] = field(default_factory=dict)
     allow_mixed_models: bool = False
     base_dir: Path = field(default_factory=Path.cwd)
     resolved_definition: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        def keyed(section: str, values: Mapping[str, Any], builder_type: type) -> dict[str, Any]:
+            return {key: _builder_value(value) if isinstance(value, builder_type) else value
+                    for key, value in values.items()}
+
+        object.__setattr__(self, "models", keyed("models", self.models, Model))
+        object.__setattr__(self, "configurations", keyed("configurations", self.configurations, Configuration))
+        candidate_values = self.candidates
+        if isinstance(candidate_values, Mapping):
+            candidates = {}
+            for key, value in candidate_values.items():
+                normalized = _builder_value(value) if isinstance(value, Candidate) else value
+                if isinstance(normalized, Mapping) and "id" in normalized:
+                    normalized = {field: item for field, item in normalized.items() if field != "id"}
+                candidates[key] = normalized
+        else:
+            candidates = {candidate.id: {key: value for key, value in candidate.to_definition().items() if key != "id"}
+                          for candidate in candidate_values}
+        object.__setattr__(self, "candidates", candidates)
+        if isinstance(self.workload, Workload):
+            workload = self.workload.to_definition()
+        elif isinstance(self.workload, Mapping):
+            workload = dict(self.workload)
+        else:
+            workload = Workload.explicit(self.workload).to_definition()
+        object.__setattr__(self, "workload", workload)
+        object.__setattr__(self, "policy", _builder_value(self.policy))
+        object.__setattr__(self, "window", _builder_value(self.window))
+        object.__setattr__(self, "acceptance", _builder_value(self.acceptance))
+        object.__setattr__(self, "signals", tuple(_builder_value(item) for item in self.signals))
+        object.__setattr__(self, "goals", tuple(_builder_value(item) for item in self.goals))
+        object.__setattr__(self, "disturbances", tuple(_builder_value(item) for item in self.disturbances))
 
 
 def adaptive_definition_schema() -> dict[str, Any]:
@@ -133,21 +405,42 @@ def adaptive_definition_schema() -> dict[str, Any]:
             "taskParams": {"type": "object"},
             "execution": {"type": "object", "additionalProperties": False,
                           "properties": {"options": {"type": "object"}}},
-            "workload": {"type": "object", "additionalProperties": False, "required": ["requests"],
-                         "properties": {"requests": {"type": "array", "minItems": 1, "items": {
-                             "type": "object", "additionalProperties": False,
-                             "required": ["taskId", "instanceId"],
-                             "properties": {"requestId": {"type": "string", "minLength": 1},
-                                            "taskId": {"type": "string", "minLength": 1},
-                                            "instanceId": {"type": "string", "minLength": 1},
-                                            "labels": label_map}}}}},
+            "workload": {"type": "object", "oneOf": [
+                {"required": ["requests"], "not": {"required": ["generator"]},
+                 "additionalProperties": False,
+                 "properties": {"requests": {"type": "array", "minItems": 1, "items": {
+                     "type": "object", "additionalProperties": False,
+                     "required": ["taskId", "instanceId"],
+                     "properties": {"requestId": {"type": "string", "minLength": 1},
+                                    "taskId": {"type": "string", "minLength": 1},
+                                    "instanceId": {"type": "string", "minLength": 1},
+                                    "labels": label_map}}}}},
+                {"required": ["generator"], "not": {"required": ["requests"]},
+                 "additionalProperties": False,
+                 "properties": {"generator": {"type": "object", "additionalProperties": False,
+                     "required": ["seed", "segments"], "properties": {
+                         "seed": {"type": "integer"},
+                         "tasks": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                         "instances": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                         "sampling": {"enum": ["with_replacement", "without_replacement"]},
+                         "labelFeatures": {"type": "array", "items": {"type": "string", "minLength": 1}},
+                         "segments": {"type": "array", "minItems": 1, "items": {
+                             "type": "object", "additionalProperties": False, "required": ["size"],
+                             "properties": {"size": {"type": "integer", "minimum": 1},
+                                            "where": {"type": "object"}}}}}}}}]},
             "policy": {"type": "object", "additionalProperties": False, "required": ["ref"],
                        "properties": {"ref": {"type": "string", "minLength": 1},
                                       "params": {"type": "object"},
                                       "sources": {"type": "array", "items": {"type": "string", "minLength": 1}}}},
-            "window": {"type": "object", "additionalProperties": False, "required": ["requests"],
+            "window": {"type": "object", "additionalProperties": False,
                        "properties": {"requests": {"type": "integer", "minimum": 1},
-                                      "mode": {"enum": ["sliding", "fixed"]}}},
+                                      "all": {"const": True}, "mode": {"enum": ["sliding", "fixed"]}},
+                       "oneOf": [
+                {"required": ["requests"], "not": {"required": ["all"]},
+                 "properties": {"requests": {"type": "integer", "minimum": 1},
+                                "mode": {"enum": ["sliding", "fixed"]}}},
+                {"required": ["all"], "not": {"required": ["requests"]},
+                 "properties": {"all": {"const": True}, "mode": {"enum": ["sliding", "fixed"]}}}]},
             "signals": {"type": "array", "items": assessor},
             "acceptance": {"type": "object", "additionalProperties": False,
                            "properties": {"minimumResponseLength": {"type": "integer", "minimum": 0}}},
@@ -172,14 +465,6 @@ def experiment_definition(experiment: AdaptiveExperiment) -> dict[str, Any]:
             return [plain(item) for item in value]
         return value
 
-    requests = []
-    for row in experiment.workload:
-        item: dict[str, Any] = {"taskId": row.task_id, "instanceId": row.instance_id}
-        if row.request_id is not None:
-            item["requestId"] = row.request_id
-        if row.labels:
-            item["labels"] = plain(row.labels)
-        requests.append(item)
     return {
         "workflowKind": "adaptive", "schemaVersion": ADAPTIVE_DEFINITION_VERSION,
         "id": experiment.id, "output": experiment.output, "seed": experiment.seed,
@@ -188,7 +473,7 @@ def experiment_definition(experiment: AdaptiveExperiment) -> dict[str, Any]:
         "surfaces": plain(experiment.surfaces), "configurations": plain(experiment.configurations),
         "candidates": plain(experiment.candidates), "taskParams": plain(experiment.task_params),
         "execution": {"options": plain(experiment.execution_options)},
-        "workload": {"requests": requests}, "policy": plain(experiment.policy),
+        "workload": plain(experiment.workload), "policy": plain(experiment.policy),
         "window": plain(experiment.window), "signals": plain(experiment.signals),
         "acceptance": plain(experiment.acceptance), "goals": plain(experiment.goals),
         "disturbances": plain(experiment.disturbances), "evaluation": plain(experiment.evaluation),
@@ -224,15 +509,39 @@ def load_adaptive_experiment(source: str | Path | Mapping[str, Any] | AdaptiveEx
                                    for row in resolved.get("disturbances", [])]
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"Invalid adaptive disturbance definition: {exc}") from exc
-    resolved = {**resolved, "disturbances": normalized_disturbances}
-    requests = tuple(WorkloadRequest(
-        task_id=row["taskId"], instance_id=row["instanceId"],
-        request_id=row.get("requestId"), labels=dict(row.get("labels") or {}),
-    ) for row in resolved["workload"]["requests"])
+    resolved = {
+        **resolved,
+        "output": resolved.get("output", "outputs"),
+        "seed": resolved.get("seed", 0),
+        "labels": deepcopy(resolved.get("labels") or {}),
+        "allowMixedModels": resolved.get("allowMixedModels", False),
+        "taskParams": deepcopy(resolved.get("taskParams") or {}),
+        "execution": {"options": deepcopy((resolved.get("execution") or {}).get("options") or {})},
+        "acceptance": {"minimumResponseLength": (resolved.get("acceptance") or {}).get("minimumResponseLength", 0)},
+        "signals": deepcopy(resolved.get("signals") or []),
+        "goals": deepcopy(resolved.get("goals") or []),
+        "disturbances": normalized_disturbances,
+        "evaluation": deepcopy(resolved.get("evaluation") or {}),
+        "trace": deepcopy(resolved.get("trace") or {}),
+    }
+    resolved["models"] = {
+        key: {**deepcopy(value), "modelParams": deepcopy(value.get("modelParams") or {})}
+        for key, value in resolved["models"].items()
+    }
+    resolved["policy"] = {**deepcopy(resolved["policy"]), "params": deepcopy(resolved["policy"].get("params") or {})}
+    resolved["window"] = {**deepcopy(resolved["window"]), "mode": resolved["window"].get("mode", "sliding")}
+    resolved["goals"] = [{**deepcopy(row), "scope": row.get("scope", "system")} for row in resolved["goals"]]
+    if "generator" in resolved["workload"]:
+        generator = deepcopy(resolved["workload"]["generator"])
+        generator.setdefault("tasks", [])
+        generator.setdefault("instances", [])
+        generator.setdefault("sampling", "with_replacement")
+        generator.setdefault("labelFeatures", [])
+        resolved["workload"] = {"generator": generator}
     return AdaptiveExperiment(
         id=resolved["id"], dataset=resolved["dataset"], models=deepcopy(resolved["models"]),
         surfaces=deepcopy(resolved["surfaces"]), configurations=deepcopy(resolved["configurations"]),
-        candidates=deepcopy(resolved["candidates"]), workload=requests,
+        candidates=deepcopy(resolved["candidates"]), workload=deepcopy(resolved["workload"]),
         policy=deepcopy(resolved["policy"]), window=deepcopy(resolved["window"]),
         seed=resolved.get("seed", 0), output=resolved.get("output", "outputs"),
         labels=deepcopy(resolved.get("labels") or {}), task_params=deepcopy(resolved.get("taskParams") or {}),
@@ -246,5 +555,6 @@ def load_adaptive_experiment(source: str | Path | Mapping[str, Any] | AdaptiveEx
     )
 
 
-__all__ = ["ADAPTIVE_DEFINITION_VERSION", "AdaptiveExperiment", "WorkloadRequest",
+__all__ = ["ADAPTIVE_DEFINITION_VERSION", "AdaptiveExperiment", "WorkloadRequest", "Model", "Configuration",
+           "Candidate", "PolicyRef", "Window", "Goal", "Acceptance", "SignalRef", "Disturbance", "Scenario",
            "adaptive_definition_schema", "experiment_definition", "load_adaptive_experiment"]
