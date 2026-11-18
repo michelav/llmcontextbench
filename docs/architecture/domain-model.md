@@ -52,6 +52,7 @@ in [workflows/adaptive.md](workflows/adaptive.md#domain-model).
 | `goal` | A bound on a reading. Reported by `metrics`, never enforced. |
 | `disturbance` | A seeded delay or failure injected into a runtime component for a range of the sequence. |
 | `scenario` | A workload plus disturbances; a helper for building both sections, not a stored type. |
+| `definition builder` | A typed fragment of the adaptive definition for experiments written in Python (`Model`, `Configuration`, `Candidate`, `PolicyRef`, `Window`, `Goal`, ...). Stored as the mapping it produces; not a domain entity. |
 | `online assessor` | A dataset-provided or external component that turns a response into a quality signal during execution. Distinct from offline evaluation (`eval`). |
 
 The tool does not use the words study, episode, probe, cascade, size bin or burst. An "arm" (one

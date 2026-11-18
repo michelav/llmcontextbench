@@ -24,7 +24,11 @@ stored form only.
 
 - `plan(code-built)` and `plan(path)` produce byte-identical artifacts for equal experiments.
 - New sections need one schema fragment and one normaliser; the builder follows.
-- Builders are input types, not a second representation; reading a section returns the mapping.
+- Builders are input types, not a second representation or domain model; reading a section
+  returns the mapping. Builders are kept for sections with structure or rules a mapping hides;
+  an id-plus-string entry such as a surface stays a mapping.
+- Keyed sections (`models`, `configurations`, `candidates`) also accept a list of builders that
+  carry their id; the id becomes the key and must match it when both are given.
 
 ## Sources
 

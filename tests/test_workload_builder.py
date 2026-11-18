@@ -92,6 +92,59 @@ def test_definition_builders_normalize_to_same_form_as_mapping(tmp_path: Path) -
     assert parsed.resolved_definition["workload"] == workload.to_definition()
 
 
+def _keyed_experiment(models, configurations) -> AdaptiveExperiment:
+    return AdaptiveExperiment(
+        id="keyed", dataset={"root": str(DATASET)}, models=models,
+        surfaces={"full": {"type": "full_context"}}, configurations=configurations,
+        candidates=[Candidate("A", "mock", "inline")],
+        workload=Workload.explicit([{"taskId": "task_role", "instanceId": "person-001"}]),
+        policy=PolicyRef("static", {"candidate": "A"}), window=Window(requests=2),
+    )
+
+
+def test_keyed_sections_accept_a_list_of_builders_with_ids(tmp_path: Path) -> None:
+    listed = _keyed_experiment([Model("mock", "mock-model", id="mock")],
+                               [Configuration("inline", "json", "full", id="inline")])
+    keyed = _keyed_experiment({"mock": {"provider": "mock", "name": "mock-model"}},
+                              {"inline": Configuration("inline", "json", "full", id="inline")})
+    assert listed == keyed
+    assert listed.models == {"mock": {"provider": "mock", "name": "mock-model", "modelParams": {}}}
+    assert listed.configurations == {"inline": {"strategy": "inline", "representation": "json", "surface": "full"}}
+    first = plan(listed, output=tmp_path / "listed")
+    second = plan(keyed, output=tmp_path / "keyed")
+    for name in ("adaptive-plan.json", "resolved.json"):
+        assert (first.root / name).read_bytes() == (second.root / name).read_bytes()
+
+
+@pytest.mark.parametrize(("build", "message"), [
+    (lambda: _keyed_experiment(
+        {"other": Model("mock", "mock-model", id="mock")}, {"inline": Configuration("inline", "json", "full")}),
+     "models.other: Model id 'mock' does not match its key"),
+    (lambda: _keyed_experiment(
+        [Model("mock", "mock-model")], {"inline": Configuration("inline", "json", "full")}),
+     "a list of models takes Model builders with an id"),
+    (lambda: _keyed_experiment(
+        {"mock": Model("mock", "mock-model")}, [{"strategy": "inline", "representation": "json", "surface": "full"}]),
+     "a list of configurations takes Configuration builders with an id"),
+    (lambda: _keyed_experiment(
+        [Model("mock", "a", id="mock"), Model("mock", "b", id="mock")],
+        {"inline": Configuration("inline", "json", "full")}),
+     "models: duplicate id 'mock'"),
+    (lambda: Model("mock", "mock-model", id=""), "models: id must be a non-empty string"),
+], ids=["id does not match key", "list item without id", "list item is a mapping", "duplicate id", "empty id"])
+def test_keyed_sections_refuse_inconsistent_ids(build, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        build()
+
+
+def test_entry_builders_keep_id_out_of_the_entry() -> None:
+    model = Model("mock", "mock-model", id="mock")
+    assert "id" not in model.to_definition()
+    assert Model.from_definition(model.to_definition(), id="mock") == model
+    configuration = Configuration("inline", "json", "full", id="inline")
+    assert Configuration.from_definition(configuration.to_definition(), id="inline") == configuration
+
+
 ROUND_TRIP_CASES = [
     (Model, {"provider": "mock", "name": "model", "modelParams": {}}),
     (Model, {"provider": "mock", "name": "model", "modelParams": {"temperature": 0}}),

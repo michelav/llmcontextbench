@@ -41,16 +41,18 @@ A segment can filter the pool by declared features, for example
 `{"<feature>": {"min": 0, "max": 1000}}`. `Workload.explicit([...])` takes a fixed list of
 `WorkloadRequest(task_id, instance_id, request_id=None, labels={})` instead.
 
-**Build the experiment.** Each section accepts a builder or the equivalent mapping from the
-[definition file](reference/definition-adaptive.md):
+**Build the experiment.** Each section accepts a definition builder or the equivalent mapping
+from the [definition file](reference/definition-adaptive.md). Definition builders are typed
+fragments of the definition, not a separate model: the experiment stores the mapping they
+produce.
 
 ```python
 experiment = AdaptiveExperiment(
     id="code-built-adaptive-example",
     dataset={"root": str(DATASET_ROOT)},
-    models={"mock": Model("mock", "mock-model")},
+    models=[Model("mock", "mock-model", id="mock")],
     surfaces={"full": {"type": "full_context"}},
-    configurations={"inline-json": Configuration("inline", "json", "full")},
+    configurations=[Configuration("inline", "json", "full", id="inline-json")],
     candidates=[Candidate("A", "mock", "inline-json")],
     workload=workload,
     policy=PolicyRef("static", {"candidate": "A"}),
@@ -58,8 +60,11 @@ experiment = AdaptiveExperiment(
 )
 ```
 
-Builders validate with the same schema as a file, so an invalid value fails with the same field
-name. `X.from_definition(mapping)` turns a loaded section back into a builder.
+`models`, `configurations` and `candidates` are keyed sections: give them as a mapping from id to
+builder or mapping, as in the file, or as a list of builders that carry their id. A builder's id
+must match its key. Builders validate with the same schema as a file, so an invalid value fails
+with the same field name. `X.from_definition(mapping)` turns a loaded section back into a builder
+(`Model` and `Configuration` take the key as `id=`).
 
 **Plan and run.** `plan` returns a `Run` handle bound to the output directory; `open_run(path)`
 returns the same handle for an existing run.

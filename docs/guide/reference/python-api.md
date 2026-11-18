@@ -49,12 +49,14 @@ AdaptiveExperiment(id, dataset, models, surfaces, configurations, candidates, wo
                    evaluation={}, trace={}, allow_mixed_models=False)
 ```
 
-Each section takes the mapping of the [definition file](definition-adaptive.md) or a builder:
+Each section takes the mapping of the [definition file](definition-adaptive.md) or a definition
+builder. Definition builders are typed fragments of the definition document, not domain objects:
+the experiment stores the mapping a builder produces, so file and code give the same plan.
 
 | Builder | Section |
 |---|---|
-| `Model(provider, name, model_params={})` | an entry of `models` |
-| `Configuration(strategy, representation, surface)` | an entry of `configurations` |
+| `Model(provider, name, model_params={}, *, id=None)` | an entry of `models` (a list of builders with `id`, or a mapping) |
+| `Configuration(strategy, representation, surface, *, id=None)` | an entry of `configurations` (a list of builders with `id`, or a mapping) |
 | `Candidate(id, model, configuration, labels={})` | an item of `candidates` (a list of builders or a mapping) |
 | `PolicyRef(ref, params={}, sources=())` | `policy` |
 | `Window(requests=None, all=False, mode="sliding")` | `window` |
@@ -66,7 +68,8 @@ Each section takes the mapping of the [definition file](definition-adaptive.md) 
 | `Scenario(workload, disturbances=())` | `.to_sections()` returns `workload` and `disturbances` |
 
 Every builder has `to_definition()` and `from_definition(mapping)` and validates with the same
-schema as a file.
+schema as a file. In a keyed section the id is the key; it is not part of the entry mapping, and
+a builder's `id` must match its key. Surfaces are given as mappings.
 
 ## Datasets and workloads
 

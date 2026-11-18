@@ -18,6 +18,7 @@ from ctxbench.api import (
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 DATASET_ROOT = REPOSITORY_ROOT / "examples/datasets/fake"
 
+ij = Configuration("inline", "json", "full", id="inline-json")
 
 def main(output: Path | None = None) -> None:
     if output is None:
@@ -33,9 +34,9 @@ def main(output: Path | None = None) -> None:
     experiment = AdaptiveExperiment(
         id="code-built-adaptive-example",
         dataset={"root": str(DATASET_ROOT)},
-        models={"mock": Model("mock", "mock-model")},
+        models=[Model("mock", "mock-model", id="mock")],
         surfaces={"full": {"type": "full_context"}},
-        configurations={"inline-json": Configuration("inline", "json", "full")},
+        configurations=[Configuration("inline", "json", "full", id="inline-json")],
         candidates=[Candidate("A", "mock", "inline-json")],
         workload=workload,
         policy=PolicyRef("static", {"candidate": "A"}),

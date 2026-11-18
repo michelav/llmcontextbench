@@ -1,10 +1,16 @@
-"""Typed adaptive experiment definition and v4 validation."""
+"""Adaptive experiment definition (v4): definition builders, schema and loading.
+
+The definition document is the experiment's canonical form. The classes here are definition
+builders: typed fragments of that document for experiments written in Python. They are not domain
+entities; each one validates through the file's schema fragment and normaliser and is stored as
+the mapping it produces, so a file and an equal code-built experiment give the same plan.
+"""
 from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 from ctxbench.core.definitions import resolve_definition, resolve_definition_data
 from ctxbench.runtime.disturbances import DisturbanceSpec
@@ -96,6 +102,12 @@ def _normalise_mapping(section: str, value: Any) -> Any:
 
 
 class _SectionBuilder:
+    """Base of the definition builders.
+
+    ``section`` names the definition section whose schema fragment and normaliser the builder
+    uses, so the builder accepts exactly what the file accepts.
+    """
+
     section: str
 
     def __post_init__(self) -> None:
@@ -107,36 +119,52 @@ class _SectionBuilder:
         return _normalise_section(self.section, value)
 
 
+def _check_entry_id(section: str, entry_id: str | None) -> None:
+    if entry_id is not None and (not isinstance(entry_id, str) or not entry_id):
+        raise ValueError(f"Invalid adaptive definition at {section}: id must be a non-empty string")
+
+
 @dataclass(frozen=True, slots=True)
 class Model(_SectionBuilder):
+    """An entry of ``models``. ``id`` is its key; it is needed only when models are given as a list."""
+
     provider: str
     name: str
     model_params: Mapping[str, Any] = field(default_factory=dict)
+    id: str | None = field(default=None, kw_only=True)
     section = "models"
 
     def to_definition(self) -> dict[str, Any]:
+        """Return the entry mapping; the id is the entry's key and is not part of it."""
+        _check_entry_id(self.section, self.id)
         value = {"provider": self.provider, "name": self.name, "modelParams": dict(self.model_params)}
         return self._validate(value)
 
     @classmethod
-    def from_definition(cls, value: Mapping[str, Any]) -> "Model":
-        return cls(value["provider"], value["name"], value.get("modelParams") or {})
+    def from_definition(cls, value: Mapping[str, Any], *, id: str | None = None) -> "Model":
+        return cls(value["provider"], value["name"], value.get("modelParams") or {}, id=id)
 
 
 @dataclass(frozen=True, slots=True)
 class Configuration(_SectionBuilder):
+    """An entry of ``configurations``. ``id`` is its key; it is needed only when configurations are
+    given as a list."""
+
     strategy: str
     representation: str
     surface: str
+    id: str | None = field(default=None, kw_only=True)
     section = "configurations"
 
     def to_definition(self) -> dict[str, Any]:
+        """Return the entry mapping; the id is the entry's key and is not part of it."""
+        _check_entry_id(self.section, self.id)
         value = {"strategy": self.strategy, "representation": self.representation, "surface": self.surface}
         return self._validate(value)
 
     @classmethod
-    def from_definition(cls, value: Mapping[str, Any]) -> "Configuration":
-        return cls(value["strategy"], value["representation"], value["surface"])
+    def from_definition(cls, value: Mapping[str, Any], *, id: str | None = None) -> "Configuration":
+        return cls(value["strategy"], value["representation"], value["surface"], id=id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,16 +329,50 @@ class Scenario:
                 "disturbances": [_builder_value(item) for item in self.disturbances]}
 
 
+def _keyed_entries(section: str, values: Any, builder_type: type) -> Any:
+    """Return a keyed section as a mapping of entry mappings.
+
+    The section is a mapping (key to builder or mapping) or a sequence of builders with an id.
+    A builder's id must match its key. Other values are left for schema validation at plan.
+    """
+    if isinstance(values, Mapping):
+        result = {}
+        for key, value in values.items():
+            if isinstance(value, builder_type):
+                if value.id is not None and value.id != key:
+                    raise ValueError(f"Invalid adaptive definition at {section}.{key}: "
+                                     f"{builder_type.__name__} id {value.id!r} does not match its key")
+                value = value.to_definition()
+            result[key] = value
+        return result
+    if isinstance(values, Sequence) and not isinstance(values, (str, bytes)):
+        result = {}
+        for value in values:
+            if not isinstance(value, builder_type) or value.id is None:
+                raise ValueError(f"Invalid adaptive definition at {section}: a list of {section} "
+                                 f"takes {builder_type.__name__} builders with an id")
+            if value.id in result:
+                raise ValueError(f"Invalid adaptive definition at {section}: duplicate id {value.id!r}")
+            result[value.id] = value.to_definition()
+        return result
+    return values
+
+
 @dataclass(frozen=True, slots=True)
 class AdaptiveExperiment:
-    """Parsed adaptive definition; this is the same model used by file and object planning."""
+    """An adaptive definition in Python: a file and an equal code-built experiment are the same value.
+
+    Sections are stored as the definition's canonical mappings; builders passed in are converted.
+    ``models`` and ``configurations`` also accept a list of builders with an id, and
+    ``candidates`` a list of ``Candidate``.
+    """
 
     id: str
     dataset: str | Mapping[str, Any]
-    models: Mapping[str, Mapping[str, Any]]
+    models: Mapping[str, Mapping[str, Any] | Model] | Sequence[Model]
     surfaces: Mapping[str, Mapping[str, Any]]
-    configurations: Mapping[str, Mapping[str, Any]]
-    candidates: Mapping[str, Mapping[str, Any]]
+    configurations: Mapping[str, Mapping[str, Any] | Configuration] | Sequence[Configuration]
+    candidates: Mapping[str, Mapping[str, Any] | Candidate] | Sequence[Candidate]
     workload: Mapping[str, Any] | Workload | tuple[WorkloadRequest, ...]
     policy: Mapping[str, Any] | PolicyRef
     window: Mapping[str, Any] | Window
@@ -330,13 +392,12 @@ class AdaptiveExperiment:
     resolved_definition: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        def keyed(section: str, values: Mapping[str, Any], builder_type: type) -> dict[str, Any]:
-            return {key: _builder_value(value) if isinstance(value, builder_type) else value
-                    for key, value in values.items()}
-
-        object.__setattr__(self, "models", {key: _normalise_mapping("models", value)
-                                            for key, value in keyed("models", self.models, Model).items()})
-        object.__setattr__(self, "configurations", keyed("configurations", self.configurations, Configuration))
+        models = _keyed_entries("models", self.models, Model)
+        if isinstance(models, Mapping):
+            models = {key: _normalise_mapping("models", value) for key, value in models.items()}
+        object.__setattr__(self, "models", models)
+        object.__setattr__(self, "configurations",
+                           _keyed_entries("configurations", self.configurations, Configuration))
         candidate_values = self.candidates
         if isinstance(candidate_values, Mapping):
             candidates = {}
